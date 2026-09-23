@@ -38,7 +38,6 @@
             <unavailable>Unavailable</unavailable>
             <inactive>Inactive</inactive>
             <active>Active</active>
-            <offload_note>Capability and active-driver status only; packet offload is not measured.</offload_note>
         </translations>
     </dashboardplussysteminformation>
 </metadata>

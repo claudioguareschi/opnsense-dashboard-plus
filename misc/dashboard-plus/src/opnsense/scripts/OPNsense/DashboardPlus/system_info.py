@@ -318,7 +318,7 @@ def collect_cpu_crypto(dmesg_output):
 
 
 def collect_accelerated_algorithms(cpu_algorithms, qat_devices):
-    """Describe registered providers, never packet-offload activity."""
+    """Describe only algorithms registered by active crypto providers."""
     providers = []
     if cpu_algorithms:
         providers.append({"provider": "CPU AES-NI", "algorithms": cpu_algorithms})

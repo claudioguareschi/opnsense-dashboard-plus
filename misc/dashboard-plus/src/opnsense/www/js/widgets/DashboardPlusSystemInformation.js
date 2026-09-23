@@ -42,7 +42,11 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
         });
         const desktopStyles = this.sizeStates[this.headerBreakpoint];
         desktopStyles['.flextable-row > .flex-cell.first'] = {width: '28%'};
-        desktopStyles['.flextable-row > .flex-cell:not(.first)'] = {width: '72%'};
+        desktopStyles['.flextable-row > .flex-cell:not(.first)'] = {
+            width: '72%',
+            'box-sizing': 'border-box',
+            'padding-left': '0.75em'
+        };
         return markup;
     }
 
@@ -88,14 +92,18 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
         };
     }
 
-    formatAlgorithms(providerData) {
+    formatAlgorithms(providerData, acceleratorData) {
         const providers = Array.isArray(providerData) ? providerData : [];
+        const acceleratorNames = new Set((acceleratorData?.devices || []).map(device => device.model));
         const values = providers.map(provider => {
             const algorithms = (provider.algorithms || []).join(', ');
-            return algorithms ? `${provider.provider}: ${algorithms}` : '';
+            if (!algorithms) {
+                return '';
+            }
+            const acceleratorName = [...acceleratorNames].find(name => provider.provider.startsWith(name));
+            return acceleratorName ? algorithms : `${provider.provider}: ${algorithms}`;
         }).filter(Boolean);
-        const note = `<small>${this.escape(this.translations.offload_note)}</small>`;
-        return `${this.formatList(values)}<br>${note}`;
+        return this.formatList(values);
     }
 
     async onMarkupRendered() {
@@ -119,14 +127,9 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
         const accelerators = this.formatAccelerators(details.accelerator);
         const hardwareName = [hardware.manufacturer, hardware.model].filter(Boolean).join(' ');
         const biosName = [bios.vendor, bios.version, bios.date].filter(Boolean).join(' / ');
-        const topologyDetails = [
-            cpu.packages ? `${cpu.packages} package${cpu.packages === 1 ? '' : 's'}` : null,
-            cpu.cores ? `${cpu.cores} core${cpu.cores === 1 ? '' : 's'}` : null,
-            cpu.threads_per_core ? `${cpu.threads_per_core} hardware thread${cpu.threads_per_core === 1 ? '' : 's'}/core` : null
-        ].filter(Boolean).join(' × ');
         const topology = cpu.threads
-            ? `${cpu.threads} CPUs: ${topologyDetails}`
-            : topologyDetails;
+            ? `${cpu.threads} thread${cpu.threads === 1 ? '' : 's'}`
+            : null;
         const updateLink = $('<a>')
             .attr('href', '/ui/core/firmware#checkupdate')
             .text(system?.updates || this.translations.unavailable)
@@ -178,7 +181,10 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
         }
 
         rows.push(
-            [this.translations.accelerated_algorithms, this.formatAlgorithms(details.accelerated_algorithms)],
+            [this.translations.accelerated_algorithms, this.formatAlgorithms(
+                details.accelerated_algorithms,
+                details.accelerator
+            )],
             [this.translations.pti, this.escape(mitigations.pti)],
             [this.translations.mds, this.escape(mitigations.mds)],
             [this.translations.uptime, `<span id="dashboard-plus-uptime">${this.escape(time?.uptime)}</span>`],
