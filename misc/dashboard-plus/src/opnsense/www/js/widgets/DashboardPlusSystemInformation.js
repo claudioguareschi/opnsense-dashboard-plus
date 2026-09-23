@@ -127,8 +127,13 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
         const accelerators = this.formatAccelerators(details.accelerator);
         const hardwareName = [hardware.manufacturer, hardware.model].filter(Boolean).join(' ');
         const biosName = [bios.vendor, bios.version, bios.date].filter(Boolean).join(' / ');
-        const topology = cpu.threads
-            ? `${cpu.threads} thread${cpu.threads === 1 ? '' : 's'}`
+        const topology = cpu.threads && cpu.packages && cpu.cores && cpu.threads_per_core
+            ? `${cpu.threads} CPU${cpu.threads === 1 ? '' : 's'} : ${cpu.packages} package(s) x ` +
+                `${cpu.cores} core(s) x ${cpu.threads_per_core} hardware threads`
+            : null;
+        const frequency = cpu.current_mhz
+            ? `${this.translations.current}: ${cpu.current_mhz} MHz` +
+                (cpu.maximum_mhz ? `, ${this.translations.maximum}: ${cpu.maximum_mhz} MHz` : '')
             : null;
         const updateLink = $('<a>')
             .attr('href', '/ui/core/firmware#checkupdate')
@@ -166,6 +171,7 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
             ])],
             [this.translations.cpu, this.formatGroup([
                 {label: this.translations.model, value: cpu.model},
+                {label: '', value: frequency ? `<span id="dashboard-plus-frequency">${frequency}</span>` : null, html: true},
                 {label: '', value: topology},
                 {label: this.translations.crypto_capabilities, value: (cpu.crypto_capabilities || []).join(', ')}
             ])]
@@ -196,12 +202,23 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
     }
 
     async onWidgetTick() {
-        const data = await this.ajaxCall('/api/diagnostics/system/system_time');
-        if (data?.uptime) {
-            $('#dashboard-plus-uptime').text(data.uptime);
+        const [time, frequency] = await Promise.all([
+            this.ajaxCall('/api/diagnostics/system/system_time'),
+            this.ajaxCall('/api/dashboardplus/system/frequency')
+        ]);
+        if (time?.uptime) {
+            $('#dashboard-plus-uptime').text(time.uptime);
         }
-        if (data?.datetime) {
-            $('#dashboard-plus-datetime').text(data.datetime);
+        if (time?.datetime) {
+            $('#dashboard-plus-datetime').text(time.datetime);
+        }
+        if (frequency?.current_mhz) {
+            const maximum = frequency.maximum_mhz
+                ? `, ${this.translations.maximum}: ${frequency.maximum_mhz} MHz`
+                : '';
+            $('#dashboard-plus-frequency').text(
+                `${this.translations.current}: ${frequency.current_mhz} MHz${maximum}`
+            );
         }
     }
 }

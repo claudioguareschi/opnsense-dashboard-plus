@@ -5,6 +5,7 @@
 import json
 import re
 import subprocess
+import sys
 
 
 DMIDECODE = "/usr/local/sbin/dmidecode"
@@ -136,6 +137,26 @@ def int_value(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def cpu_frequency(current, levels):
+    """Return the current and highest CPU frequencies reported by cpufreq."""
+    available = [
+        int(match.group(1))
+        for match in re.finditer(r"(?:^|\s)(\d+)(?:/\d+)?", levels or "")
+    ]
+    return {
+        "current_mhz": int_value(current),
+        "maximum_mhz": max(available) if available else None,
+    }
+
+
+def collect_cpu_frequency():
+    """Collect the small dynamic subset needed for a live widget refresh."""
+    return cpu_frequency(
+        sysctl_value("dev.cpu.0.freq") or sysctl_value("hw.clockrate"),
+        sysctl_value("dev.cpu.0.freq_levels"),
+    )
 
 
 def pci_tuple(address, dmi=False):
@@ -407,6 +428,7 @@ def collect():
         slot_output,
     )
     cpu_algorithms = collect_cpu_crypto(dmesg_output)
+    frequency = collect_cpu_frequency()
 
     return {
         "hardware": {
@@ -431,6 +453,7 @@ def collect():
             "cores": int_value(sysctl_value("kern.smp.cores")),
             "threads": int_value(sysctl_value("kern.smp.cpus") or sysctl_value("hw.ncpu")),
             "threads_per_core": int_value(sysctl_value("kern.smp.threads_per_core")),
+            **frequency,
             "crypto_capabilities": cpu_crypto,
         },
         "accelerator": accelerator,
@@ -443,4 +466,7 @@ def collect():
 
 
 if __name__ == "__main__":
-    print(json.dumps(collect(), sort_keys=True))
+    if len(sys.argv) > 1 and sys.argv[1] == "frequency":
+        print(json.dumps(collect_cpu_frequency(), sort_keys=True))
+    else:
+        print(json.dumps(collect(), sort_keys=True))

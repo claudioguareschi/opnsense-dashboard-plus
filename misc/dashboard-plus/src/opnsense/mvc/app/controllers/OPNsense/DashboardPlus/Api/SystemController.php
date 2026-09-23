@@ -49,4 +49,12 @@ class SystemController extends ApiControllerBase
 
         return $result;
     }
+
+    public function frequencyAction()
+    {
+        $backend = new Backend();
+        $result = json_decode($backend->configdRun('dashboardplus system frequency'), true);
+
+        return is_array($result) ? $result : [];
+    }
 }

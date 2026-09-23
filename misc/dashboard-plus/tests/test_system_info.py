@@ -109,6 +109,12 @@ dev.qat_ocf.0.enable: 1
     def test_cpu_package_count_falls_back_to_the_smp_boot_record(self):
         self.assertEqual(SYSTEM_INFO.cpu_package_count("", "FreeBSD/SMP: 1 package(s) x 4 core(s)\n"), 1)
 
+    def test_cpu_frequency_uses_the_highest_available_level_as_maximum(self):
+        self.assertEqual(
+            SYSTEM_INFO.cpu_frequency("1600", "2200/35000 1600/25000 800/12000"),
+            {"current_mhz": 1600, "maximum_mhz": 2200},
+        )
+
     def test_active_algorithm_list_identifies_the_provider(self):
         providers = SYSTEM_INFO.collect_accelerated_algorithms(
             ["AES-CBC"],

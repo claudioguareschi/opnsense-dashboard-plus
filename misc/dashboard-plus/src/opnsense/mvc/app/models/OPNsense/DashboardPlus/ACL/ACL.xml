@@ -3,6 +3,7 @@
         <name>Dashboard: Dashboard Plus System Information widget</name>
         <patterns>
             <pattern>api/dashboardplus/system/info</pattern>
+            <pattern>api/dashboardplus/system/frequency</pattern>
             <pattern>api/diagnostics/system/system_information</pattern>
             <pattern>api/diagnostics/system/system_time</pattern>
         </patterns>

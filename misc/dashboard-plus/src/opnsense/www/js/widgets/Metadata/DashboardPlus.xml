@@ -3,6 +3,7 @@
         <filename>DashboardPlusSystemInformation.js</filename>
         <endpoints>
             <endpoint>/api/dashboardplus/system/info</endpoint>
+            <endpoint>/api/dashboardplus/system/frequency</endpoint>
             <endpoint>/api/diagnostics/system/system_information</endpoint>
             <endpoint>/api/diagnostics/system/system_time</endpoint>
         </endpoints>
@@ -21,6 +22,7 @@
             <boot_environment>Boot Environment</boot_environment>
             <current>Current</current>
             <next>Next</next>
+            <maximum>Max</maximum>
             <version>Version</version>
             <opnsense>OPNsense</opnsense>
             <freebsd>FreeBSD</freebsd>
