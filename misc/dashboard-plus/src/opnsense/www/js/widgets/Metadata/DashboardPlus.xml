@@ -26,13 +26,9 @@
             <freebsd>FreeBSD</freebsd>
             <update_status>Update Status</update_status>
             <cpu>CPU Type</cpu>
-            <topology>Topology</topology>
             <crypto_capabilities>Crypto Capabilities</crypto_capabilities>
             <accelerator>Crypto Hardware</accelerator>
-            <device>Device</device>
-            <driver_state>Driver / State</driver_state>
-            <capabilities>Capabilities</capabilities>
-            <accelerated_algorithms>Enabled Accelerated Algorithms</accelerated_algorithms>
+            <accelerated_algorithms>Accelerated Crypto</accelerated_algorithms>
             <pti>Kernel PTI</pti>
             <mds>MDS Mitigation</mds>
             <uptime>Uptime</uptime>

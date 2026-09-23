@@ -63,28 +63,23 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
         }
         return values.map(item => {
             const value = item.html ? item.value : this.escape(item.value);
-            return `<strong>${this.escape(item.label)}:</strong> ${value}`;
+            return item.label ? `<strong>${this.escape(item.label)}:</strong> ${value}` : value;
         }).join('<br>');
     }
 
     formatAccelerators(acceleratorData) {
         const devices = acceleratorData?.devices || [];
         const identity = [];
-        const state = [];
         const capabilities = [];
 
         devices.forEach(device => {
-            const location = device.pci_address ? ` (${device.pci_address})` : '';
-            identity.push(`${device.integration}: ${device.model}${location}`);
-
-            const ocfState = device.ocf_active ? this.translations.active : this.translations.inactive;
-            state.push(`${device.driver}; ${device.state}; OCF ${ocfState}`);
+            const state = device.ocf_active ? this.translations.active : this.translations.inactive;
+            identity.push(`${device.model} (${state})`);
             capabilities.push((device.capabilities || []).join(', '));
         });
 
         return {
             identity: this.formatList(identity),
-            state: this.formatList(state),
             capabilities: this.formatList(capabilities.filter(value => value !== ''))
         };
     }
@@ -164,7 +159,7 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
             ])],
             [this.translations.cpu, this.formatGroup([
                 {label: this.translations.model, value: cpu.model},
-                {label: this.translations.topology, value: topology},
+                {label: '', value: topology},
                 {label: this.translations.crypto_capabilities, value: (cpu.crypto_capabilities || []).join(', ')}
             ])]
         );
@@ -172,9 +167,8 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
         if ((details.accelerator?.devices || []).length > 0) {
             rows.push(
                 [this.translations.accelerator, this.formatGroup([
-                    {label: this.translations.device, value: accelerators.identity, html: true},
-                    {label: this.translations.driver_state, value: accelerators.state, html: true},
-                    {label: this.translations.capabilities, value: accelerators.capabilities, html: true}
+                    {label: '', value: accelerators.identity, html: true},
+                    {label: '', value: accelerators.capabilities, html: true}
                 ])]
             );
         }
