@@ -1,0 +1,4 @@
+Dashboard Plus adds an extended System Information widget to the OPNsense
+dashboard. It reports platform, firmware, operating system, CPU security and
+cryptographic capabilities, accelerator state, mitigations, time, and DNS
+configuration without modifying the OPNsense core.

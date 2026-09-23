@@ -1,0 +1,39 @@
+<metadata>
+    <dashboardplussysteminformation>
+        <filename>DashboardPlusSystemInformation.js</filename>
+        <endpoints>
+            <endpoint>/api/dashboardplus/system/info</endpoint>
+            <endpoint>/api/diagnostics/system/system_information</endpoint>
+            <endpoint>/api/diagnostics/system/system_time</endpoint>
+        </endpoints>
+        <translations>
+            <title>Dashboard Plus: System Information</title>
+            <name>Name</name>
+            <user>GUI User</user>
+            <hardware>Hardware</hardware>
+            <serial>Serial Number</serial>
+            <bios>BIOS</bios>
+            <boot_method>Boot Method</boot_method>
+            <opnsense_version>OPNsense Version</opnsense_version>
+            <freebsd_version>FreeBSD Version</freebsd_version>
+            <updates>Update Status</updates>
+            <cpu>CPU</cpu>
+            <cpu_topology>CPU Topology</cpu_topology>
+            <cpu_crypto>CPU Crypto Capabilities</cpu_crypto>
+            <accelerator>Crypto Accelerator</accelerator>
+            <accelerator_state>Accelerator Driver / State</accelerator_state>
+            <accelerator_capabilities>Accelerator Capabilities</accelerator_capabilities>
+            <accelerated_algorithms>Enabled Accelerated Algorithms</accelerated_algorithms>
+            <pti>Kernel PTI</pti>
+            <mds>MDS Mitigation</mds>
+            <uptime>Uptime</uptime>
+            <datetime>Current Date/Time</datetime>
+            <dns_servers>DNS Servers</dns_servers>
+            <not_detected>Not detected</not_detected>
+            <unavailable>Unavailable</unavailable>
+            <inactive>Inactive</inactive>
+            <active>Active</active>
+            <offload_note>Capability and active-driver status only; packet offload is not measured.</offload_note>
+        </translations>
+    </dashboardplussysteminformation>
+</metadata>
