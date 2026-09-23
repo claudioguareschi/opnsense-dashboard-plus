@@ -37,9 +37,13 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
     }
 
     getMarkup() {
-        return this.createTable('dashboard-plus-system-information', {
+        const markup = this.createTable('dashboard-plus-system-information', {
             headerPosition: 'left'
         });
+        const desktopStyles = this.sizeStates[this.headerBreakpoint];
+        desktopStyles['.flextable-row > .flex-cell.first'] = {width: '28%'};
+        desktopStyles['.flextable-row > .flex-cell:not(.first)'] = {width: '72%'};
+        return markup;
     }
 
     escape(value) {
@@ -70,17 +74,17 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
     formatAccelerators(acceleratorData) {
         const devices = acceleratorData?.devices || [];
         const identity = [];
-        const capabilities = [];
+        const algorithms = [];
 
         devices.forEach(device => {
             const state = device.ocf_active ? this.translations.active : this.translations.inactive;
             identity.push(`${device.model} (${state})`);
-            capabilities.push((device.capabilities || []).join(', '));
+            algorithms.push((device.algorithms || []).join(', '));
         });
 
         return {
             identity: this.formatList(identity),
-            capabilities: this.formatList(capabilities.filter(value => value !== ''))
+            algorithms: this.formatList(algorithms.filter(value => value !== ''))
         };
     }
 
@@ -92,20 +96,6 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
         }).filter(Boolean);
         const note = `<small>${this.escape(this.translations.offload_note)}</small>`;
         return `${this.formatList(values)}<br>${note}`;
-    }
-
-    formatCpuCrypto(cpu, providers) {
-        const capabilities = cpu.crypto_capabilities || [];
-        const aesniActive = (providers || []).some(provider => provider.provider === 'CPU AES-NI');
-        const aesniAvailable = capabilities.includes('AESNI');
-        const status = aesniActive ? this.translations.active : aesniAvailable
-            ? this.translations.available : this.translations.no;
-        const features = capabilities.filter(capability => capability !== 'AESNI');
-        const values = [`${this.translations.aesni_cpu_crypto}: ${status}`];
-        if (features.length > 0) {
-            values.push(`${this.translations.cpu_features}: ${features.join(', ')}`);
-        }
-        return values.join('<br>');
     }
 
     async onMarkupRendered() {
@@ -172,9 +162,9 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
                 {label: this.translations.update_status, value: updateLink, html: true}
             ])],
             [this.translations.cpu, this.formatGroup([
-                {label: '', value: cpu.model},
+                {label: this.translations.model, value: cpu.model},
                 {label: '', value: topology},
-                {label: '', value: this.formatCpuCrypto(cpu, details.accelerated_algorithms), html: true}
+                {label: this.translations.crypto_capabilities, value: (cpu.crypto_capabilities || []).join(', ')}
             ])]
         );
 
@@ -182,7 +172,7 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
             rows.push(
                 [this.translations.accelerator, this.formatGroup([
                     {label: '', value: accelerators.identity, html: true},
-                    {label: '', value: accelerators.capabilities, html: true}
+                    {label: '', value: accelerators.algorithms, html: true}
                 ])]
             );
         }

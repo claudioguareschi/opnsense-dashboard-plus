@@ -26,8 +26,7 @@
             <freebsd>FreeBSD</freebsd>
             <update_status>Update Status</update_status>
             <cpu>CPU Type</cpu>
-            <cpu_features>CPU Crypto Features</cpu_features>
-            <aesni_cpu_crypto>AES-NI CPU Crypto</aesni_cpu_crypto>
+            <crypto_capabilities>Crypto Capabilities</crypto_capabilities>
             <accelerator>Crypto Hardware</accelerator>
             <accelerated_algorithms>Crypto Algorithms</accelerated_algorithms>
             <pti>Kernel PTI</pti>
@@ -39,8 +38,6 @@
             <unavailable>Unavailable</unavailable>
             <inactive>Inactive</inactive>
             <active>Active</active>
-            <available>Available</available>
-            <no>No</no>
             <offload_note>Capability and active-driver status only; packet offload is not measured.</offload_note>
         </translations>
     </dashboardplussysteminformation>
