@@ -56,6 +56,17 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
         return values.map(value => this.escape(value)).join('<br>');
     }
 
+    formatGroup(items) {
+        const values = items.filter(item => item.value !== null && item.value !== undefined && item.value !== '');
+        if (values.length === 0) {
+            return this.escape(this.translations.unavailable);
+        }
+        return values.map(item => {
+            const value = item.html ? item.value : this.escape(item.value);
+            return `<strong>${this.escape(item.label)}:</strong> ${value}`;
+        }).join('<br>');
+    }
+
     formatAccelerators(acceleratorData) {
         const devices = acceleratorData?.devices || [];
         const identity = [];
@@ -103,16 +114,20 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
         const versions = Array.isArray(system?.versions) ? system.versions : [];
         const hardware = details.hardware || {};
         const bios = details.bios || {};
+        const bootEnvironment = details.boot_environment || {};
         const cpu = details.cpu || {};
         const mitigations = details.mitigations || {};
         const accelerators = this.formatAccelerators(details.accelerator);
         const hardwareName = [hardware.manufacturer, hardware.model].filter(Boolean).join(' ');
         const biosName = [bios.vendor, bios.version, bios.date].filter(Boolean).join(' / ');
-        const topology = [
-            cpu.cores ? `${cpu.cores} cores` : null,
-            cpu.threads ? `${cpu.threads} threads` : null,
-            cpu.threads_per_core ? `${cpu.threads_per_core} threads/core` : null
-        ].filter(Boolean).join(' / ');
+        const topologyDetails = [
+            cpu.packages ? `${cpu.packages} package${cpu.packages === 1 ? '' : 's'}` : null,
+            cpu.cores ? `${cpu.cores} core${cpu.cores === 1 ? '' : 's'}` : null,
+            cpu.threads_per_core ? `${cpu.threads_per_core} hardware thread${cpu.threads_per_core === 1 ? '' : 's'}/core` : null
+        ].filter(Boolean).join(' × ');
+        const topology = cpu.threads
+            ? `${cpu.threads} CPUs: ${topologyDetails}`
+            : topologyDetails;
         const updateLink = $('<a>')
             .attr('href', '/ui/core/firmware#checkupdate')
             .text(system?.updates || this.translations.unavailable)
@@ -121,23 +136,46 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
         const rows = [
             [this.translations.name, this.escape(system?.name)],
             [this.translations.user, this.escape(details.user)],
-            [this.translations.hardware, this.escape(hardwareName)],
-            [this.translations.serial, this.escape(hardware.serial)],
-            [this.translations.bios, this.escape(biosName)],
-            [this.translations.boot_method, this.escape(bios.boot_method)],
-            [this.translations.opnsense_version, this.escape(versions[0])],
-            [this.translations.freebsd_version, this.escape(versions[1])],
-            [this.translations.updates, updateLink],
-            [this.translations.cpu, this.escape(cpu.model)],
-            [this.translations.cpu_topology, this.escape(topology)],
-            [this.translations.cpu_crypto, this.formatList(cpu.crypto_capabilities)],
+            [this.translations.hardware, this.formatGroup([
+                {label: this.translations.manufacturer, value: hardware.manufacturer},
+                {label: this.translations.model, value: hardware.model || hardwareName},
+                {label: this.translations.serial, value: hardware.serial}
+            ])],
+            [this.translations.firmware, this.formatGroup([
+                {label: this.translations.vendor, value: bios.vendor},
+                {label: this.translations.version, value: bios.version},
+                {label: this.translations.release_date, value: bios.date},
+                {label: this.translations.boot_method, value: bios.boot_method}
+            ])]
         ];
+
+        if (bootEnvironment.current || bootEnvironment.next) {
+            rows.push([this.translations.boot_environment, this.formatGroup([
+                {label: this.translations.current, value: bootEnvironment.current},
+                {label: this.translations.next, value: bootEnvironment.next}
+            ])]);
+        }
+
+        rows.push(
+            [this.translations.version, this.formatGroup([
+                {label: this.translations.opnsense, value: versions[0]},
+                {label: this.translations.freebsd, value: versions[1]},
+                {label: this.translations.update_status, value: updateLink, html: true}
+            ])],
+            [this.translations.cpu, this.formatGroup([
+                {label: this.translations.model, value: cpu.model},
+                {label: this.translations.topology, value: topology},
+                {label: this.translations.crypto_capabilities, value: (cpu.crypto_capabilities || []).join(', ')}
+            ])]
+        );
 
         if ((details.accelerator?.devices || []).length > 0) {
             rows.push(
-                [this.translations.accelerator, accelerators.identity],
-                [this.translations.accelerator_state, accelerators.state],
-                [this.translations.accelerator_capabilities, accelerators.capabilities]
+                [this.translations.accelerator, this.formatGroup([
+                    {label: this.translations.device, value: accelerators.identity, html: true},
+                    {label: this.translations.driver_state, value: accelerators.state, html: true},
+                    {label: this.translations.capabilities, value: accelerators.capabilities, html: true}
+                ])]
             );
         }
 

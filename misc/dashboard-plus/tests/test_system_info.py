@@ -98,6 +98,17 @@ dev.qat_ocf.0.enable: 1
         tokens = set(__import__("re").findall(r"[A-Z0-9_]+", dmesg.upper()))
         self.assertTrue({"AESNI", "PCLMULQDQ", "RDRAND"}.issubset(tokens))
 
+    def test_efi_runtime_overrides_an_inconsistent_kernel_boot_label(self):
+        self.assertEqual(SYSTEM_INFO.boot_method("BIOS", True, ""), "UEFI")
+        self.assertEqual(SYSTEM_INFO.boot_method("BIOS", False, ""), "BIOS")
+
+    def test_parse_zfs_boot_environment(self):
+        environments = SYSTEM_INFO.collect_boot_environments("default\tNR\t/\t1.64G\t2026-09-20 10:21\n")
+        self.assertEqual(environments, {"current": "default", "next": "default"})
+
+    def test_cpu_package_count_falls_back_to_the_smp_boot_record(self):
+        self.assertEqual(SYSTEM_INFO.cpu_package_count("", "FreeBSD/SMP: 1 package(s) x 4 core(s)\n"), 1)
+
     def test_active_algorithm_list_identifies_the_provider(self):
         providers = SYSTEM_INFO.collect_accelerated_algorithms(
             ["AES-CBC"],

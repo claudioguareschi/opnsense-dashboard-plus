@@ -11,6 +11,8 @@ DMIDECODE = "/usr/local/sbin/dmidecode"
 PCICONF = "/usr/sbin/pciconf"
 SYSCTL = "/sbin/sysctl"
 DMESG = "/sbin/dmesg"
+MOUNT = "/sbin/mount"
+BECTL = "/sbin/bectl"
 
 QAT_DEVICES = {
     0x0435: ("Intel QAT DH895XCC", "discrete", False),
@@ -87,6 +89,7 @@ PLACEHOLDER_VALUES = {
     "not specified",
     "system product name",
     "to be filled by o.e.m.",
+    "none",
     "unknown",
 }
 
@@ -328,6 +331,37 @@ def collect_accelerated_algorithms(cpu_algorithms, qat_devices):
     return providers
 
 
+def boot_method(kernel_method, efi_runtime, mount_output):
+    """Prefer live EFI runtime evidence over an inconsistent kernel label."""
+    if efi_runtime or re.search(r"\b(?:efi|efiboot)\b", mount_output, re.IGNORECASE):
+        return "UEFI"
+    return kernel_method or "Unavailable"
+
+
+def collect_boot_environments(output):
+    """Collect the current and next ZFS boot environments when bectl is available."""
+    environments = {"current": "", "next": ""}
+    for line in output.splitlines():
+        fields = line.split("\t")
+        if len(fields) < 2:
+            continue
+        name, state = fields[0], fields[1]
+        if "N" in state:
+            environments["current"] = name
+        if "R" in state:
+            environments["next"] = name
+    return environments
+
+
+def cpu_package_count(sysctl_packages, dmesg_output):
+    """Use the FreeBSD SMP boot record when the package sysctl is absent."""
+    packages = int_value(sysctl_packages)
+    if packages is not None:
+        return packages
+    match = re.search(r"(\d+) package\(s\)", dmesg_output, re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
 def mitigation_state(value, enabled="Enabled", disabled="Disabled"):
     if value == "1":
         return enabled
@@ -364,6 +398,8 @@ def collect():
 
     pti = mitigation_state(sysctl_value("vm.pmap.pti"))
     mds = sysctl_value("machdep.mitigations.mds.state") or sysctl_value("hw.mds_disable_state")
+    kernel_boot_method = sysctl_value("machdep.bootmethod")
+    boot_environments = collect_boot_environments(run([BECTL, "list", "-H"]))
 
     accelerator = collect_qat(
         run([PCICONF, "-lv"]),
@@ -382,10 +418,16 @@ def collect():
             "vendor": clean(bios.get("Vendor")),
             "version": clean(bios.get("Version")),
             "date": clean(bios.get("Release Date")),
-            "boot_method": sysctl_value("machdep.bootmethod") or "Unavailable",
+            "boot_method": boot_method(
+                kernel_boot_method,
+                bool(sysctl_value("hw.efi.poweroff")),
+                run([MOUNT]),
+            ),
         },
+        "boot_environment": boot_environments,
         "cpu": {
             "model": sysctl_value("hw.model") or "Unavailable",
+            "packages": cpu_package_count(sysctl_value("kern.smp.packages"), dmesg_output),
             "cores": int_value(sysctl_value("kern.smp.cores")),
             "threads": int_value(sysctl_value("kern.smp.cpus") or sysctl_value("hw.ncpu")),
             "threads_per_core": int_value(sysctl_value("kern.smp.threads_per_core")),
