@@ -94,6 +94,20 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
         return `${this.formatList(values)}<br>${note}`;
     }
 
+    formatCpuCrypto(cpu, providers) {
+        const capabilities = cpu.crypto_capabilities || [];
+        const aesniActive = (providers || []).some(provider => provider.provider === 'CPU AES-NI');
+        const aesniAvailable = capabilities.includes('AESNI');
+        const status = aesniActive ? this.translations.active : aesniAvailable
+            ? this.translations.available : this.translations.no;
+        const features = capabilities.filter(capability => capability !== 'AESNI');
+        const values = [`${this.translations.aesni_cpu_crypto}: ${status}`];
+        if (features.length > 0) {
+            values.push(`${this.translations.cpu_features}: ${features.join(', ')}`);
+        }
+        return values.join('<br>');
+    }
+
     async onMarkupRendered() {
         const [system, time, details] = await Promise.all([
             this.ajaxCall('/api/diagnostics/system/system_information'),
@@ -158,9 +172,9 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
                 {label: this.translations.update_status, value: updateLink, html: true}
             ])],
             [this.translations.cpu, this.formatGroup([
-                {label: this.translations.model, value: cpu.model},
+                {label: '', value: cpu.model},
                 {label: '', value: topology},
-                {label: this.translations.crypto_capabilities, value: (cpu.crypto_capabilities || []).join(', ')}
+                {label: '', value: this.formatCpuCrypto(cpu, details.accelerated_algorithms), html: true}
             ])]
         );
 

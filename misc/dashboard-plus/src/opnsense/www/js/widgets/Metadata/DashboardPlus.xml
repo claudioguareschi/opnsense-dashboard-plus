@@ -7,7 +7,7 @@
             <endpoint>/api/diagnostics/system/system_time</endpoint>
         </endpoints>
         <translations>
-            <title>Dashboard Plus: System Information</title>
+            <title>System Information</title>
             <name>Name</name>
             <user>GUI User</user>
             <hardware>Hardware</hardware>
@@ -26,9 +26,10 @@
             <freebsd>FreeBSD</freebsd>
             <update_status>Update Status</update_status>
             <cpu>CPU Type</cpu>
-            <crypto_capabilities>Crypto Capabilities</crypto_capabilities>
+            <cpu_features>CPU Crypto Features</cpu_features>
+            <aesni_cpu_crypto>AES-NI CPU Crypto</aesni_cpu_crypto>
             <accelerator>Crypto Hardware</accelerator>
-            <accelerated_algorithms>Accelerated Crypto</accelerated_algorithms>
+            <accelerated_algorithms>Crypto Algorithms</accelerated_algorithms>
             <pti>Kernel PTI</pti>
             <mds>MDS Mitigation</mds>
             <uptime>Uptime</uptime>
@@ -38,6 +39,8 @@
             <unavailable>Unavailable</unavailable>
             <inactive>Inactive</inactive>
             <active>Active</active>
+            <available>Available</available>
+            <no>No</no>
             <offload_note>Capability and active-driver status only; packet offload is not measured.</offload_note>
         </translations>
     </dashboardplussysteminformation>
