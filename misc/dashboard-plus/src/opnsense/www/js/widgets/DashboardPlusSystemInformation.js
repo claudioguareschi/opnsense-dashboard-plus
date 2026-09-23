@@ -149,7 +149,6 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
             [this.translations.datetime, `<span id="dashboard-plus-datetime">${this.escape(time?.datetime)}</span>`],
             [this.translations.dns_servers, this.formatList(details.dns_servers)]
         );
-        ];
 
         super.updateTable('dashboard-plus-system-information', rows);
     }
