@@ -61,6 +61,22 @@ System Slot Information
         self.assertFalse(result["ocf_active"])
         self.assertEqual(result["algorithms"], [])
 
+    def test_current_pciconf_format_and_nexus_qat_ocf_are_detected(self):
+        pciconf = """qat0@pci0:8:0:0: class=0x0b4000 rev=0x00 hdr=0x00 vendor=0x8086 device=0x0435
+    vendor     = 'Intel Corporation'
+    device     = 'DH895XCC Series QAT'
+"""
+        sysctls = """dev.qat.0.state: up
+dev.qat.0.cfg_services: sym;dc
+dev.qat_ocf.0.%parent: nexus0
+dev.qat_ocf.0.enable: 1
+"""
+        result = SYSTEM_INFO.collect_qat(pciconf, sysctls, "")["devices"][0]
+        self.assertEqual(result["model"], "Intel QAT DH895XCC")
+        self.assertEqual(result["integration"], "Discrete")
+        self.assertTrue(result["ocf_active"])
+        self.assertIn("AES-GCM", result["algorithms"])
+
     def test_unclaimed_qat_does_not_claim_acceleration(self):
         pciconf = """none3@pci0:1:0:0: class=0x0b4000 card=0x00000000 chip=0x37c88086 rev=0x04 hdr=0x00
     vendor     = 'Intel Corporation'
@@ -72,10 +88,15 @@ System Slot Information
         self.assertEqual(result["algorithms"], [])
 
     def test_cpu_algorithms_require_an_attached_aesni_driver(self):
-        dmesg = "aesni0: <AES-CBC,AES-CCM,AES-GCM,AES-ICM,AES-XTS,SHA1,SHA256> on motherboard\n"
+        dmesg = "[1] aesni0: <AES-CBC,AES-CCM,AES-GCM,AES-ICM,AES-XTS,SHA1,SHA256> on motherboard\n"
         algorithms = SYSTEM_INFO.collect_cpu_crypto(dmesg)
         self.assertEqual(algorithms[:5], ["AES-CBC", "AES-CCM", "AES-GCM", "AES-ICM", "AES-XTS"])
         self.assertEqual(SYSTEM_INFO.collect_cpu_crypto(""), [])
+
+    def test_dmesg_feature_fallback_detects_cpu_crypto_capabilities(self):
+        dmesg = "Features2=0x1<PCLMULQDQ,AESNI,RDRAND>\n"
+        tokens = set(__import__("re").findall(r"[A-Z0-9_]+", dmesg.upper()))
+        self.assertTrue({"AESNI", "PCLMULQDQ", "RDRAND"}.issubset(tokens))
 
     def test_active_algorithm_list_identifies_the_provider(self):
         providers = SYSTEM_INFO.collect_accelerated_algorithms(

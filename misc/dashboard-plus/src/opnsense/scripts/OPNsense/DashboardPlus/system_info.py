@@ -13,7 +13,7 @@ SYSCTL = "/sbin/sysctl"
 DMESG = "/sbin/dmesg"
 
 QAT_DEVICES = {
-    0x0435: ("Intel QAT DH895XCC", "unknown", False),
+    0x0435: ("Intel QAT DH895XCC", "discrete", False),
     0x0443: ("Intel QAT DH895XCC VF", "virtual function", True),
     0x37C8: ("Intel QAT C62x", "integrated", False),
     0x37C9: ("Intel QAT C62x VF", "virtual function", True),
@@ -169,20 +169,31 @@ def parse_sysctls(output):
 def parse_pciconf(output):
     devices = []
     current = None
-    header = re.compile(
-        r"^(?P<driver>[^@\s]+)@(?P<address>pci\d+:\d+:\d+:\d+):.*chip=0x(?P<chip>[0-9a-fA-F]{8})"
-    )
+    header = re.compile(r"^(?P<driver>[^@\s]+)@(?P<address>pci\d+:\d+:\d+:\d+):(?P<details>.*)$")
     for line in output.splitlines():
         match = header.match(line)
         if match:
             if current:
                 devices.append(current)
-            chip = int(match.group("chip"), 16)
+            details = match.group("details")
+            chip_match = re.search(r"\bchip=0x([0-9a-fA-F]{8})", details)
+            vendor_match = re.search(r"\bvendor=0x([0-9a-fA-F]{4})", details)
+            device_match = re.search(r"\bdevice=0x([0-9a-fA-F]{4})", details)
+            if chip_match:
+                chip = int(chip_match.group(1), 16)
+                vendor_id = chip & 0xFFFF
+                device_id = chip >> 16
+            elif vendor_match and device_match:
+                vendor_id = int(vendor_match.group(1), 16)
+                device_id = int(device_match.group(1), 16)
+            else:
+                current = None
+                continue
             current = {
                 "driver": match.group("driver"),
                 "pci_address": match.group("address"),
-                "vendor_id": chip & 0xFFFF,
-                "device_id": chip >> 16,
+                "vendor_id": vendor_id,
+                "device_id": device_id,
             }
             continue
         if current:
@@ -228,11 +239,14 @@ def collect_qat(pciconf_output, sysctl_output, slot_output):
     result = []
 
     ocf_by_parent = {}
+    ocf_by_unit = {}
     for key, parent in sysctls.items():
         match = re.fullmatch(r"dev\.qat_ocf\.(\d+)\.%parent", key)
         if match:
             unit = match.group(1)
-            ocf_by_parent[parent] = sysctls.get(f"dev.qat_ocf.{unit}.enable") == "1"
+            enabled = sysctls.get(f"dev.qat_ocf.{unit}.enable") == "1"
+            ocf_by_parent[parent] = enabled
+            ocf_by_unit[unit] = enabled
 
     for device in parse_pciconf(pciconf_output):
         description = device.get("device", "")
@@ -248,6 +262,7 @@ def collect_qat(pciconf_output, sysctl_output, slot_output):
 
         driver = device["driver"]
         unit_match = re.fullmatch(r"qat(\d+)", driver)
+        unit = None
         if unit_match:
             unit = unit_match.group(1)
             prefix = f"dev.qat.{unit}"
@@ -261,7 +276,10 @@ def collect_qat(pciconf_output, sysctl_output, slot_output):
 
         service_capabilities, service_set = qat_capabilities(services)
         capabilities = hardware_capabilities or service_capabilities
-        ocf_active = ocf_by_parent.get(driver, False) and state.lower() in ("up", "started", "attached")
+        ocf_active = (
+            (ocf_by_parent.get(driver, False) or ocf_by_unit.get(unit, False))
+            and state.lower() in ("up", "started", "attached")
+        )
         algorithms = list(QAT_OCF_ALGORITHMS) if ocf_active and service_set.intersection(("sym", "cy")) else []
 
         result.append({
@@ -286,7 +304,11 @@ def collect_cpu_crypto(dmesg_output):
     the modes it registered, which is the least-invasive reliable signal
     available to a plugin without adding a new kernel API.
     """
-    match = re.search(r"^aesni\d+:\s*<([^>]+)>", dmesg_output, re.MULTILINE | re.IGNORECASE)
+    match = re.search(
+        r"^(?:\[\d+\]\s*)?aesni\d+:\s*<([^>]+)>",
+        dmesg_output,
+        re.MULTILINE | re.IGNORECASE,
+    )
     if not match:
         return []
     return [mode.strip() for mode in match.group(1).split(",") if mode.strip()]
@@ -326,6 +348,7 @@ def collect():
     if product_version and product_version.lower() not in product.lower():
         product = f"{product} {product_version}".strip()
 
+    dmesg_output = run([DMESG])
     feature_values = " ".join(
         sysctl_value(name)
         for name in (
@@ -335,7 +358,7 @@ def collect():
             "machdep.cpu.leaf7_extfeatures",
             "machdep.cpu.extfeatures",
         )
-    )
+    ) + " " + dmesg_output
     feature_tokens = set(re.findall(r"[A-Z0-9_]+", feature_values.upper()))
     cpu_crypto = [feature for feature in CPU_CRYPTO_FEATURES if feature in feature_tokens]
 
@@ -347,7 +370,7 @@ def collect():
         run([SYSCTL, "-a"]),
         slot_output,
     )
-    cpu_algorithms = collect_cpu_crypto(run([DMESG]))
+    cpu_algorithms = collect_cpu_crypto(dmesg_output)
 
     return {
         "hardware": {
