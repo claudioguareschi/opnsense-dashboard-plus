@@ -62,8 +62,8 @@ export default class DashboardPlusGateways extends BaseTableWidget {
 
     _enablementIcon(disabled) {
         return disabled
-            ? `<i class="fa fa-times" style="font-size: 1.25em; color: #777777;" title="${this.translations.disabled}"></i>`
-            : `<i class="fa fa-check" style="font-size: 1.25em;" title="${this.translations.enabled}"></i>`;
+            ? `<i class="fa fa-times-circle-o" style="font-size: 1.5em; color: #777777;" title="${this.translations.disabled}"></i>`
+            : `<i class="fa fa-check-circle-o" style="font-size: 1.5em;" title="${this.translations.enabled}"></i>`;
     }
 
     _gatewayIdentity(gateway) {
