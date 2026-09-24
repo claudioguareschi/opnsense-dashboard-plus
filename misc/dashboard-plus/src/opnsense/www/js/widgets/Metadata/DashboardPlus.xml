@@ -74,12 +74,18 @@
             <endpoint>/api/diagnostics/cpu_usage/stream</endpoint>
             <endpoint>/api/diagnostics/system/system_resources</endpoint>
             <endpoint>/api/diagnostics/system/system_time</endpoint>
+            <endpoint>/api/diagnostics/system/system_mbuf</endpoint>
+            <endpoint>/api/diagnostics/system/system_swap</endpoint>
+            <endpoint>/api/diagnostics/firewall/pf_states</endpoint>
         </endpoints>
         <translations>
             <title>System Metrics+</title>
             <dashboard_title>System Metrics</dashboard_title>
             <cpu>CPU</cpu>
             <memory>Memory</memory>
+            <states>States</states>
+            <mbufs>Mbufs</mbufs>
+            <swap>Swap</swap>
             <load>Load</load>
             <used>used</used>
             <unavailable>Unavailable</unavailable>

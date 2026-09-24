@@ -7,7 +7,10 @@
             <pattern>api/diagnostics/system/system_information</pattern>
             <pattern>api/diagnostics/system/system_time</pattern>
             <pattern>api/diagnostics/system/system_resources</pattern>
+            <pattern>api/diagnostics/system/system_mbuf</pattern>
+            <pattern>api/diagnostics/system/system_swap</pattern>
             <pattern>api/diagnostics/cpu_usage/stream</pattern>
+            <pattern>api/diagnostics/firewall/pf_states</pattern>
             <pattern>api/diagnostics/traffic/interface</pattern>
             <pattern>api/diagnostics/traffic/stream/*</pattern>
         </patterns>
