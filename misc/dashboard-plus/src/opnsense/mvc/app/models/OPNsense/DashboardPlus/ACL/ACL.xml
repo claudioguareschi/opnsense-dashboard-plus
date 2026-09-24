@@ -16,6 +16,7 @@
             <pattern>api/diagnostics/traffic/interface</pattern>
             <pattern>api/diagnostics/traffic/stream/*</pattern>
             <pattern>api/routing/settings/search_gateway</pattern>
+            <pattern>api/interfaces/overview/interfaces_info</pattern>
         </patterns>
     </page-dashboard-widget-dashboard-plus>
 </acl>

@@ -157,4 +157,24 @@
             <unconfigured>No gateways configured. Click to configure gateways.</unconfigured>
         </translations>
     </dashboardplusgateways>
+    <dashboardplusinterfaces>
+        <filename>DashboardPlusInterfaces.js</filename>
+        <link>/interfaces.php</link>
+        <endpoints>
+            <endpoint>/api/interfaces/overview/interfaces_info</endpoint>
+        </endpoints>
+        <translations>
+            <title>Interfaces+</title>
+            <dashboard_title>Interfaces</dashboard_title>
+            <interfaces>Interfaces</interfaces>
+            <interface>Interface</interface>
+            <link>Link</link>
+            <addresses>Addresses</addresses>
+            <up>Up</up>
+            <down>Down</down>
+            <unavailable>Unavailable</unavailable>
+            <drag_to_reorder>Drag to reorder</drag_to_reorder>
+            <no_interfaces>No interfaces selected</no_interfaces>
+        </translations>
+    </dashboardplusinterfaces>
 </metadata>
