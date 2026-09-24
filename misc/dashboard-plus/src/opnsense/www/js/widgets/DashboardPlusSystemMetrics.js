@@ -236,23 +236,23 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         this.statesSeries = new TimeSeries();
         this.mbufSeries = new TimeSeries();
         this._createChart(
-            `${this.id}-cpu-chart`, this.cpuSeries, '#d94f00', 0,
+            `${this.id}-cpu-chart`, this.cpuSeries, '#2ca02c', 0,
             {minValue: 0, maxValueScale: 1.15}
         );
         this._createChart(
-            `${this.id}-memory-chart`, this.memorySeries, '#2ca02c', 0,
+            `${this.id}-memory-chart`, this.memorySeries, '#1f77b4', 0,
             {minValue: 0, maxValue: 100}
         );
         this._createChart(
-            `${this.id}-temperature-chart`, this.temperatureSeries, '#c62828', 1,
+            `${this.id}-temperature-chart`, this.temperatureSeries, '#d62728', 1,
             {minValue: 0, maxValue: 100}
         );
         this._createChart(
-            `${this.id}-states-chart`, this.statesSeries, '#2c7fb8', 0,
+            `${this.id}-states-chart`, this.statesSeries, '#9467bd', 0,
             {minValue: 0, maxValue: 100}
         );
         this._createChart(
-            `${this.id}-mbufs-chart`, this.mbufSeries, '#8c6bb1', 0,
+            `${this.id}-mbufs-chart`, this.mbufSeries, '#ff7f0e', 0,
             {minValue: 0, maxValue: 100}
         );
 
