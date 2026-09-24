@@ -50,13 +50,13 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
     _media(intf) {
         const media = $('<textarea>').html(String(intf.media ?? intf.cell_mode ?? '')).text().trim();
         if (!media) {
-            return '—';
+            return {type: '—', duplex: ''};
         }
         const match = media.match(/^\s*([^<]+?)(?:\s*<([^>]+)>)?\s*$/);
-        const type = match?.[1]?.trim() || media;
+        const type = (match?.[1]?.trim() || media).replace(/base/gi, 'Base');
         const attributes = (match?.[2] || '').split(',').map(attribute => attribute.trim());
         const duplex = attributes.find(attribute => attribute.includes('duplex'))?.replace('-', ' ');
-        return [type, duplex].filter(Boolean).join(' · ');
+        return {type, duplex: duplex || ''};
     }
 
     _link(intf) {
@@ -68,9 +68,10 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
         } : {
             icon: 'fa-minus', color: '#777777', title: this.translations.unavailable
         };
+        const media = this._media(intf);
         return `<div style="display: flex; align-items: flex-start; gap: 0.55em; text-align: left; line-height: 1.35;">
             <i class="fa ${state.icon}" title="${state.title}" style="color: ${state.color}; margin-top: 0.1em;"></i>
-            <span>${this._escape(this._media(intf))}</span>
+            <span><div>${this._escape(media.type)}</div>${media.duplex ? `<div>${this._escape(media.duplex)}</div>` : ''}</span>
         </div>`;
     }
 
