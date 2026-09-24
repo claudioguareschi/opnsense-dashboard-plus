@@ -183,11 +183,12 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
                 <section>
                     <div style="width: 95%; margin: 0 auto;">
                         <div style="display: flex; justify-content: space-between; align-items: baseline; margin: 0 0.25em;">
-                            <h3 style="margin: 0;">${this.translations.states} <a href="/ui/diagnostics/firewall/states" style="font-size: 0.65em; font-weight: normal; white-space: nowrap;">${this.translations.show_states}</a></h3>
+                            <h3 style="margin: 0;">${this.translations.states}</h3>
                             <span id="${this.id}-states-current">--</span>
                         </div>
                     </div>
                     <div id="${this.id}-states-total" style="font-size: 0.9em; margin: 0.25em 0;"></div>
+                    <div style="font-size: 0.9em; margin: 0.25em 0; text-align: center;"><a href="/ui/diagnostics/firewall/states">${this.translations.show_states}</a></div>
                     <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="${this.id}-states-chart" style="width: 100%; height: 90px;"></canvas></div>
                 </section>
                 <section>
