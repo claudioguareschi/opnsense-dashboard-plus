@@ -44,18 +44,16 @@ export default class DashboardPlusTraffic extends BaseWidget {
                         callbacks: {label: context => `${context.dataset.label}: ${this._formatBits(context.raw.y)}`}
                     },
                     streaming: {frameRate: 30, ttl: 30000},
-                    // Do not let the global palette replace the stable colors below.
-                    colorschemes: false
+                    // Match the stock Traffic widget and therefore the active theme.
+                    colorschemes: {scheme: 'tableau.Classic10'}
                 }
             }
         };
     }
 
-    _dataset(name, direction, color, time) {
+    _dataset(name, direction, time) {
         return {
             label: name,
-            borderColor: color,
-            backgroundColor: this._setAlpha(color, 0.2),
             pointRadius: 0,
             borderWidth: 2,
             direction,
@@ -66,15 +64,13 @@ export default class DashboardPlusTraffic extends BaseWidget {
 
     async _initialize(data) {
         const config = await this.getWidgetConfig();
-        const colors = Chart.colorschemes.tableau.Classic10;
         const combinedIn = [];
         const combinedOut = [];
         const $perInterface = $('#dashboard-plus-traffic-per-interface');
 
-        Object.entries(data.interfaces).forEach(([id, intf], index) => {
-            const color = colors[index % colors.length];
-            combinedIn.push({...this._dataset(intf.name, 'inbytes', color, data.time), intf: id});
-            combinedOut.push({...this._dataset(intf.name, 'outbytes', color, data.time), intf: id});
+        Object.entries(data.interfaces).forEach(([id, intf]) => {
+            combinedIn.push({...this._dataset(intf.name, 'inbytes', data.time), intf: id});
+            combinedOut.push({...this._dataset(intf.name, 'outbytes', data.time), intf: id});
 
             const canvasId = `dashboard-plus-traffic-${id}`;
             $perInterface.append(`
@@ -84,8 +80,8 @@ export default class DashboardPlusTraffic extends BaseWidget {
                 </div>
             `);
             this.charts[id] = new Chart($(`#${canvasId}`)[0].getContext('2d'), this._chartConfig([
-                this._dataset(this.translations.trafficin, 'inbytes', '#1f77b4', data.time),
-                this._dataset(this.translations.trafficout, 'outbytes', '#ff7f0e', data.time)
+                this._dataset(this.translations.trafficin, 'inbytes', data.time),
+                this._dataset(this.translations.trafficout, 'outbytes', data.time)
             ]));
         });
 
