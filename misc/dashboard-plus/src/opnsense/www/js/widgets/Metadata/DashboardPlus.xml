@@ -6,7 +6,6 @@
             <endpoint>/api/dashboardplus/system/frequency</endpoint>
             <endpoint>/api/diagnostics/system/system_information</endpoint>
             <endpoint>/api/diagnostics/system/system_time</endpoint>
-            <endpoint>/api/diagnostics/system/system_temperature</endpoint>
         </endpoints>
         <translations>
             <title>System Information+</title>
@@ -75,6 +74,7 @@
             <endpoint>/api/diagnostics/cpu_usage/stream</endpoint>
             <endpoint>/api/diagnostics/system/system_resources</endpoint>
             <endpoint>/api/diagnostics/system/system_time</endpoint>
+            <endpoint>/api/diagnostics/system/system_temperature</endpoint>
             <endpoint>/api/diagnostics/system/system_mbuf</endpoint>
             <endpoint>/api/diagnostics/system/system_swap</endpoint>
             <endpoint>/api/diagnostics/system/system_disk</endpoint>
@@ -101,6 +101,19 @@
             <minutes_5>5 minutes</minutes_5>
         </translations>
     </dashboardplussystemmetrics>
+    <dashboardplusthermalsensors>
+        <filename>DashboardPlusThermalSensors.js</filename>
+        <endpoints>
+            <endpoint>/api/diagnostics/system/system_temperature</endpoint>
+        </endpoints>
+        <translations>
+            <title>Thermal Sensors+</title>
+            <dashboard_title>Thermal Sensors</dashboard_title>
+            <sensors>Sensors</sensors>
+            <core>Core</core>
+            <no_sensors>No sensors selected</no_sensors>
+        </translations>
+    </dashboardplusthermalsensors>
     <dashboardplusinterfacestatistics>
         <filename>DashboardPlusInterfaceStatistics.js</filename>
         <endpoints>
