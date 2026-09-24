@@ -85,7 +85,6 @@
             <dashboard_title>System Metrics</dashboard_title>
             <cpu>CPU</cpu>
             <temperature>Temperature</temperature>
-            <hottest>Hottest</hottest>
             <memory>Memory</memory>
             <states>States</states>
             <mbufs>Mbufs</mbufs>

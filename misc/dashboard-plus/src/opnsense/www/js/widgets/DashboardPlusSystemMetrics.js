@@ -141,7 +141,6 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
                             <span id="${this.id}-temperature-current">--</span>
                         </div>
                     </div>
-                    <div id="${this.id}-temperature-source" style="font-size: 0.9em; margin: 0.25em 0;"></div>
                     <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="${this.id}-temperature-chart" style="width: 100%; height: 90px;"></canvas></div>
                 </section>
                 <section>
@@ -314,10 +313,8 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
             this.temperatureCelsius = celsius;
             this.temperatureSeries.append(Date.now(), celsius);
             $(`#${this.id}-temperature-current`).text(`${celsius.toFixed(1)} °C`);
-            $(`#${this.id}-temperature-source`).text(`${this.translations.hottest}: ${hottest.device}`);
         } else {
             $(`#${this.id}-temperature-current`).text(this.translations.unavailable);
-            $(`#${this.id}-temperature-source`).text('');
         }
 
         const stateCurrent = parseInt(states?.current, 10);
