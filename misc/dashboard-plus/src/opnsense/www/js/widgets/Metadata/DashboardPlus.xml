@@ -60,6 +60,10 @@
             <interfaces>Interfaces</interfaces>
             <in>In</in>
             <out>Out</out>
+            <time_window>Time window</time_window>
+            <seconds_20>20 seconds</seconds_20>
+            <minute_1>1 minute</minute_1>
+            <minutes_5>5 minutes</minutes_5>
         </translations>
     </dashboardplustraffic>
     <dashboardplusinterfacestatistics>

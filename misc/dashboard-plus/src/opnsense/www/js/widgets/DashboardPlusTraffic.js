@@ -13,6 +13,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
         this.latestData = null;
         this.currentConfig = null;
         this.configChanged = false;
+        this.windowDuration = 60000;
         this.directionColors = {
             inbytes: {line: '#2878b8', fill: 'rgba(40, 120, 184, 0.28)'},
             outbytes: {line: '#ff7f0e', fill: 'rgba(255, 127, 14, 0.28)'}
@@ -41,7 +42,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
                             unit: 'minute',
                             displayFormats: {minute: 'HH:mm'}
                         },
-                        realtime: {duration: 60000, delay: 2000},
+                        realtime: {duration: this.windowDuration, delay: 2000},
                     },
                     y: {ticks: {callback: value => this._formatBits(value)}}
                 },
@@ -52,7 +53,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
                         intersect: false,
                         callbacks: {label: context => `${context.dataset.label}: ${this._formatBits(context.raw.y)}`}
                     },
-                    streaming: {frameRate: 30, ttl: 61000},
+                    streaming: {frameRate: 30, ttl: this.windowDuration + 1000},
                     // Match the stock Traffic widget and therefore the active theme.
                     colorschemes: useThemePalette ? {scheme: 'tableau.Classic10'} : false
                 }
@@ -76,7 +77,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
     _perInterfaceHeading(name) {
         const color = this.directionColors;
         return `
-            <div class="dashboard-plus-traffic-heading" style="display: flex; justify-content: space-between; align-items: center; padding: 0 0.5em;">
+            <div class="dashboard-plus-traffic-heading" draggable="true" title="Drag to reorder" style="display: flex; justify-content: space-between; align-items: center; padding: 0 0.5em; cursor: grab;">
                 <h3 style="margin: 0;">${$('<div>').text(name).html()}</h3>
                 <div style="display: flex; gap: 1em; white-space: nowrap;">
                     <span><i style="display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; background: ${color.inbytes.line};"></i> ${this.translations.in}</span>
@@ -91,7 +92,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
         const combinedOut = [];
         const $perInterface = $('#dashboard-plus-traffic-per-interface');
 
-        Object.entries(data.interfaces).forEach(([id, intf]) => {
+        this._orderedInterfaces(data.interfaces, config).forEach(([id, intf]) => {
             combinedIn.push({...this._dataset(intf.name, 'inbytes', data.time), intf: id});
             combinedOut.push({...this._dataset(intf.name, 'outbytes', data.time), intf: id});
 
@@ -110,12 +111,14 @@ export default class DashboardPlusTraffic extends BaseWidget {
 
         this.charts.combinedIn = new Chart($('#dashboard-plus-traffic-in')[0].getContext('2d'), this._chartConfig(combinedIn));
         this.charts.combinedOut = new Chart($('#dashboard-plus-traffic-out')[0].getContext('2d'), this._chartConfig(combinedOut));
+        this._makeSubpanelsSortable();
         this.initialized = true;
         this.currentConfig = config;
         this._applyConfig(config);
     }
 
     _applyConfig(config) {
+        this.windowDuration = (parseInt(config.time_window, 10) || 60) * 1000;
         const combined = config.display === 'combined';
         $('#dashboard-plus-traffic-combined').toggle(combined);
         $('#dashboard-plus-traffic-per-interface').toggle(!combined);
@@ -130,6 +133,57 @@ export default class DashboardPlusTraffic extends BaseWidget {
                 dataset.hidden = !(config.interfaces || []).includes(dataset.intf);
             });
         }
+        Object.values(this.charts).forEach(chart => {
+            chart.options.scales.x.realtime.duration = this.windowDuration;
+            chart.options.plugins.streaming.ttl = this.windowDuration + 1000;
+        });
+    }
+
+    _orderedInterfaces(interfaces, config) {
+        const order = config.interfaces || [];
+        return Object.entries(interfaces).sort(([left], [right]) => {
+            const leftIndex = order.indexOf(left);
+            const rightIndex = order.indexOf(right);
+            return (leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex) -
+                (rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex);
+        });
+    }
+
+    _saveSubpanelOrder() {
+        const order = $('#dashboard-plus-traffic-per-interface').children('.dashboard-plus-traffic-interface')
+            .map((_, panel) => $(panel).data('interface')).get();
+        const selected = this.currentConfig.interfaces || [];
+        this.currentConfig.interfaces = [
+            ...order.filter(id => selected.includes(id)),
+            ...selected.filter(id => !order.includes(id))
+        ];
+        this.setWidgetConfig(this.currentConfig);
+        $('#save-grid').show();
+    }
+
+    _makeSubpanelsSortable() {
+        const $container = $('#dashboard-plus-traffic-per-interface');
+        let draggedPanel = null;
+        $container.on('mousedown', '.dashboard-plus-traffic-heading', event => event.stopPropagation());
+        $container.on('dragstart', '.dashboard-plus-traffic-heading', event => {
+            draggedPanel = $(event.currentTarget).closest('.dashboard-plus-traffic-interface');
+            event.originalEvent.dataTransfer.effectAllowed = 'move';
+            event.stopPropagation();
+        });
+        $container.on('dragover', '.dashboard-plus-traffic-interface', event => {
+            event.preventDefault();
+            event.originalEvent.dataTransfer.dropEffect = 'move';
+        });
+        $container.on('drop', '.dashboard-plus-traffic-interface', event => {
+            event.preventDefault();
+            const $target = $(event.currentTarget);
+            if (draggedPanel && draggedPanel[0] !== $target[0]) {
+                const halfway = $target.offset().top + ($target.outerHeight() / 2);
+                event.originalEvent.clientY < halfway ? $target.before(draggedPanel) : $target.after(draggedPanel);
+                this._saveSubpanelOrder();
+            }
+        });
+        $container.on('dragend', '.dashboard-plus-traffic-heading', () => { draggedPanel = null; });
     }
 
     _appendPoint(chart, intf, sample, time) {
@@ -208,6 +262,17 @@ export default class DashboardPlusTraffic extends BaseWidget {
                 id: 'dashboard-plus-traffic-interfaces',
                 options: interfaces,
                 default: interfaces.filter(item => ['lan', 'wan'].includes(item.value)).map(item => item.value)
+            },
+            time_window: {
+                title: this.translations.time_window,
+                type: 'select',
+                id: 'dashboard-plus-traffic-time-window',
+                options: [
+                    {value: '20', label: this.translations.seconds_20},
+                    {value: '60', label: this.translations.minute_1},
+                    {value: '300', label: this.translations.minutes_5}
+                ],
+                default: '60'
             }
         };
     }
