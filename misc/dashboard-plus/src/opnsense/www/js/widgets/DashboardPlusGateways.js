@@ -17,7 +17,7 @@ export default class DashboardPlusGateways extends BaseTableWidget {
     }
 
     getMarkup() {
-        const $container = $('<div class="dashboard-plus-gateways"></div>');
+        const $container = $('<div class="dashboard-plus-gateways" style="padding: 0 0.25em;"></div>');
         const $table = this.createTable('dashboard-plus-gateways-table', {
             headerPosition: 'top',
             headers: [
