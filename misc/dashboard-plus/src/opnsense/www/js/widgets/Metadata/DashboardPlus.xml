@@ -58,6 +58,8 @@
             <per_interface>Per interface</per_interface>
             <combined>Combined</combined>
             <interfaces>Interfaces</interfaces>
+            <in>In</in>
+            <out>Out</out>
         </translations>
     </dashboardplustraffic>
     <dashboardplusinterfacestatistics>

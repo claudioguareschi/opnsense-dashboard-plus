@@ -13,13 +13,17 @@ export default class DashboardPlusTraffic extends BaseWidget {
         this.latestData = null;
         this.currentConfig = null;
         this.configChanged = false;
+        this.directionColors = {
+            inbytes: {line: '#2878b8', fill: 'rgba(40, 120, 184, 0.28)'},
+            outbytes: {line: '#ff7f0e', fill: 'rgba(255, 127, 14, 0.28)'}
+        };
     }
 
     getGridOptions() {
         return {sizeToContent: 650};
     }
 
-    _chartConfig(datasets) {
+    _chartConfig(datasets, showLegend = true, useThemePalette = true) {
         return {
             type: 'line',
             data: {datasets},
@@ -30,36 +34,55 @@ export default class DashboardPlusTraffic extends BaseWidget {
                 elements: {line: {fill: true, cubicInterpolationMode: 'monotone', clip: 0}},
                 scales: {
                     x: {
-                        display: false,
+                        display: true,
                         type: 'realtime',
-                        realtime: {duration: 20000, delay: 2000},
+                        time: {
+                            tooltipFormat: 'HH:mm:ss',
+                            unit: 'minute',
+                            displayFormats: {minute: 'HH:mm'}
+                        },
+                        realtime: {duration: 900000, delay: 2000},
                     },
                     y: {ticks: {callback: value => this._formatBits(value)}}
                 },
                 plugins: {
-                    legend: {display: true, position: 'top'},
+                    legend: {display: showLegend, position: 'top'},
                     tooltip: {
                         mode: 'nearest',
                         intersect: false,
                         callbacks: {label: context => `${context.dataset.label}: ${this._formatBits(context.raw.y)}`}
                     },
-                    streaming: {frameRate: 30, ttl: 30000},
+                    streaming: {frameRate: 30, ttl: 901000},
                     // Match the stock Traffic widget and therefore the active theme.
-                    colorschemes: {scheme: 'tableau.Classic10'}
+                    colorschemes: useThemePalette ? {scheme: 'tableau.Classic10'} : false
                 }
             }
         };
     }
 
-    _dataset(name, direction, time) {
+    _dataset(name, direction, time, explicitColor = false) {
+        const color = this.directionColors[direction];
         return {
             label: name,
+            ...(explicitColor ? {borderColor: color.line, backgroundColor: color.fill} : {}),
             pointRadius: 0,
             borderWidth: 2,
             direction,
             lastTime: time,
             data: []
         };
+    }
+
+    _perInterfaceHeading(name) {
+        const color = this.directionColors;
+        return `
+            <div class="dashboard-plus-traffic-heading" style="display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin: 0;">${$('<div>').text(name).html()}</h3>
+                <div style="display: flex; gap: 1em; white-space: nowrap;">
+                    <span><i style="display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; background: ${color.inbytes.line};"></i> ${this.translations.in}</span>
+                    <span><i style="display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; background: ${color.outbytes.line};"></i> ${this.translations.out}</span>
+                </div>
+            </div>`;
     }
 
     async _initialize(data) {
@@ -75,14 +98,14 @@ export default class DashboardPlusTraffic extends BaseWidget {
             const canvasId = `dashboard-plus-traffic-${id}`;
             $perInterface.append(`
                 <div class="dashboard-plus-traffic-interface" data-interface="${id}">
-                    <h3>${$('<div>').text(intf.name).html()}</h3>
+                    ${this._perInterfaceHeading(intf.name)}
                     <div class="canvas-container-noaspectratio"><canvas id="${canvasId}"></canvas></div>
                 </div>
             `);
             this.charts[id] = new Chart($(`#${canvasId}`)[0].getContext('2d'), this._chartConfig([
-                this._dataset(this.translations.trafficin, 'inbytes', data.time),
-                this._dataset(this.translations.trafficout, 'outbytes', data.time)
-            ]));
+                this._dataset(this.translations.in, 'inbytes', data.time, true),
+                this._dataset(this.translations.out, 'outbytes', data.time, true)
+            ], false, false));
         });
 
         this.charts.combinedIn = new Chart($('#dashboard-plus-traffic-in')[0].getContext('2d'), this._chartConfig(combinedIn));
