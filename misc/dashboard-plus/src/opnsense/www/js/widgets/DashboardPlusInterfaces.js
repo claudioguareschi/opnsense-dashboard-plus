@@ -17,10 +17,10 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
     }
 
     getMarkup() {
-        const $container = $('<div class="dashboard-plus-interfaces" style="padding: 0 0.25em;"></div>');
+        const $container = $('<div class="dashboard-plus-interfaces"></div>');
         const $table = this.createTable('dashboard-plus-interfaces-table', {
             headerPosition: 'top',
-            headers: ['', this.translations.interface, this.translations.link, this.translations.addresses]
+            headers: [this.translations.interface, this.translations.link, this.translations.addresses]
         });
         // The grid needs columns for reliable alignment, but the row design is
         // deliberately self-explanatory, so it does not need a visible header.
@@ -48,7 +48,7 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
     }
 
     _media(intf) {
-        const media = String(intf.media ?? intf.cell_mode ?? '').trim();
+        const media = $('<textarea>').html(String(intf.media ?? intf.cell_mode ?? '')).text().trim();
         if (!media) {
             return '—';
         }
@@ -89,7 +89,7 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
 
     _setGridColumns() {
         $('#dashboard-plus-interfaces-table').children('.grid-row').css({
-            gridTemplateColumns: '8% 28% 29% 35%',
+            gridTemplateColumns: '34% 35% 31%',
             alignItems: 'center'
         });
     }
@@ -116,8 +116,8 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
             $draggedRow = null;
             $placeholder = null;
         };
-        $table.on('mousedown', '.grid-row .grid-item:nth-child(2)', event => event.stopPropagation());
-        $table.on('dragstart', '.grid-row .grid-item:nth-child(2)', event => {
+        $table.on('mousedown', '.grid-row .grid-item:nth-child(1)', event => event.stopPropagation());
+        $table.on('dragstart', '.grid-row .grid-item:nth-child(1)', event => {
             $draggedRow = $(event.currentTarget).closest('.grid-row');
             $draggedRow.css({opacity: 0.4, outline: '2px dashed #d94f00'});
             $placeholder = $('<div class="grid-row dashboard-plus-interfaces-drop-placeholder" aria-label="Drop interface here"></div>')
@@ -147,7 +147,7 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
             }
             clearDragState();
         });
-        $table.on('dragend', '.grid-row .grid-item:nth-child(2)', clearDragState);
+        $table.on('dragend', '.grid-row .grid-item:nth-child(1)', clearDragState);
     }
 
     async onMarkupRendered() {
@@ -175,7 +175,7 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
         $table.children('.dashboard-plus-interfaces-empty').remove();
 
         const rows = orderedInterfaces.map(intf => [
-            '', this._identity(intf), this._link(intf), this._addresses(intf)
+            this._identity(intf), this._link(intf), this._addresses(intf)
         ]);
         // BaseTableWidget inserts new rows right after the header; reverse the
         // source so that the configured order remains the visual order.
@@ -185,7 +185,7 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
             const $cells = $(row).children();
             $(row).data('interface', orderedInterfaces[index].identifier);
             $cells.css('text-align', 'left');
-            $cells.eq(1).attr({draggable: 'true', title: this.translations.drag_to_reorder})
+            $cells.eq(0).attr({draggable: 'true', title: this.translations.drag_to_reorder})
                 .css('cursor', 'grab');
         });
         this._setGridColumns();
