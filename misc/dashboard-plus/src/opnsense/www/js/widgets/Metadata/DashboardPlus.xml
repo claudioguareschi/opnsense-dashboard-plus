@@ -133,4 +133,25 @@
             <out>Out</out>
         </translations>
     </dashboardplusinterfacestatistics>
+    <dashboardplusgateways>
+        <filename>DashboardPlusGateways.js</filename>
+        <link>/ui/routing/configuration</link>
+        <endpoints>
+            <endpoint>/api/routing/settings/search_gateway</endpoint>
+        </endpoints>
+        <translations>
+            <title>Gateways+</title>
+            <dashboard_title>Gateways</dashboard_title>
+            <gateways>Gateways</gateways>
+            <metrics>Metrics</metrics>
+            <health>Health</health>
+            <gateway>Gateway</gateway>
+            <rtt>RTT</rtt>
+            <rttd>RTTd</rttd>
+            <loss>Loss</loss>
+            <status>Status</status>
+            <default_gateway>Default gateway</default_gateway>
+            <unconfigured>No gateways configured. Click to configure gateways.</unconfigured>
+        </translations>
+    </dashboardplusgateways>
 </metadata>

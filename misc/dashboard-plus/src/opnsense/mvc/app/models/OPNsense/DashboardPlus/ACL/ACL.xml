@@ -15,6 +15,7 @@
             <pattern>api/diagnostics/firewall/pf_states</pattern>
             <pattern>api/diagnostics/traffic/interface</pattern>
             <pattern>api/diagnostics/traffic/stream/*</pattern>
+            <pattern>api/routing/settings/search_gateway</pattern>
         </patterns>
     </page-dashboard-widget-dashboard-plus>
 </acl>
