@@ -48,6 +48,9 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
     _media(intf) {
         const media = $('<textarea>').html(String(intf.media ?? intf.cell_mode ?? '')).text().trim();
         if (!media) {
+            if (/^ipsec\d+$/i.test(String(intf.device || ''))) {
+                return {type: this.translations.ipsec_vti, duplex: ''};
+            }
             return {type: '—', duplex: ''};
         }
         const match = media.match(/^\s*([^<]+?)(?:\s*<([^>]+)>)?\s*$/);
