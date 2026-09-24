@@ -41,7 +41,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
                             unit: 'minute',
                             displayFormats: {minute: 'HH:mm'}
                         },
-                        realtime: {duration: 900000, delay: 2000},
+                        realtime: {duration: 300000, delay: 2000},
                     },
                     y: {ticks: {callback: value => this._formatBits(value)}}
                 },
@@ -52,7 +52,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
                         intersect: false,
                         callbacks: {label: context => `${context.dataset.label}: ${this._formatBits(context.raw.y)}`}
                     },
-                    streaming: {frameRate: 30, ttl: 901000},
+                    streaming: {frameRate: 30, ttl: 301000},
                     // Match the stock Traffic widget and therefore the active theme.
                     colorschemes: useThemePalette ? {scheme: 'tableau.Classic10'} : false
                 }
@@ -76,7 +76,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
     _perInterfaceHeading(name) {
         const color = this.directionColors;
         return `
-            <div class="dashboard-plus-traffic-heading" style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="dashboard-plus-traffic-heading" style="display: flex; justify-content: space-between; align-items: center; padding: 0 0.5em;">
                 <h3 style="margin: 0;">${$('<div>').text(name).html()}</h3>
                 <div style="display: flex; gap: 1em; white-space: nowrap;">
                     <span><i style="display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; background: ${color.inbytes.line};"></i> ${this.translations.in}</span>
