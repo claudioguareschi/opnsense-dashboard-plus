@@ -17,21 +17,30 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
 
     getMarkup() {
         const $container = $('<div class="dashboard-plus-interface-statistics"></div>');
-        $container.append(this.createTable('dashboard-plus-interface-statistics-table', {
-            headerPosition: 'top',
-            headers: [
-                this.translations.interface,
-                this.translations.bytes,
-                this.translations.packets,
-                this.translations.errors,
-                this.translations.collisions
-            ]
-        }));
+        const $table = this.createTable('dashboard-plus-interface-statistics-table', {
+            // Use the stock dashboard table so its 95% width, padding and
+            // separators match Interfaces+ and the native widgets.
+            headerPosition: 'none'
+        });
+        const $header = $('<div class="flextable-header dashboard-plus-interface-statistics-header" role="row"></div>');
+        [
+            this.translations.interface,
+            this.translations.bytes,
+            this.translations.packets,
+            this.translations.errors,
+            this.translations.collisions
+        ].forEach(title => $header.append(`<div class="flex-cell" role="columnheader">${title}</div>`));
+        $table.prepend($header);
+        $container.append($table);
         return $container;
     }
 
     _pair(first, second) {
-        return `<small>${this.translations.in}: ${first}<br>${this.translations.out}: ${second}</small>`;
+        return `<div>${this.translations.in}: ${first}<br>${this.translations.out}: ${second}</div>`;
+    }
+
+    _escape(value) {
+        return $('<div>').text(value ?? '').html();
     }
 
     _applyConfig(config) {
@@ -41,29 +50,30 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
     _applyFieldVisibility(config) {
         const visibleFields = config.fields || ['bytes', 'packets', 'errors', 'collisions'];
         const fieldColumns = {bytes: 1, packets: 2, errors: 3, collisions: 4};
+        const widths = {
+            0: ['100%'],
+            1: ['42%', '58%'],
+            2: ['32%', '34%', '34%'],
+            3: ['27%', '24.5%', '24.5%', '24%'],
+            4: ['22%', '22%', '21%', '20%', '15%']
+        }[visibleFields.length];
         const $table = $('#dashboard-plus-interface-statistics-table');
-        $table.children('.grid-header-container, .grid-row').each((_, row) => {
-            Object.entries(fieldColumns).forEach(([field, column]) => {
-                $(row).children().eq(column).toggle(visibleFields.includes(field));
+        $table.children('.flextable-header, .flextable-row').each((_, row) => {
+            let visibleIndex = 0;
+            $(row).children('.flex-cell').each((column, cell) => {
+                const field = Object.keys(fieldColumns).find(key => fieldColumns[key] === column);
+                const visible = !field || visibleFields.includes(field);
+                $(cell).toggle(visible).css({
+                    width: visible ? widths[visibleIndex++] : '',
+                    textAlign: 'left'
+                });
             });
         });
-
-        // The core table uses 100px minimum columns, which makes five columns
-        // wrap in a standard dashboard cell.  Keep the compact statistics table
-        // on one line, while still redistributing its width when fields are hidden.
-        const columns = {
-            0: '100%',
-            1: '42% 58%',
-            2: '32% 34% 34%',
-            3: '27% 24.5% 24.5% 24%',
-            4: '22% 22% 21% 20% 15%'
-        }[visibleFields.length];
-        $table.children('.grid-header-container, .grid-row').css('grid-template-columns', columns);
     }
 
     _clearTable() {
         const id = 'dashboard-plus-interface-statistics-table';
-        $(`#${id}`).children('.grid-row').remove();
+        $(`#${id}`).children('.flextable-row').remove();
         this.tables[id].data = [];
     }
 
@@ -93,7 +103,7 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
             const errorsReceived = parseInt(intf['input errors']) || 0;
             const errorsTransmitted = parseInt(intf['output errors']) || 0;
             super.updateTable('dashboard-plus-interface-statistics-table', [[
-                intf.name,
+                `<a href="/interfaces.php?if=${encodeURIComponent(id)}">${this._escape(intf.name)}</a>`,
                 this._pair(this._formatBytes(received) || '0', this._formatBytes(transmitted) || '0'),
                 this._pair(packetsReceived.toLocaleString(), packetsTransmitted.toLocaleString()),
                 this._pair(errorsReceived.toLocaleString(), errorsTransmitted.toLocaleString()),
