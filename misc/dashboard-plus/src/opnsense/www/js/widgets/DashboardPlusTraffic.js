@@ -41,7 +41,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
                             unit: 'minute',
                             displayFormats: {minute: 'HH:mm'}
                         },
-                        realtime: {duration: 300000, delay: 2000},
+                        realtime: {duration: 60000, delay: 2000},
                     },
                     y: {ticks: {callback: value => this._formatBits(value)}}
                 },
@@ -52,7 +52,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
                         intersect: false,
                         callbacks: {label: context => `${context.dataset.label}: ${this._formatBits(context.raw.y)}`}
                     },
-                    streaming: {frameRate: 30, ttl: 301000},
+                    streaming: {frameRate: 30, ttl: 61000},
                     // Match the stock Traffic widget and therefore the active theme.
                     colorschemes: useThemePalette ? {scheme: 'tableau.Classic10'} : false
                 }
