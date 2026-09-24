@@ -14,7 +14,6 @@ SYSCTL = "/sbin/sysctl"
 DMESG = "/sbin/dmesg"
 MOUNT = "/sbin/mount"
 BECTL = "/sbin/bectl"
-SETKEY = "/usr/sbin/setkey"
 
 QAT_DEVICES = {
     0x0435: ("Intel QAT DH895XCC", "discrete", False),
@@ -372,9 +371,9 @@ def collect_accelerated_algorithms(providers):
     })
 
 
-def collect_ipsec_status(output):
-    """Report security-association activity, not unmeasurable packet offload."""
-    return "Active security associations" if re.search(r"\bspi=", output) else "No active security associations"
+def collect_ipsec_status(providers):
+    """Report whether IPsec has an active hardware crypto provider available."""
+    return "Hardware acceleration active" if any(provider["active"] for provider in providers) else "Hardware acceleration unavailable"
 
 
 def boot_method(kernel_method, efi_runtime, mount_output):
@@ -482,7 +481,7 @@ def collect():
             **frequency,
         },
         "crypto_hardware": crypto_hardware,
-        "ipsec": collect_ipsec_status(run([SETKEY, "-D"])),
+        "ipsec": collect_ipsec_status(crypto_hardware),
         "accelerated_algorithms": collect_accelerated_algorithms(crypto_hardware),
         "mitigations": {
             "pti": pti,

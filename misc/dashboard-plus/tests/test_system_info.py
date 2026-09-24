@@ -129,9 +129,12 @@ dev.qat_ocf.0.enable: 1
             ["AES-GCM", "AES-XTS"],
         )
 
-    def test_ipsec_status_does_not_claim_packet_offload(self):
-        self.assertEqual(SYSTEM_INFO.collect_ipsec_status(""), "No active security associations")
-        self.assertEqual(SYSTEM_INFO.collect_ipsec_status("spi=0x1234"), "Active security associations")
+    def test_ipsec_status_reports_active_hardware_not_packet_offload(self):
+        self.assertEqual(SYSTEM_INFO.collect_ipsec_status([]), "Hardware acceleration unavailable")
+        self.assertEqual(
+            SYSTEM_INFO.collect_ipsec_status([{"active": True}]),
+            "Hardware acceleration active",
+        )
 
 
 if __name__ == "__main__":
