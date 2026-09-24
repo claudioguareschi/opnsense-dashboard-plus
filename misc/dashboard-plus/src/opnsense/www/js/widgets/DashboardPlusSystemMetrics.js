@@ -99,11 +99,12 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
             }
             const percent = Math.max(0, Math.min(parseFloat(filesystem.used_pct) || 0, 100));
             const row = document.createElement('div');
-            row.style.cssText = 'padding: 0.35em 0; text-align: left;';
+            row.style.cssText = 'display: grid; grid-template-columns: 28% 72%; padding: 0.35em 0; text-align: left;';
             const mount = document.createElement('span');
-            mount.style.cssText = 'display: block; margin-bottom: 0.2em;';
+            mount.style.cssText = 'padding-right: 0.75em;';
             mount.textContent = filesystem.mountpoint;
             const usage = document.createElement('div');
+            usage.style.paddingLeft = '0.75em';
             const bar = document.createElement('div');
             bar.style.cssText = 'height: 0.75em; background: rgba(119,119,119,0.12); border-radius: 0.375em; overflow: hidden;';
             const fill = document.createElement('div');
