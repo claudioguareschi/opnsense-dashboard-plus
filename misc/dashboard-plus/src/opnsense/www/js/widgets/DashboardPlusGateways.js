@@ -68,7 +68,9 @@ export default class DashboardPlusGateways extends BaseTableWidget {
     }
 
     _statusCell(status, info) {
-        return `<div style="margin: -4px; min-height: 3.35em; display: flex; align-items: center; justify-content: center; background: ${info.background}; color: ${info.color}; font-weight: 600;">${this._escape(status)}</div>`;
+        return `<div style="min-height: 3.35em; display: flex; align-items: center; justify-content: center;">
+            <span style="min-width: 5.25em; padding: 0.45em 0.65em; border-radius: 999px; background: ${info.background}; color: ${info.color}; font-weight: 600; text-align: center;">${this._escape(status)}</span>
+        </div>`;
     }
 
     _applyFieldVisibility(config) {
