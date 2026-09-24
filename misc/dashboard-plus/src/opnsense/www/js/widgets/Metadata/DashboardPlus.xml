@@ -176,6 +176,10 @@
             <drag_to_reorder>Drag to reorder</drag_to_reorder>
             <no_interfaces>No interfaces selected</no_interfaces>
             <ipsec_vti>IPsec VTI</ipsec_vti>
+            <wireguard>WireGuard</wireguard>
+            <openvpn_client>OpenVPN client</openvpn_client>
+            <openvpn_server>OpenVPN server</openvpn_server>
+            <openvpn>OpenVPN tunnel</openvpn>
         </translations>
     </dashboardplusinterfaces>
 </metadata>

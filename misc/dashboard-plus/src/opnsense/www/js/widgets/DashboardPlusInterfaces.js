@@ -48,8 +48,21 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
     _media(intf) {
         const media = $('<textarea>').html(String(intf.media ?? intf.cell_mode ?? '')).text().trim();
         if (!media) {
-            if (/^ipsec\d+$/i.test(String(intf.device || ''))) {
+            const device = String(intf.device || '');
+            if (/^ipsec\d+$/i.test(device)) {
                 return {type: this.translations.ipsec_vti, duplex: ''};
+            }
+            if (/^wg\d+$/i.test(device)) {
+                return {type: this.translations.wireguard, duplex: ''};
+            }
+            if (/^ovpnc\d+$/i.test(device)) {
+                return {type: this.translations.openvpn_client, duplex: ''};
+            }
+            if (/^ovpns\d+$/i.test(device)) {
+                return {type: this.translations.openvpn_server, duplex: ''};
+            }
+            if (/^ovpn\d+$/i.test(device)) {
+                return {type: this.translations.openvpn, duplex: ''};
             }
             return {type: '—', duplex: ''};
         }
