@@ -83,6 +83,10 @@
             <load>Load</load>
             <used>used</used>
             <unavailable>Unavailable</unavailable>
+            <time_window>Time window</time_window>
+            <seconds_20>20 seconds</seconds_20>
+            <minute_1>1 minute</minute_1>
+            <minutes_5>5 minutes</minutes_5>
         </translations>
     </dashboardplussystemmetrics>
     <dashboardplusinterfacestatistics>

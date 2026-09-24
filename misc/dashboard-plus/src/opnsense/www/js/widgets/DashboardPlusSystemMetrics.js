@@ -7,8 +7,12 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
     constructor(config) {
         super(config);
         this.tickTimeout = 10;
+        this.configurable = true;
         this.cpuSeries = null;
         this.memorySeries = null;
+        this.charts = [];
+        this.windowDuration = 60000;
+        this.currentConfig = null;
     }
 
     getGridOptions() {
@@ -18,7 +22,7 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
     _createChart(canvasId, series, color) {
         const chart = new SmoothieChart({
             responsive: true,
-            millisPerPixel: 500,
+            millisPerPixel: this._millisecondsPerPixel(canvasId),
             tooltip: true,
             labels: {
                 fillStyle: Chart.defaults.color,
@@ -28,12 +32,26 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
             grid: {
                 strokeStyle: 'rgba(119,119,119,0.12)',
                 verticalSections: 4,
-                millisPerLine: 60000,
+                millisPerLine: this.windowDuration / 4,
                 fillStyle: 'transparent'
             }
         });
         chart.streamTo(document.getElementById(canvasId), 1000);
         chart.addTimeSeries(series, {lineWidth: 3, strokeStyle: color, fillStyle: `${color}33`});
+        this.charts.push({chart, canvasId});
+    }
+
+    _millisecondsPerPixel(canvasId) {
+        const width = document.getElementById(canvasId)?.clientWidth || 500;
+        return this.windowDuration / width;
+    }
+
+    _applyTimeWindow(config) {
+        this.windowDuration = (parseInt(config.time_window, 10) || 60) * 1000;
+        this.charts.forEach(({chart, canvasId}) => {
+            chart.options.millisPerPixel = this._millisecondsPerPixel(canvasId);
+            chart.options.grid.millisPerLine = this.windowDuration / 4;
+        });
     }
 
     _formatTotalMemory(mebibytes) {
@@ -44,7 +62,7 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
 
     getMarkup() {
         return $(`
-            <div class="dashboard-plus-system-metrics" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1em;">
+            <div class="dashboard-plus-system-metrics" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1em; padding: 0 0.5em;">
                 <section>
                     <div style="display: flex; justify-content: space-between; align-items: baseline;">
                         <h3 style="margin: 0;">${this.translations.cpu}</h3>
@@ -67,6 +85,8 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
 
     async onMarkupRendered() {
         $(`#${this.id}-title`).html(`<b>${this.translations.dashboard_title}</b>`);
+        this.currentConfig = await this.getWidgetConfig();
+        this._applyTimeWindow(this.currentConfig);
         this.cpuSeries = new TimeSeries();
         this.memorySeries = new TimeSeries();
         this._createChart(`${this.id}-cpu-chart`, this.cpuSeries, '#d94f00');
@@ -81,6 +101,32 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
             this.cpuSeries.append(Date.now(), cpu);
             $(`#${this.id}-cpu-current`).text(`${cpu.toFixed(0)}%`);
         });
+    }
+
+    async getWidgetOptions() {
+        return {
+            time_window: {
+                title: this.translations.time_window,
+                type: 'select',
+                id: 'dashboard-plus-system-metrics-time-window',
+                options: [
+                    {value: '20', label: this.translations.seconds_20},
+                    {value: '60', label: this.translations.minute_1},
+                    {value: '300', label: this.translations.minutes_5}
+                ],
+                default: '60'
+            }
+        };
+    }
+
+    onWidgetOptionsChanged(options) {
+        this.currentConfig = options;
+        this._applyTimeWindow(options);
+    }
+
+    onWidgetResize() {
+        this._applyTimeWindow(this.currentConfig || {time_window: '60'});
+        return true;
     }
 
     async onWidgetTick() {
