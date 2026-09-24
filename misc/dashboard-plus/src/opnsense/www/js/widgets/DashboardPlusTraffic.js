@@ -53,7 +53,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
                         intersect: false,
                         callbacks: {label: context => `${context.dataset.label}: ${this._formatBits(context.raw.y)}`}
                     },
-                    streaming: {frameRate: 30, ttl: this.windowDuration + 1000},
+                    streaming: {frameRate: 30, ttl: this.windowDuration + 10000},
                     // Match the stock Traffic widget and therefore the active theme.
                     colorschemes: useThemePalette ? {scheme: 'tableau.Classic10'} : false
                 }
@@ -135,7 +135,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
         }
         Object.values(this.charts).forEach(chart => {
             chart.options.scales.x.realtime.duration = this.windowDuration;
-            chart.options.plugins.streaming.ttl = this.windowDuration + 1000;
+            chart.options.plugins.streaming.ttl = this.windowDuration + 10000;
         });
     }
 
