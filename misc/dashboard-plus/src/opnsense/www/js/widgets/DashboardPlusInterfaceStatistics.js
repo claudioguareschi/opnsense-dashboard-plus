@@ -7,7 +7,6 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
     constructor(config) {
         super(config);
         this.configurable = true;
-        this.chart = null;
         this.configChanged = false;
         this.currentConfig = null;
     }
@@ -18,13 +17,6 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
 
     getMarkup() {
         const $container = $('<div class="dashboard-plus-interface-statistics"></div>');
-        $container.append(`
-            <div id="dashboard-plus-interface-statistics-chart" class="dashboard-plus-interface-statistics-chart-container">
-                <div class="canvas-container">
-                    <canvas id="dashboard-plus-interface-statistics-canvas" style="display: inline-block"></canvas>
-                </div>
-            </div>
-        `);
         $container.append(this.createTable('dashboard-plus-interface-statistics-table', {
             headerPosition: 'top',
             headers: [
@@ -43,10 +35,6 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
     }
 
     _applyConfig(config) {
-        const showGraph = config.display === 'graph' || config.display === 'both';
-        const showTable = config.display === 'table' || config.display === 'both';
-        $('#dashboard-plus-interface-statistics-chart').toggle(showGraph);
-        $('#dashboard-plus-interface-statistics-table').toggle(showTable);
         this._applyFieldVisibility(config);
     }
 
@@ -69,26 +57,6 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
 
     async onMarkupRendered() {
         $(`#${this.id}-title`).html(`<b>${this.translations.dashboard_title}</b>`);
-        const context = $('#dashboard-plus-interface-statistics-canvas')[0].getContext('2d');
-        this.chart = new Chart(context, {
-            type: 'doughnut',
-            data: {labels: [], datasets: [{data: [], backgroundColor: []}]},
-            options: {
-                cutout: '40%',
-                maintainAspectRatio: true,
-                responsive: true,
-                aspectRatio: 2,
-                layout: {
-                    padding: 10
-                },
-                normalized: true,
-                parsing: false,
-                plugins: {
-                    legend: {display: true, position: 'left'},
-                    colorschemes: false
-                }
-            }
-        });
         this.currentConfig = await this.getWidgetConfig();
         this._applyConfig(this.currentConfig);
     }
@@ -102,11 +70,7 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
             this.configChanged = false;
         }
         const config = this.currentConfig;
-        const colors = Chart.colorschemes.tableau.Classic10;
-        const labels = [];
-        const chartData = [];
-        const chartColors = [];
-        Object.entries(data.interfaces || {}).forEach(([id, intf], index) => {
+        Object.entries(data.interfaces || {}).forEach(([id, intf]) => {
             if (!(config.interfaces || []).includes(id)) {
                 return;
             }
@@ -123,16 +87,7 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
                 this._pair(errorsReceived.toLocaleString(), errorsTransmitted.toLocaleString()),
                 (parseInt(intf.collisions) || 0).toLocaleString()
             ]], id);
-            labels.push(intf.name);
-            chartData.push(config.chart_metric === 'packets'
-                ? packetsReceived + packetsTransmitted
-                : received + transmitted);
-            chartColors.push(colors[index % colors.length]);
         });
-        this.chart.data.labels = labels;
-        this.chart.data.datasets[0].data = chartData;
-        this.chart.data.datasets[0].backgroundColor = chartColors;
-        this.chart.update();
         this._applyFieldVisibility(config);
     }
 
@@ -140,17 +95,6 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
         const data = await this.ajaxCall('/api/diagnostics/traffic/interface');
         const interfaces = Object.entries(data.interfaces || {}).map(([id, intf]) => ({value: id, label: intf.name}));
         return {
-            display: {
-                title: this.translations.display,
-                type: 'select',
-                id: 'dashboard-plus-interface-statistics-display',
-                options: [
-                    {value: 'both', label: this.translations.both},
-                    {value: 'graph', label: this.translations.graph},
-                    {value: 'table', label: this.translations.table}
-                ],
-                default: 'both'
-            },
             interfaces: {
                 title: this.translations.interfaces,
                 type: 'select_multiple',
@@ -169,27 +113,11 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
                     {value: 'collisions', label: this.translations.collisions}
                 ],
                 default: ['bytes', 'packets', 'errors', 'collisions']
-            },
-            chart_metric: {
-                title: this.translations.chart_metric,
-                type: 'select',
-                id: 'dashboard-plus-interface-statistics-chart-metric',
-                options: [
-                    {value: 'bytes', label: this.translations.traffic_bytes},
-                    {value: 'packets', label: this.translations.traffic_packets}
-                ],
-                default: 'bytes'
             }
         };
     }
 
     onWidgetOptionsChanged() {
         this.configChanged = true;
-    }
-
-    onWidgetClose() {
-        if (this.chart !== null) {
-            this.chart.destroy();
-        }
     }
 }

@@ -76,10 +76,6 @@
         <translations>
             <title>Interface Statistics+</title>
             <dashboard_title>Interface Statistics</dashboard_title>
-            <display>Display</display>
-            <both>Graph and table</both>
-            <graph>Graph</graph>
-            <table>Table</table>
             <interfaces>Interfaces</interfaces>
             <fields>Data fields</fields>
             <interface>Interface</interface>
@@ -89,9 +85,6 @@
             <collisions>Collisions</collisions>
             <in>In</in>
             <out>Out</out>
-            <chart_metric>Chart metric</chart_metric>
-            <traffic_bytes>Traffic (bytes)</traffic_bytes>
-            <traffic_packets>Traffic (packets)</traffic_packets>
         </translations>
     </dashboardplusinterfacestatistics>
 </metadata>
