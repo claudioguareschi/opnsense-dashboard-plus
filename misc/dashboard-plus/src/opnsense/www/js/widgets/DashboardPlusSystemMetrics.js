@@ -10,6 +10,7 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         this.configurable = true;
         this.cpuSeries = null;
         this.memorySeries = null;
+        this.memoryPercent = null;
         this.charts = [];
         this.windowDuration = 60000;
         this.currentConfig = null;
@@ -19,14 +20,14 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         return {sizeToContent: 420};
     }
 
-    _createChart(canvasId, series, color) {
+    _createChart(canvasId, series, color, precision = 0) {
         const chart = new SmoothieChart({
             responsive: true,
             millisPerPixel: this._millisecondsPerPixel(canvasId),
             tooltip: true,
             labels: {
                 fillStyle: Chart.defaults.color,
-                precision: 0,
+                precision,
                 fontSize: 11
             },
             grid: {
@@ -62,7 +63,7 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
 
     getMarkup() {
         return $(`
-            <div class="dashboard-plus-system-metrics" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1em; padding: 0 0.5em;">
+            <div class="dashboard-plus-system-metrics" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1em; padding: 0 0.25em;">
                 <section>
                     <div style="display: flex; justify-content: space-between; align-items: baseline;">
                         <h3 style="margin: 0;">${this.translations.cpu}</h3>
@@ -90,7 +91,7 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         this.cpuSeries = new TimeSeries();
         this.memorySeries = new TimeSeries();
         this._createChart(`${this.id}-cpu-chart`, this.cpuSeries, '#d94f00');
-        this._createChart(`${this.id}-memory-chart`, this.memorySeries, '#2ca02c');
+        this._createChart(`${this.id}-memory-chart`, this.memorySeries, '#2ca02c', 1);
 
         this.openEventSource('/api/diagnostics/cpu_usage/stream', event => {
             if (!event) {
@@ -99,6 +100,9 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
             }
             const cpu = JSON.parse(event.data).total;
             this.cpuSeries.append(Date.now(), cpu);
+            if (this.memoryPercent !== null) {
+                this.memorySeries.append(Date.now(), this.memoryPercent);
+            }
             $(`#${this.id}-cpu-current`).text(`${cpu.toFixed(0)}%`);
         });
     }
@@ -141,6 +145,7 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
             const arc = parseInt(memory.arc_frmt, 10) || 0;
             const pressureUsed = Math.max(0, used - arc);
             const percent = total > 0 ? (pressureUsed / total) * 100 : 0;
+            this.memoryPercent = percent;
             this.memorySeries.append(Date.now(), percent);
             $(`#${this.id}-memory-current`).text(`${percent.toFixed(0)}%`);
             $(`#${this.id}-memory-total`).text(
