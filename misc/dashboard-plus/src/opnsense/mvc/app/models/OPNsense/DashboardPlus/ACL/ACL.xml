@@ -6,6 +6,7 @@
             <pattern>api/dashboardplus/system/frequency</pattern>
             <pattern>api/diagnostics/system/system_information</pattern>
             <pattern>api/diagnostics/system/system_time</pattern>
+            <pattern>api/diagnostics/system/system_temperature</pattern>
             <pattern>api/diagnostics/system/system_resources</pattern>
             <pattern>api/diagnostics/system/system_mbuf</pattern>
             <pattern>api/diagnostics/system/system_swap</pattern>

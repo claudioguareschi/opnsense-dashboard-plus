@@ -6,6 +6,7 @@
             <endpoint>/api/dashboardplus/system/frequency</endpoint>
             <endpoint>/api/diagnostics/system/system_information</endpoint>
             <endpoint>/api/diagnostics/system/system_time</endpoint>
+            <endpoint>/api/diagnostics/system/system_temperature</endpoint>
         </endpoints>
         <translations>
             <title>System Information+</title>
@@ -83,6 +84,8 @@
             <title>System Metrics+</title>
             <dashboard_title>System Metrics</dashboard_title>
             <cpu>CPU</cpu>
+            <temperature>Temperature</temperature>
+            <hottest>Hottest</hottest>
             <memory>Memory</memory>
             <states>States</states>
             <mbufs>Mbufs</mbufs>

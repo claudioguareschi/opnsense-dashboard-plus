@@ -10,9 +10,11 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         this.configurable = true;
         this.cpuSeries = null;
         this.memorySeries = null;
+        this.temperatureSeries = null;
         this.statesSeries = null;
         this.mbufSeries = null;
         this.memoryPercent = null;
+        this.temperatureCelsius = null;
         this.statesPercent = null;
         this.mbufPercent = null;
         this.charts = [];
@@ -135,6 +137,16 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
                 <section>
                     <div style="width: 95%; margin: 0 auto;">
                         <div style="display: flex; justify-content: space-between; align-items: baseline; margin: 0 0.25em;">
+                            <h3 style="margin: 0;">${this.translations.temperature}</h3>
+                            <span id="${this.id}-temperature-current">--</span>
+                        </div>
+                    </div>
+                    <div id="${this.id}-temperature-source" style="font-size: 0.9em; margin: 0.25em 0;"></div>
+                    <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="${this.id}-temperature-chart" style="width: 100%; height: 90px;"></canvas></div>
+                </section>
+                <section>
+                    <div style="width: 95%; margin: 0 auto;">
+                        <div style="display: flex; justify-content: space-between; align-items: baseline; margin: 0 0.25em;">
                             <h3 style="margin: 0;">${this.translations.memory}</h3>
                             <span id="${this.id}-memory-current">--</span>
                         </div>
@@ -192,6 +204,7 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         this._applyTimeWindow(this.currentConfig);
         this.cpuSeries = new TimeSeries();
         this.memorySeries = new TimeSeries();
+        this.temperatureSeries = new TimeSeries();
         this.statesSeries = new TimeSeries();
         this.mbufSeries = new TimeSeries();
         this._createChart(
@@ -200,6 +213,10 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         );
         this._createChart(
             `${this.id}-memory-chart`, this.memorySeries, '#2ca02c', 0,
+            {minValue: 0, maxValue: 100}
+        );
+        this._createChart(
+            `${this.id}-temperature-chart`, this.temperatureSeries, '#c62828', 1,
             {minValue: 0, maxValue: 100}
         );
         this._createChart(
@@ -220,6 +237,9 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
             this.cpuSeries.append(Date.now(), cpu);
             if (this.memoryPercent !== null) {
                 this.memorySeries.append(Date.now(), this.memoryPercent);
+            }
+            if (this.temperatureCelsius !== null) {
+                this.temperatureSeries.append(Date.now(), this.temperatureCelsius);
             }
             if (this.statesPercent !== null) {
                 this.statesSeries.append(Date.now(), this.statesPercent);
@@ -258,9 +278,10 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
     }
 
     async onWidgetTick() {
-        const [resources, time, states, mbufs, swap, disks] = await Promise.all([
+        const [resources, time, temperature, states, mbufs, swap, disks] = await Promise.all([
             this.ajaxCall('/api/diagnostics/system/system_resources'),
             this.ajaxCall('/api/diagnostics/system/system_time'),
+            this.ajaxCall('/api/diagnostics/system/system_temperature'),
             this.ajaxCall('/api/diagnostics/firewall/pf_states'),
             this.ajaxCall('/api/diagnostics/system/system_mbuf'),
             this.ajaxCall('/api/diagnostics/system/system_swap'),
@@ -281,6 +302,23 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
             );
         }
         $(`#${this.id}-cpu-load`).text(`${this.translations.load}: ${time.loadavg || this.translations.unavailable}`);
+
+        const readings = Array.isArray(temperature)
+            ? temperature.filter(reading => Number.isFinite(parseFloat(reading.temperature)))
+            : [];
+        if (readings.length > 0) {
+            const hottest = readings.reduce((current, reading) =>
+                parseFloat(reading.temperature) > parseFloat(current.temperature) ? reading : current
+            );
+            const celsius = parseFloat(hottest.temperature);
+            this.temperatureCelsius = celsius;
+            this.temperatureSeries.append(Date.now(), celsius);
+            $(`#${this.id}-temperature-current`).text(`${celsius.toFixed(1)} °C`);
+            $(`#${this.id}-temperature-source`).text(`${this.translations.hottest}: ${hottest.device}`);
+        } else {
+            $(`#${this.id}-temperature-current`).text(this.translations.unavailable);
+            $(`#${this.id}-temperature-source`).text('');
+        }
 
         const stateCurrent = parseInt(states?.current, 10);
         const stateLimit = parseInt(states?.limit, 10);
