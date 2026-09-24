@@ -88,11 +88,20 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
             return;
         }
         container.replaceChildren();
+        const byMountpoint = new Map();
         for (const filesystem of devices) {
+            byMountpoint.set(filesystem.mountpoint, filesystem);
+        }
+        for (const mountpoint of ['/', '/tmp', '/var', '/var/log']) {
+            const filesystem = byMountpoint.get(mountpoint);
+            if (!filesystem) {
+                continue;
+            }
             const percent = Math.max(0, Math.min(parseFloat(filesystem.used_pct) || 0, 100));
             const row = document.createElement('div');
-            row.style.cssText = 'display: grid; grid-template-columns: minmax(8em, 28%) 1fr; column-gap: 0.75em; align-items: center; padding: 0.35em 0;';
+            row.style.cssText = 'padding: 0.35em 0; text-align: left;';
             const mount = document.createElement('span');
+            mount.style.cssText = 'display: block; margin-bottom: 0.2em;';
             mount.textContent = filesystem.mountpoint;
             const usage = document.createElement('div');
             const bar = document.createElement('div');
@@ -166,7 +175,7 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
                 </section>
                 <section style="grid-column: 1 / -1;">
                     <div style="width: 95%; margin: 0 auto;">
-                        <div style="margin: 0 0.25em;">
+                        <div style="display: flex; align-items: baseline; margin: 0 0.25em;">
                             <h3 style="margin: 0;">${this.translations.filesystems}</h3>
                         </div>
                     </div>
