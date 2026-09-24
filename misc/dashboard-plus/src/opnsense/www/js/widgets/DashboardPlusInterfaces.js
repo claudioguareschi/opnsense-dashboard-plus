@@ -167,9 +167,12 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
         const orderedInterfaces = this._orderedInterfaces(interfaces, this.currentConfig);
         const $table = $('#dashboard-plus-interfaces-table');
         if (!orderedInterfaces.length) {
-            $table.html(`<div style="padding: 0.75em;">${this.translations.no_interfaces}</div>`);
+            $table.children('.grid-row, .dashboard-plus-interfaces-empty').remove();
+            $table.append(`<div class="dashboard-plus-interfaces-empty" style="padding: 0.75em;">${this.translations.no_interfaces}</div>`);
             return;
         }
+
+        $table.children('.dashboard-plus-interfaces-empty').remove();
 
         const rows = orderedInterfaces.map(intf => [
             '', this._identity(intf), this._link(intf), this._addresses(intf)
