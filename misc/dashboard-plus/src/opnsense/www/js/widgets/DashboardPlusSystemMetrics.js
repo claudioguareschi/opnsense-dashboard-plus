@@ -91,6 +91,26 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         }
     }
 
+    _componentNames() {
+        return ['cpu', 'temperature', 'memory', 'states', 'mbufs', 'swap', 'filesystems'];
+    }
+
+    _applyComponentVisibility(config) {
+        const components = config.components || this._componentNames();
+        const markers = {
+            cpu: `${this.id}-cpu-chart`,
+            temperature: `${this.id}-temperature-chart`,
+            memory: `${this.id}-memory-chart`,
+            states: `${this.id}-states-chart`,
+            mbufs: `${this.id}-mbufs-chart`,
+            swap: `${this.id}-swap-bar`,
+            filesystems: `${this.id}-filesystems`
+        };
+        Object.entries(markers).forEach(([component, marker]) => {
+            $(`#${marker}`).closest('section').toggle(components.includes(component));
+        });
+    }
+
     _renderFilesystems(devices) {
         const container = document.getElementById(`${this.id}-filesystems`);
         if (!container || !Array.isArray(devices)) {
@@ -208,6 +228,7 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         $(`#${this.id}-title`).html(`<b>${this.translations.dashboard_title}</b>`);
         this.currentConfig = await this.getWidgetConfig();
         this._applyTimeWindow(this.currentConfig);
+        this._applyComponentVisibility(this.currentConfig);
         this.cpuSeries = new TimeSeries();
         this.memorySeries = new TimeSeries();
         this.temperatureSeries = new TimeSeries();
@@ -259,6 +280,16 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
 
     async getWidgetOptions() {
         return {
+            components: {
+                title: this.translations.components,
+                type: 'select_multiple',
+                id: 'dashboard-plus-system-metrics-components',
+                options: this._componentNames().map(component => ({
+                    value: component,
+                    label: this.translations[component]
+                })),
+                default: this._componentNames()
+            },
             time_window: {
                 title: this.translations.time_window,
                 type: 'select',
@@ -276,6 +307,8 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
     onWidgetOptionsChanged(options) {
         this.currentConfig = options;
         this._applyTimeWindow(options);
+        this._applyComponentVisibility(options);
+        this.config.callbacks.updateGrid();
     }
 
     onWidgetResize() {

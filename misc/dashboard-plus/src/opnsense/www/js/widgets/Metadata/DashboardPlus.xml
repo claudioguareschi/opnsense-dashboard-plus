@@ -83,6 +83,7 @@
         <translations>
             <title>System Metrics+</title>
             <dashboard_title>System Metrics</dashboard_title>
+            <components>Components</components>
             <cpu>CPU</cpu>
             <temperature>Temperature</temperature>
             <memory>Memory</memory>
