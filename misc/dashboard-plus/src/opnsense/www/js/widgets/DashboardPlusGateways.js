@@ -59,10 +59,12 @@ export default class DashboardPlusGateways extends BaseTableWidget {
 
     _gatewayIdentity(gateway) {
         const defaultMarker = gateway.defaultgw
-            ? ` <i class="fa fa-globe" aria-label="${this.translations.default_gateway}" title="${this.translations.default_gateway}"></i>`
+            ? `<i class="fa fa-globe" aria-label="${this.translations.default_gateway}" title="${this.translations.default_gateway}" style="margin-left: 1em; flex: 0 0 auto;"></i>`
             : '';
         return `<div style="text-align: left; line-height: 1.35;">
-            <a href="/ui/routing/configuration#edit=${encodeURIComponent(gateway.uuid)}" target="_blank" rel="noopener noreferrer">${this._escape(gateway.name)}</a>${defaultMarker}
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <a href="/ui/routing/configuration#edit=${encodeURIComponent(gateway.uuid)}" target="_blank" rel="noopener noreferrer">${this._escape(gateway.name)}</a>${defaultMarker}
+            </div>
             <br><strong>${this._escape(gateway.gateway)}</strong>
         </div>`;
     }
@@ -99,10 +101,67 @@ export default class DashboardPlusGateways extends BaseTableWidget {
         );
     }
 
+    _saveGatewayOrder() {
+        const order = $('#dashboard-plus-gateways-table').children('.grid-row')
+            .map((_, row) => $(row).data('gateway')).get();
+        const selected = this.currentConfig.gateways || order;
+        this.currentConfig.gateways = [
+            ...order.filter(uuid => selected.includes(uuid)),
+            ...selected.filter(uuid => !order.includes(uuid))
+        ];
+        this.setWidgetConfig(this.currentConfig);
+        $('#save-grid').show();
+    }
+
+    _makeRowsSortable() {
+        const $table = $('#dashboard-plus-gateways-table');
+        let $draggedRow = null;
+        let $placeholder = null;
+        const clearDragState = () => {
+            $draggedRow?.css({opacity: '', outline: ''});
+            $placeholder?.remove();
+            $draggedRow = null;
+            $placeholder = null;
+        };
+        $table.on('mousedown', '.grid-row .grid-item:nth-child(2)', event => event.stopPropagation());
+        $table.on('dragstart', '.grid-row .grid-item:nth-child(2)', event => {
+            $draggedRow = $(event.currentTarget).closest('.grid-row');
+            $draggedRow.css({opacity: 0.4, outline: '2px dashed #d94f00'});
+            $placeholder = $('<div class="grid-row dashboard-plus-gateways-drop-placeholder" aria-label="Drop gateway here"></div>')
+                .css({
+                    height: $draggedRow.outerHeight(),
+                    border: '2px dashed #d94f00',
+                    background: 'rgba(217, 79, 0, 0.08)'
+                });
+            event.originalEvent.dataTransfer.effectAllowed = 'move';
+            event.stopPropagation();
+        });
+        $table.on('dragover', event => {
+            event.preventDefault();
+            event.originalEvent.dataTransfer.dropEffect = 'move';
+            const $target = $(event.target).closest('.grid-row');
+            if (!$draggedRow || !$target.length || $target[0] === $draggedRow[0]) {
+                return;
+            }
+            const halfway = $target.offset().top + ($target.outerHeight() / 2);
+            event.originalEvent.clientY < halfway ? $target.before($placeholder) : $target.after($placeholder);
+        });
+        $table.on('drop', event => {
+            event.preventDefault();
+            if ($draggedRow && $placeholder?.parent().length) {
+                $placeholder.replaceWith($draggedRow);
+                this._saveGatewayOrder();
+            }
+            clearDragState();
+        });
+        $table.on('dragend', '.grid-row .grid-item:nth-child(2)', clearDragState);
+    }
+
     async onMarkupRendered() {
         $(`#${this.id}-title`).html(`<b>${this.translations.dashboard_title}</b>`);
         this.currentConfig = await this.getWidgetConfig();
         this._applyFieldVisibility(this.currentConfig);
+        this._makeRowsSortable();
     }
 
     async onWidgetTick() {
@@ -118,7 +177,8 @@ export default class DashboardPlusGateways extends BaseTableWidget {
             return;
         }
 
-        const rows = this._orderedGateways(gateways, config).map(gateway => {
+        const orderedGateways = this._orderedGateways(gateways, config);
+        const rows = orderedGateways.map(gateway => {
             const info = this._statusInfo(gateway.status);
             return [
                 `<i class="fa ${info.icon}" style="font-size: 1.4em; color: ${info.color};" title="${this._escape(gateway.status)}"></i>`,
@@ -130,6 +190,11 @@ export default class DashboardPlusGateways extends BaseTableWidget {
             ];
         });
         super.updateTable('dashboard-plus-gateways-table', rows);
+        $('#dashboard-plus-gateways-table').children('.grid-row').each((index, row) => {
+            $(row).data('gateway', orderedGateways[index].uuid);
+            $(row).children().eq(1).attr({draggable: 'true', title: this.translations.drag_to_reorder})
+                .css('cursor', 'grab');
+        });
         this._applyFieldVisibility(config);
     }
 
