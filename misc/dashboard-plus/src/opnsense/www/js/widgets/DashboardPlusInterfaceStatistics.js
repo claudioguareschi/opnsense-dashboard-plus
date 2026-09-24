@@ -19,8 +19,10 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
     getMarkup() {
         const $container = $('<div class="dashboard-plus-interface-statistics"></div>');
         $container.append(`
-            <div id="dashboard-plus-interface-statistics-chart" class="canvas-container">
-                <canvas id="dashboard-plus-interface-statistics-canvas"></canvas>
+            <div id="dashboard-plus-interface-statistics-chart" class="dashboard-plus-interface-statistics-chart-container">
+                <div class="canvas-container">
+                    <canvas id="dashboard-plus-interface-statistics-canvas" style="display: inline-block"></canvas>
+                </div>
             </div>
         `);
         $container.append(this.createTable('dashboard-plus-interface-statistics-table', {
@@ -72,8 +74,14 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
             data: {labels: [], datasets: [{data: [], backgroundColor: []}]},
             options: {
                 cutout: '40%',
+                maintainAspectRatio: true,
                 responsive: true,
                 aspectRatio: 2,
+                layout: {
+                    padding: 10
+                },
+                normalized: true,
+                parsing: false,
                 plugins: {
                     legend: {display: true, position: 'left'},
                     colorschemes: false
