@@ -43,4 +43,42 @@
             <available>Available</available>
         </translations>
     </dashboardplussysteminformation>
+    <dashboardplustraffic>
+        <filename>DashboardPlusTraffic.js</filename>
+        <link>/ui/diagnostics/traffic</link>
+        <endpoints>
+            <endpoint>/api/diagnostics/traffic/stream/*</endpoint>
+            <endpoint>/api/diagnostics/traffic/interface</endpoint>
+        </endpoints>
+        <translations>
+            <title>Traffic Graph</title>
+            <trafficin>Traffic In</trafficin>
+            <trafficout>Traffic Out</trafficout>
+            <display>Display</display>
+            <per_interface>Per interface</per_interface>
+            <combined>Combined</combined>
+            <interfaces>Interfaces</interfaces>
+        </translations>
+    </dashboardplustraffic>
+    <dashboardplusinterfacestatistics>
+        <filename>DashboardPlusInterfaceStatistics.js</filename>
+        <endpoints>
+            <endpoint>/api/diagnostics/traffic/interface</endpoint>
+        </endpoints>
+        <translations>
+            <title>Interface Statistics</title>
+            <display>Display</display>
+            <both>Graph and table</both>
+            <graph>Graph</graph>
+            <table>Table</table>
+            <interfaces>Interfaces</interfaces>
+            <interface>Interface</interface>
+            <bytes>Bytes</bytes>
+            <packets>Packets</packets>
+            <errors>Errors</errors>
+            <collisions>Collisions</collisions>
+            <in>In</in>
+            <out>Out</out>
+        </translations>
+    </dashboardplusinterfacestatistics>
 </metadata>

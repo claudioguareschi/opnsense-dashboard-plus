@@ -1,11 +1,13 @@
 <acl>
     <page-dashboard-widget-dashboard-plus>
-        <name>Dashboard: Dashboard Plus System Information widget</name>
+        <name>Dashboard: Dashboard Plus widgets</name>
         <patterns>
             <pattern>api/dashboardplus/system/info</pattern>
             <pattern>api/dashboardplus/system/frequency</pattern>
             <pattern>api/diagnostics/system/system_information</pattern>
             <pattern>api/diagnostics/system/system_time</pattern>
+            <pattern>api/diagnostics/traffic/interface</pattern>
+            <pattern>api/diagnostics/traffic/stream/*</pattern>
         </patterns>
     </page-dashboard-widget-dashboard-plus>
 </acl>
