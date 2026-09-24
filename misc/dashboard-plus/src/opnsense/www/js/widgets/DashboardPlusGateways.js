@@ -18,17 +18,19 @@ export default class DashboardPlusGateways extends BaseTableWidget {
 
     getMarkup() {
         const $container = $('<div class="dashboard-plus-gateways"></div>');
-        $container.append(this.createTable('dashboard-plus-gateways-table', {
+        const $table = this.createTable('dashboard-plus-gateways-table', {
             headerPosition: 'top',
             headers: [
-                this.translations.health,
+                '',
                 this.translations.gateway,
                 this.translations.rtt,
                 this.translations.rttd,
                 this.translations.loss,
                 this.translations.status
             ]
-        }));
+        });
+        $table.find('.grid-header').css('text-align', 'left');
+        $container.append($table);
         return $container;
     }
 
