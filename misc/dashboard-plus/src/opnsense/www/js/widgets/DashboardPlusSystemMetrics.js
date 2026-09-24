@@ -13,6 +13,8 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         this.statesSeries = null;
         this.mbufSeries = null;
         this.memoryPercent = null;
+        this.statesPercent = null;
+        this.mbufPercent = null;
         this.charts = [];
         this.windowDuration = 60000;
         this.currentConfig = null;
@@ -170,6 +172,12 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
             if (this.memoryPercent !== null) {
                 this.memorySeries.append(Date.now(), this.memoryPercent);
             }
+            if (this.statesPercent !== null) {
+                this.statesSeries.append(Date.now(), this.statesPercent);
+            }
+            if (this.mbufPercent !== null) {
+                this.mbufSeries.append(Date.now(), this.mbufPercent);
+            }
             $(`#${this.id}-cpu-current`).text(`${cpu.toFixed(0)}%`);
         });
     }
@@ -228,6 +236,7 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         const stateLimit = parseInt(states?.limit, 10);
         if (Number.isFinite(stateCurrent) && Number.isFinite(stateLimit) && stateLimit > 0) {
             const percent = (stateCurrent / stateLimit) * 100;
+            this.statesPercent = percent;
             this.statesSeries.append(Date.now(), percent);
             $(`#${this.id}-states-current`).text(`${percent.toFixed(0)}%`);
             $(`#${this.id}-states-total`).text(`${stateCurrent.toLocaleString()} / ${stateLimit.toLocaleString()} ${this.translations.states.toLowerCase()}`);
@@ -238,6 +247,7 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         const mbufLimit = parseInt(mbuf?.['cluster-max'], 10);
         if (Number.isFinite(mbufCurrent) && Number.isFinite(mbufLimit) && mbufLimit > 0) {
             const percent = (mbufCurrent / mbufLimit) * 100;
+            this.mbufPercent = percent;
             this.mbufSeries.append(Date.now(), percent);
             $(`#${this.id}-mbufs-current`).text(`${percent.toFixed(0)}%`);
             $(`#${this.id}-mbufs-total`).text(`${mbufCurrent.toLocaleString()} / ${mbufLimit.toLocaleString()} ${this.translations.mbufs.toLowerCase()}`);
