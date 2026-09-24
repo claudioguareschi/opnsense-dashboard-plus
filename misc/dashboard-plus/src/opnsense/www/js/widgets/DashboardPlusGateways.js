@@ -187,7 +187,9 @@ export default class DashboardPlusGateways extends BaseTableWidget {
                 this._statusCell(gateway.status, info)
             ];
         });
-        super.updateTable('dashboard-plus-gateways-table', rows);
+        // BaseTableWidget inserts every new row immediately after the header,
+        // so feed it in reverse to retain the configured visual order.
+        super.updateTable('dashboard-plus-gateways-table', [...rows].reverse());
         $('#dashboard-plus-gateways-table').children('.grid-row').each((index, row) => {
             const $cells = $(row).children();
             $(row).data('gateway', orderedGateways[index].uuid);
