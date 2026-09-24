@@ -68,20 +68,20 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         return $(`
             <div class="dashboard-plus-system-metrics" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1em; padding: 0 0.25em;">
                 <section>
-                    <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin: 0 2em;">
                         <h3 style="margin: 0;">${this.translations.cpu}</h3>
                         <span id="${this.id}-cpu-current">--</span>
                     </div>
                     <div id="${this.id}-cpu-load" style="font-size: 0.9em; margin: 0.25em 0;"></div>
-                    <div class="canvas-container-noaspectratio"><canvas id="${this.id}-cpu-chart" style="width: 100%; height: 90px;"></canvas></div>
+                    <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="${this.id}-cpu-chart" style="width: 100%; height: 90px;"></canvas></div>
                 </section>
                 <section>
-                    <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin: 0 2em;">
                         <h3 style="margin: 0;">${this.translations.memory}</h3>
                         <span id="${this.id}-memory-current">--</span>
                     </div>
                     <div id="${this.id}-memory-total" style="font-size: 0.9em; margin: 0.25em 0;"></div>
-                    <div class="canvas-container-noaspectratio"><canvas id="${this.id}-memory-chart" style="width: 100%; height: 90px;"></canvas></div>
+                    <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="${this.id}-memory-chart" style="width: 100%; height: 90px;"></canvas></div>
                 </section>
             </div>
         `);
