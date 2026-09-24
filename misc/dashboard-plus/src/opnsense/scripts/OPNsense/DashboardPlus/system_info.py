@@ -342,11 +342,13 @@ def collect_cpu_crypto(dmesg_output):
 def collect_crypto_hardware(cpu_has_aesni, cpu_algorithms, qat_devices):
     """Describe detected AES-NI and QuickAssist providers and their state."""
     providers = []
+    qat_active = any(device["ocf_active"] for device in qat_devices)
     if cpu_has_aesni:
         providers.append({
             "feature": "AES-NI",
             "provider": "CPU",
-            "active": bool(cpu_algorithms),
+            "active": bool(cpu_algorithms) and not qat_active,
+            "state": "available" if cpu_algorithms and qat_active else "active" if cpu_algorithms else "inactive",
             "algorithms": cpu_algorithms,
         })
     for device in qat_devices:
@@ -354,6 +356,7 @@ def collect_crypto_hardware(cpu_has_aesni, cpu_algorithms, qat_devices):
             "feature": "QuickAssist",
             "provider": device["model"],
             "active": device["ocf_active"],
+            "state": "active" if device["ocf_active"] else "inactive",
             "algorithms": device["algorithms"],
         })
     return providers

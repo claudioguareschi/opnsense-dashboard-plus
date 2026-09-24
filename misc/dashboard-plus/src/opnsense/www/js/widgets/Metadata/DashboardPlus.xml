@@ -40,6 +40,7 @@
             <unavailable>Unavailable</unavailable>
             <inactive>Inactive</inactive>
             <active>Active</active>
+            <available>Available</available>
         </translations>
     </dashboardplussysteminformation>
 </metadata>

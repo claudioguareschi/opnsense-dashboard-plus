@@ -64,6 +64,13 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
         return values.map(value => this.escape(value)).join('<br>');
     }
 
+    formatCommaList(values) {
+        if (!Array.isArray(values) || values.length === 0) {
+            return this.escape(this.translations.unavailable);
+        }
+        return values.map(value => this.escape(value)).join(', ');
+    }
+
     formatGroup(items) {
         const values = items.filter(item => item.value !== null && item.value !== undefined && item.value !== '');
         if (values.length === 0) {
@@ -77,7 +84,7 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
 
     formatCryptoHardware(providers) {
         const values = (providers || []).map(provider => {
-            const state = provider.active ? this.translations.active : this.translations.inactive;
+            const state = this.translations[provider.state] || this.translations.inactive;
             return `${provider.feature}: ${provider.provider} (${state})`;
         });
         return this.formatList(values);
@@ -160,7 +167,7 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
 
         rows.push(
             [this.translations.ipsec, this.escape(details.ipsec)],
-            [this.translations.accelerated_algorithms, this.formatList(details.accelerated_algorithms)],
+            [this.translations.accelerated_algorithms, this.formatCommaList(details.accelerated_algorithms)],
             [this.translations.pti, this.escape(mitigations.pti)],
             [this.translations.mds, this.escape(mitigations.mds)],
             [this.translations.uptime, `<span id="dashboard-plus-uptime">${this.escape(time?.uptime)}</span>`],

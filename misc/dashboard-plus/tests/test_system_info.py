@@ -122,10 +122,11 @@ dev.qat_ocf.0.enable: 1
             [{"model": "Intel QAT C3xxx", "ocf_active": True, "algorithms": ["AES-GCM", "AES-XTS"]}],
         )
         self.assertEqual(providers[0]["feature"], "AES-NI")
+        self.assertEqual(providers[0]["state"], "available")
         self.assertEqual(providers[1]["provider"], "Intel QAT C3xxx")
         self.assertEqual(
             SYSTEM_INFO.collect_accelerated_algorithms(providers),
-            ["AES-CBC", "AES-GCM", "AES-XTS"],
+            ["AES-GCM", "AES-XTS"],
         )
 
     def test_ipsec_status_does_not_claim_packet_offload(self):
