@@ -68,6 +68,23 @@
             <minutes_5>5 minutes</minutes_5>
         </translations>
     </dashboardplustraffic>
+    <dashboardplussystemmetrics>
+        <filename>DashboardPlusSystemMetrics.js</filename>
+        <endpoints>
+            <endpoint>/api/diagnostics/cpu_usage/stream</endpoint>
+            <endpoint>/api/diagnostics/system/system_resources</endpoint>
+            <endpoint>/api/diagnostics/system/system_time</endpoint>
+        </endpoints>
+        <translations>
+            <title>System Metrics+</title>
+            <dashboard_title>System Metrics</dashboard_title>
+            <cpu>CPU</cpu>
+            <memory>Memory</memory>
+            <load>Load</load>
+            <used>used</used>
+            <unavailable>Unavailable</unavailable>
+        </translations>
+    </dashboardplussystemmetrics>
     <dashboardplusinterfacestatistics>
         <filename>DashboardPlusInterfaceStatistics.js</filename>
         <endpoints>

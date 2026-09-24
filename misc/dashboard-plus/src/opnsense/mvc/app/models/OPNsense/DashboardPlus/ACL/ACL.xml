@@ -6,6 +6,8 @@
             <pattern>api/dashboardplus/system/frequency</pattern>
             <pattern>api/diagnostics/system/system_information</pattern>
             <pattern>api/diagnostics/system/system_time</pattern>
+            <pattern>api/diagnostics/system/system_resources</pattern>
+            <pattern>api/diagnostics/cpu_usage/stream</pattern>
             <pattern>api/diagnostics/traffic/interface</pattern>
             <pattern>api/diagnostics/traffic/stream/*</pattern>
         </patterns>
