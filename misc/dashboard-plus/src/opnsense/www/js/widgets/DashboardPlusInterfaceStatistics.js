@@ -68,6 +68,7 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
     }
 
     async onMarkupRendered() {
+        $(`#${this.id}-title`).html(`<b>${this.translations.dashboard_title}</b>`);
         const context = $('#dashboard-plus-interface-statistics-canvas')[0].getContext('2d');
         this.chart = new Chart(context, {
             type: 'doughnut',

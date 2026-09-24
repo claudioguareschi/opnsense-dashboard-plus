@@ -8,7 +8,8 @@
             <endpoint>/api/diagnostics/system/system_time</endpoint>
         </endpoints>
         <translations>
-            <title>System Information</title>
+            <title>System Information+</title>
+            <dashboard_title>System Information</dashboard_title>
             <name>Name</name>
             <user>GUI User</user>
             <hardware>Hardware</hardware>
@@ -73,7 +74,8 @@
             <endpoint>/api/diagnostics/traffic/interface</endpoint>
         </endpoints>
         <translations>
-            <title>Interface Statistics</title>
+            <title>Interface Statistics+</title>
+            <dashboard_title>Interface Statistics</dashboard_title>
             <display>Display</display>
             <both>Graph and table</both>
             <graph>Graph</graph>

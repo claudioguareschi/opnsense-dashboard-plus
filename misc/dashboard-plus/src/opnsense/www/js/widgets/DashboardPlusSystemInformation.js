@@ -91,6 +91,7 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
     }
 
     async onMarkupRendered() {
+        $(`#${this.id}-title`).html(`<b>${this.translations.dashboard_title}</b>`);
         const [system, time, details] = await Promise.all([
             this.ajaxCall('/api/diagnostics/system/system_information'),
             this.ajaxCall('/api/diagnostics/system/system_time'),
