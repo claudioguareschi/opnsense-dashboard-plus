@@ -51,7 +51,8 @@
             <endpoint>/api/diagnostics/traffic/interface</endpoint>
         </endpoints>
         <translations>
-            <title>Traffic Graph</title>
+            <title>Traffic Graph+</title>
+            <dashboard_title>Traffic Graph</dashboard_title>
             <trafficin>Traffic In</trafficin>
             <trafficout>Traffic Out</trafficout>
             <display>Display</display>

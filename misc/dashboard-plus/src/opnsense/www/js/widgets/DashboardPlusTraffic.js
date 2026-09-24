@@ -261,6 +261,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
     }
 
     async onMarkupRendered() {
+        $(`#${this.id}-title`).html(`<b>${this.translations.dashboard_title}</b>`);
         this.openEventSource('/api/diagnostics/traffic/stream/1', this._onMessage.bind(this));
     }
 
