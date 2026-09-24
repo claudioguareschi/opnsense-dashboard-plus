@@ -77,11 +77,13 @@ export default class DashboardPlusTraffic extends BaseWidget {
     _perInterfaceHeading(name) {
         const color = this.directionColors;
         return `
-            <div class="dashboard-plus-traffic-heading" draggable="true" title="Drag to reorder" style="display: flex; justify-content: space-between; align-items: center; padding: 0 0.5em; cursor: grab;">
-                <h3 style="margin: 0;">${$('<div>').text(name).html()}</h3>
-                <div style="display: flex; gap: 1em; white-space: nowrap;">
-                    <span><i style="display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; background: ${color.inbytes.line};"></i> ${this.translations.in}</span>
-                    <span><i style="display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; background: ${color.outbytes.line};"></i> ${this.translations.out}</span>
+            <div style="width: 95%; margin: 0 auto;">
+                <div class="dashboard-plus-traffic-heading" draggable="true" title="Drag to reorder" style="display: flex; justify-content: space-between; align-items: center; margin: 0 0.25em; cursor: grab;">
+                    <h3 style="margin: 0;">${$('<div>').text(name).html()}</h3>
+                    <div style="display: flex; gap: 1em; white-space: nowrap;">
+                        <span><i style="display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; background: ${color.inbytes.line};"></i> ${this.translations.in}</span>
+                        <span><i style="display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; background: ${color.outbytes.line};"></i> ${this.translations.out}</span>
+                    </div>
                 </div>
             </div>`;
     }
@@ -100,7 +102,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
             $perInterface.append(`
                 <div class="dashboard-plus-traffic-interface" data-interface="${id}">
                     ${this._perInterfaceHeading(intf.name)}
-                    <div class="canvas-container-noaspectratio"><canvas id="${canvasId}"></canvas></div>
+                    <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="${canvasId}"></canvas></div>
                 </div>
             `);
             this.charts[id] = new Chart($(`#${canvasId}`)[0].getContext('2d'), this._chartConfig([
@@ -248,12 +250,12 @@ export default class DashboardPlusTraffic extends BaseWidget {
 
     getMarkup() {
         return $(
-            `<div class="dashboard-plus-traffic-container">
+            `<div class="dashboard-plus-traffic-container" style="padding: 0 0.25em;">
                 <div id="dashboard-plus-traffic-combined">
                     <h3>${this.translations.trafficin}</h3>
-                    <div class="canvas-container-noaspectratio"><canvas id="dashboard-plus-traffic-in"></canvas></div>
+                    <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="dashboard-plus-traffic-in"></canvas></div>
                     <h3>${this.translations.trafficout}</h3>
-                    <div class="canvas-container-noaspectratio"><canvas id="dashboard-plus-traffic-out"></canvas></div>
+                    <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="dashboard-plus-traffic-out"></canvas></div>
                 </div>
                 <div id="dashboard-plus-traffic-per-interface"></div>
             </div>`
