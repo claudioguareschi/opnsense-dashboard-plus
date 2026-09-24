@@ -47,6 +47,18 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
                 $(row).children().eq(column).toggle(visibleFields.includes(field));
             });
         });
+
+        // The core table uses 100px minimum columns, which makes five columns
+        // wrap in a standard dashboard cell.  Keep the compact statistics table
+        // on one line, while still redistributing its width when fields are hidden.
+        const columns = {
+            0: '100%',
+            1: '42% 58%',
+            2: '32% 34% 34%',
+            3: '27% 24.5% 24.5% 24%',
+            4: '22% 22% 21% 20% 15%'
+        }[visibleFields.length];
+        $table.children('.grid-header-container, .grid-row').css('grid-template-columns', columns);
     }
 
     _clearTable() {
