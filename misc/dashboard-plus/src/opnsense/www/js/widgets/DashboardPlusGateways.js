@@ -59,19 +59,17 @@ export default class DashboardPlusGateways extends BaseTableWidget {
 
     _gatewayIdentity(gateway) {
         const defaultMarker = gateway.defaultgw
-            ? `<i class="fa fa-globe" aria-label="${this.translations.default_gateway}" title="${this.translations.default_gateway}" style="margin-left: 1em; flex: 0 0 auto;"></i>`
+            ? `<i class="fa fa-globe" aria-label="${this.translations.default_gateway}" title="${this.translations.default_gateway}" style="margin-left: 0.5em;"></i>`
             : '';
         return `<div style="text-align: left; line-height: 1.35;">
-            <div style="display: flex; align-items: center; justify-content: space-between;">
-                <a href="/ui/routing/configuration#edit=${encodeURIComponent(gateway.uuid)}" target="_blank" rel="noopener noreferrer">${this._escape(gateway.name)}</a>${defaultMarker}
-            </div>
-            <br><strong>${this._escape(gateway.gateway)}</strong>
+            <a href="/ui/routing/configuration#edit=${encodeURIComponent(gateway.uuid)}" target="_blank" rel="noopener noreferrer">${this._escape(gateway.name)}</a>${defaultMarker}
+            <strong style="display: block; margin-top: 0.15em;">${this._escape(gateway.gateway)}</strong>
         </div>`;
     }
 
     _statusCell(status, info) {
-        return `<div style="min-height: 3.35em; display: flex; align-items: center; justify-content: center;">
-            <span style="min-width: 5.25em; padding: 0.45em 0.65em; border-radius: 999px; background: ${info.background}; color: ${info.color}; font-weight: 600; text-align: center;">${this._escape(status)}</span>
+        return `<div style="min-height: 3.35em; display: flex; align-items: center; justify-content: flex-start;">
+            <span style="width: 5.25em; padding: 0.45em 0.65em; border-radius: 999px; background: ${info.background}; color: ${info.color}; font-weight: 600; text-align: center;">${this._escape(status)}</span>
         </div>`;
     }
 
@@ -191,8 +189,11 @@ export default class DashboardPlusGateways extends BaseTableWidget {
         });
         super.updateTable('dashboard-plus-gateways-table', rows);
         $('#dashboard-plus-gateways-table').children('.grid-row').each((index, row) => {
+            const $cells = $(row).children();
             $(row).data('gateway', orderedGateways[index].uuid);
-            $(row).children().eq(1).attr({draggable: 'true', title: this.translations.drag_to_reorder})
+            $cells.css('text-align', 'left');
+            $cells.eq(0).css('text-align', 'center');
+            $cells.eq(1).attr({draggable: 'true', title: this.translations.drag_to_reorder})
                 .css('cursor', 'grab');
         });
         this._applyFieldVisibility(config);
