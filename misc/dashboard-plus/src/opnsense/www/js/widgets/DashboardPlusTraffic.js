@@ -15,7 +15,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
         this.configChanged = false;
         this.windowDuration = 60000;
         this.directionColors = {
-            inbytes: {line: '#2878b8', fill: 'rgba(40, 120, 184, 0.28)'},
+            inbytes: {line: '#2ca02c', fill: 'rgba(44, 160, 44, 0.28)'},
             outbytes: {line: '#ff7f0e', fill: 'rgba(255, 127, 14, 0.28)'}
         };
     }
@@ -164,26 +164,48 @@ export default class DashboardPlusTraffic extends BaseWidget {
     _makeSubpanelsSortable() {
         const $container = $('#dashboard-plus-traffic-per-interface');
         let draggedPanel = null;
+        let $placeholder = null;
+        const clearDragState = () => {
+            if (draggedPanel) {
+                draggedPanel.css({opacity: '', outline: ''});
+            }
+            $placeholder?.remove();
+            $placeholder = null;
+            draggedPanel = null;
+        };
         $container.on('mousedown', '.dashboard-plus-traffic-heading', event => event.stopPropagation());
         $container.on('dragstart', '.dashboard-plus-traffic-heading', event => {
             draggedPanel = $(event.currentTarget).closest('.dashboard-plus-traffic-interface');
+            draggedPanel.css({opacity: 0.4, outline: '2px dashed #d94f00'});
+            $placeholder = $('<div class="dashboard-plus-traffic-drop-placeholder" aria-label="Drop graph here"></div>')
+                .css({
+                    height: draggedPanel.outerHeight(),
+                    margin: '0.5em 0',
+                    border: '2px dashed #d94f00',
+                    background: 'rgba(217, 79, 0, 0.08)'
+                });
             event.originalEvent.dataTransfer.effectAllowed = 'move';
             event.stopPropagation();
         });
         $container.on('dragover', '.dashboard-plus-traffic-interface', event => {
             event.preventDefault();
             event.originalEvent.dataTransfer.dropEffect = 'move';
+            const $target = $(event.currentTarget);
+            if (!draggedPanel || draggedPanel[0] === $target[0]) {
+                return;
+            }
+            const halfway = $target.offset().top + ($target.outerHeight() / 2);
+            event.originalEvent.clientY < halfway ? $target.before($placeholder) : $target.after($placeholder);
         });
         $container.on('drop', '.dashboard-plus-traffic-interface', event => {
             event.preventDefault();
-            const $target = $(event.currentTarget);
-            if (draggedPanel && draggedPanel[0] !== $target[0]) {
-                const halfway = $target.offset().top + ($target.outerHeight() / 2);
-                event.originalEvent.clientY < halfway ? $target.before(draggedPanel) : $target.after(draggedPanel);
+            if (draggedPanel && $placeholder?.parent().length) {
+                $placeholder.replaceWith(draggedPanel);
                 this._saveSubpanelOrder();
             }
+            clearDragState();
         });
-        $container.on('dragend', '.dashboard-plus-traffic-heading', () => { draggedPanel = null; });
+        $container.on('dragend', '.dashboard-plus-traffic-heading', clearDragState);
     }
 
     _appendPoint(chart, intf, sample, time) {
