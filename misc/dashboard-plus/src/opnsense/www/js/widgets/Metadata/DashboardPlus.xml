@@ -88,7 +88,7 @@
             <temperature>Temperature</temperature>
             <memory>Memory</memory>
             <states>States</states>
-            <show_states>Show state table</show_states>
+            <show_states>Show table</show_states>
             <mbufs>Mbufs</mbufs>
             <swap>Swap</swap>
             <filesystems>Filesystems</filesystems>
