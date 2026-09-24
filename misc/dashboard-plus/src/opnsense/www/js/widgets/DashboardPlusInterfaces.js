@@ -90,8 +90,10 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
     }
 
     _identity(intf) {
+        const device = String(intf.device || '');
+        const isTunnel = /^(ipsec\d+|wg\d+|ovpnc\d+|ovpns\d+|ovpn\d+)$/i.test(device);
         return `<div style="display: flex; align-items: center; gap: 0.55em; min-height: 2.7em; text-align: left;">
-            <i class="fa fa-sitemap" aria-hidden="true"></i>
+            <i class="fa ${isTunnel ? 'fa-exchange' : 'fa-sitemap'}" aria-hidden="true"></i>
             <a href="/interfaces.php?if=${encodeURIComponent(intf.identifier)}" title="${this._escape(intf.identifier)}">${this._escape(intf.description)}</a>
         </div>`;
     }
