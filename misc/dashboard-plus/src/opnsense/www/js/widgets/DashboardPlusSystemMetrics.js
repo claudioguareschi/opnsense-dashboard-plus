@@ -92,7 +92,7 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         for (const filesystem of devices) {
             byMountpoint.set(filesystem.mountpoint, filesystem);
         }
-        for (const mountpoint of ['/', '/tmp', '/var']) {
+        for (const mountpoint of ['/', '/tmp', '/var/log']) {
             const filesystem = byMountpoint.get(mountpoint);
             if (!filesystem) {
                 continue;
