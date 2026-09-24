@@ -183,7 +183,7 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
                 <section>
                     <div style="width: 95%; margin: 0 auto;">
                         <div style="display: grid; grid-template-columns: 1fr auto 1fr; align-items: baseline; margin: 0 0.25em;">
-                            <h3 style="margin: 0;">${this.translations.states}</h3>
+                            <h3 style="margin: 0; justify-self: start; text-align: left;">${this.translations.states}</h3>
                             <a href="/ui/diagnostics/firewall/states" style="font-size: 0.9em;">${this.translations.show_states}</a>
                             <span id="${this.id}-states-current" style="justify-self: end;">--</span>
                         </div>
