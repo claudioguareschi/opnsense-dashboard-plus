@@ -45,6 +45,18 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
         const showTable = config.display === 'table' || config.display === 'both';
         $('#dashboard-plus-interface-statistics-chart').toggle(showGraph);
         $('#dashboard-plus-interface-statistics-table').toggle(showTable);
+        this._applyFieldVisibility(config);
+    }
+
+    _applyFieldVisibility(config) {
+        const visibleFields = config.fields || ['bytes', 'packets', 'errors', 'collisions'];
+        const fieldColumns = {bytes: 1, packets: 2, errors: 3, collisions: 4};
+        const $table = $('#dashboard-plus-interface-statistics-table');
+        $table.children('.grid-header-container, .grid-row').each((_, row) => {
+            Object.entries(fieldColumns).forEach(([field, column]) => {
+                $(row).children().eq(column).toggle(visibleFields.includes(field));
+            });
+        });
     }
 
     _clearTable() {
@@ -62,7 +74,10 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
                 cutout: '40%',
                 responsive: true,
                 aspectRatio: 2,
-                plugins: {legend: {display: true, position: 'left'}}
+                plugins: {
+                    legend: {display: true, position: 'left'},
+                    colorschemes: false
+                }
             }
         });
         this.currentConfig = await this.getWidgetConfig();
@@ -100,13 +115,16 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
                 (parseInt(intf.collisions) || 0).toLocaleString()
             ]], id);
             labels.push(intf.name);
-            chartData.push(packetsReceived + packetsTransmitted);
+            chartData.push(config.chart_metric === 'packets'
+                ? packetsReceived + packetsTransmitted
+                : received + transmitted);
             chartColors.push(colors[index % colors.length]);
         });
         this.chart.data.labels = labels;
         this.chart.data.datasets[0].data = chartData;
         this.chart.data.datasets[0].backgroundColor = chartColors;
         this.chart.update();
+        this._applyFieldVisibility(config);
     }
 
     async getWidgetOptions() {
@@ -130,6 +148,28 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
                 id: 'dashboard-plus-interface-statistics-interfaces',
                 options: interfaces,
                 default: interfaces.filter(item => ['lan', 'wan'].includes(item.value)).map(item => item.value)
+            },
+            fields: {
+                title: this.translations.fields,
+                type: 'select_multiple',
+                id: 'dashboard-plus-interface-statistics-fields',
+                options: [
+                    {value: 'bytes', label: this.translations.bytes},
+                    {value: 'packets', label: this.translations.packets},
+                    {value: 'errors', label: this.translations.errors},
+                    {value: 'collisions', label: this.translations.collisions}
+                ],
+                default: ['bytes', 'packets', 'errors', 'collisions']
+            },
+            chart_metric: {
+                title: this.translations.chart_metric,
+                type: 'select',
+                id: 'dashboard-plus-interface-statistics-chart-metric',
+                options: [
+                    {value: 'bytes', label: this.translations.traffic_bytes},
+                    {value: 'packets', label: this.translations.traffic_packets}
+                ],
+                default: 'bytes'
             }
         };
     }

@@ -27,7 +27,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
                 maintainAspectRatio: false,
                 responsive: true,
                 normalized: true,
-                elements: {line: {fill: false, cubicInterpolationMode: 'monotone', clip: 0}},
+                elements: {line: {fill: true, cubicInterpolationMode: 'monotone', clip: 0}},
                 scales: {
                     x: {
                         display: false,
@@ -43,7 +43,9 @@ export default class DashboardPlusTraffic extends BaseWidget {
                         intersect: false,
                         callbacks: {label: context => `${context.dataset.label}: ${this._formatBits(context.raw.y)}`}
                     },
-                    streaming: {frameRate: 30, ttl: 30000}
+                    streaming: {frameRate: 30, ttl: 30000},
+                    // Do not let the global palette replace the stable colors below.
+                    colorschemes: false
                 }
             }
         };

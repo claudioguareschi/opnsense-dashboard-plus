@@ -72,6 +72,7 @@
             <graph>Graph</graph>
             <table>Table</table>
             <interfaces>Interfaces</interfaces>
+            <fields>Data fields</fields>
             <interface>Interface</interface>
             <bytes>Bytes</bytes>
             <packets>Packets</packets>
@@ -79,6 +80,9 @@
             <collisions>Collisions</collisions>
             <in>In</in>
             <out>Out</out>
+            <chart_metric>Chart metric</chart_metric>
+            <traffic_bytes>Traffic (bytes)</traffic_bytes>
+            <traffic_packets>Traffic (packets)</traffic_packets>
         </translations>
     </dashboardplusinterfacestatistics>
 </metadata>
