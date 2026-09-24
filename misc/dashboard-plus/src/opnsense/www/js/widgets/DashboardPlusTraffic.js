@@ -187,17 +187,17 @@ export default class DashboardPlusTraffic extends BaseWidget {
             event.originalEvent.dataTransfer.effectAllowed = 'move';
             event.stopPropagation();
         });
-        $container.on('dragover', '.dashboard-plus-traffic-interface', event => {
+        $container.on('dragover', event => {
             event.preventDefault();
             event.originalEvent.dataTransfer.dropEffect = 'move';
-            const $target = $(event.currentTarget);
-            if (!draggedPanel || draggedPanel[0] === $target[0]) {
+            const $target = $(event.target).closest('.dashboard-plus-traffic-interface');
+            if (!draggedPanel || !$target.length || draggedPanel[0] === $target[0]) {
                 return;
             }
             const halfway = $target.offset().top + ($target.outerHeight() / 2);
             event.originalEvent.clientY < halfway ? $target.before($placeholder) : $target.after($placeholder);
         });
-        $container.on('drop', '.dashboard-plus-traffic-interface', event => {
+        $container.on('drop', event => {
             event.preventDefault();
             if (draggedPanel && $placeholder?.parent().length) {
                 $placeholder.replaceWith(draggedPanel);
