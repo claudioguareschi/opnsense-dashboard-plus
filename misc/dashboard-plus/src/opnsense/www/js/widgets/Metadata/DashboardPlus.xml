@@ -150,6 +150,8 @@
             <rttd>RTTd</rttd>
             <loss>Loss</loss>
             <status>Status</status>
+            <enabled>Enabled</enabled>
+            <disabled>Disabled</disabled>
             <default_gateway>Default gateway</default_gateway>
             <drag_to_reorder>Drag to reorder</drag_to_reorder>
             <unconfigured>No gateways configured. Click to configure gateways.</unconfigured>

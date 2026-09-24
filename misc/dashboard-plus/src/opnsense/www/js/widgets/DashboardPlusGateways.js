@@ -45,16 +45,25 @@ export default class DashboardPlusGateways extends BaseTableWidget {
 
     _statusInfo(status) {
         const normalized = String(status || '').toLowerCase();
+        if (normalized.includes('disabled')) {
+            return {color: '#777777', background: 'rgba(119, 119, 119, 0.14)'};
+        }
         if (normalized.includes('online')) {
-            return {color: '#2ca02c', background: 'rgba(44, 160, 44, 0.20)', icon: 'fa-check-circle'};
+            return {color: '#2ca02c', background: 'rgba(44, 160, 44, 0.20)'};
         }
         if (normalized.includes('offline')) {
-            return {color: '#d62728', background: 'rgba(214, 39, 40, 0.20)', icon: 'fa-times-circle'};
+            return {color: '#d62728', background: 'rgba(214, 39, 40, 0.20)'};
         }
         if (normalized.includes('delay') || normalized.includes('loss')) {
-            return {color: '#ff7f0e', background: 'rgba(255, 127, 14, 0.20)', icon: 'fa-exclamation-circle'};
+            return {color: '#ff7f0e', background: 'rgba(255, 127, 14, 0.20)'};
         }
-        return {color: '#777777', background: 'rgba(119, 119, 119, 0.14)', icon: 'fa-question-circle'};
+        return {color: '#777777', background: 'rgba(119, 119, 119, 0.14)'};
+    }
+
+    _enablementIcon(disabled) {
+        return disabled
+            ? `<i class="fa fa-times" style="font-size: 1.25em; color: #777777;" title="${this.translations.disabled}"></i>`
+            : `<i class="fa fa-check" style="font-size: 1.25em;" title="${this.translations.enabled}"></i>`;
     }
 
     _gatewayIdentity(gateway) {
@@ -177,14 +186,15 @@ export default class DashboardPlusGateways extends BaseTableWidget {
 
         const orderedGateways = this._orderedGateways(gateways, config);
         const rows = orderedGateways.map(gateway => {
-            const info = this._statusInfo(gateway.status);
+            const status = gateway.disabled ? this.translations.disabled : gateway.status;
+            const info = this._statusInfo(status);
             return [
-                `<i class="fa ${info.icon}" style="font-size: 1.4em; color: ${info.color};" title="${this._escape(gateway.status)}"></i>`,
+                this._enablementIcon(gateway.disabled),
                 this._gatewayIdentity(gateway),
-                this._escape(gateway.delay === '~' ? '—' : gateway.delay),
-                this._escape(gateway.stddev === '~' ? '—' : gateway.stddev),
-                this._escape(gateway.loss === '~' ? '—' : gateway.loss),
-                this._statusCell(gateway.status, info)
+                this._escape(gateway.disabled || gateway.delay === '~' ? '—' : gateway.delay),
+                this._escape(gateway.disabled || gateway.stddev === '~' ? '—' : gateway.stddev),
+                this._escape(gateway.disabled || gateway.loss === '~' ? '—' : gateway.loss),
+                this._statusCell(status, info)
             ];
         });
         // BaseTableWidget inserts every new row immediately after the header,
