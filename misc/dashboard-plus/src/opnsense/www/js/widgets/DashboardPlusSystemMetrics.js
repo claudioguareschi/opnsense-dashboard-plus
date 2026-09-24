@@ -20,10 +20,13 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         return {sizeToContent: 420};
     }
 
-    _createChart(canvasId, series, color, precision = 0) {
+    _createChart(canvasId, series, color, precision = 0, scale = {}) {
         const chart = new SmoothieChart({
             responsive: true,
             millisPerPixel: this._millisecondsPerPixel(canvasId),
+            minValue: scale.minValue,
+            maxValue: scale.maxValue,
+            maxValueScale: scale.maxValueScale || 1,
             tooltip: true,
             labels: {
                 fillStyle: Chart.defaults.color,
@@ -90,8 +93,14 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         this._applyTimeWindow(this.currentConfig);
         this.cpuSeries = new TimeSeries();
         this.memorySeries = new TimeSeries();
-        this._createChart(`${this.id}-cpu-chart`, this.cpuSeries, '#d94f00');
-        this._createChart(`${this.id}-memory-chart`, this.memorySeries, '#2ca02c', 1);
+        this._createChart(
+            `${this.id}-cpu-chart`, this.cpuSeries, '#d94f00', 0,
+            {minValue: 0, maxValueScale: 1.15}
+        );
+        this._createChart(
+            `${this.id}-memory-chart`, this.memorySeries, '#2ca02c', 0,
+            {minValue: 0, maxValue: 100}
+        );
 
         this.openEventSource('/api/diagnostics/cpu_usage/stream', event => {
             if (!event) {
