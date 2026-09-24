@@ -84,6 +84,13 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         return percent >= 80 ? '#d94f00' : percent >= 50 ? '#ff7f0e' : '#2ca02c';
     }
 
+    _expandTemperatureScale(celsius) {
+        const entry = this.charts.find(chart => chart.canvasId === `${this.id}-temperature-chart`);
+        if (entry && celsius > entry.chart.options.maxValue) {
+            entry.chart.options.maxValue = Math.ceil(celsius / 10) * 10;
+        }
+    }
+
     _renderFilesystems(devices) {
         const container = document.getElementById(`${this.id}-filesystems`);
         if (!container || !Array.isArray(devices)) {
@@ -311,6 +318,7 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
             );
             const celsius = parseFloat(hottest.temperature);
             this.temperatureCelsius = celsius;
+            this._expandTemperatureScale(celsius);
             this.temperatureSeries.append(Date.now(), celsius);
             $(`#${this.id}-temperature-current`).text(`${celsius.toFixed(1)} °C`);
         } else {
