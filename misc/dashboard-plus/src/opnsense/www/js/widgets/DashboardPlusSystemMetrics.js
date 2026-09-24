@@ -78,6 +78,37 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         return `${kibibytes} KiB`;
     }
 
+    _usageColor(percent) {
+        return percent >= 80 ? '#d94f00' : percent >= 50 ? '#ff7f0e' : '#2ca02c';
+    }
+
+    _renderFilesystems(devices) {
+        const container = document.getElementById(`${this.id}-filesystems`);
+        if (!container || !Array.isArray(devices)) {
+            return;
+        }
+        container.replaceChildren();
+        for (const filesystem of devices) {
+            const percent = Math.max(0, Math.min(parseFloat(filesystem.used_pct) || 0, 100));
+            const row = document.createElement('div');
+            row.style.cssText = 'display: grid; grid-template-columns: minmax(8em, 28%) 1fr; column-gap: 0.75em; align-items: center; padding: 0.35em 0;';
+            const mount = document.createElement('span');
+            mount.textContent = filesystem.mountpoint;
+            const usage = document.createElement('div');
+            const bar = document.createElement('div');
+            bar.style.cssText = 'height: 0.75em; background: rgba(119,119,119,0.12); border-radius: 0.375em; overflow: hidden;';
+            const fill = document.createElement('div');
+            fill.style.cssText = `height: 100%; width: ${percent}%; background: ${this._usageColor(percent)}; transition: width 0.2s ease;`;
+            bar.append(fill);
+            const details = document.createElement('div');
+            details.style.cssText = 'font-size: 0.9em; margin-top: 0.15em;';
+            details.textContent = `${percent.toFixed(0)}% · ${filesystem.used} / ${filesystem.blocks} (${filesystem.type})`;
+            usage.append(bar, details);
+            row.append(mount, usage);
+            container.append(row);
+        }
+    }
+
     getMarkup() {
         return $(`
             <div class="dashboard-plus-system-metrics" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1em; padding: 0 0.25em;">
@@ -132,6 +163,14 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
                         <div id="${this.id}-swap-bar" style="height: 100%; width: 0; background: #2ca02c; transition: width 0.2s ease;"></div>
                     </div>
                     <div id="${this.id}-swap-total" style="font-size: 0.9em; margin: 0.25em 0;"></div>
+                </section>
+                <section style="grid-column: 1 / -1;">
+                    <div style="width: 95%; margin: 0 auto;">
+                        <div style="margin: 0 0.25em;">
+                            <h3 style="margin: 0;">${this.translations.filesystems}</h3>
+                        </div>
+                    </div>
+                    <div id="${this.id}-filesystems" style="width: 95%; margin: 0.25em auto 0;"></div>
                 </section>
             </div>
         `);
@@ -209,12 +248,13 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
     }
 
     async onWidgetTick() {
-        const [resources, time, states, mbufs, swap] = await Promise.all([
+        const [resources, time, states, mbufs, swap, disks] = await Promise.all([
             this.ajaxCall('/api/diagnostics/system/system_resources'),
             this.ajaxCall('/api/diagnostics/system/system_time'),
             this.ajaxCall('/api/diagnostics/firewall/pf_states'),
             this.ajaxCall('/api/diagnostics/system/system_mbuf'),
-            this.ajaxCall('/api/diagnostics/system/system_swap')
+            this.ajaxCall('/api/diagnostics/system/system_swap'),
+            this.ajaxCall('/api/diagnostics/system/system_disk')
         ]);
         const memory = resources.memory;
         if (memory?.total !== undefined) {
@@ -258,10 +298,12 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         const swapUsed = swapDevices.reduce((total, device) => total + (parseInt(device.used, 10) || 0), 0);
         if (swapTotal > 0) {
             const percent = (swapUsed / swapTotal) * 100;
-            const color = percent >= 80 ? '#d94f00' : percent >= 50 ? '#ff7f0e' : '#2ca02c';
+            const color = this._usageColor(percent);
             $(`#${this.id}-swap-current`).text(`${percent.toFixed(0)}%`);
             $(`#${this.id}-swap-total`).text(`${this._formatKiB(swapUsed)} / ${this._formatKiB(swapTotal)} ${this.translations.used}`);
             $(`#${this.id}-swap-bar`).css({width: `${Math.min(percent, 100)}%`, background: color});
         }
+
+        this._renderFilesystems(disks?.devices);
     }
 }

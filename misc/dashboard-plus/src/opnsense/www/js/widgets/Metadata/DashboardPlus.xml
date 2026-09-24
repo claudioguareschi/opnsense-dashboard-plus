@@ -76,6 +76,7 @@
             <endpoint>/api/diagnostics/system/system_time</endpoint>
             <endpoint>/api/diagnostics/system/system_mbuf</endpoint>
             <endpoint>/api/diagnostics/system/system_swap</endpoint>
+            <endpoint>/api/diagnostics/system/system_disk</endpoint>
             <endpoint>/api/diagnostics/firewall/pf_states</endpoint>
         </endpoints>
         <translations>
@@ -86,6 +87,7 @@
             <states>States</states>
             <mbufs>Mbufs</mbufs>
             <swap>Swap</swap>
+            <filesystems>Filesystems</filesystems>
             <load>Load</load>
             <used>used</used>
             <unavailable>Unavailable</unavailable>
