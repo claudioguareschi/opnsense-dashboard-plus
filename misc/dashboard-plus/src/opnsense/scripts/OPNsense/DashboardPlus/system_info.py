@@ -14,6 +14,7 @@ SYSCTL = "/sbin/sysctl"
 DMESG = "/sbin/dmesg"
 MOUNT = "/sbin/mount"
 BECTL = "/sbin/bectl"
+SETKEY = "/usr/sbin/setkey"
 
 QAT_DEVICES = {
     0x0435: ("Intel QAT DH895XCC", "discrete", False),
@@ -338,18 +339,39 @@ def collect_cpu_crypto(dmesg_output):
     return [mode.strip() for mode in match.group(1).split(",") if mode.strip()]
 
 
-def collect_accelerated_algorithms(cpu_algorithms, qat_devices):
-    """Describe only algorithms registered by active crypto providers."""
+def collect_crypto_hardware(cpu_has_aesni, cpu_algorithms, qat_devices):
+    """Describe detected AES-NI and QuickAssist providers and their state."""
     providers = []
-    if cpu_algorithms:
-        providers.append({"provider": "CPU AES-NI", "algorithms": cpu_algorithms})
+    if cpu_has_aesni:
+        providers.append({
+            "feature": "AES-NI",
+            "provider": "CPU",
+            "active": bool(cpu_algorithms),
+            "algorithms": cpu_algorithms,
+        })
     for device in qat_devices:
-        if device["algorithms"]:
-            providers.append({
-                "provider": f"{device['model']} ({device['pci_address']})",
-                "algorithms": device["algorithms"],
-            })
+        providers.append({
+            "feature": "QuickAssist",
+            "provider": device["model"],
+            "active": device["ocf_active"],
+            "algorithms": device["algorithms"],
+        })
     return providers
+
+
+def collect_accelerated_algorithms(providers):
+    """Return the de-duplicated algorithms of active hardware providers only."""
+    return sorted({
+        algorithm
+        for provider in providers
+        if provider["active"]
+        for algorithm in provider["algorithms"]
+    })
+
+
+def collect_ipsec_status(output):
+    """Report security-association activity, not unmeasurable packet offload."""
+    return "Active security associations" if re.search(r"\bspi=", output) else "No active security associations"
 
 
 def boot_method(kernel_method, efi_runtime, mount_output):
@@ -428,6 +450,7 @@ def collect():
         slot_output,
     )
     cpu_algorithms = collect_cpu_crypto(dmesg_output)
+    crypto_hardware = collect_crypto_hardware("AESNI" in cpu_crypto, cpu_algorithms, accelerator["devices"])
     frequency = collect_cpu_frequency()
 
     return {
@@ -454,10 +477,10 @@ def collect():
             "threads": int_value(sysctl_value("kern.smp.cpus") or sysctl_value("hw.ncpu")),
             "threads_per_core": int_value(sysctl_value("kern.smp.threads_per_core")),
             **frequency,
-            "crypto_capabilities": cpu_crypto,
         },
-        "accelerator": accelerator,
-        "accelerated_algorithms": collect_accelerated_algorithms(cpu_algorithms, accelerator["devices"]),
+        "crypto_hardware": crypto_hardware,
+        "ipsec": collect_ipsec_status(run([SETKEY, "-D"])),
+        "accelerated_algorithms": collect_accelerated_algorithms(crypto_hardware),
         "mitigations": {
             "pti": pti,
             "mds": mds or "Unavailable",

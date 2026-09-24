@@ -75,34 +75,11 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
         }).join('<br>');
     }
 
-    formatAccelerators(acceleratorData) {
-        const devices = acceleratorData?.devices || [];
-        const identity = [];
-        const algorithms = [];
-
-        devices.forEach(device => {
-            const state = device.ocf_active ? this.translations.active : this.translations.inactive;
-            identity.push(`${device.model} (${state})`);
-            algorithms.push((device.algorithms || []).join(', '));
+    formatCryptoHardware(providers) {
+        const values = (providers || []).map(provider => {
+            const state = provider.active ? this.translations.active : this.translations.inactive;
+            return `${provider.feature}: ${provider.provider} (${state})`;
         });
-
-        return {
-            identity: this.formatList(identity),
-            algorithms: this.formatList(algorithms.filter(value => value !== ''))
-        };
-    }
-
-    formatAlgorithms(providerData, acceleratorData) {
-        const providers = Array.isArray(providerData) ? providerData : [];
-        const acceleratorNames = new Set((acceleratorData?.devices || []).map(device => device.model));
-        const values = providers.map(provider => {
-            const algorithms = (provider.algorithms || []).join(', ');
-            if (!algorithms) {
-                return '';
-            }
-            const acceleratorName = [...acceleratorNames].find(name => provider.provider.startsWith(name));
-            return acceleratorName ? algorithms : `${provider.provider}: ${algorithms}`;
-        }).filter(Boolean);
         return this.formatList(values);
     }
 
@@ -124,7 +101,6 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
         const bootEnvironment = details.boot_environment || {};
         const cpu = details.cpu || {};
         const mitigations = details.mitigations || {};
-        const accelerators = this.formatAccelerators(details.accelerator);
         const hardwareName = [hardware.manufacturer, hardware.model].filter(Boolean).join(' ');
         const biosName = [bios.vendor, bios.version, bios.date].filter(Boolean).join(' / ');
         const topology = cpu.threads && cpu.packages && cpu.cores && cpu.threads_per_core
@@ -172,25 +148,19 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
             [this.translations.cpu, this.formatGroup([
                 {label: this.translations.model, value: cpu.model},
                 {label: '', value: frequency ? `<span id="dashboard-plus-frequency">${frequency}</span>` : null, html: true},
-                {label: '', value: topology},
-                {label: this.translations.crypto_capabilities, value: (cpu.crypto_capabilities || []).join(', ')}
+                {label: '', value: topology}
             ])]
         );
 
-        if ((details.accelerator?.devices || []).length > 0) {
+        if ((details.crypto_hardware || []).length > 0) {
             rows.push(
-                [this.translations.accelerator, this.formatGroup([
-                    {label: '', value: accelerators.identity, html: true},
-                    {label: '', value: accelerators.algorithms, html: true}
-                ])]
+                [this.translations.accelerator, this.formatCryptoHardware(details.crypto_hardware)]
             );
         }
 
         rows.push(
-            [this.translations.accelerated_algorithms, this.formatAlgorithms(
-                details.accelerated_algorithms,
-                details.accelerator
-            )],
+            [this.translations.ipsec, this.escape(details.ipsec)],
+            [this.translations.accelerated_algorithms, this.formatList(details.accelerated_algorithms)],
             [this.translations.pti, this.escape(mitigations.pti)],
             [this.translations.mds, this.escape(mitigations.mds)],
             [this.translations.uptime, `<span id="dashboard-plus-uptime">${this.escape(time?.uptime)}</span>`],

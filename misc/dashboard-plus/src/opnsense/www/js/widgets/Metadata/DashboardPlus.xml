@@ -28,8 +28,8 @@
             <freebsd>FreeBSD</freebsd>
             <update_status>Update Status</update_status>
             <cpu>CPU Type</cpu>
-            <crypto_capabilities>Crypto Capabilities</crypto_capabilities>
             <accelerator>Crypto Hardware</accelerator>
+            <ipsec>IPsec</ipsec>
             <accelerated_algorithms>Crypto Algorithms</accelerated_algorithms>
             <pti>Kernel PTI</pti>
             <mds>MDS Mitigation</mds>

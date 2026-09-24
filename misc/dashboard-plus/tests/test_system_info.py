@@ -115,13 +115,22 @@ dev.qat_ocf.0.enable: 1
             {"current_mhz": 1600, "maximum_mhz": 2200},
         )
 
-    def test_active_algorithm_list_identifies_the_provider(self):
-        providers = SYSTEM_INFO.collect_accelerated_algorithms(
-            ["AES-CBC"],
-            [{"model": "Intel QAT C3xxx", "pci_address": "pci0:0:4:0", "algorithms": ["AES-GCM"]}],
+    def test_active_hardware_algorithms_are_de_duplicated(self):
+        providers = SYSTEM_INFO.collect_crypto_hardware(
+            True,
+            ["AES-CBC", "AES-GCM"],
+            [{"model": "Intel QAT C3xxx", "ocf_active": True, "algorithms": ["AES-GCM", "AES-XTS"]}],
         )
-        self.assertEqual(providers[0]["provider"], "CPU AES-NI")
-        self.assertEqual(providers[1]["algorithms"], ["AES-GCM"])
+        self.assertEqual(providers[0]["feature"], "AES-NI")
+        self.assertEqual(providers[1]["provider"], "Intel QAT C3xxx")
+        self.assertEqual(
+            SYSTEM_INFO.collect_accelerated_algorithms(providers),
+            ["AES-CBC", "AES-GCM", "AES-XTS"],
+        )
+
+    def test_ipsec_status_does_not_claim_packet_offload(self):
+        self.assertEqual(SYSTEM_INFO.collect_ipsec_status(""), "No active security associations")
+        self.assertEqual(SYSTEM_INFO.collect_ipsec_status("spi=0x1234"), "Active security associations")
 
 
 if __name__ == "__main__":
