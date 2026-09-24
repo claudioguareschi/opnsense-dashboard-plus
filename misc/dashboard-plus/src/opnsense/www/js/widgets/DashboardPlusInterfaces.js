@@ -19,12 +19,10 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
     getMarkup() {
         const $container = $('<div class="dashboard-plus-interfaces"></div>');
         const $table = this.createTable('dashboard-plus-interfaces-table', {
-            headerPosition: 'top',
-            headers: [this.translations.interface, this.translations.link, this.translations.addresses]
+            // Match the stock Interfaces widget: its flex table owns the
+            // native 95% width and row gutters.
+            headerPosition: 'none'
         });
-        // The grid needs columns for reliable alignment, but the row design is
-        // deliberately self-explanatory, so it does not need a visible header.
-        $table.find('.grid-header-container').hide();
         $container.append($table);
         return $container;
     }
@@ -88,15 +86,8 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
         ).join('') || '—';
     }
 
-    _setGridColumns() {
-        $('#dashboard-plus-interfaces-table').children('.grid-row').css({
-            gridTemplateColumns: '34% 35% 31%',
-            alignItems: 'center'
-        });
-    }
-
     _saveInterfaceOrder() {
-        const order = $('#dashboard-plus-interfaces-table').children('.grid-row')
+        const order = $('#dashboard-plus-interfaces-table').children('.flextable-row')
             .map((_, row) => $(row).data('interface')).get();
         const selected = this.currentConfig.interfaces || order;
         this.currentConfig.interfaces = [
@@ -117,11 +108,11 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
             $draggedRow = null;
             $placeholder = null;
         };
-        $table.on('mousedown', '.grid-row .grid-item:nth-child(1)', event => event.stopPropagation());
-        $table.on('dragstart', '.grid-row .grid-item:nth-child(1)', event => {
-            $draggedRow = $(event.currentTarget).closest('.grid-row');
+        $table.on('mousedown', '.flextable-row .flex-cell:nth-child(1)', event => event.stopPropagation());
+        $table.on('dragstart', '.flextable-row .flex-cell:nth-child(1)', event => {
+            $draggedRow = $(event.currentTarget).closest('.flextable-row');
             $draggedRow.css({opacity: 0.4, outline: '2px dashed #d94f00'});
-            $placeholder = $('<div class="grid-row dashboard-plus-interfaces-drop-placeholder" aria-label="Drop interface here"></div>')
+            $placeholder = $('<div class="flextable-row dashboard-plus-interfaces-drop-placeholder" aria-label="Drop interface here"></div>')
                 .css({
                     height: $draggedRow.outerHeight(),
                     border: '2px dashed #d94f00',
@@ -133,7 +124,7 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
         $table.on('dragover', event => {
             event.preventDefault();
             event.originalEvent.dataTransfer.dropEffect = 'move';
-            const $target = $(event.target).closest('.grid-row');
+            const $target = $(event.target).closest('.flextable-row');
             if (!$draggedRow || !$target.length || $target[0] === $draggedRow[0]) {
                 return;
             }
@@ -148,7 +139,7 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
             }
             clearDragState();
         });
-        $table.on('dragend', '.grid-row .grid-item:nth-child(1)', clearDragState);
+        $table.on('dragend', '.flextable-row .flex-cell:nth-child(1)', clearDragState);
     }
 
     async onMarkupRendered() {
@@ -168,7 +159,7 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
         const orderedInterfaces = this._orderedInterfaces(interfaces, this.currentConfig);
         const $table = $('#dashboard-plus-interfaces-table');
         if (!orderedInterfaces.length) {
-            $table.children('.grid-row, .dashboard-plus-interfaces-empty').remove();
+            $table.children('.flextable-row, .dashboard-plus-interfaces-empty').remove();
             $table.append(`<div class="dashboard-plus-interfaces-empty" style="padding: 0.75em;">${this.translations.no_interfaces}</div>`);
             return;
         }
@@ -178,18 +169,14 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
         const rows = orderedInterfaces.map(intf => [
             this._identity(intf), this._link(intf), this._addresses(intf)
         ]);
-        // BaseTableWidget inserts new rows right after the header; reverse the
-        // source so that the configured order remains the visual order.
-        super.updateTable('dashboard-plus-interfaces-table', [...rows].reverse());
-        $table.children('.grid-header-container').hide();
-        $table.children('.grid-row').each((index, row) => {
+        super.updateTable('dashboard-plus-interfaces-table', rows);
+        $table.children('.flextable-row').each((index, row) => {
             const $cells = $(row).children();
             $(row).data('interface', orderedInterfaces[index].identifier);
             $cells.css('text-align', 'left');
             $cells.eq(0).attr({draggable: 'true', title: this.translations.drag_to_reorder})
                 .css('cursor', 'grab');
         });
-        this._setGridColumns();
     }
 
     async getWidgetOptions() {
