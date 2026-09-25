@@ -92,6 +92,7 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
             this.configChanged = false;
         }
         const config = this.currentConfig;
+        const rows = [];
         Object.entries(data.interfaces || {}).forEach(([id, intf]) => {
             if (!(config.interfaces || []).includes(id)) {
                 return;
@@ -102,14 +103,15 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
             const packetsTransmitted = parseInt(intf['packets transmitted']) || 0;
             const errorsReceived = parseInt(intf['input errors']) || 0;
             const errorsTransmitted = parseInt(intf['output errors']) || 0;
-            super.updateTable('dashboard-plus-interface-statistics-table', [[
+            rows.push([
                 `<a href="/interfaces.php?if=${encodeURIComponent(id)}">${this._escape(intf.name)}</a>`,
                 this._pair(this._formatBytes(received) || '0', this._formatBytes(transmitted) || '0'),
                 this._pair(packetsReceived.toLocaleString(), packetsTransmitted.toLocaleString()),
                 this._pair(errorsReceived.toLocaleString(), errorsTransmitted.toLocaleString()),
                 `<span style="font-size: 0.92em;">${(parseInt(intf.collisions) || 0).toLocaleString()}</span>`
-            ]], id);
+            ]);
         });
+        super.updateTable('dashboard-plus-interface-statistics-table', rows);
         this._applyFieldVisibility(config);
     }
 
