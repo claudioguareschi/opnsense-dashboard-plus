@@ -18,6 +18,10 @@ export default class DashboardPlusTraffic extends BaseWidget {
             inbytes: {line: '#2ca02c', fill: 'rgba(44, 160, 44, 0.28)'},
             outbytes: {line: '#ff7f0e', fill: 'rgba(255, 127, 14, 0.28)'}
         };
+        this.interfacePalette = [
+            '#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f', '#edc949',
+            '#af7aa1', '#ff9da7', '#9c755f', '#bab0ab', '#2ca02c', '#ff7f0e'
+        ];
     }
 
     getGridOptions() {
@@ -61,11 +65,12 @@ export default class DashboardPlusTraffic extends BaseWidget {
         };
     }
 
-    _dataset(name, direction, time, explicitColor = false) {
+    _dataset(name, direction, time, explicitColor = false, customColor = null) {
         const color = this.directionColors[direction];
         return {
             label: name,
             ...(explicitColor ? {borderColor: color.line, backgroundColor: color.fill} : {}),
+            ...(customColor ? {borderColor: customColor, backgroundColor: `${customColor}47`} : {}),
             pointRadius: 0,
             borderWidth: 2,
             direction,
@@ -88,15 +93,28 @@ export default class DashboardPlusTraffic extends BaseWidget {
             </div>`;
     }
 
+    _renderCombinedLegend(datasets) {
+        const $legend = $('#dashboard-plus-traffic-combined-legend').empty();
+        datasets.forEach(dataset => {
+            const label = $('<div>').text(dataset.label).html();
+            $legend.append(`
+                <span class="dashboard-plus-traffic-legend-item" data-interface="${dataset.intf}" title="${label}" style="display: inline-flex; align-items: center; gap: 0.35em; flex: 0 0 auto;">
+                    <i style="display: inline-block; width: 0.75em; height: 0.75em; border-radius: 50%; background: ${dataset.borderColor};"></i>${label}
+                </span>
+            `);
+        });
+    }
+
     async _initialize(data) {
         const config = await this.getWidgetConfig();
         const combinedIn = [];
         const combinedOut = [];
         const $perInterface = $('#dashboard-plus-traffic-per-interface');
 
-        this._orderedInterfaces(data.interfaces, config).forEach(([id, intf]) => {
-            combinedIn.push({...this._dataset(intf.name, 'inbytes', data.time), intf: id});
-            combinedOut.push({...this._dataset(intf.name, 'outbytes', data.time), intf: id});
+        this._orderedInterfaces(data.interfaces, config).forEach(([id, intf], index) => {
+            const color = this.interfacePalette[index % this.interfacePalette.length];
+            combinedIn.push({...this._dataset(intf.name, 'inbytes', data.time, false, color), intf: id});
+            combinedOut.push({...this._dataset(intf.name, 'outbytes', data.time, false, color), intf: id});
 
             const canvasId = `dashboard-plus-traffic-${id}`;
             $perInterface.append(`
@@ -111,8 +129,9 @@ export default class DashboardPlusTraffic extends BaseWidget {
             ], false, false));
         });
 
-        this.charts.combinedIn = new Chart($('#dashboard-plus-traffic-in')[0].getContext('2d'), this._chartConfig(combinedIn));
-        this.charts.combinedOut = new Chart($('#dashboard-plus-traffic-out')[0].getContext('2d'), this._chartConfig(combinedOut));
+        this.charts.combinedIn = new Chart($('#dashboard-plus-traffic-in')[0].getContext('2d'), this._chartConfig(combinedIn, false, false));
+        this.charts.combinedOut = new Chart($('#dashboard-plus-traffic-out')[0].getContext('2d'), this._chartConfig(combinedOut, false, false));
+        this._renderCombinedLegend(combinedIn);
         this._makeSubpanelsSortable();
         this.initialized = true;
         this.currentConfig = config;
@@ -127,6 +146,9 @@ export default class DashboardPlusTraffic extends BaseWidget {
         this._updateViewToggle(combined);
         $('.dashboard-plus-traffic-interface').each((_, element) => {
             $(element).toggle(!combined && (config.interfaces || []).includes($(element).data('interface')));
+        });
+        $('.dashboard-plus-traffic-legend-item').each((_, item) => {
+            $(item).toggle((config.interfaces || []).includes($(item).data('interface')));
         });
         for (const chart of [this.charts.combinedIn, this.charts.combinedOut]) {
             if (!chart) {
@@ -274,9 +296,10 @@ export default class DashboardPlusTraffic extends BaseWidget {
             `<div class="dashboard-plus-traffic-container" style="padding: 0 0.25em;">
                 <div id="dashboard-plus-traffic-combined">
                     <h3>${this.translations.trafficin}</h3>
-                    <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="dashboard-plus-traffic-in"></canvas></div>
+                    <div id="dashboard-plus-traffic-combined-legend" style="display: flex; gap: 0.75em; overflow-x: auto; white-space: nowrap; padding: 0 0.5em 0.35em; font-size: 0.82em;"></div>
+                    <div class="canvas-container-noaspectratio" style="height: 180px; margin: 0 0.5em;"><canvas id="dashboard-plus-traffic-in"></canvas></div>
                     <h3>${this.translations.trafficout}</h3>
-                    <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="dashboard-plus-traffic-out"></canvas></div>
+                    <div class="canvas-container-noaspectratio" style="height: 180px; margin: 0 0.5em;"><canvas id="dashboard-plus-traffic-out"></canvas></div>
                 </div>
                 <div id="dashboard-plus-traffic-per-interface"></div>
             </div>`
