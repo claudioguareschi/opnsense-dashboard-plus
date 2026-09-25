@@ -128,7 +128,9 @@ export default class DashboardPlusTraffic extends BaseWidget {
         const target = direction > 0
             ? positions.find(position => position > current + 5)
             : [...positions].reverse().find(position => position < current - 5);
-        element.scrollTo({left: target ?? (direction > 0 ? element.scrollWidth : 0), behavior: 'smooth'});
+        element.scrollLeft = target ?? (direction > 0 ? element.scrollWidth : 0);
+        this._updateLegendControls();
+        window.setTimeout(() => this._updateLegendControls(), 0);
     }
 
     async _initialize(data) {
