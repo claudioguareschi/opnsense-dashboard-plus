@@ -188,4 +188,30 @@
             <openvpn>OpenVPN tunnel</openvpn>
         </translations>
     </dashboardplusinterfaces>
+    <dashboardplusfirewalllogs>
+        <filename>DashboardPlusFirewallLogs.js</filename>
+        <link>/ui/diagnostics/firewall/log</link>
+        <endpoints>
+            <endpoint>/api/diagnostics/firewall/log</endpoint>
+            <endpoint>/api/diagnostics/firewall/stream_log</endpoint>
+            <endpoint>/api/diagnostics/interface/get_interface_names</endpoint>
+        </endpoints>
+        <translations>
+            <title>Firewall Logs+</title>
+            <dashboard_title>Firewall Logs</dashboard_title>
+            <action>Action</action>
+            <time>Time</time>
+            <interface>Interface</interface>
+            <rule>Rule</rule>
+            <source>Source</source>
+            <destination>Destination</destination>
+            <actions>Actions</actions>
+            <all>All</all>
+            <pass>Pass</pass>
+            <block>Block</block>
+            <interfaces>Interfaces</interfaces>
+            <rows>Rows</rows>
+            <no_entries>No matching firewall log entries</no_entries>
+        </translations>
+    </dashboardplusfirewalllogs>
 </metadata>
