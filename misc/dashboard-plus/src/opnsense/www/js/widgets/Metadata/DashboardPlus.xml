@@ -132,6 +132,11 @@
             <collisions_short>Coll.</collisions_short>
             <in>In</in>
             <out>Out</out>
+            <refresh_interval>Refresh interval</refresh_interval>
+            <second_1>1 second</second_1>
+            <seconds_5>5 seconds</seconds_5>
+            <seconds_10>10 seconds</seconds_10>
+            <drag_to_reorder>Drag to reorder</drag_to_reorder>
         </translations>
     </dashboardplusinterfacestatistics>
     <dashboardplusgateways>

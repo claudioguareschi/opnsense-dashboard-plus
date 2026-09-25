@@ -1,6 +1,6 @@
 PLUGIN_NAME=		dashboard-plus
 PLUGIN_VERSION=		0.1
-PLUGIN_REVISION=	24
+PLUGIN_REVISION=	25
 PLUGIN_COMMENT=		Extended system information dashboard widget
 PLUGIN_DEPENDS=		dmidecode
 
