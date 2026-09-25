@@ -105,6 +105,11 @@ export default class DashboardPlusTraffic extends BaseWidget {
         });
     }
 
+    _scrollCombinedLegend(direction) {
+        const element = $(`#${this.id}-traffic-combined-legend`)[0];
+        element?.scrollBy({left: direction * element.clientWidth * 0.75, behavior: 'smooth'});
+    }
+
     async _initialize(data) {
         const config = await this.getWidgetConfig();
         const combinedIn = [];
@@ -177,11 +182,9 @@ export default class DashboardPlusTraffic extends BaseWidget {
         const config = {...this.currentConfig};
         config.display = config.display === 'combined' ? 'per_interface' : 'combined';
         this.currentConfig = config;
-        this.setWidgetConfig(config);
         this._applyConfig(config);
         Object.values(this.charts).forEach(chart => chart.resize());
         this.config.callbacks?.updateGrid?.();
-        $('#save-grid').show();
     }
 
     _orderedInterfaces(interfaces, config) {
@@ -294,9 +297,14 @@ export default class DashboardPlusTraffic extends BaseWidget {
     getMarkup() {
         return $(
             `<div class="dashboard-plus-traffic-container" style="padding: 0 0.25em;">
+                <style>.dashboard-plus-traffic-combined-legend::-webkit-scrollbar { display: none; }</style>
                 <div id="dashboard-plus-traffic-combined">
                     <h3>${this.translations.trafficin}</h3>
-                    <div id="dashboard-plus-traffic-combined-legend" style="display: flex; gap: 0.75em; overflow-x: auto; white-space: nowrap; padding: 0 0.5em 0.35em; font-size: 0.82em;"></div>
+                    <div style="display: flex; align-items: center; gap: 0.35em; margin: 0 0.5em 0.35em;">
+                        <button type="button" id="${this.id}-traffic-legend-previous" style="border: 0; background: transparent; color: #777; cursor: pointer; padding: 0 0.2em;" title="${this.translations.legend_previous}" aria-label="${this.translations.legend_previous}"><i class="fa fa-angle-double-left"></i></button>
+                        <div id="dashboard-plus-traffic-combined-legend" class="dashboard-plus-traffic-combined-legend" style="display: flex; flex: 1; min-width: 0; gap: 0.75em; overflow-x: auto; white-space: nowrap; font-size: 0.82em; scrollbar-width: none; -ms-overflow-style: none;"></div>
+                        <button type="button" id="${this.id}-traffic-legend-next" style="border: 0; background: transparent; color: #777; cursor: pointer; padding: 0 0.2em;" title="${this.translations.legend_next}" aria-label="${this.translations.legend_next}"><i class="fa fa-angle-double-right"></i></button>
+                    </div>
                     <div class="canvas-container-noaspectratio" style="height: 180px; margin: 0 0.5em;"><canvas id="dashboard-plus-traffic-in"></canvas></div>
                     <h3>${this.translations.trafficout}</h3>
                     <div class="canvas-container-noaspectratio" style="height: 180px; margin: 0 0.5em;"><canvas id="dashboard-plus-traffic-out"></canvas></div>
@@ -316,6 +324,16 @@ export default class DashboardPlusTraffic extends BaseWidget {
             event.preventDefault();
             event.stopPropagation();
             this._toggleDisplay();
+        });
+        $(`#${this.id}-traffic-legend-previous`).on('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            this._scrollCombinedLegend(-1);
+        });
+        $(`#${this.id}-traffic-legend-next`).on('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            this._scrollCombinedLegend(1);
         });
         this.openEventSource('/api/diagnostics/traffic/stream/1', this._onMessage.bind(this));
     }

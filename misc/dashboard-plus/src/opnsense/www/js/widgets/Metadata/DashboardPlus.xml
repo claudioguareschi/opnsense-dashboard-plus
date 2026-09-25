@@ -59,6 +59,8 @@
             <display>Display</display>
             <compact>Compact view</compact>
             <expand>Expanded view</expand>
+            <legend_previous>Scroll legend left</legend_previous>
+            <legend_next>Scroll legend right</legend_next>
             <per_interface>Per interface</per_interface>
             <combined>Combined</combined>
             <interfaces>Interfaces</interfaces>
