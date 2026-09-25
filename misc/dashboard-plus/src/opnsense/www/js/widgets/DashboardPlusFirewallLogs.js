@@ -39,11 +39,12 @@ export default class DashboardPlusFirewallLogs extends BaseTableWidget {
     _applyColumns() {
         $('#dashboard-plus-firewall-logs-table')
             .children('.flextable-header, .dashboard-plus-firewall-logs-row')
-            .children('.flex-cell')
-            .each((column, cell) => $(cell).css({
-                width: ['8%', '18%', '24%', '24%', '26%'][column],
-                textAlign: 'left'
-            }));
+            .each((_, row) => {
+                $(row).children('.flex-cell').each((column, cell) => $(cell).css({
+                    width: ['8%', '18%', '24%', '24%', '26%'][column],
+                    textAlign: 'left'
+                }));
+            });
     }
 
     _actionIcon(action) {
