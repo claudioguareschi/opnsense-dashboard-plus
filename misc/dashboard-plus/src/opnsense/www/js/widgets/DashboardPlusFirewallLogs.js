@@ -37,7 +37,7 @@ export default class DashboardPlusFirewallLogs extends BaseTableWidget {
     }
 
     _applyColumns() {
-        const widths = ['7%', '19%', '14%', '30%', '30%'];
+        const widths = ['7%', '19%', '16%', '28%', '30%'];
         $('#dashboard-plus-firewall-logs-table')
             .children('.flextable-header, .dashboard-plus-firewall-logs-row')
             .each((_, row) => {
