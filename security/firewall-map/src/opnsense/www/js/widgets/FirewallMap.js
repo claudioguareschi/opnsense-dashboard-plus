@@ -19,7 +19,7 @@ export default class FirewallMap extends BaseWidget {
         return $(`
             <div id="${this.id}-firewall-map" style="position: relative; height: 430px; overflow: hidden; border-radius: 8px; background: #07111f; box-shadow: inset 0 0 0 1px rgba(87, 155, 185, 0.28);">
                 <div aria-hidden="true" style="pointer-events: none; position: absolute; inset: 0; z-index: 0; opacity: .4; background-image: linear-gradient(rgba(78, 136, 165, .16) 1px, transparent 1px), linear-gradient(90deg, rgba(78, 136, 165, .16) 1px, transparent 1px); background-size: 36px 36px;"></div>
-                <div id="${this.id}-firewall-map-canvas" style="position: absolute; inset: 0; z-index: 1;"></div>
+                <div id="${this.id}-firewall-map-canvas" style="position: absolute; inset: 0; z-index: 1; text-align: left;"></div>
                 <div id="${this.id}-firewall-map-status" style="position: absolute; left: 14px; bottom: 11px; z-index: 2; color: #a9c8d9; font-size: .82em; letter-spacing: .02em; text-shadow: 0 1px 2px #000;"></div>
             </div>
         `);
@@ -66,7 +66,11 @@ export default class FirewallMap extends BaseWidget {
         }
         try {
             const renderer = await this._loadRenderer();
-            this.renderer = renderer.create($(`#${this.id}-firewall-map-canvas`)[0]);
+            const container = $(`#${this.id}-firewall-map-canvas`)[0];
+            this.renderer = renderer.create(container);
+            // deck.gl positions its canvas absolutely without left/top, so pin it explicitly
+            // rather than relying on the static position (the dashboard centres widget text).
+            $(container).children('canvas').css({left: 0, top: 0});
         } catch (error) {
             console.error('Firewall Map+: renderer initialisation failed', error);
             this._status(`${this.translations.renderer_failed}: ${error?.message || error}`);
