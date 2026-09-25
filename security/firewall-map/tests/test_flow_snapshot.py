@@ -35,6 +35,16 @@ class FlowSnapshotTest(unittest.TestCase):
         flows = FLOW_SNAPSHOT.map_flows(records, {"198.13.91.163"})
         self.assertEqual(flows, [{"origin": "198.13.91.163", "dest": "45.56.79.53", "count": 5440}])
 
+    def test_excludes_firewall_to_firewall_state(self):
+        record = {
+            "src": {"address": "152.44.11.230", "port": "443"},
+            "dst": {"address": "198.13.91.163", "port": "443"},
+            "nat": None,
+            "bytes_in": 100,
+            "bytes_out": 200,
+        }
+        self.assertEqual(FLOW_SNAPSHOT.map_flows([record], {"152.44.11.230", "198.13.91.163"}), [])
+
     def test_bounds_records(self):
         output = "\n".join(
             f"all udp 192.0.2.{index}:53 -> 198.51.100.{index}:53 SINGLE:SINGLE\n"

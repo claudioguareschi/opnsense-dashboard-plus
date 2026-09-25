@@ -134,7 +134,7 @@ def map_flows(records, local_addresses):
         nat = record["nat"]["address"] if record["nat"] else None
         local = nat if nat and public_ipv4(nat) else (src if src in local_addresses else dst if dst in local_addresses else None)
         remote = dst if local == src else src
-        if not local or not public_ipv4(remote) or remote == local:
+        if not local or not public_ipv4(remote) or remote == local or remote in local_addresses:
             continue
         key = (local, remote)
         grouped[key] = grouped.get(key, 0) + record["bytes_in"] + record["bytes_out"]
