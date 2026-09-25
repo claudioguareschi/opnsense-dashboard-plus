@@ -124,6 +124,13 @@ class TrackerTest(unittest.TestCase):
         flow = tracker.flows[self.PAIR]
         self.assertEqual((flow["rate_in"], flow["rate_out"]), (600.0, 100.0))
 
+    def test_names_the_responder_service(self):
+        tracker = COLLECTOR.FlowTracker(smoothing=1.0)
+        tracker.update(COLLECTOR.parse_states(nat_state(1000, 1000)), self.LOCAL, now=0.0)
+        self.assertEqual(tracker.flows[self.PAIR]["services"], ["HTTPS"])
+        self.assertEqual(COLLECTOR.service_name("udp", "51820"), "WireGuard")
+        self.assertEqual(COLLECTOR.service_name("tcp", "9999"), "TCP/9999")
+
     def test_idle_flow_fades_then_state_removal_drops_it(self):
         tracker = COLLECTOR.FlowTracker(fade_seconds=10, smoothing=1.0)
         tracker.update(COLLECTOR.parse_states(nat_state(1000, 1000)), self.LOCAL, now=0.0)

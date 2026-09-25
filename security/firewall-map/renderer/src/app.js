@@ -1,6 +1,6 @@
 /* Firewall Map+ renderer. Bundled locally from deck.gl. */
 import {Deck, MapView} from '@deck.gl/core';
-import {GeoJsonLayer, PathLayer, ScatterplotLayer} from '@deck.gl/layers';
+import {GeoJsonLayer, PathLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
 import worldData from './world.json';
 
 // Antarctica only adds empty space below the flows.
@@ -9,10 +9,12 @@ const world = {...worldData, features: worldData.features.filter((feature) => fe
 const ARC_SAMPLES = 32;
 const LINK_WIDTH = 1.5;
 const HEAVY_WIDTH = 3;
-// heavy talkers: the busiest few links, or anything above this byte rate
-const HEAVY_TOP = 5;
+// heavy talkers: the busiest few links (if above a floor), or anything above a byte rate
+const DEFAULT_OPTIONS = {heavyTop: 5, heavyRate: 1000000, maxArcs: 120, labels: true};
 const HEAVY_TOP_MIN_RATE = 10000;
-const HEAVY_RATE = 1000000;
+// city labels appear once the map is zoomed this far past the fitted world view
+const LABEL_ZOOM_STEP = 1.2;
+const MAX_LABELS = 40;
 // pulse speed maps log10(bytes/s) onto this range: ~1 B/s crawls, ~10 MB/s races
 const FASTEST_LOG_RATE = 7;
 // a direction counts as "both ways" when the smaller side carries at least this share
@@ -40,7 +42,7 @@ function hash(text) {
  * (GeoLite often maps many addresses to one city or country centroid) get alternating,
  * increasingly deep bends, so each one stays visible as its own arch.
  */
-export function buildArcs(data) {
+export function buildArcs(data, options = DEFAULT_OPTIONS) {
   const locations = new Map((data.locations || []).map((location) => [location.id, location]));
   // Addresses GeoLite places at identical coordinates can't be told apart on the map, so they
   // share one arch carrying their combined rate.
@@ -61,18 +63,20 @@ export function buildArcs(data) {
       entry.flow.rateIn += rateIn;
       entry.flow.rateOut += rateOut;
       entry.flow.activity = Math.max(entry.flow.activity, item.activity ?? 1);
+      entry.members.push(item);
     } else {
       merged.set(key, {
         flow: {origin: item.origin, dest: item.dest, rate, rateIn, rateOut, activity: item.activity ?? 1},
         origin,
         dest,
+        members: [item],
       });
     }
   }
-  const flows = [...merged.values()].sort((a, b) => b.flow.rate - a.flow.rate);
+  const flows = [...merged.values()].sort((a, b) => b.flow.rate - a.flow.rate).slice(0, options.maxArcs);
   const lanes = new Map();
   const arcs = [];
-  flows.forEach(({flow, origin, dest}, index) => {
+  flows.forEach(({flow, origin, dest, members}, index) => {
     const x0 = origin.lon;
     const y0 = mercatorY(origin.lat);
     const x1 = dest.lon;
@@ -119,7 +123,12 @@ export function buildArcs(data) {
     arcs.push({
       key: `${flow.origin}>${flow.dest}`,
       path,
-      heavy: (index < HEAVY_TOP && rate >= HEAVY_TOP_MIN_RATE) || rate >= HEAVY_RATE,
+      heavy: (index < options.heavyTop && rate >= HEAVY_TOP_MIN_RATE) || rate >= options.heavyRate,
+      rate,
+      rateIn,
+      rateOut,
+      dest,
+      members,
       // colour follows the dominant direction; pulses show both when traffic flows both ways
       toward: inShare >= 0.5,
       direction,
@@ -129,6 +138,45 @@ export function buildArcs(data) {
     });
   });
   return arcs;
+}
+
+function formatRate(bytes) {
+  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1000 && unit < units.length - 1) {
+    value /= 1000;
+    unit++;
+  }
+  return `${value >= 100 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+}
+
+function escapeHtml(text) {
+  return String(text ?? '').replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+}
+
+/** Hover card for an endpoint (all flows to that place) or a single arch. */
+function describe(place, members, locations) {
+  const rateIn = members.reduce((sum, flow) => sum + (flow.rate_in ?? 0), 0);
+  const rateOut = members.reduce((sum, flow) => sum + (flow.rate_out ?? 0), 0);
+  const services = [...new Set(members.flatMap((flow) => flow.services || []))].slice(0, 5);
+  const addresses = members
+    .slice()
+    .sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))
+    .slice(0, 6)
+    .map((flow) => {
+      const location = locations.get(flow.dest);
+      const asn = location?.asn ? ` · AS${location.asn} ${escapeHtml(location.as_org || '')}` : '';
+      return `<div>${escapeHtml(flow.dest)}${asn}</div>`;
+    });
+  const more = members.length > 6 ? `<div>+${members.length - 6} more</div>` : '';
+  const title = [place.city, place.country].filter(Boolean).join(', ') || place.name || place.id;
+  return `
+    <div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}</div>
+    ${addresses.join('')}${more}
+    <div style="margin-top:4px">↓ ${formatRate(rateIn)} &nbsp; ↑ ${formatRate(rateOut)}</div>
+    ${services.length ? `<div>${services.map(escapeHtml).join(', ')}</div>` : ''}
+  `;
 }
 
 function pulsePosition(arc, seconds, reverse) {
@@ -191,6 +239,12 @@ export function palette(theme = DEFAULT_THEME) {
     toward: {link: mix(background, accent, 0.7), heavy: shade(accent, 0.2), pulse: shade(accent, 0.15)},
     away: {link: mix(background, success, 0.7), heavy: shade(success, 0.2), pulse: shade(success, 0.15)},
     endpoint: rgb(mix(accent, text, 0.2), 220),
+    label: rgb(mix(text, background, 0.15), 230),
+    tooltip: {
+      background: `rgb(${background.join(',')})`,
+      text: `rgb(${text.join(',')})`,
+      border: `rgba(${accent.join(',')},0.35)`,
+    },
     background: rgb(background),
   };
 }
@@ -202,6 +256,9 @@ function fitZoom(width) {
 
 export function createFirewallMap(container, options = {}) {
   let colors = palette(options.theme);
+  let settings = {...DEFAULT_OPTIONS, ...(options.settings || {})};
+  let locationIndex = new Map();
+  let flowsByDest = new Map();
   let lastData = {locations: [], flows: []};
   const initialZoom = fitZoom(container.clientWidth);
   let viewState = {longitude: VIEW_LONGITUDE, latitude: VIEW_LATITUDE, zoom: initialZoom, minZoom: initialZoom, maxZoom: 6};
@@ -211,12 +268,49 @@ export function createFirewallMap(container, options = {}) {
     views: new MapView({repeat: false}),
     viewState,
     onViewStateChange: ({viewState: next}) => {
+      const labelsWereVisible = viewState.zoom >= viewState.minZoom + LABEL_ZOOM_STEP;
       viewState = {...next, minZoom: viewState.minZoom, maxZoom: viewState.maxZoom};
       deck.setProps({viewState});
+      if (labelsWereVisible !== viewState.zoom >= viewState.minZoom + LABEL_ZOOM_STEP) {
+        deck.setProps({layers: layers(lastData)});
+      }
     },
     controller: {scrollZoom: {smooth: true}, dragRotate: false, touchRotate: false},
     useDevicePixels: true,
-    getCursor: ({isDragging}) => isDragging ? 'grabbing' : 'grab',
+    // arrow pointer so endpoints and arches can be hovered; the hand only while dragging
+    getCursor: ({isDragging, isHovering}) => isDragging ? 'grabbing' : (isHovering ? 'pointer' : 'default'),
+    getTooltip: ({object, layer}) => {
+      if (!object || !layer) {
+        return null;
+      }
+      let html = null;
+      if (layer.id === 'firewall-map-endpoints' && object.local) {
+        const own = (lastData.flows || []).filter((flow) => flow.origin === object.id);
+        const rateIn = own.reduce((sum, flow) => sum + (flow.rate_in ?? 0), 0);
+        const rateOut = own.reduce((sum, flow) => sum + (flow.rate_out ?? 0), 0);
+        html = `<div style="font-weight:600;margin-bottom:2px">${escapeHtml(object.id)}</div>
+          <div>${own.length} active links</div>
+          <div style="margin-top:4px">↓ ${formatRate(rateIn)} &nbsp; ↑ ${formatRate(rateOut)}</div>`;
+      } else if (layer.id === 'firewall-map-endpoints') {
+        html = describe(object, flowsByDest.get(`${object.lat},${object.lon}`) || [], locationIndex);
+      } else if (layer.id === 'firewall-map-arcs') {
+        html = describe(object.dest, object.members, locationIndex);
+      }
+      return html && {
+        html,
+        style: {
+          background: colors.tooltip.background,
+          color: colors.tooltip.text,
+          border: `1px solid ${colors.tooltip.border}`,
+          borderRadius: '4px',
+          padding: '6px 8px',
+          fontSize: '12px',
+          lineHeight: '1.35',
+          boxShadow: '0 2px 8px rgba(0,0,0,.15)',
+          maxWidth: '320px',
+        },
+      };
+    },
     layers: [],
   });
   // Exposed for in-browser diagnostics of the live widget.
@@ -256,9 +350,34 @@ export function createFirewallMap(container, options = {}) {
     }
   }
 
+  // one label per place, busiest places first
+  function labels(data) {
+    const seen = new Map();
+    for (const flow of data.flows || []) {
+      const location = locationIndex.get(flow.dest);
+      const text = location?.city || location?.country;
+      if (!text) {
+        continue;
+      }
+      const key = `${location.lat},${location.lon}`;
+      const current = seen.get(key);
+      seen.set(key, {text, lat: location.lat, lon: location.lon, rate: (current?.rate || 0) + (flow.rate || 0)});
+    }
+    return [...seen.values()].sort((a, b) => b.rate - a.rate).slice(0, MAX_LABELS);
+  }
+
   function layers(data) {
-    arcs = buildArcs(data);
+    arcs = buildArcs(data, settings);
     pulseItems = pulses(arcs);
+    locationIndex = new Map((data.locations || []).map((location) => [location.id, location]));
+    flowsByDest = new Map();
+    for (const flow of data.flows || []) {
+      const dest = locationIndex.get(flow.dest);
+      if (dest) {
+        const key = `${dest.lat},${dest.lon}`;
+        flowsByDest.set(key, [...(flowsByDest.get(key) || []), flow]);
+      }
+    }
     baseLayers = [
       new GeoJsonLayer({
         id: 'firewall-map-world',
@@ -279,6 +398,8 @@ export function createFirewallMap(container, options = {}) {
         widthUnits: 'pixels',
         capRounded: true,
         jointRounded: true,
+        pickable: true,
+        widthMinPixels: 1,
         getColor: (arc) => {
           const scheme = arc.toward ? colors.toward : colors.away;
           return rgb(arc.heavy ? scheme.heavy : scheme.link, Math.round((arc.heavy ? 150 : 70) + 105 * arc.activity));
@@ -297,7 +418,25 @@ export function createFirewallMap(container, options = {}) {
         getLineColor: colors.endpoint,
         lineWidthUnits: 'pixels',
         getLineWidth: (location) => location.local ? 2 : 0,
+        pickable: true,
+        radiusMinPixels: 2.5,
         updateTriggers: {getFillColor: colors.endpoint, getLineColor: colors.endpoint},
+      }),
+      new TextLayer({
+        id: 'firewall-map-labels',
+        data: labels(data),
+        visible: settings.labels && viewState.zoom >= viewState.minZoom + LABEL_ZOOM_STEP,
+        getPosition: (label) => [label.lon, label.lat],
+        getText: (label) => label.text,
+        getSize: 11,
+        getColor: colors.label,
+        getPixelOffset: [0, -9],
+        fontFamily: getComputedStyle(container).fontFamily || 'sans-serif',
+        outlineWidth: 3,
+        outlineColor: colors.background,
+        fontSettings: {sdf: true},
+        characterSet: 'auto',
+        updateTriggers: {getColor: colors.label},
       }),
     ];
     const layerList = [...baseLayers, pulseLayer((performance.now() - started) / 1000)];
@@ -311,6 +450,10 @@ export function createFirewallMap(container, options = {}) {
     render(data) {
       lastData = data;
       deck.setProps({layers: layers(data)});
+    },
+    setSettings(next) {
+      settings = {...DEFAULT_OPTIONS, ...next};
+      deck.setProps({layers: layers(lastData)});
     },
     setTheme(theme) {
       colors = palette(theme);

@@ -26,6 +26,8 @@ PFCTL = "/sbin/pfctl"
 IFCONFIG = "/sbin/ifconfig"
 MMDBLOOKUP = "/usr/local/bin/mmdblookup"
 CITY_DATABASE = "/usr/local/share/GeoIP/GeoLite2-City.mmdb"
+# optional: used for AS number/organisation when the administrator installs it
+ASN_DATABASE = "/usr/local/share/GeoIP/GeoLite2-ASN.mmdb"
 OUTPUT_FILE = "/var/run/firewallmap/flows.json"
 GEO_CACHE_FILE = "/var/db/firewallmap/geo.json"
 
@@ -37,6 +39,28 @@ HOST_REFRESH_SECONDS = 30.0
 GEO_CACHE_SAVE_SECONDS = 60.0
 GEO_LOOKUPS_PER_SAMPLE = 25
 GEO_CACHE_MAX = 20000
+MAX_SERVICES = 4
+
+SERVICES = {
+    ("tcp", "20"): "FTP data", ("tcp", "21"): "FTP", ("tcp", "22"): "SSH", ("tcp", "25"): "SMTP",
+    ("udp", "53"): "DNS", ("tcp", "53"): "DNS", ("tcp", "80"): "HTTP", ("udp", "123"): "NTP",
+    ("tcp", "143"): "IMAP", ("tcp", "443"): "HTTPS", ("udp", "443"): "QUIC", ("udp", "500"): "IKE",
+    ("tcp", "465"): "SMTPS", ("tcp", "587"): "Submission", ("tcp", "853"): "DNS over TLS",
+    ("udp", "853"): "DNS over QUIC", ("tcp", "993"): "IMAPS", ("tcp", "995"): "POP3S",
+    ("udp", "1194"): "OpenVPN", ("tcp", "1194"): "OpenVPN", ("udp", "3478"): "STUN/TURN",
+    ("tcp", "3389"): "RDP", ("udp", "4500"): "IPsec NAT-T", ("tcp", "5223"): "Apple Push",
+    ("tcp", "5228"): "Google Push", ("udp", "51820"): "WireGuard", ("tcp", "8080"): "HTTP alt",
+    ("tcp", "8443"): "HTTPS alt", ("udp", "19302"): "Google STUN",
+}
+
+
+def service_name(protocol, port):
+    """Name the responder side of a connection (the service being used)."""
+    if protocol in ("icmp", "ipv6-icmp"):
+        return "ICMP"
+    if port is None:
+        return protocol.upper()
+    return SERVICES.get((protocol, port), f"{protocol.upper()}/{port}")
 
 COUNTERS = re.compile(r"(?P<packets_in>\d+):(?P<packets_out>\d+) pkts,\s+(?P<bytes_in>\d+):(?P<bytes_out>\d+) bytes")
 AGE = re.compile(r"\bage (?:(?P<days>\d+)d)?(?P<h>\d+):(?P<m>\d+):(?P<s>\d+)")
@@ -158,27 +182,38 @@ def parse_mmdb(output):
     return values
 
 
-def lookup_location(address):
-    """Resolve one address against the local GeoLite City database (never a remote service)."""
+def mmdb_lookup(database, address):
     try:
         result = subprocess.run(
-            [MMDBLOOKUP, "--file", CITY_DATABASE, "--ip", address],
+            [MMDBLOOKUP, "--file", database, "--ip", address],
             capture_output=True, check=False, text=True, timeout=2,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return None
-    values = parse_mmdb(result.stdout)
+        return {}
+    return parse_mmdb(result.stdout)
+
+
+def lookup_location(address):
+    """Resolve one address against the local GeoLite databases (never a remote service)."""
+    values = mmdb_lookup(CITY_DATABASE, address)
     try:
         latitude = float(values[("location", "latitude")])
         longitude = float(values[("location", "longitude")])
     except (KeyError, ValueError):
         return None
-    return {
+    location = {
         "lat": round(latitude, 4),
         "lon": round(longitude, 4),
         "city": values.get(("city", "names", "en")),
         "country": values.get(("country", "iso_code")) or values.get(("registered_country", "iso_code")),
+        "country_name": values.get(("country", "names", "en")) or values.get(("registered_country", "names", "en")),
     }
+    if os.path.exists(ASN_DATABASE):
+        asn = mmdb_lookup(ASN_DATABASE, address)
+        if ("autonomous_system_number",) in asn:
+            location["asn"] = int(asn[("autonomous_system_number",)])
+            location["as_org"] = asn.get(("autonomous_system_organization",))
+    return location
 
 
 class GeoCache:
@@ -195,10 +230,13 @@ class GeoCache:
         self._load()
 
     def _database_mtime(self):
-        try:
-            return int(os.stat(self.database).st_mtime)
-        except OSError:
-            return None
+        mtimes = []
+        for database in (self.database, ASN_DATABASE):
+            try:
+                mtimes.append(int(os.stat(database).st_mtime))
+            except OSError:
+                mtimes.append(None)
+        return mtimes
 
     def _load(self):
         try:
@@ -295,7 +333,9 @@ class FlowTracker:
                 delta = current
             else:
                 delta = (0, 0, 0)
-            total = totals.setdefault(pair, {"toward": 0, "away": 0, "packets": 0, "states": 0, "protocols": set()})
+            total = totals.setdefault(pair, {"toward": 0, "away": 0, "packets": 0, "states": 0, "protocols": set(), "services": {}})
+            service = service_name(record["protocol"], record["dst"]["port"])
+            total["services"][service] = total["services"].get(service, 0) + delta[0] + delta[1] + 1
             total["toward"] += delta[0]
             total["away"] += delta[1]
             total["packets"] += delta[2]
@@ -319,6 +359,8 @@ class FlowTracker:
             flow["rate"] = flow["rate_in"] + flow["rate_out"]
             flow["states"] = total["states"]
             flow["protocols"] = sorted(total["protocols"])
+            # busiest services first
+            flow["services"] = [name for name, _ in sorted(total["services"].items(), key=lambda item: -item[1])][:MAX_SERVICES]
             if total["toward"] + total["away"] > 0:
                 flow["last_active"] = now
 
@@ -358,17 +400,24 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time):
             "activity": round(activity, 3),
             "states": flow["states"],
             "protocols": flow["protocols"],
+            "services": flow.get("services", []),
         })
     locations = []
     for address in sorted(location_ids):
         location = geo.get(address)
-        locations.append({
+        entry = {
             "id": address,
             "name": ", ".join(part for part in (location.get("city"), location.get("country")) if part) or address,
+            "city": location.get("city"),
+            "country": location.get("country_name") or location.get("country"),
             "lat": location["lat"],
             "lon": location["lon"],
             "local": address in local_addresses,
-        })
+        }
+        if location.get("asn"):
+            entry["asn"] = location["asn"]
+            entry["as_org"] = location.get("as_org")
+        locations.append(entry)
     return {
         "status": "ok",
         "sampled_at": datetime.fromtimestamp(wall_time, timezone.utc).isoformat(),

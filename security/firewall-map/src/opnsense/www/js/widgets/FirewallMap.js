@@ -9,6 +9,58 @@ export default class FirewallMap extends BaseWidget {
         this.tickTimeout = 2;
         this.renderer = null;
         this.loadingRenderer = null;
+        this.configurable = true;
+    }
+
+    async getWidgetOptions() {
+        const choices = (values) => values.map(([value, label]) => ({value, label}));
+        return {
+            heavy_top: {
+                id: `${this.id}-option-heavy-top`,
+                title: this.translations.heavy_top,
+                type: 'select',
+                options: choices([['0', this.translations.none], ['3', '3'], ['5', '5'], ['10', '10']]),
+                default: '5',
+            },
+            heavy_rate: {
+                id: `${this.id}-option-heavy-rate`,
+                title: this.translations.heavy_rate,
+                type: 'select',
+                options: choices([
+                    ['100000', '100 KB/s'], ['500000', '500 KB/s'], ['1000000', '1 MB/s'],
+                    ['5000000', '5 MB/s'], ['10000000', '10 MB/s'],
+                ]),
+                default: '1000000',
+            },
+            max_arcs: {
+                id: `${this.id}-option-max-arcs`,
+                title: this.translations.max_arcs,
+                type: 'select',
+                options: choices([['50', '50'], ['100', '100'], ['150', '150']]),
+                default: '100',
+            },
+            labels: {
+                id: `${this.id}-option-labels`,
+                title: this.translations.labels,
+                type: 'select',
+                options: choices([['1', this.translations.labels_zoomed], ['0', this.translations.labels_off]]),
+                default: '1',
+            },
+        };
+    }
+
+    async _settings() {
+        const config = await this.getWidgetConfig();
+        return {
+            heavyTop: parseInt(config.heavy_top, 10),
+            heavyRate: parseInt(config.heavy_rate, 10),
+            maxArcs: parseInt(config.max_arcs, 10),
+            labels: config.labels !== '0',
+        };
+    }
+
+    async onWidgetOptionsChanged() {
+        this.renderer?.setSettings(await this._settings());
     }
 
     getGridOptions() {
@@ -118,7 +170,7 @@ export default class FirewallMap extends BaseWidget {
             const container = $(`#${this.id}-firewall-map-canvas`)[0];
             const theme = this._readTheme();
             this._applyTheme(theme);
-            this.renderer = renderer.create(container, {theme});
+            this.renderer = renderer.create(container, {theme, settings: await this._settings()});
             // deck.gl positions its canvas absolutely without left/top, so pin it explicitly
             // rather than relying on the static position (the dashboard centres widget text).
             $(container).children('canvas').css({left: 0, top: 0});
