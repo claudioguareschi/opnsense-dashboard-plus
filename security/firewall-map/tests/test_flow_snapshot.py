@@ -23,6 +23,17 @@ class FlowSnapshotTest(unittest.TestCase):
         self.assertEqual(records[0]["protocol"], "tcp")
         self.assertEqual(records[0]["bytes_out"], 5072)
         self.assertEqual(records[0]["packets_in"], 8)
+        self.assertEqual(records[0]["src"]["address"], "45.56.79.53")
+        self.assertEqual(records[0]["dst"]["address"], "198.13.91.163")
+        self.assertEqual(records[0]["nat"]["address"], "192.168.1.2")
+
+    def test_uses_nat_public_address_as_map_origin(self):
+        output = """all tcp 192.168.1.2:443 (198.13.91.163:443) <- 45.56.79.53:35799 ESTABLISHED:ESTABLISHED
+   age 00:10:05, expires in 23:59:48, 8:12 pkts, 368:5072 bytes
+"""
+        records = FLOW_SNAPSHOT.state_snapshot(output)
+        flows = FLOW_SNAPSHOT.map_flows(records, {"198.13.91.163"})
+        self.assertEqual(flows, [{"origin": "198.13.91.163", "dest": "45.56.79.53", "count": 5440}])
 
     def test_bounds_records(self):
         output = "\n".join(

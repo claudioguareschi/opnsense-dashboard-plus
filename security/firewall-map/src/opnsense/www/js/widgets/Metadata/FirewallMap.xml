@@ -1,0 +1,17 @@
+<metadata>
+    <firewallmap>
+        <filename>FirewallMap.js</filename>
+        <link>/ui/diagnostics/firewall/log</link>
+        <endpoints>
+            <endpoint>/api/firewallmap/flow/snapshot</endpoint>
+        </endpoints>
+        <translations>
+            <title>Firewall Map+</title>
+            <dashboard_title>Firewall Map</dashboard_title>
+            <active_flows>active flows</active_flows>
+            <no_flows>No public flows to display</no_flows>
+            <data_unavailable>Live flow data is unavailable</data_unavailable>
+            <webgl_unavailable>WebGL is required for Firewall Map+</webgl_unavailable>
+        </translations>
+    </firewallmap>
+</metadata>
