@@ -144,7 +144,9 @@ export default class DashboardPlusTraffic extends BaseWidget {
         const combinedOut = [];
         const $perInterface = $(`#${this._elementId('per-interface')}`);
 
-        const palette = Chart.colorschemes.tableau.Classic10;
+        // Classic10 repeats once a firewall has more than ten interfaces.
+        // Tableau20 keeps the identity of every plotted interface distinct.
+        const palette = Chart.colorschemes.tableau.Tableau20;
         const interfaceColors = Object.keys(data.interfaces).reduce((colors, id, index) => {
             colors[id] = palette[index % palette.length];
             return colors;
