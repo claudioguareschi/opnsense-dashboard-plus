@@ -1,0 +1,4 @@
+Firewall Map provides a WebGL dashboard visualization of current firewall
+flows, blocked events, and IDS/IPS alerts. It collects PF state counter deltas
+locally and is designed to enrich remote endpoints with locally stored GeoIP
+data.
