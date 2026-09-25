@@ -13,6 +13,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
         this.latestData = null;
         this.currentConfig = null;
         this.configChanged = false;
+        this.compactVisible = false;
         this.windowDuration = 60000;
         this.directionColors = {
             inbytes: {line: '#2ca02c', fill: 'rgba(44, 160, 44, 0.28)'},
@@ -107,15 +108,27 @@ export default class DashboardPlusTraffic extends BaseWidget {
         if (!element) {
             return;
         }
-        const canScrollLeft = element.scrollLeft > 1;
-        const canScrollRight = element.scrollLeft + element.clientWidth < element.scrollWidth - 1;
+        const scrollThreshold = 5;
+        const canScrollLeft = element.scrollLeft > scrollThreshold;
+        const canScrollRight = element.scrollLeft + element.clientWidth < element.scrollWidth - scrollThreshold;
         $(`#${this.id}-traffic-legend-previous`).toggle(canScrollLeft);
         $(`#${this.id}-traffic-legend-next`).toggle(canScrollRight);
     }
 
     _scrollCombinedLegend(direction) {
         const element = $(`#${this.id}-traffic-combined-legend`)[0];
-        element?.scrollBy({left: direction * element.clientWidth * 0.75, behavior: 'smooth'});
+        if (!element) {
+            return;
+        }
+        const current = element.scrollLeft;
+        const containerLeft = element.getBoundingClientRect().left;
+        const positions = [...element.children]
+            .filter(item => $(item).is(':visible'))
+            .map(item => item.getBoundingClientRect().left - containerLeft + current);
+        const target = direction > 0
+            ? positions.find(position => position > current + 5)
+            : [...positions].reverse().find(position => position < current - 5);
+        element.scrollTo({left: target ?? (direction > 0 ? element.scrollWidth : 0), behavior: 'smooth'});
     }
 
     async _initialize(data) {
@@ -159,6 +172,10 @@ export default class DashboardPlusTraffic extends BaseWidget {
     _applyConfig(config) {
         this.windowDuration = (parseInt(config.time_window, 10) || 60) * 1000;
         const combined = config.display === 'combined';
+        if (combined && !this.compactVisible) {
+            $(`#${this.id}-traffic-combined-legend`).scrollLeft(0);
+        }
+        this.compactVisible = combined;
         $('#dashboard-plus-traffic-combined').toggle(combined);
         $('#dashboard-plus-traffic-per-interface').toggle(!combined);
         this._updateViewToggle(combined);
