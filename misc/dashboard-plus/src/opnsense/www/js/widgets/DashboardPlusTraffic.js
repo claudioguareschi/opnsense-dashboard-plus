@@ -25,6 +25,10 @@ export default class DashboardPlusTraffic extends BaseWidget {
         return {sizeToContent: 650};
     }
 
+    _elementId(name) {
+        return `${this.id}-traffic-${name}`;
+    }
+
     _chartConfig(datasets, showLegend = true, useThemePalette = true) {
         return {
             type: 'line',
@@ -91,7 +95,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
     }
 
     _renderCombinedLegend(datasets) {
-        const $legend = $('#dashboard-plus-traffic-combined-legend').empty();
+        const $legend = $(`#${this._elementId('combined-legend')}`).empty();
         datasets.forEach(dataset => {
             const label = $('<div>').text(dataset.label).html();
             $legend.append(`
@@ -104,7 +108,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
     }
 
     _updateLegendControls() {
-        const element = $(`#${this.id}-traffic-combined-legend`)[0];
+        const element = $(`#${this._elementId('combined-legend')}`)[0];
         if (!element) {
             return;
         }
@@ -116,7 +120,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
     }
 
     _scrollCombinedLegend(direction) {
-        const element = $(`#${this.id}-traffic-combined-legend`)[0];
+        const element = $(`#${this._elementId('combined-legend')}`)[0];
         if (!element) {
             return;
         }
@@ -137,7 +141,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
         const config = await this.getWidgetConfig();
         const combinedIn = [];
         const combinedOut = [];
-        const $perInterface = $('#dashboard-plus-traffic-per-interface');
+        const $perInterface = $(`#${this._elementId('per-interface')}`);
 
         const palette = Chart.colorschemes.tableau.Classic10;
         const interfaceColors = Object.keys(data.interfaces).reduce((colors, id, index) => {
@@ -149,7 +153,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
             combinedIn.push({...this._dataset(intf.name, 'inbytes', data.time, false, color), intf: id});
             combinedOut.push({...this._dataset(intf.name, 'outbytes', data.time, false, color), intf: id});
 
-            const canvasId = `dashboard-plus-traffic-${id}`;
+            const canvasId = this._elementId(`interface-${id}`);
             $perInterface.append(`
                 <div class="dashboard-plus-traffic-interface" data-interface="${id}">
                     ${this._perInterfaceHeading(intf.name)}
@@ -162,8 +166,8 @@ export default class DashboardPlusTraffic extends BaseWidget {
             ], false, false));
         });
 
-        this.charts.combinedIn = new Chart($('#dashboard-plus-traffic-in')[0].getContext('2d'), this._chartConfig(combinedIn, false, false));
-        this.charts.combinedOut = new Chart($('#dashboard-plus-traffic-out')[0].getContext('2d'), this._chartConfig(combinedOut, false, false));
+        this.charts.combinedIn = new Chart($(`#${this._elementId('in')}`)[0].getContext('2d'), this._chartConfig(combinedIn, false, false));
+        this.charts.combinedOut = new Chart($(`#${this._elementId('out')}`)[0].getContext('2d'), this._chartConfig(combinedOut, false, false));
         this._renderCombinedLegend(combinedIn);
         this._makeSubpanelsSortable();
         this.initialized = true;
@@ -175,16 +179,16 @@ export default class DashboardPlusTraffic extends BaseWidget {
         this.windowDuration = (parseInt(config.time_window, 10) || 60) * 1000;
         const combined = config.display === 'combined';
         if (combined && !this.compactVisible) {
-            $(`#${this.id}-traffic-combined-legend`).scrollLeft(0);
+            $(`#${this._elementId('combined-legend')}`).scrollLeft(0);
         }
         this.compactVisible = combined;
-        $('#dashboard-plus-traffic-combined').toggle(combined);
-        $('#dashboard-plus-traffic-per-interface').toggle(!combined);
+        $(`#${this._elementId('combined')}`).toggle(combined);
+        $(`#${this._elementId('per-interface')}`).toggle(!combined);
         this._updateViewToggle(combined);
-        $('.dashboard-plus-traffic-interface').each((_, element) => {
+        $(`#${this._elementId('per-interface')}`).children('.dashboard-plus-traffic-interface').each((_, element) => {
             $(element).toggle(!combined && (config.interfaces || []).includes($(element).data('interface')));
         });
-        $('.dashboard-plus-traffic-legend-item').each((_, item) => {
+        $(`#${this._elementId('combined-legend')}`).children('.dashboard-plus-traffic-legend-item').each((_, item) => {
             $(item).toggle((config.interfaces || []).includes($(item).data('interface')));
         });
         requestAnimationFrame(() => this._updateLegendControls());
@@ -231,7 +235,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
     }
 
     _saveSubpanelOrder() {
-        const order = $('#dashboard-plus-traffic-per-interface').children('.dashboard-plus-traffic-interface')
+        const order = $(`#${this._elementId('per-interface')}`).children('.dashboard-plus-traffic-interface')
             .map((_, panel) => $(panel).data('interface')).get();
         const selected = this.currentConfig.interfaces || [];
         this.currentConfig.interfaces = [
@@ -243,7 +247,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
     }
 
     _makeSubpanelsSortable() {
-        const $container = $('#dashboard-plus-traffic-per-interface');
+        const $container = $(`#${this._elementId('per-interface')}`);
         let draggedPanel = null;
         let $placeholder = null;
         const clearDragState = () => {
@@ -331,18 +335,18 @@ export default class DashboardPlusTraffic extends BaseWidget {
         return $(
             `<div class="dashboard-plus-traffic-container" style="padding: 0 0.25em;">
                 <style>.dashboard-plus-traffic-combined-legend::-webkit-scrollbar { display: none; }</style>
-                <div id="dashboard-plus-traffic-combined">
+                <div id="${this._elementId('combined')}">
                     <h3>${this.translations.trafficin}</h3>
                     <div style="display: flex; align-items: center; gap: 0.35em; margin: 0 0.5em 0.35em;">
                         <button type="button" id="${this.id}-traffic-legend-previous" style="border: 0; background: transparent; color: #777; cursor: pointer; padding: 0 0.2em;" title="${this.translations.legend_previous}" aria-label="${this.translations.legend_previous}"><i class="fa fa-angle-double-left"></i></button>
-                        <div id="dashboard-plus-traffic-combined-legend" class="dashboard-plus-traffic-combined-legend" style="display: flex; flex: 1; min-width: 0; gap: 0.75em; overflow-x: auto; white-space: nowrap; font-size: 0.82em; scrollbar-width: none; -ms-overflow-style: none;"></div>
+                        <div id="${this._elementId('combined-legend')}" class="dashboard-plus-traffic-combined-legend" style="display: flex; flex: 1; min-width: 0; gap: 0.75em; overflow-x: auto; white-space: nowrap; font-size: 0.82em; scrollbar-width: none; -ms-overflow-style: none;"></div>
                         <button type="button" id="${this.id}-traffic-legend-next" style="border: 0; background: transparent; color: #777; cursor: pointer; padding: 0 0.2em;" title="${this.translations.legend_next}" aria-label="${this.translations.legend_next}"><i class="fa fa-angle-double-right"></i></button>
                     </div>
-                    <div class="canvas-container-noaspectratio" style="height: 180px; margin: 0 0.5em;"><canvas id="dashboard-plus-traffic-in"></canvas></div>
+                    <div class="canvas-container-noaspectratio" style="height: 180px; margin: 0 0.5em;"><canvas id="${this._elementId('in')}"></canvas></div>
                     <h3>${this.translations.trafficout}</h3>
-                    <div class="canvas-container-noaspectratio" style="height: 180px; margin: 0 0.5em;"><canvas id="dashboard-plus-traffic-out"></canvas></div>
+                    <div class="canvas-container-noaspectratio" style="height: 180px; margin: 0 0.5em;"><canvas id="${this._elementId('out')}"></canvas></div>
                 </div>
-                <div id="dashboard-plus-traffic-per-interface"></div>
+                <div id="${this._elementId('per-interface')}"></div>
             </div>`
         );
     }
@@ -368,7 +372,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
             event.stopPropagation();
             this._scrollCombinedLegend(1);
         });
-        $(`#${this.id}-traffic-combined-legend`).on('scroll', () => this._updateLegendControls());
+        $(`#${this._elementId('combined-legend')}`).on('scroll', () => this._updateLegendControls());
         this.openEventSource('/api/diagnostics/traffic/stream/1', this._onMessage.bind(this));
     }
 
