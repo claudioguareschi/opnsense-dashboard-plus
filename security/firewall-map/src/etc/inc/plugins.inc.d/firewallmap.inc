@@ -9,8 +9,9 @@
  *
  * 1. Redistributions of source code must retain the above copyright notice,
  *    this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
  * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
@@ -25,25 +26,16 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-namespace OPNsense\FirewallMap\Api;
-
-use OPNsense\Base\ApiControllerBase;
-use OPNsense\Core\Backend;
-
-class FlowController extends ApiControllerBase
+function firewallmap_services()
 {
-    /**
-     * Return the latest capped, geo-enriched flow summary from the collector.
-     *
-     * The collector samples PF counters every second in the background; this
-     * request only reads its output, so dashboard polling never walks the
-     * state table or performs GeoIP lookups.
-     */
-    public function snapshotAction()
-    {
-        $backend = new Backend();
-        $result = json_decode($backend->configdRun('firewallmap flow snapshot'), true);
-
-        return is_array($result) ? $result : ['status' => 'failed', 'flows' => []];
-    }
+    return [[
+        'description' => gettext('Firewall Map+ flow collector'),
+        'configd' => [
+            'restart' => ['firewallmap restart'],
+            'start' => ['firewallmap start'],
+            'stop' => ['firewallmap stop'],
+        ],
+        'name' => 'firewallmap',
+        'pidfile' => '/var/run/firewallmap.pid',
+    ]];
 }

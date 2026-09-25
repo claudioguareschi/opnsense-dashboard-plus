@@ -1,0 +1,3 @@
+if [ -x /usr/local/etc/rc.d/firewallmap ]; then
+	/usr/local/etc/rc.d/firewallmap stop > /dev/null 2>&1
+fi

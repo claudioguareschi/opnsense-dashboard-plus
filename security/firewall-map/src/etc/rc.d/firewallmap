@@ -1,0 +1,30 @@
+#!/bin/sh
+#
+# PROVIDE: firewallmap
+# REQUIRE: LOGIN DAEMON
+# KEYWORD: shutdown
+#
+
+. /etc/rc.subr
+
+name=firewallmap
+rcvar=firewallmap_enable
+pidfile=/var/run/firewallmap.pid
+command=/usr/local/opnsense/scripts/OPNsense/FirewallMap/firewallmap_collector.py
+command_interpreter=/usr/local/bin/python3
+start_cmd="firewallmap_start"
+
+firewallmap_start()
+{
+	if [ -n "$(check_pidfile ${pidfile} ${command} ${command_interpreter})" ]; then
+		echo "${name} already running."
+		return 0
+	fi
+	echo "Starting ${name}."
+	/usr/sbin/daemon -f -p ${pidfile} ${command_interpreter} ${command}
+}
+
+load_rc_config $name
+: ${firewallmap_enable="YES"}
+
+run_rc_command "$1"

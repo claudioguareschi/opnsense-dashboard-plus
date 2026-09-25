@@ -9,7 +9,9 @@
             <title>Firewall Map+</title>
             <dashboard_title>Firewall Map</dashboard_title>
             <active_flows>active flows</active_flows>
-            <no_flows>No public flows to display</no_flows>
+            <no_flows>No active public flows</no_flows>
+            <collector_starting>Starting flow collector…</collector_starting>
+            <carp_backup>CARP backup: traffic is passing through the master</carp_backup>
             <data_unavailable>Live flow data is unavailable</data_unavailable>
             <webgl_unavailable>WebGL is required for Firewall Map+</webgl_unavailable>
             <renderer_failed>Map renderer failed to initialise</renderer_failed>

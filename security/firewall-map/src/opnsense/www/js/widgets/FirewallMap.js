@@ -6,7 +6,7 @@
 export default class FirewallMap extends BaseWidget {
     constructor(config) {
         super(config);
-        this.tickTimeout = 5;
+        this.tickTimeout = 2;
         this.renderer = null;
         this.loadingRenderer = null;
     }
@@ -85,13 +85,22 @@ export default class FirewallMap extends BaseWidget {
         }
         try {
             const snapshot = await this.ajaxCall('/api/firewallmap/flow/snapshot');
+            if (snapshot.status === 'starting') {
+                this._status(this.translations.collector_starting);
+                return;
+            }
             if (snapshot.status !== 'ok') {
+                console.error('Firewall Map+: collector reported', snapshot);
                 this._status(this.translations.data_unavailable);
                 return;
             }
             this.renderer.render(snapshot);
             const count = snapshot.flows?.length || 0;
-            this._status(count ? `${count} ${this.translations.active_flows}` : this.translations.no_flows);
+            let status = count ? `${count} ${this.translations.active_flows}` : this.translations.no_flows;
+            if (snapshot.carp === 'backup') {
+                status += ` · ${this.translations.carp_backup}`;
+            }
+            this._status(status);
         } catch (error) {
             console.error('Firewall Map+: flow update failed', error);
             this._status(this.translations.data_unavailable);
