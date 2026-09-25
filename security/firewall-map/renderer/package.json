@@ -7,9 +7,7 @@
   },
   "dependencies": {
     "@deck.gl/core": "^9.3.2",
-    "@deck.gl/layers": "^9.3.2",
-    "@flowmap.gl/data": "workspace:*",
-    "@flowmap.gl/layers": "workspace:*"
+    "@deck.gl/layers": "^9.3.2"
   },
   "devDependencies": {
     "vite": "^8.0.8"
