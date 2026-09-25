@@ -37,7 +37,7 @@ export default class DashboardPlusFirewallLogs extends BaseTableWidget {
     }
 
     _applyColumns() {
-        const widths = ['7%', '19%', '14%', '29%', '31%'];
+        const widths = ['7%', '19%', '14%', '30%', '30%'];
         $('#dashboard-plus-firewall-logs-table')
             .children('.flextable-header, .dashboard-plus-firewall-logs-row')
             .each((_, row) => {
@@ -57,7 +57,7 @@ export default class DashboardPlusFirewallLogs extends BaseTableWidget {
                             flexBasis: widths[column],
                             marginLeft: '',
                             marginTop: '',
-                            textAlign: column === 4 ? 'right' : 'left'
+                            textAlign: 'left'
                         });
                     }
                 });
