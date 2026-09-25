@@ -28,7 +28,7 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
             this.translations.bytes,
             this.translations.packets,
             this.translations.errors,
-            this.translations.collisions
+            this.translations.collisions_short
         ].forEach(title => $header.append(`<div class="flex-cell" role="columnheader">${title}</div>`));
         $table.prepend($header);
         $container.append($table);
@@ -55,7 +55,7 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
             1: ['42%', '58%'],
             2: ['32%', '34%', '34%'],
             3: ['27%', '24.5%', '24.5%', '24%'],
-            4: ['22%', '22%', '21%', '20%', '15%']
+            4: ['25%', '21%', '21%', '20%', '13%']
         }[visibleFields.length];
         const $table = $('#dashboard-plus-interface-statistics-table');
         $table.children('.flextable-header, .flextable-row').each((_, row) => {

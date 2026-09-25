@@ -129,6 +129,7 @@
             <packets>Packets</packets>
             <errors>Errors</errors>
             <collisions>Collisions</collisions>
+            <collisions_short>Coll.</collisions_short>
             <in>In</in>
             <out>Out</out>
         </translations>
