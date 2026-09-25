@@ -1,0 +1,17 @@
+{
+  "name": "firewall-map-renderer",
+  "private": true,
+  "description": "Builds src/opnsense/www/js/firewall-map-renderer.js. Place this directory at examples/vite-app inside a checkout of https://github.com/visgl/flowmap.gl (v9.4.0), run pnpm install there, then npm run build and copy dist-firewall-map/firewall-map-renderer.js into the plugin.",
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@deck.gl/core": "^9.3.2",
+    "@deck.gl/layers": "^9.3.2",
+    "@flowmap.gl/data": "workspace:*",
+    "@flowmap.gl/layers": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "^8.0.8"
+  }
+}
