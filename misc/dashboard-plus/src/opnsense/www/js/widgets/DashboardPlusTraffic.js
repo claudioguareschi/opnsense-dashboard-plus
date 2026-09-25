@@ -124,6 +124,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
         const combined = config.display === 'combined';
         $('#dashboard-plus-traffic-combined').toggle(combined);
         $('#dashboard-plus-traffic-per-interface').toggle(!combined);
+        this._updateViewToggle(combined);
         $('.dashboard-plus-traffic-interface').each((_, element) => {
             $(element).toggle(!combined && (config.interfaces || []).includes($(element).data('interface')));
         });
@@ -139,6 +140,26 @@ export default class DashboardPlusTraffic extends BaseWidget {
             chart.options.scales.x.realtime.duration = this.windowDuration;
             chart.options.plugins.streaming.ttl = this.windowDuration + 10000;
         });
+    }
+
+    _updateViewToggle(compact) {
+        const $toggle = $(`#${this.id}-traffic-view-toggle`);
+        $toggle.attr({
+            title: compact ? this.translations.expand : this.translations.compact,
+            'aria-label': compact ? this.translations.expand : this.translations.compact
+        });
+        $toggle.find('i').attr('class', compact ? 'fa fa-expand' : 'fa fa-compress');
+    }
+
+    _toggleDisplay() {
+        const config = {...this.currentConfig};
+        config.display = config.display === 'combined' ? 'per_interface' : 'combined';
+        this.currentConfig = config;
+        this.setWidgetConfig(config);
+        this._applyConfig(config);
+        Object.values(this.charts).forEach(chart => chart.resize());
+        this.config.callbacks?.updateGrid?.();
+        $('#save-grid').show();
     }
 
     _orderedInterfaces(interfaces, config) {
@@ -264,6 +285,15 @@ export default class DashboardPlusTraffic extends BaseWidget {
 
     async onMarkupRendered() {
         $(`#${this.id}-title`).html(`<b>${this.translations.dashboard_title}</b>`);
+        const $header = $(`#${this.id}-title`).closest('.widget-header');
+        $header.find('.widget-header-left').append(
+            `<button type="button" id="${this.id}-traffic-view-toggle" style="border: 0; background: transparent; color: #d94f00; cursor: pointer; padding: 0; font-size: 0.9em;" title="${this.translations.compact}" aria-label="${this.translations.compact}"><i class="fa fa-compress"></i></button>`
+        );
+        $(`#${this.id}-traffic-view-toggle`).on('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            this._toggleDisplay();
+        });
         this.openEventSource('/api/diagnostics/traffic/stream/1', this._onMessage.bind(this));
     }
 

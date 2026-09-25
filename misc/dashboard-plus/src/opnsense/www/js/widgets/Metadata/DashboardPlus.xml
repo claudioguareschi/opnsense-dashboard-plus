@@ -57,6 +57,8 @@
             <trafficin>Traffic In</trafficin>
             <trafficout>Traffic Out</trafficout>
             <display>Display</display>
+            <compact>Compact view</compact>
+            <expand>Expanded view</expand>
             <per_interface>Per interface</per_interface>
             <combined>Combined</combined>
             <interfaces>Interfaces</interfaces>
