@@ -151,7 +151,13 @@ export default class FirewallMap extends BaseWidget {
         }
     }
 
-    onWidgetResize() {
+    onWidgetResize(elem, width) {
+        // Keep a world-map aspect ratio (80N to 56S at full width) instead of a fixed height,
+        // and let the dashboard size the cell to it.
+        const map = document.getElementById(`${this.id}-firewall-map`);
+        if (map && width) {
+            map.style.height = `${Math.round(Math.min(640, Math.max(240, width * 0.6)))}px`;
+        }
         this.renderer?.resize();
         return true;
     }
