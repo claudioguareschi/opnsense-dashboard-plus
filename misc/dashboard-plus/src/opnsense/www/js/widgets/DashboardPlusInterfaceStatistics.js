@@ -36,7 +36,7 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
     }
 
     _pair(first, second) {
-        return `<div>${this.translations.in}: ${first}<br>${this.translations.out}: ${second}</div>`;
+        return `<div style="font-size: 0.92em; line-height: 1.4;">${this.translations.in}: ${first}<br>${this.translations.out}: ${second}</div>`;
     }
 
     _escape(value) {
@@ -107,7 +107,7 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
                 this._pair(this._formatBytes(received) || '0', this._formatBytes(transmitted) || '0'),
                 this._pair(packetsReceived.toLocaleString(), packetsTransmitted.toLocaleString()),
                 this._pair(errorsReceived.toLocaleString(), errorsTransmitted.toLocaleString()),
-                (parseInt(intf.collisions) || 0).toLocaleString()
+                `<span style="font-size: 0.92em;">${(parseInt(intf.collisions) || 0).toLocaleString()}</span>`
             ]], id);
         });
         this._applyFieldVisibility(config);
