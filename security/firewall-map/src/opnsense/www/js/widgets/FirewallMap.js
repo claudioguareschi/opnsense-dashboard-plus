@@ -32,8 +32,26 @@ export default class FirewallMap extends BaseWidget {
         if (!this.loadingRenderer) {
             this.loadingRenderer = $.getScript('/ui/js/firewall-map-renderer.js');
         }
-        await this.loadingRenderer;
-        return window.FirewallMapRenderer;
+        try {
+            await this.loadingRenderer;
+        } catch (error) {
+            this.loadingRenderer = null;
+            throw new Error(`renderer script failed to load (${error?.status || ''} ${error?.statusText || error})`);
+        }
+        const renderer = window.FirewallMapRenderer;
+        if (typeof renderer?.create !== 'function') {
+            throw new Error('renderer script loaded but did not expose FirewallMapRenderer.create()');
+        }
+        return renderer;
+    }
+
+    _hasWebGL() {
+        try {
+            const canvas = document.createElement('canvas');
+            return !!(canvas.getContext('webgl2') || canvas.getContext('webgl'));
+        } catch (_) {
+            return false;
+        }
     }
 
     _status(message) {
@@ -42,16 +60,19 @@ export default class FirewallMap extends BaseWidget {
 
     async onMarkupRendered() {
         $(`#${this.id}-title`).html(`<b>${this.translations.dashboard_title}</b>`);
+        if (!this._hasWebGL()) {
+            this._status(this.translations.webgl_unavailable);
+            return;
+        }
         try {
             const renderer = await this._loadRenderer();
-            if (!renderer?.create) {
-                throw new Error('Flowmap.gl did not initialise');
-            }
             this.renderer = renderer.create($(`#${this.id}-firewall-map-canvas`)[0]);
-            await this.onWidgetTick();
-        } catch (_) {
-            this._status(this.translations.webgl_unavailable);
+        } catch (error) {
+            console.error('Firewall Map+: renderer initialisation failed', error);
+            this._status(`${this.translations.renderer_failed}: ${error?.message || error}`);
+            return;
         }
+        await this.onWidgetTick();
     }
 
     async onWidgetTick() {
@@ -67,7 +88,8 @@ export default class FirewallMap extends BaseWidget {
             this.renderer.render(snapshot);
             const count = snapshot.flows?.length || 0;
             this._status(count ? `${count} ${this.translations.active_flows}` : this.translations.no_flows);
-        } catch (_) {
+        } catch (error) {
+            console.error('Firewall Map+: flow update failed', error);
             this._status(this.translations.data_unavailable);
         }
     }

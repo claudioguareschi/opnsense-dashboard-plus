@@ -12,6 +12,7 @@
             <no_flows>No public flows to display</no_flows>
             <data_unavailable>Live flow data is unavailable</data_unavailable>
             <webgl_unavailable>WebGL is required for Firewall Map+</webgl_unavailable>
+            <renderer_failed>Map renderer failed to initialise</renderer_failed>
         </translations>
     </firewallmap>
 </metadata>
