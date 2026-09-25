@@ -18,10 +18,6 @@ export default class DashboardPlusTraffic extends BaseWidget {
             inbytes: {line: '#2ca02c', fill: 'rgba(44, 160, 44, 0.28)'},
             outbytes: {line: '#ff7f0e', fill: 'rgba(255, 127, 14, 0.28)'}
         };
-        this.interfacePalette = [
-            '#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f', '#edc949',
-            '#af7aa1', '#ff9da7', '#9c755f', '#bab0ab', '#2ca02c', '#ff7f0e'
-        ];
     }
 
     getGridOptions() {
@@ -103,6 +99,18 @@ export default class DashboardPlusTraffic extends BaseWidget {
                 </span>
             `);
         });
+        requestAnimationFrame(() => this._updateLegendControls());
+    }
+
+    _updateLegendControls() {
+        const element = $(`#${this.id}-traffic-combined-legend`)[0];
+        if (!element) {
+            return;
+        }
+        const canScrollLeft = element.scrollLeft > 1;
+        const canScrollRight = element.scrollLeft + element.clientWidth < element.scrollWidth - 1;
+        $(`#${this.id}-traffic-legend-previous`).toggle(canScrollLeft);
+        $(`#${this.id}-traffic-legend-next`).toggle(canScrollRight);
     }
 
     _scrollCombinedLegend(direction) {
@@ -116,8 +124,13 @@ export default class DashboardPlusTraffic extends BaseWidget {
         const combinedOut = [];
         const $perInterface = $('#dashboard-plus-traffic-per-interface');
 
-        this._orderedInterfaces(data.interfaces, config).forEach(([id, intf], index) => {
-            const color = this.interfacePalette[index % this.interfacePalette.length];
+        const palette = Chart.colorschemes.tableau.Classic10;
+        const interfaceColors = Object.keys(data.interfaces).reduce((colors, id, index) => {
+            colors[id] = palette[index % palette.length];
+            return colors;
+        }, {});
+        this._orderedInterfaces(data.interfaces, config).forEach(([id, intf]) => {
+            const color = interfaceColors[id];
             combinedIn.push({...this._dataset(intf.name, 'inbytes', data.time, false, color), intf: id});
             combinedOut.push({...this._dataset(intf.name, 'outbytes', data.time, false, color), intf: id});
 
@@ -155,6 +168,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
         $('.dashboard-plus-traffic-legend-item').each((_, item) => {
             $(item).toggle((config.interfaces || []).includes($(item).data('interface')));
         });
+        requestAnimationFrame(() => this._updateLegendControls());
         for (const chart of [this.charts.combinedIn, this.charts.combinedOut]) {
             if (!chart) {
                 continue;
@@ -335,7 +349,13 @@ export default class DashboardPlusTraffic extends BaseWidget {
             event.stopPropagation();
             this._scrollCombinedLegend(1);
         });
+        $(`#${this.id}-traffic-combined-legend`).on('scroll', () => this._updateLegendControls());
         this.openEventSource('/api/diagnostics/traffic/stream/1', this._onMessage.bind(this));
+    }
+
+    onWidgetResize() {
+        requestAnimationFrame(() => this._updateLegendControls());
+        return true;
     }
 
     async getWidgetOptions() {
