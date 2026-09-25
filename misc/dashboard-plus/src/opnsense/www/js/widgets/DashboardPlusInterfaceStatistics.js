@@ -55,7 +55,7 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
             1: ['42%', '58%'],
             2: ['32%', '34%', '34%'],
             3: ['27%', '24.5%', '24.5%', '24%'],
-            4: ['25%', '21%', '21%', '20%', '13%']
+            4: ['27%', '21%', '21%', '20%', '11%']
         }[visibleFields.length];
         const $table = $('#dashboard-plus-interface-statistics-table');
         $table.children('.flextable-header, .flextable-row').each((_, row) => {
