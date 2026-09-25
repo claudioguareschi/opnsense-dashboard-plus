@@ -37,13 +37,30 @@ export default class DashboardPlusFirewallLogs extends BaseTableWidget {
     }
 
     _applyColumns() {
+        const widths = ['6%', '17%', '12%', '33%', '32%'];
         $('#dashboard-plus-firewall-logs-table')
             .children('.flextable-header, .dashboard-plus-firewall-logs-row')
             .each((_, row) => {
-                $(row).children('.flex-cell').each((column, cell) => $(cell).css({
-                    width: ['8%', '18%', '24%', '24%', '26%'][column],
-                    textAlign: 'left'
-                }));
+                $(row).children('.flex-cell').each((column, cell) => {
+                    const $cell = $(cell);
+                    if (column === 5) {
+                        $cell.css({
+                            width: '94%',
+                            flexBasis: '94%',
+                            marginLeft: '6%',
+                            marginTop: '0.25em',
+                            textAlign: 'left'
+                        });
+                    } else {
+                        $cell.css({
+                            width: widths[column],
+                            flexBasis: widths[column],
+                            marginLeft: '',
+                            marginTop: '',
+                            textAlign: 'left'
+                        });
+                    }
+                });
             });
     }
 
@@ -74,9 +91,13 @@ export default class DashboardPlusFirewallLogs extends BaseTableWidget {
 
     _identity(entry) {
         const interfaceName = this.interfaceNames[entry.interface] || entry.interface || '—';
+        return this._escape(interfaceName);
+    }
+
+    _rule(entry) {
         const rule = entry.label || `@${entry.rulenr || '0'}`;
         const query = new URLSearchParams({field: 'rid', operator: '=', value: entry.rid || ''});
-        return `<div>${this._escape(interfaceName)}<br><a href="/ui/diagnostics/firewall/log#${query}" target="_blank" rel="noopener noreferrer" style="font-size: 0.86em;">${this._escape(rule)}</a></div>`;
+        return `<a href="/ui/diagnostics/firewall/log#${query}" target="_blank" rel="noopener noreferrer" style="font-size: 0.86em;">${this._escape(rule)}</a>`;
     }
 
     _matches(entry) {
@@ -106,7 +127,8 @@ export default class DashboardPlusFirewallLogs extends BaseTableWidget {
             this._time(entry.__timestamp__),
             this._identity(entry),
             this._endpoint(entry.src, entry.srcport),
-            this._endpoint(entry.dst, entry.dstport)
+            this._endpoint(entry.dst, entry.dstport),
+            this._rule(entry)
         ].forEach(value => $row.append(`<div class="flex-cell" role="cell">${value}</div>`));
         const $table = $('#dashboard-plus-firewall-logs-table');
         const $header = $table.children('.dashboard-plus-firewall-logs-header');
