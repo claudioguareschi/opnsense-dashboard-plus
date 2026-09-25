@@ -37,7 +37,7 @@ export default class DashboardPlusFirewallLogs extends BaseTableWidget {
     }
 
     _applyColumns() {
-        const widths = ['6%', '17%', '12%', '33%', '32%'];
+        const widths = ['7%', '19%', '14%', '30%', '30%'];
         $('#dashboard-plus-firewall-logs-table')
             .children('.flextable-header, .dashboard-plus-firewall-logs-row')
             .each((_, row) => {
@@ -45,10 +45,10 @@ export default class DashboardPlusFirewallLogs extends BaseTableWidget {
                     const $cell = $(cell);
                     if (column === 5) {
                         $cell.css({
-                            width: '94%',
-                            flexBasis: '94%',
-                            marginLeft: '6%',
-                            marginTop: '0.25em',
+                            width: '93%',
+                            flexBasis: '93%',
+                            marginLeft: '7%',
+                            marginTop: '0',
                             textAlign: 'left'
                         });
                     } else {
@@ -86,7 +86,9 @@ export default class DashboardPlusFirewallLogs extends BaseTableWidget {
 
     _endpoint(address, port) {
         const escapedAddress = this._escape(address || '—');
-        return port ? `${escapedAddress}:<span style="color: inherit;">${this._escape(port)}</span>` : escapedAddress;
+        return port
+            ? `${escapedAddress}<br><span style="color: inherit;">${this._escape(port)}</span>`
+            : escapedAddress;
     }
 
     _identity(entry) {

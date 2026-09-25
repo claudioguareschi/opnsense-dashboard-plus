@@ -199,7 +199,7 @@
         <translations>
             <title>Firewall Logs+</title>
             <dashboard_title>Firewall Logs</dashboard_title>
-            <action>Action</action>
+            <action>Act.</action>
             <time>Time</time>
             <interface>Interface</interface>
             <rule>Rule</rule>
