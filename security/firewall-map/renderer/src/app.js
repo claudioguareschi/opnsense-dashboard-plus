@@ -67,14 +67,6 @@ export function createFirewallMap(container, options = {}) {
   const initialZoom = fitZoom(container.clientWidth);
   let viewState = {longitude: VIEW_LONGITUDE, latitude: VIEW_LATITUDE, zoom: initialZoom, minZoom: initialZoom, maxZoom: 6};
 
-  // Wheel zoom only with Ctrl/Cmd so scrolling the dashboard is never captured by the map.
-  const onWheel = (event) => {
-    if (!event.ctrlKey && !event.metaKey) {
-      event.stopPropagation();
-    }
-  };
-  container.addEventListener('wheel', onWheel, {capture: true});
-
   const deck = new Deck({
     parent: container,
     views: new MapView({repeat: false}),
@@ -158,7 +150,6 @@ export function createFirewallMap(container, options = {}) {
       deck.redraw(true);
     },
     destroy() {
-      container.removeEventListener('wheel', onWheel, {capture: true});
       deck.finalize();
     },
   };
