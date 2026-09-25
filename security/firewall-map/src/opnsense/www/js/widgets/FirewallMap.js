@@ -28,7 +28,7 @@ export default class FirewallMap extends BaseWidget {
 
     /**
      * Read the dashboard theme's own colours (themes don't expose CSS variables): the widget
-     * background, body text and the link colour, which carries the theme accent.
+     * background, body text, the link colour (theme accent) and the success colour (green).
      */
     _readTheme() {
         const parse = (value) => {
@@ -46,13 +46,20 @@ export default class FirewallMap extends BaseWidget {
         }
         background = background || [255, 255, 255];
         const text = parse(getComputedStyle(map).color) || [55, 55, 54];
-        const probe = document.createElement('a');
-        probe.href = '#';
-        map.appendChild(probe);
-        const accent = parse(getComputedStyle(probe).color) || [192, 62, 20];
-        probe.remove();
+        const probeColor = (element) => {
+            map.appendChild(element);
+            const color = parse(getComputedStyle(element).color);
+            element.remove();
+            return color;
+        };
+        const link = document.createElement('a');
+        link.href = '#';
+        const accent = probeColor(link) || [192, 62, 20];
+        const success = document.createElement('span');
+        success.className = 'text-success';
+        const green = probeColor(success) || [76, 175, 80];
         const luminance = (0.2126 * background[0] + 0.7152 * background[1] + 0.0722 * background[2]) / 255;
-        return {dark: luminance < 0.5, background, text, accent};
+        return {dark: luminance < 0.5, background, text, accent, success: green};
     }
 
     _applyTheme(theme) {

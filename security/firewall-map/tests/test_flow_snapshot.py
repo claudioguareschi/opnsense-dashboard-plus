@@ -116,6 +116,14 @@ class TrackerTest(unittest.TestCase):
         self.assertEqual(tracker.flows[self.PAIR]["rate"], 1000.0)
         self.assertEqual(len(tracker.visible(102.0)), 1)
 
+    def test_splits_rate_toward_and_away_from_firewall(self):
+        tracker = COLLECTOR.FlowTracker(smoothing=1.0)
+        # remote 45.56.79.53 initiated this state: first counter is remote -> firewall
+        tracker.update(COLLECTOR.parse_states(nat_state(1000, 1000)), self.LOCAL, now=0.0)
+        tracker.update(COLLECTOR.parse_states(nat_state(1600, 1100)), self.LOCAL, now=1.0)
+        flow = tracker.flows[self.PAIR]
+        self.assertEqual((flow["rate_in"], flow["rate_out"]), (600.0, 100.0))
+
     def test_idle_flow_fades_then_state_removal_drops_it(self):
         tracker = COLLECTOR.FlowTracker(fade_seconds=10, smoothing=1.0)
         tracker.update(COLLECTOR.parse_states(nat_state(1000, 1000)), self.LOCAL, now=0.0)
@@ -139,7 +147,8 @@ class TrackerTest(unittest.TestCase):
         tracker = COLLECTOR.FlowTracker(smoothing=1.0)
         for index in range(5):
             tracker.flows[("198.13.91.163", f"8.8.8.{index}")] = {
-                "rate": float(index), "packet_rate": 0.0, "last_active": 0.0, "first_seen": 0.0,
+                "rate": float(index), "rate_in": 0.0, "rate_out": 0.0, "packet_rate": 0.0,
+                "last_active": 0.0, "first_seen": 0.0,
             }
         visible = tracker.visible(0.0, limit=2)
         self.assertEqual([item[2] for item in visible], ["8.8.8.4", "8.8.8.3"])

@@ -279,20 +279,26 @@ class FlowTracker:
             pair = flow_endpoints(record, local_addresses)
             if pair is None or record.get("id") is None:
                 continue
-            current = (record["bytes_in"] + record["bytes_out"], record["packets_in"] + record["packets_out"])
+            # PF counts initiator->responder first; src is the initiator in parse_states()
+            remote_initiated = record["src"]["address"] == pair[1]
+            toward, away = (
+                (record["bytes_in"], record["bytes_out"]) if remote_initiated
+                else (record["bytes_out"], record["bytes_in"])
+            )
+            current = (toward, away, record["packets_in"] + record["packets_out"])
             counters[record["id"]] = current
             previous = self.counters.get(record["id"])
             if previous is not None:
-                delta_bytes = max(0, current[0] - previous[0])
-                delta_packets = max(0, current[1] - previous[1])
+                delta = tuple(max(0, now_value - before) for now_value, before in zip(current, previous))
             elif not first_sample and record.get("age") is not None and record["age"] <= 2 * (elapsed or INTERVAL):
                 # a state created since the previous sample: everything it counted is new
-                delta_bytes, delta_packets = current
+                delta = current
             else:
-                delta_bytes = delta_packets = 0
-            total = totals.setdefault(pair, {"bytes": 0, "packets": 0, "states": 0, "protocols": set()})
-            total["bytes"] += delta_bytes
-            total["packets"] += delta_packets
+                delta = (0, 0, 0)
+            total = totals.setdefault(pair, {"toward": 0, "away": 0, "packets": 0, "states": 0, "protocols": set()})
+            total["toward"] += delta[0]
+            total["away"] += delta[1]
+            total["packets"] += delta[2]
             total["states"] += 1
             total["protocols"].add(record["protocol"])
         self.counters = counters
@@ -303,14 +309,17 @@ class FlowTracker:
             if pair not in totals:
                 del self.flows[pair]
         for pair, total in totals.items():
-            flow = self.flows.setdefault(pair, {"rate": 0.0, "packet_rate": 0.0, "last_active": None, "first_seen": now})
-            rate = total["bytes"] / elapsed if elapsed else 0.0
-            packet_rate = total["packets"] / elapsed if elapsed else 0.0
-            flow["rate"] = self.smoothing * rate + (1 - self.smoothing) * flow["rate"]
-            flow["packet_rate"] = self.smoothing * packet_rate + (1 - self.smoothing) * flow["packet_rate"]
+            flow = self.flows.setdefault(pair, {
+                "rate": 0.0, "rate_in": 0.0, "rate_out": 0.0, "packet_rate": 0.0,
+                "last_active": None, "first_seen": now,
+            })
+            for key, value in (("rate_in", total["toward"]), ("rate_out", total["away"]), ("packet_rate", total["packets"])):
+                current_rate = value / elapsed if elapsed else 0.0
+                flow[key] = self.smoothing * current_rate + (1 - self.smoothing) * flow[key]
+            flow["rate"] = flow["rate_in"] + flow["rate_out"]
             flow["states"] = total["states"]
             flow["protocols"] = sorted(total["protocols"])
-            if total["bytes"] > 0:
+            if total["toward"] + total["away"] > 0:
                 flow["last_active"] = now
 
     def activity(self, flow, now):
@@ -343,6 +352,8 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time):
             "dest": remote,
             "count": max(1, int(flow["rate"])),
             "rate": round(flow["rate"], 1),
+            "rate_in": round(flow["rate_in"], 1),
+            "rate_out": round(flow["rate_out"], 1),
             "packet_rate": round(flow["packet_rate"], 2),
             "activity": round(activity, 3),
             "states": flow["states"],

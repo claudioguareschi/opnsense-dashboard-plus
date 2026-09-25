@@ -7,8 +7,16 @@ import worldData from './world.json';
 const world = {...worldData, features: worldData.features.filter((feature) => feature.id !== 'ATA')};
 
 const ARC_SAMPLES = 32;
-const MIN_WIDTH = 1.2;
-const MAX_WIDTH = 4.5;
+const LINK_WIDTH = 1.5;
+const HEAVY_WIDTH = 3;
+// heavy talkers: the busiest few links, or anything above this byte rate
+const HEAVY_TOP = 5;
+const HEAVY_TOP_MIN_RATE = 10000;
+const HEAVY_RATE = 1000000;
+// pulse speed maps log10(bytes/s) onto this range: ~1 B/s crawls, ~10 MB/s races
+const FASTEST_LOG_RATE = 7;
+// a direction counts as "both ways" when the smaller side carries at least this share
+const BIDIRECTIONAL_SHARE = 0.25;
 const FRAME_INTERVAL = 1000 / 30;
 
 function mercatorY(latitude) {
@@ -44,25 +52,24 @@ export function buildArcs(data) {
       continue;
     }
     const key = `${item.origin}>${dest.lat},${dest.lon}`;
-    const entry = merged.get(key);
     const rate = item.rate ?? item.count ?? 0;
+    const rateIn = item.rate_in ?? rate;
+    const rateOut = item.rate_out ?? 0;
+    const entry = merged.get(key);
     if (entry) {
       entry.flow.rate += rate;
+      entry.flow.rateIn += rateIn;
+      entry.flow.rateOut += rateOut;
       entry.flow.activity = Math.max(entry.flow.activity, item.activity ?? 1);
-      entry.flow.endpoints += 1;
     } else {
       merged.set(key, {
-        flow: {origin: item.origin, dest: item.dest, rate, activity: item.activity ?? 1, endpoints: 1},
+        flow: {origin: item.origin, dest: item.dest, rate, rateIn, rateOut, activity: item.activity ?? 1},
         origin,
         dest,
       });
     }
   }
   const flows = [...merged.values()].sort((a, b) => b.flow.rate - a.flow.rate);
-
-  const logs = flows.map(({flow}) => Math.log10(1 + flow.rate));
-  const low = Math.min(...logs);
-  const high = Math.max(...logs);
   const lanes = new Map();
   const arcs = [];
   flows.forEach(({flow, origin, dest}, index) => {
@@ -98,28 +105,57 @@ export function buildArcs(data) {
       const y = u * u * y0 + 2 * u * t * cy + t * t * y1;
       path.push([x, latitudeFromMercator(y)]);
     }
-    const strength = high > low ? (logs[index] - low) / (high - low) : 0.5;
-    const activity = flow.activity ?? 1;
+    const {rate, rateIn, rateOut} = flow;
+    const activity = flow.activity;
+    const total = rateIn + rateOut;
+    const inShare = total > 0 ? rateIn / total : 1;
+    let direction = 'both';
+    if (inShare >= 1 - BIDIRECTIONAL_SHARE) {
+      direction = 'in';
+    } else if (inShare <= BIDIRECTIONAL_SHARE) {
+      direction = 'out';
+    }
+    const strength = Math.min(1, Math.log10(1 + rate) / FASTEST_LOG_RATE);
     arcs.push({
       key: `${flow.origin}>${flow.dest}`,
       path,
-      // short regional arcs are drawn slimmer so they don't merge into a blob at world zoom
-      width: (MIN_WIDTH + (MAX_WIDTH - MIN_WIDTH) * strength * Math.min(1, 0.35 + length / 30)) * (0.6 + 0.4 * activity),
+      heavy: (index < HEAVY_TOP && rate >= HEAVY_TOP_MIN_RATE) || rate >= HEAVY_RATE,
+      // colour follows the dominant direction; pulses show both when traffic flows both ways
+      toward: inShare >= 0.5,
+      direction,
       activity,
-      period: 4.5 - 2.5 * strength,
+      period: 6 - 5.2 * strength,
       phase: hash(`${flow.origin}>${flow.dest}`),
     });
   });
   return arcs;
 }
 
-function pulsePosition(arc, seconds) {
-  const t = ((seconds / arc.period + arc.phase) % 1) * ARC_SAMPLES;
+function pulsePosition(arc, seconds, reverse) {
+  let t = (seconds / arc.period + arc.phase) % 1;
+  if (reverse) {
+    t = 1 - t;
+  }
+  t *= ARC_SAMPLES;
   const index = Math.min(Math.floor(t), ARC_SAMPLES - 1);
   const fraction = t - index;
   const [ax, ay] = arc.path[index];
   const [bx, by] = arc.path[index + 1];
   return [ax + (bx - ax) * fraction, ay + (by - ay) * fraction];
+}
+
+/** Pulses run away from the firewall (arc origin) for outbound traffic and towards it for inbound. */
+function pulses(arcs) {
+  const items = [];
+  for (const arc of arcs) {
+    if (arc.direction !== 'in') {
+      items.push({arc, reverse: false, toward: false});
+    }
+    if (arc.direction !== 'out') {
+      items.push({arc, reverse: true, toward: true});
+    }
+  }
+  return items;
 }
 
 // Mercator world is 512px wide at zoom 0; this centre keeps inhabited land in view.
@@ -132,6 +168,7 @@ const DEFAULT_THEME = {
   background: [7, 17, 31],
   text: [169, 200, 217],
   accent: [45, 212, 191],
+  success: [76, 175, 80],
 };
 
 function rgb(color, alpha = 255) {
@@ -144,14 +181,16 @@ function mix(a, b, amount) {
 
 /** Map palette derived from the dashboard theme so the widget blends in. */
 export function palette(theme = DEFAULT_THEME) {
-  const {dark, background, text, accent} = {...DEFAULT_THEME, ...theme};
+  const {dark, background, text, accent, success} = {...DEFAULT_THEME, ...theme};
+  const shade = (color, amount) => mix(color, dark ? [255, 255, 255] : text, amount);
   return {
     dark,
     land: rgb(mix(background, accent, dark ? 0.12 : 0.07)),
     border: rgb(mix(background, mix(accent, text, 0.5), dark ? 0.45 : 0.35)),
-    arc: mix(background, accent, dark ? 0.75 : 0.65),
-    pulse: dark ? mix(accent, [255, 255, 255], 0.35) : mix(accent, text, 0.25),
-    endpoint: rgb(accent, 220),
+    // towards the firewall uses the theme accent, away from it the theme's success green
+    toward: {link: mix(background, accent, 0.7), heavy: shade(accent, 0.2), pulse: shade(accent, 0.15)},
+    away: {link: mix(background, success, 0.7), heavy: shade(success, 0.2), pulse: shade(success, 0.15)},
+    endpoint: rgb(mix(accent, text, 0.2), 220),
     background: rgb(background),
   };
 }
@@ -189,15 +228,17 @@ export function createFirewallMap(container, options = {}) {
   let lastFrame = 0;
   const started = performance.now();
 
+  let pulseItems = [];
+
   function pulseLayer(seconds) {
     return new ScatterplotLayer({
       id: 'firewall-map-pulses',
-      data: arcs,
-      getPosition: (arc) => pulsePosition(arc, seconds),
-      getRadius: (arc) => arc.width * 0.75 + 1.2,
+      data: pulseItems,
+      getPosition: (item) => pulsePosition(item.arc, seconds, item.reverse),
+      getRadius: (item) => item.arc.heavy ? 3.4 : 2.4,
       radiusUnits: 'pixels',
-      getFillColor: (arc) => rgb(colors.pulse, Math.round(90 + 165 * arc.activity)),
-      updateTriggers: {getPosition: seconds, getFillColor: colors.pulse},
+      getFillColor: (item) => rgb((item.toward ? colors.toward : colors.away).pulse, Math.round(110 + 145 * item.arc.activity)),
+      updateTriggers: {getPosition: seconds, getFillColor: [colors.toward.pulse, colors.away.pulse]},
     });
   }
 
@@ -217,6 +258,7 @@ export function createFirewallMap(container, options = {}) {
 
   function layers(data) {
     arcs = buildArcs(data);
+    pulseItems = pulses(arcs);
     baseLayers = [
       new GeoJsonLayer({
         id: 'firewall-map-world',
@@ -233,12 +275,15 @@ export function createFirewallMap(container, options = {}) {
         id: 'firewall-map-arcs',
         data: arcs,
         getPath: (arc) => arc.path,
-        getWidth: (arc) => arc.width,
+        getWidth: (arc) => arc.heavy ? HEAVY_WIDTH : LINK_WIDTH,
         widthUnits: 'pixels',
         capRounded: true,
         jointRounded: true,
-        getColor: (arc) => rgb(colors.arc, Math.round(55 + 150 * arc.activity)),
-        updateTriggers: {getColor: colors.arc},
+        getColor: (arc) => {
+          const scheme = arc.toward ? colors.toward : colors.away;
+          return rgb(arc.heavy ? scheme.heavy : scheme.link, Math.round((arc.heavy ? 150 : 70) + 105 * arc.activity));
+        },
+        updateTriggers: {getColor: [colors.toward.link, colors.away.link]},
       }),
       new ScatterplotLayer({
         id: 'firewall-map-endpoints',
