@@ -65,7 +65,7 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
                 const visible = !field || visibleFields.includes(field);
                 $(cell).toggle(visible).css({
                     width: visible ? widths[visibleIndex++] : '',
-                    textAlign: 'left'
+                    textAlign: column === fieldColumns.collisions ? 'right' : 'left'
                 });
             });
         });
