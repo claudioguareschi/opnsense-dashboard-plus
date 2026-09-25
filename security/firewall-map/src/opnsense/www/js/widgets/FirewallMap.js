@@ -17,7 +17,7 @@ export default class FirewallMap extends BaseWidget {
 
     getMarkup() {
         return $(`
-            <div id="${this.id}-firewall-map" style="position: relative; height: 430px; overflow: hidden; border-radius: 8px; background: #07111f; box-shadow: inset 0 0 0 1px rgba(87, 155, 185, 0.28);">
+            <div id="${this.id}-firewall-map" style="position: relative; height: 430px; min-height: 260px; overflow: hidden; border-radius: 8px; background: #07111f; box-shadow: inset 0 0 0 1px rgba(87, 155, 185, 0.28);">
                 <div aria-hidden="true" style="pointer-events: none; position: absolute; inset: 0; z-index: 0; opacity: .4; background-image: linear-gradient(rgba(78, 136, 165, .16) 1px, transparent 1px), linear-gradient(90deg, rgba(78, 136, 165, .16) 1px, transparent 1px); background-size: 36px 36px;"></div>
                 <div id="${this.id}-firewall-map-canvas" style="position: absolute; inset: 0; z-index: 1;"></div>
                 <div id="${this.id}-firewall-map-status" style="position: absolute; left: 14px; bottom: 11px; z-index: 2; color: #a9c8d9; font-size: .82em; letter-spacing: .02em; text-shadow: 0 1px 2px #000;"></div>
@@ -95,8 +95,16 @@ export default class FirewallMap extends BaseWidget {
     }
 
     onWidgetResize() {
+        // Fill the grid cell the user sized instead of a fixed height; returning false
+        // keeps the widget manager from shrinking the cell back to the content height.
+        const map = document.getElementById(`${this.id}-firewall-map`);
+        const cell = map?.closest('.grid-stack-item-content');
+        if (map && cell) {
+            const available = cell.getBoundingClientRect().bottom - map.getBoundingClientRect().top - 10;
+            map.style.height = `${Math.max(260, Math.floor(available))}px`;
+        }
         this.renderer?.resize();
-        return true;
+        return false;
     }
 
     onWidgetClose() {
