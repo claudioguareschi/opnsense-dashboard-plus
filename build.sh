@@ -37,7 +37,7 @@ for PLUGIN in ${PLUGINS}; do
     mkdir -p "$(dirname "${WORK}/${PLUGIN}")"
     cp -R "${ROOT}/${PLUGIN}" "${WORK}/${PLUGIN}"
     if [ -n "${DEVEL:-}" ]; then
-        (cd "${WORK}/${PLUGIN}" && make package > /dev/null)
+        (cd "${WORK}/${PLUGIN}" && make PLUGIN_DEVEL=yes package > /dev/null)
     else
         (cd "${WORK}/${PLUGIN}" && make PLUGIN_DEVEL= package > /dev/null)
     fi
