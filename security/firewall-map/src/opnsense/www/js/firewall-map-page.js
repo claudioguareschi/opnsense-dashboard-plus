@@ -798,6 +798,7 @@
             }
         });
         const $tabs = $('<ul class="nav nav-pills fwmap-q-tabs"></ul>');
+        const $bulk = $('<div class="fwmap-q-bulkbar"></div>');
         const $search = $(`<input type="search" class="form-control input-sm fwmap-q-search" placeholder="${esc(T.queue_search)}">`);
         const $list = $('<div class="fwmap-q-list"></div>');
         const $searchBox = $(`<div class="fwmap-q-searchbox">${ic('search')}</div>`).append($search);
@@ -829,7 +830,6 @@
             }
             $bulk.html(bulk.join(''));
         };
-        const $bulk = $('<div class="fwmap-q-bulkbar"></div>');
         $bulk.on('click', '.fwmap-q-bulk', function () {
             const to = String($(this).data('to'));
             const count = view.counts[view.status] || 0;
