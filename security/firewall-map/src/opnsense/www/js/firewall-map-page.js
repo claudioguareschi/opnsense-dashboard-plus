@@ -298,32 +298,30 @@
         ] : [];
         const card = state.investigations.get(address);
         const flow = (state.selection?.members || []).find((member) => member.dest === address);
-        return `<div class="fwmap-address"><b>${esc(address)}</b>${remoteIdentity(address)}${flow ? connection(flow) : ''}<div class="fwmap-links">${links.concat(admin).join(' · ')}</div>`
+        return `<div class="fwmap-address"><b>${esc(address)}</b>${flow ? connection(flow) : ''}<div class="fwmap-links">${links.concat(admin).join(' · ')}</div>`
             + (card ? `<div class="fwmap-investigation">${card}</div>` : '') + '</div>';
     }
 
     /** Who opened the connection: 'Inbound to mail 192.168.1.2:443 (HTTPS)' or 'Outbound'. */
-    function connection(flow) {
-        const traffic = `<div class="text-muted">${(flow.services || []).slice(0, 3).map(esc).join(', ')}`
-            + `${(flow.services || []).length ? ' · ' : ''}↓ ${esc(formatRate(flow.rate_in || 0))} ↑ ${esc(formatRate(flow.rate_out || 0))}</div>`;
-        if (flow.initiated !== 'remote' && flow.initiated !== 'both') {
-            const inside = (flow.inside || []).slice(0, 3).map((host) =>
-                `${host.name ? `${esc(host.name)} ` : ''}<span class="text-muted">${esc([host.ip, host.interface].filter(Boolean).join(' · '))}</span>`);
-            return `<div><b>${esc(T.outbound)}</b> ${esc(T.from)} ${inside.length ? inside.join(', ') : esc(T.this_firewall)}</div>${traffic}`;
-        }
-        const targets = (flow.targets || []).slice(0, 3).map((target) =>
-            `${target.name ? `${esc(target.name)} ` : ''}${esc(target.ip)}${target.port ? `:${esc(target.port)}` : ''}`
-            + (target.service ? ` <span class="text-muted">(${esc(target.service)})</span>` : '')).join(', ');
-        const label = flow.initiated === 'remote' ? T.inbound : T.inbound_outbound;
-        return `<div style="font-weight:600">${esc(label)}${targets ? ` ${esc(T.to)} ${targets}` : ''}</div>${traffic}`;
+    /** What the map knows about a remote address: hostname, network, country. */
+    function remoteOf(address) {
+        const location = (state.snapshot?.locations || []).find((item) => item.id === address) || {};
+        return {
+            ip: address,
+            hostname: state.snapshot?.hostnames?.[address],
+            org: state.settings.asn ? location.as_org : null,
+            country: location.country,
+        };
     }
 
-    /** Remote side: hostname (when looked up), then the network it belongs to. */
-    function remoteIdentity(address) {
-        const hostname = state.snapshot?.hostnames?.[address];
-        const location = (state.snapshot?.locations || []).find((item) => item.id === address);
-        return (hostname ? `<div>${esc(hostname)}</div>` : '')
-            + (state.settings.asn && location?.asn ? `<div class="text-muted">AS${esc(location.asn)} ${esc(location.as_org || '')}</div>` : '');
+    /** The one-line summary of a flow, then its services and current rates. */
+    function connection(flow) {
+        const style = flow.threat ? ' style="color:rgb(196,18,48)"' : '';
+        const sentences = FirewallMapRenderer.flowSummary(flow, remoteOf(flow.dest))
+            .map((sentence) => `<div class="fwmap-summary"${style}>${esc(sentence)}</div>`).join('');
+        const traffic = `<div class="text-muted">${(flow.services || []).slice(0, 3).map(esc).join(', ')}`
+            + `${(flow.services || []).length ? ' · ' : ''}↓ ${esc(formatRate(flow.rate_in || 0))} ↑ ${esc(formatRate(flow.rate_out || 0))}</div>`;
+        return sentences + traffic;
     }
 
     /* ---------------------------------------------------------------- investigation card */
@@ -422,19 +420,23 @@
     }
 
     function queueItem(row, names) {
-        const host = (ip) => `${names.has(ip) ? `${esc(names.get(ip))} ` : ''}${esc(ip)}`;
+        // the same sentence as on the map, rebuilt from what the queue recorded
+        const ports = row.service_ports || {};
+        const serviceFor = (protocol, port) => Object.keys(ports).find((name) => ports[name] === `${port}/${protocol}`)
+            || (port ? `${String(protocol).toUpperCase()}/${port}` : 'ICMP');
         const targets = (row.targets || []).map((target) => {
             const [protocol, ip, port] = String(target).split('|');
-            return `${host(ip)}${port ? `:${esc(port)}` : ''} <span class="text-muted">${esc(protocol)}</span>`;
+            const firewall = !/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(ip);
+            return {ip, port, protocol, name: firewall ? 'firewall' : names.get(ip), firewall, service: serviceFor(protocol, port)};
         });
-        const lines = [];
-        if (row.inbound) {
-            lines.push(`<b>${esc(T.inbound)}</b>${targets.length ? ` ${esc(T.to)} ${targets.join(', ')}` : ''}`);
-        }
-        if (row.outbound) {
-            const inside = (row.inside || []).map(host);
-            lines.push(`<b>${esc(T.outbound)}</b>${inside.length ? ` ${esc(T.from)} ${inside.join(', ')}` : ''}`);
-        }
+        const pseudo = {
+            initiated: row.inbound && row.outbound ? 'both' : row.inbound ? 'remote' : 'local',
+            targets,
+            inside: (row.inside || []).map((ip) => ({ip, name: names.get(ip)})),
+            services: row.services || [],
+            service_ports: ports,
+        };
+        const lines = FirewallMapRenderer.flowSummary(pseudo, remoteOf(row.address)).map(esc);
         const address = esc(row.address);
         const status = STATUSES.includes(row.status) ? row.status : 'new';
         const actions = [
@@ -449,7 +451,7 @@
             <div class="fwmap-queue-head"><b>${address}</b>
                 <span class="label label-default fwmap-status">${esc(T[`status_${status}`])}</span>
                 <span style="font-weight:600;color:rgb(196,18,48)">${(row.lists || []).map(esc).join(', ')}</span></div>
-            ${lines.map((line) => `<div>${line}</div>`).join('')}
+            ${lines.map((line) => `<div class="fwmap-summary">${line}</div>`).join('')}
             <div class="text-muted fwmap-queue-meta">${esc(T.first_seen)} ${esc(ago(row.first_seen))} · ${esc(T.last_seen)} ${esc(ago(row.last_seen))}
                 · ${esc(row.samples)} ${esc(T.samples)} · ${esc(T.peak)} ${esc(formatBytes(row.peak_bytes || 0))}
                 ${(row.services || []).length ? ` · ${(row.services || []).map(esc).join(', ')}` : ''}</div>

@@ -127,6 +127,13 @@ SERVICES = {
 }
 
 
+def service_port_label(protocol, port):
+    """'443/tcp' for the summary sentence; ICMP has no port."""
+    if protocol in ("icmp", "ipv6-icmp") or not port:
+        return None
+    return f"{port}/{protocol}"
+
+
 def service_name(protocol, port):
     """Name the responder side of a connection (the service being used)."""
     if protocol in ("icmp", "ipv6-icmp"):
@@ -613,6 +620,7 @@ class FlowTracker:
             total = totals.setdefault(pair, {
                 "toward": 0, "away": 0, "packets": 0, "states": 0, "protocols": set(), "services": {},
                 "inside": {}, "egress": {}, "remote_started": 0, "local_started": 0, "targets": {},
+                "ports": {}, "oldest": 0,
             })
             weight = delta[0] + delta[1] + 1
             inside_side = inside_endpoint(record)
@@ -638,6 +646,9 @@ class FlowTracker:
                 total["egress"][record["origif"]] = total["egress"].get(record["origif"], 0) + weight
             service = service_name(record["protocol"], service_port)
             total["services"][service] = total["services"].get(service, 0) + delta[0] + delta[1] + 1
+            total["ports"].setdefault(service, service_port_label(record["protocol"], service_port))
+            if record.get("age") is not None and record["age"] > total["oldest"]:
+                total["oldest"] = record["age"]
             total["toward"] += delta[0]
             total["away"] += delta[1]
             total["packets"] += delta[2]
@@ -663,6 +674,9 @@ class FlowTracker:
             flow["protocols"] = sorted(total["protocols"])
             # busiest services first
             flow["services"] = [name for name, _ in sorted(total["services"].items(), key=lambda item: -item[1])][:MAX_SERVICES]
+            flow["service_ports"] = {name: total["ports"][name] for name in flow["services"] if total["ports"].get(name)}
+            # how long the oldest connection behind this flow has been open
+            flow["age"] = total["oldest"]
             flow["inside"] = [address for address, _ in sorted(total["inside"].items(), key=lambda item: -item[1])][:MAX_INSIDE]
             flow["egress"] = max(total["egress"], key=total["egress"].get) if total["egress"] else None
             started = total["remote_started"] + total["local_started"]
@@ -1231,9 +1245,10 @@ def describe_target(target, names, networks, interfaces, local_addresses):
     protocol, address, port = target.split("|")
     service = service_name(protocol, port or None)
     if address in local_addresses:
-        return {"ip": address, "port": port, "name": "firewall", "interface": None, "service": service}
+        return {"ip": address, "port": port, "protocol": protocol, "name": "firewall", "interface": None,
+                "service": service, "firewall": True}
     described = describe_inside(address, names, networks, interfaces)
-    described.update({"port": port, "service": service})
+    described.update({"port": port, "protocol": protocol, "service": service})
     return described
 
 
@@ -1299,6 +1314,8 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None
             "initiated": flow.get("initiated", "local"),
             "targets": [describe_target(target, names, networks, interfaces, local_addresses)
                         for target in flow.get("targets", [])],
+            "service_ports": flow.get("service_ports", {}),
+            "age": flow.get("age"),
         })
         # a permitted flow to a listed address is what deserves attention, not background scans
         flows[-1]["threat"] = bool(flows[-1]["lists"])

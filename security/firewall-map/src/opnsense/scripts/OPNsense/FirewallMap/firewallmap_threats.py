@@ -64,7 +64,7 @@ def observe(records, flow_endpoints, lists_for, local_addresses, inside_endpoint
             continue
         entry = seen.setdefault(remote, {
             "lists": lists, "inbound": 0, "outbound": 0, "targets": [], "inside": [], "services": [], "bytes": 0,
-            "youngest": None,
+            "youngest": None, "service_ports": {},
         })
         if record.get("age") is not None:
             entry["youngest"] = record["age"] if entry["youngest"] is None else min(entry["youngest"], record["age"])
@@ -88,6 +88,8 @@ def observe(records, flow_endpoints, lists_for, local_addresses, inside_endpoint
         service = service_name(record["protocol"], service_port)
         if service not in entry["services"]:
             entry["services"].append(service)
+            if record["protocol"] not in ("icmp", "ipv6-icmp") and service_port:
+                entry["service_ports"][service] = f'{service_port}/{record["protocol"]}'
         entry["bytes"] += record.get("bytes_in", 0) + record.get("bytes_out", 0)
     return seen
 
@@ -128,6 +130,8 @@ def _record(db, seen, now):
         data["targets"] = merge(data.get("targets", []), entry["targets"])
         data["inside"] = merge(data.get("inside", []), entry["inside"])
         data["services"] = merge(data.get("services", []), entry["services"])
+        data["service_ports"] = {**data.get("service_ports", {}), **entry["service_ports"]}
+        data["service_ports"] = {name: port for name, port in data["service_ports"].items() if name in data["services"]}
         data["inbound"] = bool(data.get("inbound")) or entry["inbound"] > 0
         data["outbound"] = bool(data.get("outbound")) or entry["outbound"] > 0
         data["peak_bytes"] = max(data.get("peak_bytes", 0), entry["bytes"])

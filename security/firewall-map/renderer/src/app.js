@@ -191,23 +191,87 @@ const INITIATOR_LABELS = {
   both: 'Started from both sides',
 };
 
-function targetLine(target) {
-  const name = target.name ? `${escapeHtml(target.name)} ` : '';
-  const service = target.service ? ` <span style="opacity:.75">${escapeHtml(target.service)}</span>` : '';
-  return `${name}${escapeHtml(target.ip)}${target.port ? `:${escapeHtml(target.port)}` : ''}${service}`;
+function duration(seconds) {
+  if (!seconds || seconds < 60) {
+    return null;
+  }
+  if (seconds < 5400) {
+    return `${Math.round(seconds / 60)} min`;
+  }
+  if (seconds < 172800) {
+    return `${Math.round(seconds / 3600)} h`;
+  }
+  return `${Math.round(seconds / 86400)} days`;
 }
 
-/** 'Inbound to mail 192.168.1.2:443 HTTPS' or 'Outbound' for one flow. */
-function connectionLine(flow) {
-  if (flow.initiated === 'remote' || flow.initiated === 'both') {
-    const targets = (flow.targets || []).slice(0, 2).map(targetLine).join(', ');
-    const label = flow.initiated === 'remote' ? 'Inbound' : 'Inbound and outbound';
-    return `<div style="font-weight:600">${label}${targets ? ` to ${targets}` : ''}</div>`;
+/** 'HTTPS (443/tcp)', 'port 9443/tcp' or 'ICMP'. */
+function serviceLabel(name, port) {
+  const raw = /^(TCP|UDP)\/(\d+)$/.exec(name || '');
+  if (raw) {
+    return `port ${raw[2]}/${raw[1].toLowerCase()}`;
   }
-  const inside = (flow.inside || []).slice(0, 2)
-    .map((host) => `${host.name ? `${escapeHtml(host.name)} ` : ''}${escapeHtml(host.ip)}`).join(', ');
-  // no inside host behind the state: the firewall itself opened it (DNS resolver, updates, VPN)
-  return `<div style="opacity:.75">Outbound from ${inside || 'this firewall'}</div>`;
+  return port ? `${plain(name)} (${port})` : plain(name || 'traffic');
+}
+
+function hostLabel(host) {
+  return host.name ? `${plain(host.name)} (${host.ip})` : host.ip;
+}
+
+/**
+ * One plain-language sentence per direction of a flow, built only from what the collector saw:
+ * who opened it, the service and port, the other side's name, network and country, how long.
+ * `remote` is {ip, hostname, org, country}; the caller escapes the result.
+ */
+export function flowSummary(flow, remote) {
+  const place = [remote.org, remote.country].filter(Boolean).map(plain).join(', ');
+  const other = `${remote.hostname ? plain(remote.hostname) : remote.ip}${place ? ` (${place})` : ''}`;
+  const open = duration(flow.age);
+  const sentences = [];
+  const services = flow.services || [];
+  const ports = flow.service_ports || {};
+  if (flow.initiated === 'remote' || flow.initiated === 'both') {
+    const targets = flow.targets || [];
+    const target = targets[0];
+    let where = 'this firewall';
+    let service = serviceLabel(services[0], ports[services[0]]);
+    if (target) {
+      where = target.firewall || target.name === 'firewall' ? 'this firewall' : hostLabel(target);
+      const port = target.port ? `${target.port}/${target.protocol || 'tcp'}` : null;
+      service = serviceLabel(target.service, port);
+    }
+    const more = targets.length > 1 ? ` (and ${targets.length - 1} other target${targets.length > 2 ? 's' : ''})` : '';
+    const forwarded = target && !(target.firewall || target.name === 'firewall') ? ' through a port forward' : '';
+    sentences.push(`${other} reached ${where} on ${service}${more}${forwarded}${open ? `, open for ${open}` : ''}.`);
+  }
+  if (flow.initiated !== 'remote') {
+    const inside = flow.inside || [];
+    const who = inside.length
+      ? `${hostLabel(inside[0])}${inside.length > 1 ? ` and ${inside.length - 1} other host${inside.length > 2 ? 's' : ''}` : ''}`
+      : 'This firewall';
+    const name = services[0] || '';
+    const service = serviceLabel(name, ports[name]);
+    const more = services.length > 1 ? ` and ${services.length - 1} other service${services.length > 2 ? 's' : ''}` : '';
+    let sentence;
+    if (/^DNS/.test(name)) {
+      sentence = `${who} queried ${service}${more} at ${other}`;
+    } else if (name === 'NTP') {
+      sentence = `${who} synced time with ${other} over ${service}${more}`;
+    } else if (/^(SMTP|SMTPS|Submission)$/.test(name)) {
+      sentence = `${who} delivered mail to ${other} over ${service}${more}`;
+    } else if (name === 'ICMP') {
+      sentence = `${who} pinged ${other}`;
+    } else {
+      sentence = `${who} opened ${service}${more} to ${other}`;
+    }
+    sentences.push(`${sentence}${open && name !== 'ICMP' ? `, open for ${open}` : ''}.`);
+  }
+  return sentences;
+}
+
+/** The summary as hover-card HTML; flagged flows read in the threat colour. */
+function connectionLine(flow, remote) {
+  const style = flow.threat ? 'font-weight:600;color:rgb(196,18,48)' : 'font-weight:600';
+  return flowSummary(flow, remote).map((sentence) => `<div style="${style}">${escapeHtml(sentence)}</div>`).join('');
 }
 
 // arches, blocked sources and endpoints fade in and out instead of popping
@@ -317,7 +381,9 @@ function describe(place, members, locations, hostnames = {}, showAsn = true) {
       const hostname = hostnames?.[flow.dest] ? `<div>${escapeHtml(hostnames[flow.dest])}</div>` : '';
       const asn = showAsn && location?.asn
         ? `<div style="opacity:.7">AS${location.asn} ${escapeHtml(location.as_org || '')}</div>` : '';
-      return `<div style="margin-top:3px">${hostname}<div>${escapeHtml(flow.dest)}</div>${asn}${connectionLine(flow)}</div>`;
+      const remote = {ip: flow.dest, hostname: hostnames?.[flow.dest], org: showAsn ? location?.as_org : null,
+        country: location?.country};
+      return `<div style="margin-top:3px">${hostname}<div>${escapeHtml(flow.dest)}</div>${asn}${connectionLine(flow, remote)}</div>`;
     });
   const more = members.length > 6 ? `<div>+${members.length - 6} more</div>` : '';
   const title = [place.city || place.region, place.country].filter(Boolean).join(', ') || place.name || place.id;

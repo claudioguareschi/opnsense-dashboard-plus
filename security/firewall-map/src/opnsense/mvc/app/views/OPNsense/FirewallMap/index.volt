@@ -60,6 +60,7 @@
     .fwmap-details-head { display: flex; justify-content: space-between; }
     .fwmap-details-head a { font-size: 1.3em; line-height: 1; text-decoration: none; }
     .fwmap-address { margin-top: 6px; }
+    .fwmap-summary { font-weight: 600; }
     .fwmap-links { font-size: .85em; }
     .fwmap-empty { padding: 6px 2px; }
     .fwmap-investigation { margin: 4px 0 8px; padding: 6px 8px; border-left: 3px solid rgba(128, 128, 128, .35); }

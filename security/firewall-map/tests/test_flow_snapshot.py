@@ -249,6 +249,7 @@ class InitiatorTest(unittest.TestCase):
         flow = tracker.flows[("198.13.91.163", "94.154.43.203")]
         self.assertEqual(flow["initiated"], "remote")
         self.assertEqual(flow["targets"], ["tcp|192.168.1.2|443"])
+        self.assertEqual((flow["service_ports"], flow["age"]), ({"HTTPS": "443/tcp"}, 1))
         # the server's replies dominate: the bytes go away from the firewall although the remote started it
         self.assertGreater(flow["rate_out"], flow["rate_in"])
         target = COLLECTOR.describe_target("tcp|192.168.1.2|443", {"192.168.1.2": "mail"}, [], {}, {"198.13.91.163"})
@@ -645,6 +646,7 @@ class ThreatQueueTest(unittest.TestCase):
         self.assertEqual(list(seen), ["108.188.77.155"])
         self.assertEqual(seen["108.188.77.155"]["targets"], ["tcp|192.168.1.2|80"])
         self.assertEqual(seen["108.188.77.155"]["inbound"], 1)
+        self.assertEqual(seen["108.188.77.155"]["service_ports"], {"HTTP": "80/tcp"})
 
     def test_reply_state_from_a_server_counts_as_inbound(self):
         # the SYN passed the other CARP node; the mail server's reply created an outbound NAT state
