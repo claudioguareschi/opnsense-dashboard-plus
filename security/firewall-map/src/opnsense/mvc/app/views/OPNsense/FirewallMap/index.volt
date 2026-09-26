@@ -27,7 +27,8 @@
 <style>
     #firewallmap-page {
         position: relative;
-        height: calc(100vh - 170px);
+        /* header, page title, content padding and the fixed footer */
+        height: calc(100vh - 235px);
         min-height: 420px;
         overflow: hidden;
         border-radius: 6px;
