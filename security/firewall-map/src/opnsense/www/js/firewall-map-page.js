@@ -71,6 +71,9 @@
         if (f.traffic === 'threats' && !flow.threat) {
             return false;
         }
+        if (f.traffic === 'ids' && !flow.ids) {
+            return false;
+        }
         if (f.service && flowService(flow) !== f.service) {
             return false;
         }
@@ -98,6 +101,9 @@
         if (f.traffic === 'threats') {
             return false;
         }
+        if (f.traffic === 'ids' && !block.ids) {
+            return false;
+        }
         // blocked sources have no service category or inside host
         if (f.service || f.iface || f.host) {
             return false;
@@ -111,15 +117,29 @@
         return true;
     }
 
+    function alertMatches(alert) {
+        const f = state.filters;
+        if (f.service || f.iface || f.host) {
+            return false;
+        }
+        if (f.country && alert.country !== f.country) {
+            return false;
+        }
+        return !(f.asn && String(alert.asn || '') !== f.asn);
+    }
+
     function filtered(snapshot) {
         const locations = locationsById(snapshot);
         const flows = (snapshot.flows || []).filter((flow) => flowMatches(flow, locations));
         const blocks = state.settings.blocks ? (snapshot.blocks || []).filter(blockMatches) : [];
+        // alerting addresses without an arc: shown with everything, or when looking at IDS alerts
+        const alerts = ['', 'all', 'ids'].includes(state.filters.traffic || '') ? (snapshot.alerts || []).filter(alertMatches) : [];
         const used = new Set(flows.flatMap((flow) => [flow.origin, flow.dest]));
         return {
             ...snapshot,
             flows,
             blocks,
+            alerts,
             locations: (snapshot.locations || []).filter((location) => location.local || used.has(location.id)),
         };
     }
@@ -299,7 +319,9 @@
         const card = state.investigations.get(address);
         const flow = (state.selection?.members || []).find((member) => member.dest === address);
         const block = state.selection?.block?.source === address ? state.selection.block : null;
-        const summary = flow ? connection(flow) : block ? blocked(block) : '';
+        const alert = state.selection?.alert?.source === address ? state.selection.alert : null;
+        const ids = flow?.ids || block?.ids || alert?.ids;
+        const summary = (flow ? connection(flow) : block ? blocked(block) : '') + idsLines(ids);
         return `<div class="fwmap-address"><b>${esc(address)}</b>${summary}<div class="fwmap-links">${links.concat(admin).join(' · ')}</div>`
             + (card ? `<div class="fwmap-investigation">${card}</div>` : '') + '</div>';
     }
@@ -493,6 +515,7 @@
                     <i class="fa fa-clock-o"></i> ${esc(ago(row.last_seen))} ${esc(T.ago)}</span>
             </div>
             ${lines.map((line) => `<div class="fwmap-q-summary">${line}</div>`).join('')}
+            ${idsLines(row.ids)}
             <div class="fwmap-q-chips">${chips}</div>
             <div class="fwmap-q-meta">
                 <span title="${esc(T.first_seen)}"><i class="fa fa-calendar"></i> ${esc(T.first_seen)} ${esc(ago(row.first_seen))} ${esc(T.ago)}</span>
@@ -681,8 +704,21 @@
             .append($('<span></span>').text(`${T.blacklist_short}: ${text}`));
     }
 
+    /** Suricata's alerts for an address, worst signature first. */
+    function idsLines(ids) {
+        if (!ids) {
+            return '';
+        }
+        const cls = ids.severity <= 2 ? 'fwmap-ids fwmap-ids-high' : 'fwmap-ids';
+        return FirewallMapRenderer.idsSummary(ids)
+            .map((line) => `<div class="${cls}"><i class="fa fa-flag"></i> ${esc(line)}</div>`).join('');
+    }
+
     /** First thing to read: did the firewall let it through, and does that matter. */
-    function verdict(isBlocked, flagged, count) {
+    function verdict(isBlocked, flagged, count, idsOnly) {
+        if (idsOnly) {
+            return `<div class="fwmap-verdict fwmap-verdict-blocked">${esc(T.verdict_ids)}</div>`;
+        }
         let text = isBlocked ? T.verdict_blocked : flagged ? T.verdict_allowed_flagged : T.verdict_allowed;
         const kind = isBlocked ? 'blocked' : flagged ? 'danger' : 'allowed';
         if (!isBlocked && count > 1) {
@@ -699,7 +735,7 @@
             return;
         }
         const addresses = [...new Set(selection.addresses)].slice(0, 8);
-        const lists = [...new Set([...(selection.block?.lists || []),
+        const lists = [...new Set([...(selection.block?.lists || []), ...(selection.alert?.lists || []),
             ...(selection.members || []).flatMap((member) => member.lists || [])])];
         const country = state.isAdmin && selection.countryCode
             ? `<div class="fwmap-links"><a href="#" class="fwmap-country" data-code="${esc(selection.countryCode)}">`
@@ -709,7 +745,7 @@
                 <b>${esc(selection.title || '')}</b>
                 <a href="#" id="fwmap-details-close" title="${esc(T.close)}">&times;</a>
             </div>
-            ${verdict(selection.kind === 'blocked', lists.length > 0, addresses.length)}
+            ${verdict(selection.kind === 'blocked', lists.length > 0, addresses.length, selection.kind === 'alert')}
             ${lists.length ? `<div style="font-weight:600;color:rgb(196,18,48)">${esc(T.listed_in)} ${lists.map(esc).join(', ')}</div>` : ''}
             ${addresses.map(addressRow).join('')}
             ${country}
@@ -875,6 +911,9 @@
                     message += ` · ${below} ${T.below_threshold}`;
                 }
             }
+        }
+        if ((shown.alerts || []).length || shown.flows.some((flow) => flow.ids)) {
+            message += ` · ${(shown.alerts || []).length + shown.flows.filter((flow) => flow.ids).length} ${T.ids_alerting}`;
         }
         const threats = shown.flows.filter((flow) => flow.threat).length;
         if (threats) {

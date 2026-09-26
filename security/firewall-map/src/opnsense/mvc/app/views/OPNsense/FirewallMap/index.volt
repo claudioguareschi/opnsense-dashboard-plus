@@ -61,6 +61,8 @@
     .fwmap-details-head a { font-size: 1.3em; line-height: 1; text-decoration: none; }
     .fwmap-address { margin-top: 6px; }
     .fwmap-summary { font-weight: 600; }
+    .fwmap-ids { margin-top: 2px; color: rgb(200, 110, 0); }
+    .fwmap-ids-high { color: rgb(196, 18, 48); font-weight: 600; }
     .fwmap-verdict { margin: 4px 0; padding: 3px 8px; border-radius: 3px; font-weight: 600; }
     .fwmap-verdict-allowed { background: rgba(46, 139, 87, .14); color: rgb(30, 110, 65); }
     .fwmap-verdict-danger { background: rgb(196, 18, 48); color: #fff; }
@@ -147,6 +149,8 @@
         click_hint: "{{ lang._('Click an endpoint or arc on the map for details and actions.') }}",
         verdict_allowed: "{{ lang._('Allowed: the firewall let this traffic through') }}",
         verdict_allowed_flagged: "{{ lang._('Allowed: flagged traffic got through the firewall') }}",
+        verdict_ids: "{{ lang._('Seen by Suricata: no connection is open right now') }}",
+        ids_alerting: "{{ lang._('addresses with IDS alerts') }}",
         verdict_blocked: "{{ lang._('Blocked: the firewall dropped this traffic') }}",
         remote_addresses: "{{ lang._('remote addresses') }}",
         inside_hosts: "{{ lang._('Inside hosts') }}",
@@ -261,6 +265,7 @@
             <option value="permitted">{{ lang._('Permitted') }}</option>
             <option value="blocked">{{ lang._('Blocked') }}</option>
             <option value="threats">{{ lang._('Threats that got through') }}</option>
+            <option value="ids">{{ lang._('IDS alerts') }}</option>
         </select>
         <select id="fwmap-filter-service" class="form-control"></select>
         <select id="fwmap-filter-iface" class="form-control"></select>

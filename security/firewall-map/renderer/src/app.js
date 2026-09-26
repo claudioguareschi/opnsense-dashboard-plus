@@ -399,7 +399,7 @@ function describe(place, members, locations, hostnames = {}, showAsn = true) {
         ? `<div style="opacity:.7">AS${location.asn} ${escapeHtml(location.as_org || '')}</div>` : '';
       const remote = {ip: flow.dest, hostname: hostnames?.[flow.dest], org: showAsn ? location?.as_org : null,
         country: location?.country};
-      return `<div style="margin-top:3px">${hostname}<div>${escapeHtml(flow.dest)}</div>${asn}${connectionLine(flow, remote)}</div>`;
+      return `<div style="margin-top:3px">${hostname}<div>${escapeHtml(flow.dest)}</div>${asn}${connectionLine(flow, remote)}${idsHtml(flow.ids)}</div>`;
     });
   const more = members.length > 6 ? `<div>+${members.length - 6} more</div>` : '';
   const title = [place.city || place.region, place.country].filter(Boolean).join(', ') || place.name || place.id;
@@ -511,6 +511,44 @@ function verdictLine(blocked, flagged) {
     : '<div style="font-weight:600;color:rgb(30,110,65)">Allowed through the firewall</div>';
 }
 
+/**
+ * Suricata's view of an address in one line per signature, worst first:
+ * 'Suricata: ET SCAN Potential SSH Scan (severity 2), 3× in the last hour, latest 2 min ago'.
+ */
+export function idsSummary(ids) {
+  if (!ids || !ids.count) {
+    return [];
+  }
+  const latest = duration(ids.last_seconds) || 'moments';
+  const lines = (ids.signatures || []).map((item, index) =>
+    `Suricata: ${plain(item.signature)} (severity ${item.severity}${item.category ? `, ${plain(item.category)}` : ''})`
+    + `, ${item.count}×${index === 0 ? ` in the last ${ids.minutes >= 60 ? `${Math.round(ids.minutes / 60)} h` : `${ids.minutes} min`}, latest ${latest} ago` : ''}`);
+  const shown = (ids.signatures || []).reduce((sum, item) => sum + item.count, 0);
+  if (ids.count > shown) {
+    lines.push(`and ${ids.count - shown} more alert${ids.count - shown > 1 ? 's' : ''}`);
+  }
+  return lines;
+}
+
+function idsHtml(ids) {
+  const serious = ids && ids.severity <= 2;
+  return idsSummary(ids).map((line) =>
+    `<div style="margin-top:2px;${serious ? 'color:rgb(196,18,48);font-weight:600' : 'color:rgb(200,110,0)'}">⚑ ${escapeHtml(line)}</div>`).join('');
+}
+
+/** Hover card for an address Suricata alerted on that has no arc right now. */
+function describeAlert(alert, showAsn) {
+  const title = [alert.city, alert.country].filter(Boolean).join(', ') || alert.source;
+  const asn = showAsn && alert.asn ? `<div style="opacity:.7">AS${alert.asn} ${escapeHtml(alert.as_org || '')}</div>` : '';
+  return `
+    <div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}</div>
+    <div style="font-weight:600;opacity:.8">Seen by Suricata, no connection open now</div>
+    ${(alert.lists || []).length ? `<div style="font-weight:600;color:rgb(196,18,48)">Listed in ${alert.lists.map(escapeHtml).join(', ')}</div>` : ''}
+    <div style="margin-top:3px"><div>${escapeHtml(alert.source)}</div>${asn}</div>
+    ${idsHtml(alert.ids)}
+  `;
+}
+
 /** Hover card for a blocked source. */
 function describeBlock(block, showAsn) {
   const title = [block.city, block.country].filter(Boolean).join(', ') || block.source;
@@ -523,6 +561,7 @@ function describeBlock(block, showAsn) {
     <div style="margin-top:3px"><div>${escapeHtml(block.source)}</div>${asn}</div>
     <div style="margin-top:4px;font-weight:600${block.threat || (block.lists || []).length ? ';color:rgb(196,18,48)' : ''}">${escapeHtml(blockSummary(block, showAsn))}</div>
     <div style="opacity:.7">${block.hits_per_minute} in the last minute${block.threat ? ' (hammering)' : ''}</div>
+    ${idsHtml(block.ids)}
   `;
 }
 
@@ -696,6 +735,10 @@ export function createFirewallMap(container, options = {}) {
       return {kind: 'blocked', addresses: [object.source], country: object.country, countryCode: object.country_code,
         title: object.city || object.country, block: object};
     }
+    if (layerId === 'firewall-map-alerts') {
+      return {kind: 'alert', addresses: [object.source], country: object.country, countryCode: object.country_code,
+        title: object.city || object.country, alert: object};
+    }
     if (layerId === 'firewall-map-arcs') {
       return {kind: 'flow', addresses: object.members.map((member) => member.dest), country: object.dest.country,
         countryCode: object.dest.country_code, title: object.dest.city || object.dest.region || object.dest.country,
@@ -726,6 +769,9 @@ export function createFirewallMap(container, options = {}) {
     }
     if (layer.id === 'firewall-map-blocks' || layer.id === 'firewall-map-block-sources') {
       return describeBlock(object, settings.asn);
+    }
+    if (layer.id === 'firewall-map-alerts') {
+      return describeAlert(object, settings.asn);
     }
     if (layer.id === 'firewall-map-arcs') {
       return describe(object.dest, object.members, locationIndex, lastData.hostnames, settings.asn);
@@ -779,6 +825,8 @@ export function createFirewallMap(container, options = {}) {
   const arcFader = new Fader((arc) => arc.key);
   const blockFader = new Fader((block) => block.source);
   const endpointFader = new Fader((location) => location.id);
+  const alertFader = new Fader((alert) => alert.source);
+  let alertPoints = [];
   let frameNow = performance.now();
   let fadeKey = 'steady';
   // stable colour per category across refreshes (first seen keeps its colour)
@@ -1032,6 +1080,22 @@ export function createFirewallMap(container, options = {}) {
         updateTriggers: {getFillColor: [colors.block, fadeKey]},
       }),
       new ScatterplotLayer({
+        // addresses Suricata alerted on with no arc right now: a hollow marker in the alert colour
+        id: 'firewall-map-alerts',
+        data: alertPoints,
+        getPosition: (alert) => [alert.lon, alert.lat],
+        getRadius: 4.5,
+        radiusUnits: 'pixels',
+        stroked: true,
+        filled: true,
+        getFillColor: (alert) => faded(rgb(colors.background.slice(0, 3), 220), alertFader.opacity(alert, frameNow)),
+        getLineColor: (alert) => faded(alert.ids?.severity <= 2 ? rgb(colors.block) : [230, 140, 0, 255], alertFader.opacity(alert, frameNow)),
+        lineWidthUnits: 'pixels',
+        getLineWidth: 2,
+        pickable: true,
+        updateTriggers: {getFillColor: [colors.background, fadeKey], getLineColor: [colors.block, fadeKey]},
+      }),
+      new ScatterplotLayer({
         id: 'firewall-map-endpoints',
         data: locationsShown,
         getPosition: (location) => [location.lon, location.lat],
@@ -1051,7 +1115,7 @@ export function createFirewallMap(container, options = {}) {
   }
 
   function animating(now) {
-    return arcFader.animating(now) || blockFader.animating(now) || endpointFader.animating(now);
+    return arcFader.animating(now) || blockFader.animating(now) || endpointFader.animating(now) || alertFader.animating(now);
   }
 
   function compose(now = performance.now()) {
@@ -1069,6 +1133,7 @@ export function createFirewallMap(container, options = {}) {
     pulseItems = pulses(arcs);
     blockArcs = blockFader.update(settings.blocks ? buildBlocks(data) : [], now);
     locationsShown = endpointFader.update(data.locations || [], now);
+    alertPoints = alertFader.update(data.alerts || [], now);
     locationIndex = new Map((data.locations || []).map((location) => [location.id, location]));
     flowsByDest = new Map();
     for (const flow of data.flows || []) {

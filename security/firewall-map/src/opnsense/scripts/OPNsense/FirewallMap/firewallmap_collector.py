@@ -59,6 +59,15 @@ THREAT_RECORD_SECONDS = 20.0
 THREAT_PRUNE_SECONDS = 3600.0
 RC_SCRIPT = "/usr/local/etc/rc.d/firewallmap"
 FILTER_LOG = "/var/log/filter/latest.log"
+# Suricata's alert log (EVE JSON); read locally, only alert events
+EVE_LOG = "/var/log/suricata/eve.json"
+IDS_LIST = "Suricata IDS"
+# alerts are remembered this long per remote address; severity 1-2 flags the address as a threat
+ALERT_WINDOW_SECONDS = 3600
+ALERT_FLAG_SEVERITY = 2
+MAX_ALERT_SOURCES = 2000
+MAX_SIGNATURES_PER_SOURCE = 10
+ALERT_BACKLOG_BYTES = 2 * 1024 * 1024
 RULES_DEBUG = "/tmp/rules.debug"
 CONFIG_XML = "/conf/config.xml"
 # a blocked source fades this long after its last hit and is reported while hit in the last minute;
@@ -1211,7 +1220,7 @@ class BlockTracker:
 
 
 def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, interfaces, blocklists=None,
-                   reputation=None):
+                   reputation=None, alerts=None):
     """Map-ready blocked sources; each arc ends at the firewall address that was hit."""
     visible = blocks.visible(now)
     geo.resolve([address for address, _ in visible])
@@ -1249,7 +1258,35 @@ def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, inte
             "accuracy_km": location.get("accuracy_km"),
             "asn": location.get("asn"),
             "as_org": location.get("as_org"),
-            "lists": threat_lists_for(address, blocklists, reputation),
+            "lists": threat_lists_for(address, blocklists, reputation, alerts),
+            "ids": alerts.summary(address) if alerts is not None else None,
+        })
+    return result
+
+
+def alert_snapshot(alerts, geo, origin, shown, blocklists=None, reputation=None, now=None):
+    """Alerting addresses with no arc on the map right now (the connection ended or never got one)."""
+    if alerts is None:
+        return []
+    addresses = [address for address in reversed(list(alerts.sources)) if address not in shown][:MAX_BLOCK_SOURCES]
+    geo.resolve(addresses)
+    result = []
+    for address in addresses:
+        location = geo.get(address)
+        if location is None:
+            continue
+        result.append({
+            "source": address,
+            "target": origin,
+            "lat": location["lat"],
+            "lon": location["lon"],
+            "city": location.get("city") or location.get("region"),
+            "country": location.get("country_name") or location.get("country"),
+            "country_code": location.get("country"),
+            "asn": location.get("asn"),
+            "as_org": location.get("as_org"),
+            "lists": threat_lists_for(address, blocklists, reputation, alerts),
+            "ids": alerts.summary(address, now),
         })
     return result
 
@@ -1266,11 +1303,123 @@ def describe_target(target, names, networks, interfaces, local_addresses):
     return described
 
 
-def threat_lists_for(address, blocklists, reputation):
+def threat_lists_for(address, blocklists, reputation, alerts=None):
     lists = blocklists.lookup(address) if blocklists else []
     if reputation is not None and address in reputation.flagged:
         lists = lists + [REPUTATION_LIST]
+    if alerts is not None and alerts.flags(address):
+        lists = lists + [IDS_LIST]
     return lists
+
+
+def parse_alert(line):
+    """One Suricata EVE alert, or None for any other event (cheap check before JSON parsing)."""
+    if '"event_type":"alert"' not in line and '"event_type": "alert"' not in line:
+        return None
+    try:
+        event = json.loads(line)
+    except ValueError:
+        return None
+    alert = event.get("alert") or {}
+    try:
+        at = datetime.strptime(event.get("timestamp", ""), "%Y-%m-%dT%H:%M:%S.%f%z").timestamp()
+    except ValueError:
+        at = None
+    return {
+        "time": at,
+        "src": event.get("src_ip"),
+        "dst": event.get("dest_ip"),
+        "src_port": event.get("src_port"),
+        "dst_port": event.get("dest_port"),
+        "protocol": str(event.get("proto") or "").lower(),
+        "sid": alert.get("signature_id"),
+        "signature": alert.get("signature") or "",
+        "category": alert.get("category") or "",
+        "severity": alert.get("severity") or 3,
+        "action": alert.get("action") or "allowed",
+    }
+
+
+class AlertTracker:
+    """Suricata alerts per remote address over the last ALERT_WINDOW_SECONDS, bounded in memory."""
+
+    def __init__(self, window=ALERT_WINDOW_SECONDS, max_sources=MAX_ALERT_SOURCES):
+        self.window = window
+        self.max_sources = max_sources
+        self.sources = {}
+
+    def add(self, alert, local_addresses, now=None):
+        at = alert["time"] if alert["time"] is not None else (now or time.time())
+        src, dst = alert["src"], alert["dst"]
+        # the remote side is the public address that is not this firewall; internal-only alerts
+        # have no place on the map
+        if public_ipv4(src) and src not in local_addresses:
+            remote, local, inbound = src, dst, True
+        elif public_ipv4(dst) and dst not in local_addresses:
+            remote, local, inbound = dst, src, False
+        else:
+            return
+        entry = self.sources.pop(remote, None)
+        if entry is None:
+            if len(self.sources) >= self.max_sources:
+                del self.sources[next(iter(self.sources))]
+            entry = {"first": at, "last": at, "count": 0, "signatures": {}, "targets": {}, "inbound": False,
+                     "outbound": False}
+        self.sources[remote] = entry  # most recently alerting last, so eviction drops the stalest
+        entry["first"] = min(entry["first"], at)
+        entry["last"] = max(entry["last"], at)
+        entry["count"] += 1
+        entry["inbound" if inbound else "outbound"] = True
+        signatures = entry["signatures"]
+        key = alert["sid"] or alert["signature"]
+        if key in signatures or len(signatures) < MAX_SIGNATURES_PER_SOURCE:
+            signature = signatures.setdefault(key, {
+                "sid": alert["sid"], "signature": alert["signature"], "category": alert["category"],
+                "severity": alert["severity"], "count": 0, "last": at, "action": alert["action"],
+            })
+            signature["count"] += 1
+            signature["last"] = max(signature["last"], at)
+            signature["action"] = alert["action"]
+        port = alert["dst_port"] if inbound else alert["src_port"]
+        target = f'{local}:{port}/{alert["protocol"]}' if port else f'{local}/{alert["protocol"]}'
+        if target in entry["targets"] or len(entry["targets"]) < MAX_SIGNATURES_PER_SOURCE:
+            entry["targets"][target] = entry["targets"].get(target, 0) + 1
+
+    def expire(self, now):
+        for address in [address for address, entry in self.sources.items() if now - entry["last"] > self.window]:
+            del self.sources[address]
+
+    def flags(self, address):
+        entry = self.sources.get(address)
+        if not entry or not entry["signatures"]:
+            return False
+        return min(item["severity"] for item in entry["signatures"].values()) <= ALERT_FLAG_SEVERITY
+
+    def feed(self, lines, local_addresses):
+        for line in lines:
+            alert = parse_alert(line)
+            if alert:
+                self.add(alert, local_addresses)
+
+    def summary(self, address, now=None):
+        """What the map shows for an address: count, worst severity and the top signatures."""
+        entry = self.sources.get(address)
+        if not entry:
+            return None
+        now = time.time() if now is None else now
+        signatures = sorted(entry["signatures"].values(), key=lambda item: (item["severity"], -item["count"]))
+        return {
+            "count": entry["count"],
+            "severity": signatures[0]["severity"] if signatures else 3,
+            "signatures": [{key: item[key] for key in ("sid", "signature", "category", "severity", "count", "action")}
+                           for item in signatures[:3]],
+            "targets": [target for target, _ in sorted(entry["targets"].items(), key=lambda item: -item[1])][:3],
+            "inbound": entry["inbound"],
+            "outbound": entry["outbound"],
+            "first_seconds": round(max(0, now - entry["first"])),
+            "last_seconds": round(max(0, now - entry["last"])),
+            "minutes": self.window // 60,
+        }
 
 
 class Reputation:
@@ -1302,6 +1451,7 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None
     interfaces = context.get("interfaces", {})
     blocklists = context.get("blocklists")
     reputation = context.get("reputation")
+    alerts = context.get("alerts")
     visible = tracker.visible(now)
     geo.resolve([address for _, local, remote, _, _ in visible for address in (local, remote)])
     flows = []
@@ -1324,7 +1474,8 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None
             "services": flow.get("services", []),
             "inside": [describe_inside(address, names, networks, interfaces) for address in flow.get("inside", [])],
             "egress": interfaces.get(flow.get("egress"), flow.get("egress")),
-            "lists": threat_lists_for(remote, blocklists, reputation),
+            "lists": threat_lists_for(remote, blocklists, reputation, alerts),
+            "ids": alerts.summary(remote, wall_time) if alerts is not None else None,
             "initiated": flow.get("initiated", "local"),
             "targets": [describe_target(target, names, networks, interfaces, local_addresses)
                         for target in flow.get("targets", [])],
@@ -1413,14 +1564,15 @@ class ThreatRecorder:
         self.recorded = None
         self.pruned = None
 
-    def update(self, records, local_addresses, blocklists, reputation, now, geo=None, hostnames=None):
+    def update(self, records, local_addresses, blocklists, reputation, now, geo=None, hostnames=None, alerts=None):
         if self.recorded is not None and now - self.recorded < THREAT_RECORD_SECONDS:
             return
         self.recorded = now
         try:
             if self.db is None:
                 self.db = threats.connect(self.path)
-            seen = threats.observe(records, flow_endpoints, lambda address: threat_lists_for(address, blocklists, reputation),
+            seen = threats.observe(records, flow_endpoints,
+                                   lambda address: threat_lists_for(address, blocklists, reputation, alerts),
                                    local_addresses, inside_endpoint, service_name, orientation)
             # who the address belongs to is kept with the entry: the map forgets it once the flow ends
             if geo is not None and seen:
@@ -1435,6 +1587,9 @@ class ThreatRecorder:
                     "country": (location or {}).get("country_name") or (location or {}).get("country"),
                     "city": (location or {}).get("city"),
                 }.items() if value}
+            if alerts is not None:
+                for address, entry in seen.items():
+                    entry["ids"] = alerts.summary(address)
             threats.record(self.db, seen)
             if self.pruned is None or now - self.pruned >= THREAT_PRUNE_SECONDS:
                 threats.prune(self.db)
@@ -1506,6 +1661,9 @@ def run():
     blocks = BlockTracker()
     log = FilterLogTail()
     backlog_loaded = False
+    alerts = AlertTracker()
+    eve = FilterLogTail(EVE_LOG)
+    eve_loaded = False
     descriptions, interfaces, leases, block_meta_checked = {}, {}, {}, None
     blocklists, blocklists_checked = BlocklistIndex(), None
     reputation = Reputation(store)
@@ -1550,7 +1708,9 @@ def run():
                     blocklists.refresh(chosen_threat_lists(values.get("threat_lists")))
                     blocklists_checked = started
                 reputation.refresh(time.monotonic())
-                recorder.update(records, local_addresses, blocklists, reputation, time.monotonic(), geo, hostnames)
+                alerts.feed(eve.lines(), local_addresses)
+                alerts.expire(time.time())
+                recorder.update(records, local_addresses, blocklists, reputation, time.monotonic(), geo, hostnames, alerts)
             # wake at once when a viewer opens the map, not at the end of the slow interval
             while time.monotonic() - started < BACKGROUND_INTERVAL and not requested(REQUEST_MARKER, 2):
                 time.sleep(1.0)
@@ -1606,10 +1766,15 @@ def run():
                 reputation.refresh(now)
                 # while the map is open the queue is always fed; the setting and the widget only
                 # decide whether recording continues in the background
-                recorder.update(records, local_addresses, blocklists, reputation, now, geo, hostnames)
+                if not eve_loaded:
+                    eve_loaded = True
+                    alerts.feed(eve.backlog(ALERT_BACKLOG_BYTES), local_addresses)
+                alerts.feed(eve.lines(), local_addresses)
+                alerts.expire(time.time())
+                recorder.update(records, local_addresses, blocklists, reputation, now, geo, hostnames, alerts)
                 payload = snapshot(tracker, geo, local_addresses, role, now, time.time(), resolver, {
                     "names": leases, "networks": networks, "interfaces": interfaces, "blocklists": blocklists,
-                    "reputation": reputation,
+                    "reputation": reputation, "alerts": alerts,
                 })
                 origin = next((location["id"] for location in payload["locations"] if location["local"]), None)
                 if origin is None and local_addresses:
@@ -1617,7 +1782,10 @@ def run():
                     geo.resolve([origin])
                 payload["blocks"] = block_snapshot(
                     blocks, geo, local_addresses, origin, now, descriptions, interfaces, blocklists, reputation,
+                    alerts,
                 )
+                shown = {flow["dest"] for flow in payload["flows"]} | {block["source"] for block in payload["blocks"]}
+                payload["alerts"] = alert_snapshot(alerts, geo, origin, shown, blocklists, reputation)
                 if origin and geo.get(origin) and not any(location["id"] == origin for location in payload["locations"]):
                     location = geo.get(origin)
                     payload["locations"].append({

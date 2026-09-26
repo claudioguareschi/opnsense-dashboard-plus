@@ -746,5 +746,43 @@ class ThreatQueueTest(unittest.TestCase):
             self.assertFalse(COLLECTOR.widget_in_use(path))
 
 
+class AlertTest(unittest.TestCase):
+    LINE = json.dumps({
+        "timestamp": "2026-09-26T20:20:01.123456-0400", "event_type": "alert", "src_ip": "94.154.43.203",
+        "src_port": 51234, "dest_ip": "198.13.91.163", "dest_port": 80, "proto": "TCP",
+        "alert": {"action": "allowed", "signature_id": 2001219, "signature": "ET SCAN Potential SSH Scan",
+                  "category": "Attempted Information Leak", "severity": 2},
+    })
+
+    def test_parses_only_alerts(self):
+        alert = COLLECTOR.parse_alert(self.LINE)
+        self.assertEqual((alert["src"], alert["dst_port"], alert["severity"], alert["protocol"]),
+                         ("94.154.43.203", 80, 2, "tcp"))
+        self.assertIsNone(COLLECTOR.parse_alert('{"event_type":"anomaly"}'))
+        self.assertIsNone(COLLECTOR.parse_alert('{"event_type":"alert", broken'))
+
+    def test_tracks_per_remote_address_and_flags(self):
+        alerts = COLLECTOR.AlertTracker()
+        alerts.feed([self.LINE, self.LINE, '{"event_type":"flow"}'], {"198.13.91.163"})
+        summary = alerts.summary("94.154.43.203", now=COLLECTOR.parse_alert(self.LINE)["time"] + 60)
+        self.assertEqual((summary["count"], summary["severity"], summary["inbound"], summary["last_seconds"]),
+                         (2, 2, True, 60))
+        self.assertEqual(summary["targets"], ["198.13.91.163:80/tcp"])
+        self.assertEqual(summary["signatures"][0]["count"], 2)
+        self.assertEqual(COLLECTOR.threat_lists_for("94.154.43.203", None, None, alerts), [COLLECTOR.IDS_LIST])
+        # low severity (3) is shown but does not flag
+        low = self.LINE.replace('"severity": 2', '"severity": 3').replace("94.154.43.203", "8.8.8.8")
+        alerts.feed([low], {"198.13.91.163"})
+        self.assertFalse(alerts.flags("8.8.8.8"))
+        self.assertIsNotNone(alerts.summary("8.8.8.8"))
+        # outbound alert from an inside host: the remote side is the destination
+        outbound = self.LINE.replace('"src_ip": "94.154.43.203"', '"src_ip": "192.168.1.50"').replace(
+            '"dest_ip": "198.13.91.163"', '"dest_ip": "45.56.79.53"')
+        alerts.feed([outbound], {"198.13.91.163"})
+        self.assertTrue(alerts.summary("45.56.79.53")["outbound"])
+        alerts.expire(COLLECTOR.parse_alert(self.LINE)["time"] + COLLECTOR.ALERT_WINDOW_SECONDS + 1)
+        self.assertEqual(alerts.sources, {})
+
+
 if __name__ == "__main__":
     unittest.main()
