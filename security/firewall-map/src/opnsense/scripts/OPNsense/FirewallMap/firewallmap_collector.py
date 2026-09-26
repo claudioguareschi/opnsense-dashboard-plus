@@ -56,6 +56,8 @@ BLOCK_WINDOW_SECONDS = 600
 THREAT_HITS_PER_MINUTE = 30
 MAX_BLOCK_SOURCES = 300
 MAX_LOG_LINES_PER_SAMPLE = 5000
+# read back this much of the log when the collector starts, so the 10-minute hit window is full
+BACKLOG_BYTES = 2 * 1024 * 1024
 BLOCK_REFRESH_SECONDS = 60
 SETTINGS_REFRESH_SECONDS = 30
 GEO_CACHE_FILE = "/var/db/firewallmap/geo.json"
@@ -482,6 +484,19 @@ class FilterLogTail:
             self.handle.close()
         self.handle, self.inode = handle, inode
 
+    def backlog(self, max_bytes=BACKLOG_BYTES):
+        """Lines from the end of the current log, used once at start to fill the hit window."""
+        self._open(at_end=True)
+        if self.handle is None:
+            return []
+        end = self.handle.tell()
+        self.handle.seek(max(0, end - max_bytes))
+        if end > max_bytes:
+            self.handle.readline()  # skip the partial first line
+        lines = self.handle.readlines()
+        self.handle.seek(end)
+        return lines
+
     def lines(self, limit=MAX_LOG_LINES_PER_SAMPLE):
         if self.handle is None:
             self._open(at_end=True)
@@ -499,6 +514,14 @@ class FilterLogTail:
         except OSError:
             pass
         return result
+
+
+def log_time(line):
+    """Wall-clock time of a syslog line (RFC 5424 timestamp, second field)."""
+    try:
+        return datetime.fromisoformat(line.split(" ", 2)[1]).timestamp()
+    except (IndexError, ValueError):
+        return None
 
 
 def parse_block(line):
@@ -732,6 +755,7 @@ def run():
     hostnames = HostnameResolver()
     blocks = BlockTracker()
     log = FilterLogTail()
+    backlog_loaded = False
     descriptions, interfaces, block_meta_checked = {}, {}, None
     geo = None
     problem = None
@@ -779,6 +803,15 @@ def run():
                 now = time.monotonic()
                 tracker.update(records, local_addresses, now)
                 resolver = hostnames if requested(HOSTNAME_MARKER, HOSTNAME_REQUEST_SECONDS) else None
+                if not backlog_loaded:
+                    backlog_loaded = True
+                    wall = time.time()
+                    for line in log.backlog():
+                        event = parse_block(line)
+                        stamp = log_time(line) if event else None
+                        if event and stamp and wall - stamp <= BLOCK_WINDOW_SECONDS \
+                                and event["destination"] in local_addresses:
+                            blocks.add(event, now - (wall - stamp))
                 for line in log.lines():
                     event = parse_block(line)
                     # only connection attempts aimed at this firewall's own public addresses; blocked

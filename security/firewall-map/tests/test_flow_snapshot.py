@@ -204,6 +204,11 @@ class BlockTest(unittest.TestCase):
         self.assertEqual(len(entry["hits"]), COLLECTOR.THREAT_HITS_PER_MINUTE + 1)
         self.assertEqual(blocks.per_minute(entry, now + 300), 1)
 
+    def test_reads_log_timestamps(self):
+        self.assertEqual(COLLECTOR.log_time(self.LINE),
+                         COLLECTOR.datetime.fromisoformat("2026-09-25T21:27:07-04:00").timestamp())
+        self.assertIsNone(COLLECTOR.log_time("garbage"))
+
     def test_reader_applies_viewer_threshold(self):
         payload = {"blocks": [{"hits": 1}, {"hits": 3}, {"hits": 7}]}
         result = SNAPSHOT.apply_block_threshold(payload, 3)
