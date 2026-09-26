@@ -1,6 +1,9 @@
 Firewall Map+ shows the firewall's live traffic on a world map, as a
-dashboard widget and a full-size page. Flows are drawn from PF state counters
-and geolocated locally (MaxMind GeoLite2 or DB-IP Lite); blocked connection
-attempts come from the filter log. Traffic to or from addresses in threat
-lists is flagged and recorded in a review queue, with on-demand registry,
-routing and AbuseIPDB lookups.
+dashboard widget and a full-size page. Connections come from PF state
+counters and are geolocated locally (MaxMind GeoLite2 or DB-IP Lite); blocked
+attempts come from the filter log and Suricata alerts from its EVE log. Each
+connection is described in plain language (who opened it, service, the other
+side's network and country, allowed or blocked). Traffic involving addresses
+in threat lists, the AbuseIPDB blacklist or Suricata alerts is flagged and
+recorded in a review queue, with on-demand registry, routing and AbuseIPDB
+lookups. No firewall rules are changed.
