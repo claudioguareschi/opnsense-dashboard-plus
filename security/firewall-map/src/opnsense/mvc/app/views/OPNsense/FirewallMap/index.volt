@@ -161,6 +161,10 @@
     .fwmap-q-tabs { flex: 1 1 auto; margin: 0; }
     .fwmap-q-tabs > li > a { padding: 7px 18px; font-size: 15px; }
     .fwmap-q-tabs .badge { margin-left: 6px; }
+    .fwmap-q-bulkbar { display: flex; gap: 8px; }
+    .fwmap-q-bulkbar .btn { height: 38px; display: inline-flex; align-items: center; gap: 7px; font-size: 14px; }
+    .fwmap-q-bulkbar .btn .fwmap-ic { width: 16px; height: 16px; }
+    .fwmap-q-moreitems { text-align: center; padding: 10px 0 4px; }
     .fwmap-q-searchbox { position: relative; width: 38%; min-width: 240px; }
     .fwmap-q-searchbox .fwmap-ic { position: absolute; left: 12px; top: 10px; width: 17px; height: 17px; opacity: .6; }
     .fwmap-q-searchbox input { width: 100%; height: 38px; padding-left: 38px; font-size: 14px; }
@@ -490,6 +494,12 @@
         check_now: "{{ lang._('Check now') }}",
         no_key: "{{ lang._('no API key') }}",
         not_listed_short: "{{ lang._('Not listed') }}",
+        show_more: "{{ lang._('Show %s more') }}",
+        showing: "{{ lang._('%s of %t shown') }}",
+        dismiss_all: "{{ lang._('Dismiss all (%s)') }}",
+        dismiss_all_confirm: "{{ lang._('Dismiss all %s new entries? You can reopen them from the Dismissed tab.') }}",
+        delete_all: "{{ lang._('Delete all (%s)') }}",
+        delete_all_confirm: "{{ lang._('Delete all %s %status entries for good? This cannot be undone. New traffic from these addresses would create new entries.') }}",
         sample: "{{ lang._('sample') }}",
         other_target: "{{ lang._('other target') }}",
         other_targets: "{{ lang._('other targets') }}",

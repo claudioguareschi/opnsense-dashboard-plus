@@ -69,4 +69,33 @@ class ThreatsController extends ApiControllerBase
         );
         return is_array($result) ? $result : ['result' => 'failed', 'error' => 'no response'];
     }
+
+    /** Move every entry of one status to another, e.g. dismiss all new entries. */
+    public function bulkAction()
+    {
+        if (!$this->request->isPost()) {
+            return ['result' => 'failed'];
+        }
+        $from = (string)$this->request->getPost('from');
+        $to = (string)$this->request->getPost('to');
+        if (!in_array($from, self::STATUSES, true) || !in_array($to, self::STATUSES, true)) {
+            return ['result' => 'failed', 'error' => 'unknown status'];
+        }
+        $result = json_decode((new Backend())->configdpRun('firewallmap threats bulk', [$from, $to]) ?? '', true);
+        return is_array($result) ? $result : ['result' => 'failed', 'error' => 'no response'];
+    }
+
+    /** Delete dismissed or reviewed entries for good. */
+    public function purgeAction()
+    {
+        if (!$this->request->isPost()) {
+            return ['result' => 'failed'];
+        }
+        $status = (string)$this->request->getPost('status');
+        if (!in_array($status, ['dismissed', 'reviewed'], true)) {
+            return ['result' => 'failed', 'error' => 'only dismissed or reviewed entries can be deleted'];
+        }
+        $result = json_decode((new Backend())->configdpRun('firewallmap threats purge', [$status]) ?? '', true);
+        return is_array($result) ? $result : ['result' => 'failed', 'error' => 'no response'];
+    }
 }

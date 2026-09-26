@@ -246,12 +246,34 @@ def decode_note(value):
         return None
 
 
+def bulk_status(db, current, status, now=None):
+    """Move every entry with one status to another (e.g. dismiss all new); reversible."""
+    if current not in STATUSES or status not in STATUSES or current == status:
+        return {"result": "failed", "error": "unknown status"}
+    now = time.time() if now is None else now
+    cursor = db.execute("UPDATE threats SET status = ?, status_changed = ?, data = json_remove(data, '$.seen_after_block') "
+                        "WHERE status = ?", (status, now, current))
+    return {"result": "saved", "changed": cursor.rowcount}
+
+
+def purge(db, status):
+    """Delete the entries of one status for good (only dismissed or reviewed ones)."""
+    if status not in ("dismissed", "reviewed"):
+        return {"result": "failed", "error": "only dismissed or reviewed entries can be deleted"}
+    cursor = db.execute("DELETE FROM threats WHERE status = ?", (status,))
+    return {"result": "deleted", "deleted": cursor.rowcount}
+
+
 def main(arguments, path=DATABASE):
     command = arguments[0] if arguments else "list"
     db = connect(path)
     if command == "set" and len(arguments) >= 3:
         note = decode_note(arguments[3]) if len(arguments) > 3 and arguments[3] != "-" else None
         return set_status(db, arguments[1], arguments[2], note)
+    if command == "bulk" and len(arguments) >= 3:
+        return bulk_status(db, arguments[1], arguments[2])
+    if command == "purge" and len(arguments) >= 2:
+        return purge(db, arguments[1])
     return listing(db, arguments[1] if len(arguments) > 1 else None)
 
 

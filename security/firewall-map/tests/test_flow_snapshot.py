@@ -726,6 +726,16 @@ class ThreatQueueTest(unittest.TestCase):
             THREATS.record(db, self.observe(self.INBOUND), now=100.0)
             self.assertEqual(THREATS.listing(db)["rows"][0]["remote"]["country_code"], "RO")
 
+    def test_bulk_dismiss_and_purge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = THREATS.connect(os.path.join(directory, "cache.db"))
+            THREATS.record(db, self.observe(self.INBOUND + self.OUTBOUND), now=100.0)
+            self.assertEqual(THREATS.bulk_status(db, "new", "dismissed")["changed"], 1)
+            self.assertEqual(THREATS.listing(db)["counts"]["dismissed"], 1)
+            self.assertEqual(THREATS.purge(db, "new")["result"], "failed")
+            self.assertEqual(THREATS.purge(db, "dismissed")["deleted"], 1)
+            self.assertEqual(THREATS.listing(db)["rows"], [])
+
     def test_rejects_bad_input(self):
         with tempfile.TemporaryDirectory() as directory:
             db = THREATS.connect(os.path.join(directory, "cache.db"))

@@ -570,6 +570,7 @@
     /* ---------------------------------------------------------------- review queue */
 
     const STATUSES = ['new', 'reviewed', 'blocked', 'dismissed'];
+    const QUEUE_PAGE = 100;
 
     // inside host names from the live map, for addresses recorded in the queue
     function insideNames(extra = {}) {
@@ -780,7 +781,7 @@
     }
 
     async function showQueue() {
-        const view = {status: 'new', rows: [], counts: {}};
+        const view = {status: 'new', rows: [], counts: {}, limit: QUEUE_PAGE};
         const $body = $('<div></div>');
         let settings = {};
         try {
@@ -800,7 +801,7 @@
         const $search = $(`<input type="search" class="form-control input-sm fwmap-q-search" placeholder="${esc(T.queue_search)}">`);
         const $list = $('<div class="fwmap-q-list"></div>');
         const $searchBox = $(`<div class="fwmap-q-searchbox">${ic('search')}</div>`).append($search);
-        $body.append($('<div class="fwmap-q-toolbar"></div>').append($tabs, $searchBox), $list);
+        $body.append($('<div class="fwmap-q-toolbar"></div>').append($tabs, $bulk, $searchBox), $list);
         $search.on('input', () => render());
 
         const render = () => {
@@ -810,9 +811,43 @@
             const names = insideNames(view.names);
             const needle = String($search.val() || '').trim().toLowerCase();
             const rows = needle ? view.rows.filter((row) => JSON.stringify(row).toLowerCase().includes(needle)) : view.rows;
-            $list.html(rows.length ? rows.map((row) => queueItem(row, names)).join('')
+            // draw a page at a time: the queue can hold thousands of entries
+            const shown = rows.slice(0, view.limit);
+            $list.html(rows.length ? shown.map((row) => queueItem(row, names)).join('')
+                + (rows.length > shown.length ? `<div class="fwmap-q-moreitems"><button type="button" class="btn btn-default fwmap-q-showmore">`
+                    + `${esc(T.show_more.replace('%s', Math.min(QUEUE_PAGE, rows.length - shown.length)))}</button>`
+                    + ` <span class="fwmap-q-muted">${esc(T.showing.replace('%s', shown.length).replace('%t', rows.length))}</span></div>` : '')
                 : `<div class="text-muted fwmap-empty"><i class="fa fa-check-circle"></i> ${esc(T.queue_empty)}</div>`);
+            // bulk actions for the tab: dismissing is reversible, deleting asks first
+            const count = view.counts[view.status] || 0;
+            const bulk = [];
+            if (view.status === 'new' && count) {
+                bulk.push(`<button type="button" class="btn btn-default fwmap-q-bulk" data-to="dismissed">${ic('eye-off')}<span>${esc(T.dismiss_all.replace('%s', count))}</span></button>`);
+            }
+            if ((view.status === 'dismissed' || view.status === 'reviewed') && count) {
+                bulk.push(`<button type="button" class="btn btn-default fwmap-q-purge">${ic('trash')}<span>${esc(T.delete_all.replace('%s', count))}</span></button>`);
+            }
+            $bulk.html(bulk.join(''));
         };
+        const $bulk = $('<div class="fwmap-q-bulkbar"></div>');
+        $bulk.on('click', '.fwmap-q-bulk', function () {
+            const to = String($(this).data('to'));
+            const count = view.counts[view.status] || 0;
+            confirmAction(T.dismiss_all_confirm.replace('%s', count), () => act(async () => {
+                const result = await postJSON('/api/firewallmap/threats/bulk', {from: view.status, to});
+                if (result.result !== 'saved') {
+                    throw new Error(result.error || T.action_failed);
+                }
+            }));
+        }).on('click', '.fwmap-q-purge', function () {
+            const count = view.counts[view.status] || 0;
+            confirmAction(T.delete_all_confirm.replace('%s', count).replace('%status', T[`status_${view.status}`]), () => act(async () => {
+                const result = await postJSON('/api/firewallmap/threats/purge', {status: view.status});
+                if (result.result !== 'deleted') {
+                    throw new Error(result.error || T.action_failed);
+                }
+            }));
+        });
         const load = async () => {
             try {
                 const result = await $.getJSON(`/api/firewallmap/threats/list/${view.status}`);
@@ -840,12 +875,17 @@
         $tabs.on('click', 'a', function (event) {
             event.preventDefault();
             view.status = String($(this).data('status'));
+            view.limit = QUEUE_PAGE;
             load();
         });
         $list
             .on('click', '.fwmap-q-status', function () {
                 const address = addressOf(this);
                 act(() => setThreat(address, String($(this).data('status'))));
+            })
+            .on('click', '.fwmap-q-showmore', () => {
+                view.limit += QUEUE_PAGE;
+                render();
             })
             .on('click', '.fwmap-q-expand', function (event) {
                 event.preventDefault();
