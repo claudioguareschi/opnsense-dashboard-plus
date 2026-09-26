@@ -173,6 +173,12 @@ signed; `publish.sh` replaces older versions and signs the whole catalogue.
 
 ## Changelog
 
+- **os-firewall-map 0.1_3**: Suricata alerts correlated with the exact connection (own arc with a
+  detection marker, history rings, IDS flows vs IDS addresses), a uniform record per flagged
+  connection (both sides, NAT and port-forward target, firewall decision and rule, Suricata action
+  and DNS name) with a "Dropped by IPS" status, a redesigned full-size page (details cards, top
+  talkers with search and an IDS tab, hover cards, one-row filters, zoom buttons), the review queue
+  redesigned with connection snapshots, paging and bulk dismiss/delete, and AbuseIPDB checks in place.
 - **os-firewall-map 0.1_2**: who opened each connection (green inside, orange outside), plain-language
   summaries with an allowed/blocked verdict, AbuseIPDB blacklist and verdicts, watchlist (*Mark as
   threat*), review queue, Suricata alerts, fading arcs, resizable panels, curated threat feeds
