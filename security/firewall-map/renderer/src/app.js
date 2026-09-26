@@ -289,12 +289,6 @@ export function blockSummary(block, showAsn = true) {
     + `in the last ${block.window_minutes ?? 1} min${rule}${where}${since ? `, first seen ${since} ago` : ''}.`;
 }
 
-/** The summary as hover-card HTML; flagged flows read in the threat colour. */
-function connectionLine(flow, remote) {
-  const style = flow.threat ? 'font-weight:600;color:rgb(196,18,48)' : 'font-weight:600';
-  return flowSummary(flow, remote).map((sentence) => `<div style="${style}">${escapeHtml(sentence)}</div>`).join('');
-}
-
 // arches, blocked sources and endpoints fade in and out instead of popping
 const FADE_IN_MS = 800;
 
@@ -387,54 +381,6 @@ function escapeHtml(text) {
   return plain(text).replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 }
 
-/** Hover card for an endpoint (all flows to that place) or a single arch. */
-function describe(place, members, locations, hostnames = {}, showAsn = true) {
-  const rateIn = members.reduce((sum, flow) => sum + (flow.rate_in ?? 0), 0);
-  const rateOut = members.reduce((sum, flow) => sum + (flow.rate_out ?? 0), 0);
-  const services = [...new Set(members.flatMap((flow) => flow.services || []))].slice(0, 5);
-  const addresses = members
-    .slice()
-    .sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))
-    .slice(0, 6)
-    .map((flow) => {
-      // per address: hostname (when looked up), then the IP, then its network (ASN)
-      const location = locations.get(flow.dest);
-      const hostname = hostnames?.[flow.dest] ? `<div>${escapeHtml(hostnames[flow.dest])}</div>` : '';
-      const asn = showAsn && location?.asn
-        ? `<div style="opacity:.7">AS${location.asn} ${escapeHtml(location.as_org || '')}</div>` : '';
-      const remote = {ip: flow.dest, hostname: hostnames?.[flow.dest], org: showAsn ? location?.as_org : null,
-        country: location?.country};
-      return `<div style="margin-top:3px">${hostname}<div>${escapeHtml(flow.dest)}</div>${asn}${connectionLine(flow, remote)}${idsHtml(flow.ids)}</div>`;
-    });
-  const more = members.length > 6 ? `<div>+${members.length - 6} more</div>` : '';
-  const title = [place.city || place.region, place.country].filter(Boolean).join(', ') || place.name || place.id;
-  // GeoLite places region- or country-level matches at a representative point; say how rough it is
-  const approximate = !place.city && place.accuracy_km ? ` <span style="opacity:.7">(± ${place.accuracy_km} km)</span>` : '';
-  const insides = [];
-  for (const flow of members) {
-    for (const inside of flow.inside || []) {
-      if (!insides.some((known) => known.ip === inside.ip)) {
-        insides.push(inside);
-      }
-    }
-  }
-  const egress = [...new Set(members.map((flow) => flow.egress).filter(Boolean))];
-  const lists = [...new Set(members.flatMap((flow) => flow.lists || []))];
-  const insideBlock = insides.length
-    ? `<div style="margin-top:4px;opacity:.75">Inside</div>${insides.slice(0, 4).map(insideLine).join('')}`
-      + (insides.length > 4 ? `<div>+${insides.length - 4} more</div>` : '')
-    : '';
-  return `
-    <div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}${approximate}</div>
-    ${verdictLine(false, lists.length > 0)}
-    ${lists.length ? `<div style="font-weight:600;color:rgb(196,18,48)">Listed in ${lists.map(escapeHtml).join(', ')}</div>` : ''}
-    ${addresses.join('')}${more}
-    ${insideBlock}
-    <div style="margin-top:4px">↓ ${formatRate(rateIn)} &nbsp; ↑ ${formatRate(rateOut)}${egress.length ? ` &nbsp; via ${egress.map(escapeHtml).join(', ')}` : ''}</div>
-    ${services.length ? `<div>${services.map(escapeHtml).join(', ')}</div>` : ''}
-  `;
-}
-
 // categories for "colour by service"; each flow uses its busiest service
 const SERVICE_CATEGORIES = [
   ['Web', /^(HTTPS?|HTTP alt|HTTPS alt)$/],
@@ -458,12 +404,6 @@ export function serviceCategory(service) {
   }
   const match = SERVICE_CATEGORIES.find(([, pattern]) => pattern.test(service));
   return match ? match[0] : 'Other';
-}
-
-function insideLine(inside) {
-  const name = inside.name ? `${escapeHtml(inside.name)} ` : '';
-  const where = [inside.ip, inside.interface].filter(Boolean).map(escapeHtml).join(' · ');
-  return `<div>${name}<span style="opacity:.75">(${where})</span></div>`;
 }
 
 /** A gently bent path from a blocked source into the firewall (bends the other way from flows). */
@@ -506,16 +446,6 @@ export function buildBlocks(data) {
     .filter(Boolean);
 }
 
-/** Allowed or blocked, first; allowed traffic to a flagged address stands out. */
-function verdictLine(blocked, flagged) {
-  if (blocked) {
-    return '<div style="font-weight:600;opacity:.8">Blocked by the firewall</div>';
-  }
-  return flagged
-    ? '<div style="font-weight:600;background:rgb(196,18,48);color:#fff;padding:1px 6px;border-radius:3px">Allowed: flagged traffic got through</div>'
-    : '<div style="font-weight:600;color:rgb(30,110,65)">Allowed through the firewall</div>';
-}
-
 /**
  * Suricata's view of an address in one line per signature, worst first:
  * 'Suricata: ET SCAN Potential SSH Scan (severity 2), 3× in the last hour, latest 2 min ago'.
@@ -535,10 +465,120 @@ export function idsSummary(ids) {
   return lines;
 }
 
-function idsHtml(ids) {
-  const serious = ids && ids.severity <= 2;
-  return idsSummary(ids).map((line) =>
-    `<div style="margin-top:2px;${serious ? 'color:rgb(196,18,48);font-weight:600' : 'color:rgb(200,110,0)'}">⚑ ${escapeHtml(line)}</div>`).join('');
+/* ------------------------------------------------------------------ hover cards */
+
+// The same visual grammar as the page's details panel: title and place, a verdict pill, one block
+// per address (host, network, the plain-language sentence, IDS lines), and a muted footer.
+const TT_ICONS = {
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+  flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/>',
+  alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>',
+  server: '<rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><path d="M7 6.5h.01M7 17.5h.01"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+};
+
+function ttIcon(name) {
+  return `<svg class="fmt-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${TT_ICONS[name]}</svg>`;
+}
+
+const TT_STYLE = `
+.fmt{font-size:12px;line-height:1.4;padding:10px 12px;min-width:220px}
+.fmt-head{display:flex;align-items:flex-start;gap:10px}
+.fmt-head>div:first-child{flex:1;min-width:0}
+.fmt-title{font-weight:600;font-size:13.5px;line-height:1.25}
+.fmt-sub{opacity:.7;font-size:11.5px;margin-top:1px}
+.fmt-pill{display:inline-flex;align-items:center;gap:3px;white-space:nowrap;font-weight:600;font-size:11px;padding:1px 8px;border-radius:10px}
+.fmt-ok{background:rgb(40,150,70);color:#fff}.fmt-danger{background:rgb(196,18,48);color:#fff}
+.fmt-blocked{background:rgb(80,80,80);color:#fff}.fmt-muted{background:rgba(128,128,128,.22)}
+.fmt-lists{margin-top:6px;display:flex;flex-wrap:wrap;gap:3px}
+.fmt-chip{font-size:10.5px;font-weight:600;padding:0 6px;border-radius:3px;color:rgb(196,18,48);border:1px solid rgba(196,18,48,.45)}
+.fmt-addr{margin-top:8px;padding-top:7px;border-top:1px solid rgba(128,128,128,.2)}
+.fmt-host{display:flex;align-items:center;gap:6px;font-weight:600}
+.fmt-host .fmt-ic{color:rgb(30,110,215);width:14px;height:14px}
+.fmt-meta{opacity:.7;font-size:11.5px;margin-left:20px}
+.fmt-say{margin:3px 0 0 20px}
+.fmt-say.fmt-bad{color:rgb(196,18,48);font-weight:600}
+.fmt-ids{margin:3px 0 0 20px;font-size:11.5px;color:rgb(200,110,0);display:flex;gap:5px}
+.fmt-ids.fmt-bad{color:rgb(196,18,48);font-weight:600}
+.fmt-ids .fmt-ic{margin-top:2px}
+.fmt-more{margin:6px 0 0 20px;opacity:.7;font-size:11.5px}
+.fmt-foot{margin-top:8px;padding-top:6px;border-top:1px solid rgba(128,128,128,.2);opacity:.75;font-size:11.5px;display:flex;flex-wrap:wrap;gap:2px 12px}
+.fmt-ic{width:12px;height:12px;flex:none;vertical-align:-2px}
+.fmt-flag.flag-icon{width:16px;height:12px;background-size:cover;border-radius:2px;margin-right:4px;vertical-align:-1px;box-shadow:0 0 0 1px rgba(0,0,0,.1)}
+`;
+
+function ensureTooltipStyle() {
+  if (!document.getElementById('fwmap-tooltip-style')) {
+    const style = document.createElement('style');
+    style.id = 'fwmap-tooltip-style';
+    style.textContent = TT_STYLE;
+    document.head.appendChild(style);
+  }
+}
+
+function ttFlag(code) {
+  // flag images only where the page loads OPNsense's flag stylesheet (the full-size map)
+  return /^[A-Za-z]{2}$/.test(code || '') && document.querySelector('link[href*="flag-icon"]')
+    ? `<span class="flag-icon flag-icon-${code.toLowerCase()} fmt-flag"></span>` : '';
+}
+
+function ttPill(kind, text, icon) {
+  return `<span class="fmt-pill fmt-${kind}">${icon ? ttIcon(icon) : ''}${escapeHtml(text)}</span>`;
+}
+
+function ttHead(title, sub, pill) {
+  return `<div class="fmt-head"><div><div class="fmt-title">${escapeHtml(title)}</div>`
+    + `${sub ? `<div class="fmt-sub">${sub}</div>` : ''}</div>${pill}</div>`;
+}
+
+function ttLists(lists) {
+  return (lists || []).length
+    ? `<div class="fmt-lists">${lists.map((name) => `<span class="fmt-chip">${escapeHtml(plain(name).replace(/^FWMAP_/, '').replace(/_/g, ' '))}</span>`).join('')}</div>` : '';
+}
+
+function ttIds(ids) {
+  const bad = ids && ids.severity <= 2;
+  return idsSummary(ids).map((line) => `<div class="fmt-ids${bad ? ' fmt-bad' : ''}">${ttIcon('flag')}<span>${escapeHtml(line.replace(/^Suricata: /, ''))}</span></div>`).join('');
+}
+
+function ttAddress(icon, name, meta, sentences, bad, ids) {
+  return `<div class="fmt-addr"><div class="fmt-host">${ttIcon(icon)}<span>${escapeHtml(name)}</span></div>`
+    + `${meta ? `<div class="fmt-meta">${escapeHtml(meta)}</div>` : ''}`
+    + sentences.map((sentence) => `<div class="fmt-say${bad ? ' fmt-bad' : ''}">${escapeHtml(sentence)}</div>`).join('')
+    + ttIds(ids) + '</div>';
+}
+
+function ttPlace(item) {
+  const text = [item.city || item.region, item.country].filter(Boolean).map(plain).join(', ');
+  const approximate = !item.city && item.accuracy_km ? ` (± ${item.accuracy_km} km)` : '';
+  return text ? `${ttFlag(item.country_code)}${escapeHtml(text + approximate)}` : '';
+}
+
+/** Hover card for an endpoint (all flows to that place) or a single arch. */
+function describe(place, members, locations, hostnames = {}, showAsn = true) {
+  const rateIn = members.reduce((sum, flow) => sum + (flow.rate_in ?? 0), 0);
+  const rateOut = members.reduce((sum, flow) => sum + (flow.rate_out ?? 0), 0);
+  const services = [...new Set(members.flatMap((flow) => flow.services || []))].slice(0, 4);
+  const egress = [...new Set(members.map((flow) => flow.egress).filter(Boolean))];
+  const lists = [...new Set(members.flatMap((flow) => flow.lists || []))];
+  const sorted = members.slice().sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0));
+  const addresses = sorted.slice(0, 4).map((flow) => {
+    const location = locations.get(flow.dest);
+    const hostname = hostnames?.[flow.dest];
+    const org = showAsn && location?.asn ? `AS${location.asn} ${plain(location.as_org || '')}` : '';
+    const remote = {ip: flow.dest, hostname, org: showAsn ? location?.as_org : null, country: location?.country};
+    return ttAddress('server', hostname || flow.dest, [hostname ? flow.dest : '', org].filter(Boolean).join(' · '),
+      flowSummary(flow, remote), flow.threat, flow.ids);
+  });
+  const title = [place.city || place.region, place.country].filter(Boolean).join(', ') || place.name || place.id;
+  const flagged = lists.length > 0;
+  const more = members.length > 4 ? `<div class="fmt-more">+${members.length - 4} more address${members.length - 4 > 1 ? 'es' : ''} here</div>` : '';
+  const foot = [`↓ ${formatRate(rateIn)}  ↑ ${formatRate(rateOut)}`, egress.length ? `via ${egress.map(plain).join(', ')}` : '',
+    services.join(', ')].filter(Boolean).map((part) => `<span>${escapeHtml(part)}</span>`).join('');
+  return `<div class="fmt">${ttHead(title, members.length > 1 ? escapeHtml(`${members.length} addresses`) : ttPlace(place),
+      flagged ? ttPill('danger', 'Allowed · flagged', 'alert') : ttPill('ok', 'Allowed', 'check'))}
+    ${ttLists(lists)}${addresses.join('')}${more}<div class="fmt-foot">${foot}</div></div>`;
 }
 
 /** The arc and map entries for connections Suricata alerted on (see the collector's Correlator). */
@@ -575,46 +615,35 @@ export function idsFlowSummary(flow) {
 }
 
 function describeIdsFlow(flow, showAsn) {
-  const title = [flow.city, flow.country].filter(Boolean).join(', ') || flow.dest;
-  const signatures = flow.groups.flatMap((group) => group.signatures);
   const serious = flow.severity <= 2;
-  return `
-    <div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}</div>
-    ${verdictLine(false, serious)}
-    <div style="font-weight:600;${serious ? 'color:rgb(196,18,48)' : 'color:rgb(200,110,0)'}">⚑ Suricata alerted on this connection${flow.ips_dropped ? ' · dropped by IPS' : ''}</div>
-    <div style="margin-top:3px">${escapeHtml(idsFlowSummary(flow))}</div>
-    ${showAsn && flow.asn ? `<div style="opacity:.7">AS${flow.asn} ${escapeHtml(flow.as_org || '')}</div>` : ''}
-    ${signatures.slice(0, 3).map((item) => `<div style="margin-top:2px">${escapeHtml(plain(item.signature))} <span style="opacity:.7">(severity ${item.severity}, ${item.count}×)</span></div>`).join('')}
-  `;
+  const signatures = flow.groups.flatMap((group) => group.signatures);
+  const ids = {count: flow.count, severity: flow.severity, signatures, minutes: 60, last_seconds: flow.last_seconds};
+  const org = showAsn && flow.asn ? `AS${flow.asn} ${plain(flow.as_org || '')}` : '';
+  return `<div class="fmt">${ttHead(flow.city || flow.country || flow.dest, ttPlace(flow),
+      serious ? ttPill('danger', 'Allowed · flagged', 'alert') : ttPill('ok', 'Allowed', 'check'))}
+    ${ttLists(flow.lists)}
+    ${ttAddress('server', flow.remote, org, [idsFlowSummary(flow)], serious, ids)}
+    <div class="fmt-foot"><span>${escapeHtml(`Suricata alerted on this connection${flow.ips_dropped ? ' · dropped by IPS' : ''}`)}</span>
+      ${flow.rule ? `<span>${escapeHtml(`rule: ${plain(flow.rule)}`)}</span>` : ''}</div></div>`;
 }
 
 /** Hover card for an address Suricata alerted on that has no arc right now. */
 function describeAlert(alert, showAsn) {
-  const title = [alert.city, alert.country].filter(Boolean).join(', ') || alert.source;
-  const asn = showAsn && alert.asn ? `<div style="opacity:.7">AS${alert.asn} ${escapeHtml(alert.as_org || '')}</div>` : '';
-  return `
-    <div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}</div>
-    <div style="font-weight:600;opacity:.8">Seen by Suricata, no connection open now</div>
-    ${(alert.lists || []).length ? `<div style="font-weight:600;color:rgb(196,18,48)">Listed in ${alert.lists.map(escapeHtml).join(', ')}</div>` : ''}
-    <div style="margin-top:3px"><div>${escapeHtml(alert.source)}</div>${asn}</div>
-    ${idsHtml(alert.ids)}
-  `;
+  const org = showAsn && alert.asn ? `AS${alert.asn} ${plain(alert.as_org || '')}` : '';
+  return `<div class="fmt">${ttHead(alert.city || alert.country || alert.source, ttPlace(alert), ttPill('muted', 'Seen by Suricata', 'flag'))}
+    ${ttLists(alert.lists)}
+    ${ttAddress('server', alert.source, org, [], false, alert.ids)}
+    <div class="fmt-foot"><span>No connection is open right now</span></div></div>`;
 }
 
 /** Hover card for a blocked source. */
 function describeBlock(block, showAsn) {
-  const title = [block.city, block.country].filter(Boolean).join(', ') || block.source;
-  const approximate = !block.city && block.accuracy_km ? ` <span style="opacity:.7">(± ${block.accuracy_km} km)</span>` : '';
-  const asn = showAsn && block.asn ? `<div style="opacity:.7">AS${block.asn} ${escapeHtml(block.as_org || '')}</div>` : '';
-  return `
-    <div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}${approximate}</div>
-    ${verdictLine(true, false)}
-    ${(block.lists || []).length ? `<div style="font-weight:600;color:rgb(196,18,48)">Listed in ${block.lists.map(escapeHtml).join(', ')}</div>` : ''}
-    <div style="margin-top:3px"><div>${escapeHtml(block.source)}</div>${asn}</div>
-    <div style="margin-top:4px;font-weight:600${block.threat || (block.lists || []).length ? ';color:rgb(196,18,48)' : ''}">${escapeHtml(blockSummary(block, showAsn))}</div>
-    <div style="opacity:.7">${block.hits_per_minute} in the last minute${block.threat ? ' (hammering)' : ''}</div>
-    ${idsHtml(block.ids)}
-  `;
+  const org = showAsn && block.asn ? `AS${block.asn} ${plain(block.as_org || '')}` : '';
+  const bad = block.threat || (block.lists || []).length > 0;
+  return `<div class="fmt">${ttHead(block.city || block.country || block.source, ttPlace(block), ttPill('blocked', 'Blocked', 'ban'))}
+    ${ttLists(block.lists)}
+    ${ttAddress('server', block.source, org, [blockSummary(block, showAsn)], bad, block.ids)}
+    <div class="fmt-foot"><span>${escapeHtml(`${block.hits_per_minute} in the last minute${block.threat ? ' · hammering' : ''}`)}</span></div></div>`;
 }
 
 function pulsePosition(arc, seconds, reverse) {
@@ -780,8 +809,8 @@ export function createFirewallMap(container, options = {}) {
   // Hover cards live on <body> (fixed position) so they are never clipped by the widget
   const tooltip = document.createElement('div');
   tooltip.style.cssText = 'position:fixed;z-index:2000;pointer-events:none;display:none;'
-    + 'border-radius:4px;padding:6px 8px;font-size:12px;line-height:1.35;max-width:320px;'
-    + 'box-shadow:0 2px 8px rgba(0,0,0,.15);';
+    + 'border-radius:6px;max-width:360px;box-shadow:0 4px 16px rgba(0,0,0,.14);';
+  ensureTooltipStyle();
   document.body.appendChild(tooltip);
 
   /** What was clicked, in a form the page can act on (addresses, inside hosts, country). */
@@ -831,9 +860,8 @@ export function createFirewallMap(container, options = {}) {
       const own = (lastData.flows || []).filter((flow) => flow.origin === object.id);
       const rateIn = own.reduce((sum, flow) => sum + (flow.rate_in ?? 0), 0);
       const rateOut = own.reduce((sum, flow) => sum + (flow.rate_out ?? 0), 0);
-      return `<div style="font-weight:600;margin-bottom:2px">${escapeHtml(object.id)}</div>
-        <div>${own.length} active links</div>
-        <div style="margin-top:4px">↓ ${formatRate(rateIn)} &nbsp; ↑ ${formatRate(rateOut)}</div>`;
+      return `<div class="fmt">${ttHead('This firewall', escapeHtml(object.id), '')}
+        <div class="fmt-foot"><span>${escapeHtml(`${own.length} active links`)}</span><span>${escapeHtml(`↓ ${formatRate(rateIn)}  ↑ ${formatRate(rateOut)}`)}</span></div></div>`;
     }
     if (layer.id === 'firewall-map-endpoints') {
       return describe(object, flowsByDest.get(`${object.lat},${object.lon}`) || [], locationIndex, lastData.hostnames, settings.asn);
