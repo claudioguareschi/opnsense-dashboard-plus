@@ -47,6 +47,7 @@
         history: new Map(),
         isAdmin: false,
         selection: null,
+        investigations: new Map(),
     };
 
     /* ---------------------------------------------------------------- filtering */
@@ -286,11 +287,127 @@
             `<a href="https://www.abuseipdb.com/check/${encodeURIComponent(address)}" target="_blank" rel="noopener noreferrer">AbuseIPDB</a>`,
         ];
         const admin = state.isAdmin ? [
+            `<a href="#" class="fwmap-investigate" data-address="${esc(address)}"><b>${esc(T.investigate)}</b></a>`,
             `<a href="#" class="fwmap-states" data-address="${esc(address)}">${esc(T.show_states)}</a>`,
             `<a href="#" class="fwmap-kill" data-address="${esc(address)}">${esc(T.kill_states)}</a>`,
             `<a href="#" class="fwmap-alias" data-address="${esc(address)}">${esc(T.add_to_alias)}</a>`,
         ] : [];
-        return `<div class="fwmap-address"><b>${esc(address)}</b><div class="fwmap-links">${links.concat(admin).join(' · ')}</div></div>`;
+        const card = state.investigations.get(address);
+        return `<div class="fwmap-address"><b>${esc(address)}</b><div class="fwmap-links">${links.concat(admin).join(' · ')}</div>`
+            + (card ? `<div class="fwmap-investigation">${card}</div>` : '') + '</div>';
+    }
+
+    /* ---------------------------------------------------------------- investigation card */
+
+    function field(label, value) {
+        return value === null || value === undefined || value === ''
+            ? '' : `<tr><th>${esc(label)}</th><td>${value}</td></tr>`;
+    }
+
+    function scoreBadge(score) {
+        const color = score >= 75 ? '#c41230' : score >= 25 ? '#e67e22' : score > 0 ? '#d4a017' : '#2e8b57';
+        return `<span class="fwmap-score" style="background:${color}">${esc(score)}%</span>`;
+    }
+
+    function investigationCard(result) {
+        if (result.status !== 'ok') {
+            return `<div class="text-danger">${esc(result.error || T.action_failed)}</div>`;
+        }
+        const section = (title, data, rows) => `<div class="fwmap-inv-section"><div class="fwmap-inv-title">${esc(title)}</div>`
+            + (data?.error ? `<div class="text-muted">${esc(T.lookup_failed)}: ${esc(data.error)}</div>`
+                : `<table class="fwmap-inv-table">${rows}</table>`) + '</div>';
+        const rdap = result.rdap || {};
+        const ripe = result.ripestat || {};
+        const abuse = result.abuseipdb;
+        const abuseEmail = rdap.abuse_email
+            ? `<a href="mailto:${esc(rdap.abuse_email)}">${esc(rdap.abuse_email)}</a>` : null;
+        let html = section(T.registry, rdap,
+            field(T.owner, esc(rdap.owner || rdap.name))
+            + field(T.network, esc([rdap.name, rdap.handle].filter(Boolean).join(' · ')))
+            + field(T.range, esc(rdap.range))
+            + field(T.country, esc(rdap.country))
+            + field(T.abuse_contact, abuseEmail)
+            + field(T.registered, esc([rdap.registered, rdap.updated && `${T.updated} ${rdap.updated}`].filter(Boolean).join(' · '))));
+        html += section(T.routing, ripe,
+            field(T.prefix, esc(ripe.prefix))
+            + field(T.origin_as, (ripe.asns || []).map((item) => esc(`AS${item.asn} ${item.holder || ''}`)).join('<br>'))
+            + field(T.announced, ripe.announced === undefined ? null : esc(ripe.announced ? T.yes : T.no)));
+        if (abuse) {
+            html += section('AbuseIPDB', abuse,
+                field(T.confidence, abuse.score === undefined ? null : scoreBadge(abuse.score))
+                + field(T.reports, abuse.reports === undefined ? null : esc(`${abuse.reports} (${abuse.reporters ?? 0} ${T.reporters})`))
+                + field(T.last_reported, esc(abuse.last_reported))
+                + field(T.usage, esc([abuse.usage, abuse.tor ? 'Tor' : null].filter(Boolean).join(' · ')))
+                + field('ISP', esc([abuse.isp, abuse.domain].filter(Boolean).join(' · '))));
+        } else if (!result.abuseipdb_configured) {
+            html += `<div class="text-muted fwmap-inv-section">${esc(T.abuseipdb_hint)}</div>`;
+        }
+        return html;
+    }
+
+    async function investigate(address) {
+        state.investigations.set(address, `<div class="text-muted"><i class="fa fa-spinner fa-spin"></i> ${esc(T.looking_up)}</div>`);
+        renderDetails();
+        try {
+            const result = await $.getJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`);
+            state.investigations.set(address, investigationCard(result));
+        } catch (error) {
+            state.investigations.set(address, `<div class="text-danger">${esc(T.action_failed)}: ${esc(error.statusText || error)}</div>`);
+        }
+        renderDetails();
+    }
+
+    /* ---------------------------------------------------------------- threat feeds */
+
+    const FEEDS = [
+        {name: 'FWMAP_Spamhaus_DROP', label: 'Spamhaus DROP', url: 'https://www.spamhaus.org/drop/drop.txt',
+            about: 'Hijacked and criminal netblocks'},
+        {name: 'FWMAP_Feodo', label: 'abuse.ch Feodo Tracker', url: 'https://feodotracker.abuse.ch/downloads/ipblocklist.txt',
+            about: 'Botnet command-and-control servers'},
+        {name: 'FWMAP_ET_Compromised', label: 'Emerging Threats compromised', url: 'https://rules.emergingthreats.net/blockrules/compromised-ips.txt',
+            about: 'Hosts known to be compromised'},
+        {name: 'FWMAP_FireHOL_L1', label: 'FireHOL level 1', url: 'https://iplists.firehol.org/files/firehol_level1.netset',
+            about: 'Combined attack sources (includes DROP, Feodo, DShield)'},
+    ];
+
+    async function showFeeds() {
+        let existing = [];
+        try {
+            existing = (await postJSON('/api/firewall/alias/search_item', {current: 1, rowCount: -1})).rows || [];
+        } catch (error) {
+            notify(`${T.action_failed}: ${error.statusText || error}`, BootstrapDialog.TYPE_DANGER);
+            return;
+        }
+        const names = new Set(existing.map((row) => plain(row.name)));
+        const $list = $('<div></div>');
+        for (const feed of FEEDS) {
+            const added = names.has(feed.name);
+            const $row = $(`<div class="fwmap-feed"><div><b>${esc(feed.label)}</b><div class="text-muted">${esc(feed.about)}</div>`
+                + `<div class="text-muted" style="font-size:.85em">${esc(feed.url)}</div></div></div>`);
+            const $button = $(`<button type="button" class="btn btn-sm ${added ? 'btn-default' : 'btn-primary'}"></button>`)
+                .text(added ? T.feed_added : T.add_feed).prop('disabled', added);
+            $button.on('click', async () => {
+                $button.prop('disabled', true);
+                try {
+                    const saved = await postJSON('/api/firewall/alias/add_item', {alias: {
+                        enabled: '1', name: feed.name, type: 'urltable', content: feed.url, updatefreq: '1',
+                        description: `Firewall Map+ threat feed: ${feed.label}`,
+                    }});
+                    if (saved.result !== 'saved') {
+                        throw new Error(JSON.stringify(saved.validations || saved));
+                    }
+                    await postJSON('/api/firewall/alias/reconfigure', {});
+                    $button.removeClass('btn-primary').addClass('btn-default').text(T.feed_added);
+                } catch (error) {
+                    $button.prop('disabled', false);
+                    notify(`${T.action_failed}: ${error.message || error.statusText || error}`, BootstrapDialog.TYPE_DANGER);
+                }
+            });
+            $row.append($button);
+            $list.append($row);
+        }
+        $list.append(`<div class="text-muted" style="margin-top:8px">${esc(T.feeds_note)}</div>`);
+        BootstrapDialog.show({title: T.threat_feeds, message: $list, buttons: [{label: T.close, action: (dialog) => dialog.close()}]});
     }
 
     function renderDetails() {
@@ -578,7 +695,12 @@
             .on('click', '.fwmap-country', function (event) {
                 event.preventDefault();
                 addCountry(String($(this).data('code')));
+            })
+            .on('click', '.fwmap-investigate', function (event) {
+                event.preventDefault();
+                investigate(String($(this).data('address')));
             });
+        $('#fwmap-feeds').on('click', () => showFeeds());
     }
 
     // re-rank the current tab from the last snapshot without adding a history point
@@ -667,6 +789,7 @@
         }
 
         bindControls();
+        $('#fwmap-feeds').toggle(state.isAdmin);
         renderDetails();
         $(window).on('resize', () => state.renderer.resize());
         poll(`?blocks_min=${state.settings.blockMin}${state.settings.hostnames ? '&hostnames=1' : ''}`);

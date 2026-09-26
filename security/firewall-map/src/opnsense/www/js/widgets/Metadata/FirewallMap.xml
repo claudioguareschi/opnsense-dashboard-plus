@@ -33,6 +33,10 @@
             <geo_provider>Geolocation service</geo_provider>
             <geo_key>MaxMind license key</geo_key>
             <geo_update>Update frequency</geo_update>
+            <abuseipdb_key>AbuseIPDB API key</abuseipdb_key>
+            <key_set_abuse>Key saved (enter a new one to replace it, "-" to remove it)</key_set_abuse>
+            <abuseipdb_none>Optional: enables abuse reports when investigating an address</abuseipdb_none>
+            <threat_lists>Threat lists (none selected: automatic, ★)</threat_lists>
             <days>days</days>
             <key_set>Key saved (enter a new one to replace it, "-" to use the GeoIP alias key)</key_set>
             <key_from_alias>Using the key from the GeoIP alias (enter one to override)</key_from_alias>

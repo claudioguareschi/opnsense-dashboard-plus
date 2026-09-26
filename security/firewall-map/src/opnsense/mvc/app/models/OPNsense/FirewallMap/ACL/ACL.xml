@@ -11,6 +11,7 @@
         <name>Firewall Map+: firewall-wide settings</name>
         <patterns>
             <pattern>api/firewallmap/settings/*</pattern>
+            <pattern>api/firewallmap/investigate/*</pattern>
         </patterns>
     </page-firewall-map-settings>
 </acl>

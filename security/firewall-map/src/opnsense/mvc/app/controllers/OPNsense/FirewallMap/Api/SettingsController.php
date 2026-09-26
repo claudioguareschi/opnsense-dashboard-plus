@@ -49,6 +49,8 @@ class SettingsController extends ApiControllerBase
         return [
             'provider' => (string)$general->provider,
             'update_days' => (string)$general->update_days,
+            'abuseipdb_configured' => (string)$general->abuseipdb_key !== '',
+            'threat_lists' => (string)$general->threat_lists,
             'database' => $this->status(),
         ];
     }
@@ -63,6 +65,18 @@ class SettingsController extends ApiControllerBase
         foreach (['provider', 'update_days'] as $field) {
             if ($this->request->hasPost($field) && $this->request->getPost($field) !== '') {
                 $general->$field = $this->request->getPost($field);
+            }
+        }
+        if ($this->request->hasPost('threat_lists')) {
+            $general->threat_lists = (string)$this->request->getPost('threat_lists');
+        }
+        if ($this->request->hasPost('abuseipdb_key')) {
+            /* write-only like the MaxMind key: empty keeps it, "-" removes it */
+            $abuse = trim((string)$this->request->getPost('abuseipdb_key'));
+            if ($abuse === '-') {
+                $general->abuseipdb_key = '';
+            } elseif ($abuse !== '') {
+                $general->abuseipdb_key = $abuse;
             }
         }
         if ($this->request->hasPost('license_key')) {
@@ -85,6 +99,15 @@ class SettingsController extends ApiControllerBase
         Config::getInstance()->save();
         (new Backend())->configdRun('firewallmap geodb update', true);
         return ['result' => 'saved'];
+    }
+
+    /**
+     * Tables that can serve as threat lists: blocklist-type aliases and feed tables.
+     */
+    public function tablesAction()
+    {
+        $result = json_decode((new Backend())->configdRun('firewallmap tables'), true);
+        return is_array($result) ? $result : ['tables' => [], 'automatic' => []];
     }
 
     public function updateAction()

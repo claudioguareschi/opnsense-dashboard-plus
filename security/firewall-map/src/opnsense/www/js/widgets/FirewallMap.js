@@ -31,6 +31,7 @@ export default class FirewallMap extends BaseWidget {
         // only administrators may read (and change) the firewall-wide database settings
         try {
             this.geoSettings = await this.ajaxCall('/api/firewallmap/settings/get');
+            this.threatTables = await this.ajaxCall('/api/firewallmap/settings/tables');
         } catch (_) {
             this.geoSettings = null;
         }
@@ -72,6 +73,22 @@ export default class FirewallMap extends BaseWidget {
                 options: choices([...new Set(['1', '3', '7', '14', '30', String(geo.update_days)])]
                     .sort((a, b) => a - b).map((value) => [value, `${value} ${this.translations.days}`])),
                 default: geo.update_days,
+            },
+            abuseipdb_key: {
+                id: `${this.id}-option-abuseipdb-key`,
+                title: this.translations.abuseipdb_key,
+                type: 'text',
+                placeholder: geo.abuseipdb_configured ? this.translations.key_set_abuse : this.translations.abuseipdb_none,
+                default: '',
+            },
+            threat_lists: {
+                id: `${this.id}-option-threat-lists`,
+                title: this.translations.threat_lists,
+                type: 'select_multiple',
+                // nothing selected means automatic (feed tables and URL aliases used by block rules)
+                options: choices((this.threatTables?.tables || []).map((table) => [table.name,
+                    `${table.name}${(this.threatTables.automatic || []).includes(table.name) ? ' ★' : ''}`])),
+                default: (geo.threat_lists || '').split(',').filter(Boolean),
             },
         };
     }
@@ -216,9 +233,11 @@ export default class FirewallMap extends BaseWidget {
                 provider: values.geo_provider,
                 update_days: values.geo_update_days,
                 license_key: (values.geo_key || '').trim(),
+                abuseipdb_key: (values.abuseipdb_key || '').trim(),
+                threat_lists: (values.threat_lists || []).join(','),
             };
             // firewall-wide values are saved to the plugin, never into this user's dashboard layout
-            for (const key of ['geo_provider', 'geo_key', 'geo_update_days']) {
+            for (const key of ['geo_provider', 'geo_key', 'geo_update_days', 'abuseipdb_key', 'threat_lists']) {
                 delete values[key];
             }
             try {

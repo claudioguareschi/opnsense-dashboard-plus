@@ -62,6 +62,15 @@
     .fwmap-address { margin-top: 6px; }
     .fwmap-links { font-size: .85em; }
     .fwmap-empty { padding: 6px 2px; }
+    .fwmap-investigation { margin: 4px 0 8px; padding: 6px 8px; border-left: 3px solid rgba(128, 128, 128, .35); }
+    .fwmap-inv-section { margin-bottom: 6px; }
+    .fwmap-inv-title { font-weight: 600; font-size: .9em; text-transform: uppercase; letter-spacing: .03em; opacity: .75; }
+    .fwmap-inv-table { width: 100%; font-size: .9em; }
+    .fwmap-inv-table th { font-weight: normal; opacity: .7; padding-right: 8px; vertical-align: top; white-space: nowrap; width: 1%; }
+    .fwmap-inv-table td { word-break: break-word; }
+    .fwmap-score { color: #fff; border-radius: 3px; padding: 0 6px; font-weight: 600; }
+    .fwmap-feed { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0;
+        border-bottom: 1px solid rgba(128, 128, 128, .2); }
     @media (max-width: 1100px) {
         #fwmap-layout { flex-direction: column; }
         #fwmap-side { width: auto; flex: none; height: auto; }
@@ -119,6 +128,33 @@
         destination: "{{ lang._('Destination') }}",
         state: "{{ lang._('State') }}",
         bytes: "{{ lang._('Bytes') }}",
+        investigate: "{{ lang._('Investigate') }}",
+        looking_up: "{{ lang._('Looking up registry, routing and reputation…') }}",
+        lookup_failed: "{{ lang._('Lookup failed') }}",
+        registry: "{{ lang._('Registry (RDAP)') }}",
+        routing: "{{ lang._('Routing (RIPEstat)') }}",
+        owner: "{{ lang._('Owner') }}",
+        network: "{{ lang._('Network') }}",
+        range: "{{ lang._('Range') }}",
+        country: "{{ lang._('Country') }}",
+        abuse_contact: "{{ lang._('Abuse contact') }}",
+        registered: "{{ lang._('Registered') }}",
+        updated: "{{ lang._('updated') }}",
+        prefix: "{{ lang._('Prefix') }}",
+        origin_as: "{{ lang._('Origin AS') }}",
+        announced: "{{ lang._('Announced') }}",
+        yes: "{{ lang._('yes') }}",
+        no: "{{ lang._('no') }}",
+        confidence: "{{ lang._('Abuse confidence') }}",
+        reports: "{{ lang._('Reports (90 days)') }}",
+        reporters: "{{ lang._('reporters') }}",
+        last_reported: "{{ lang._('Last reported') }}",
+        usage: "{{ lang._('Usage') }}",
+        abuseipdb_hint: "{{ lang._('Add an AbuseIPDB API key in the Firewall Map widget settings to see abuse reports here.') }}",
+        threat_feeds: "{{ lang._('Threat feeds') }}",
+        add_feed: "{{ lang._('Add') }}",
+        feed_added: "{{ lang._('Added') }}",
+        feeds_note: "{{ lang._('Each feed becomes a URL table alias refreshed daily. It marks matching traffic on the map only; no firewall rules are added.') }}",
     };
 </script>
 <script src="/ui/js/firewall-map-renderer.js?v={{ rendererVersion }}"></script>
@@ -147,6 +183,9 @@
             <span></span> <a href="#" style="color:inherit" title="{{ lang._('Remove') }}">&times;</a>
         </span>
         <button id="fwmap-reset" class="btn btn-default btn-sm" type="button">{{ lang._('Reset filters') }}</button>
+        <button id="fwmap-feeds" class="btn btn-default btn-sm" type="button" style="display:none; margin-left:auto">
+            <i class="fa fa-shield"></i> {{ lang._('Threat feeds') }}
+        </button>
     </div>
     <div id="fwmap-layout">
         <div id="fwmap-map">

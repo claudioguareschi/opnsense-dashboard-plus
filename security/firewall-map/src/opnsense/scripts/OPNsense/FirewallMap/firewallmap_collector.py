@@ -76,7 +76,7 @@ BLOCK_REFRESH_SECONDS = 60
 # threat intelligence: pf tables behind URL/external aliases and well-known feed tables
 BLOCKLIST_REFRESH_SECONDS = 300
 BLOCKLIST_ALIAS_TYPES = {"urltable", "url", "urljson", "external"}
-BLOCKLIST_TABLE_PREFIXES = ("crowdsec", "__qfeeds", "qfeeds", "spamhaus", "firehol", "abuse")
+BLOCKLIST_TABLE_PREFIXES = ("crowdsec", "__qfeeds", "qfeeds", "spamhaus", "firehol", "abuse", "fwmap_")
 BLOCKLIST_MAX_ENTRIES = 500000
 BLOCKLIST_MAX_TOTAL = 1000000
 CGNAT = ipaddress.ip_network("100.64.0.0/10")
@@ -625,6 +625,42 @@ def blocklist_tables(config=CONFIG_XML, tables=None, blocked=None):
             tables = []
     names.update(table for table in tables if table.lower().startswith(BLOCKLIST_TABLE_PREFIXES))
     return {name for name in names if name and name in tables}
+
+
+THREAT_CANDIDATE_TYPES = BLOCKLIST_ALIAS_TYPES | {"host", "network"}
+
+
+def pf_tables():
+    try:
+        return subprocess.run([PFCTL, "-sT"], capture_output=True, check=False, text=True, timeout=10).stdout.split()
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+
+
+def threat_list_candidates(config=CONFIG_XML, tables=None):
+    """Tables an administrator may choose as threat lists, with their alias type."""
+    tables = pf_tables() if tables is None else tables
+    candidates = {}
+    try:
+        root = ElementTree.parse(config).getroot()
+        for alias in root.iterfind(".//OPNsense/Firewall/Alias/aliases/alias"):
+            name, kind = alias.findtext("name"), alias.findtext("type")
+            if name in tables and kind in THREAT_CANDIDATE_TYPES:
+                candidates[name] = {"name": name, "type": kind, "description": alias.findtext("description") or ""}
+    except (OSError, ElementTree.ParseError):
+        pass
+    for table in tables:
+        if table.lower().startswith(BLOCKLIST_TABLE_PREFIXES) and table not in candidates:
+            candidates[table] = {"name": table, "type": "feed", "description": ""}
+    return sorted(candidates.values(), key=lambda item: item["name"].lower())
+
+
+def chosen_threat_lists(setting, config=CONFIG_XML):
+    """The administrator's choice when set, otherwise the automatic selection."""
+    names = {name.strip() for name in (setting or "").split(",") if name.strip()}
+    if not names:
+        return blocklist_tables(config)
+    return names & set(pf_tables())
 
 
 class BlocklistIndex:
@@ -1259,7 +1295,7 @@ def run():
                     descriptions, interfaces, leases = rule_descriptions(), interface_names(), lease_names()
                     block_meta_checked = started
                 if blocklists_checked is None or started - blocklists_checked >= BLOCKLIST_REFRESH_SECONDS:
-                    blocklists.refresh(blocklist_tables())
+                    blocklists.refresh(chosen_threat_lists(geodb.settings().get("threat_lists")))
                     blocklists_checked = started
                 payload = snapshot(tracker, geo, local_addresses, role, now, time.time(), resolver, {
                     "names": leases, "networks": networks, "interfaces": interfaces, "blocklists": blocklists,
@@ -1296,6 +1332,9 @@ def run():
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["tables"]:
+        print(json.dumps({"tables": threat_list_candidates(), "automatic": sorted(blocklist_tables())}))
+        sys.exit(0)
     try:
         run()
     except KeyboardInterrupt:

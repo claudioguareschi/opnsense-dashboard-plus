@@ -19,6 +19,15 @@
                 <Mask>/^[A-Za-z0-9_]{0,64}$/</Mask>
                 <ValidationMessage>A MaxMind license key contains only letters, digits and underscores.</ValidationMessage>
             </license_key>
+            <abuseipdb_key type="TextField">
+                <Mask>/^[A-Za-z0-9]{0,128}$/</Mask>
+                <ValidationMessage>An AbuseIPDB API key contains only letters and digits.</ValidationMessage>
+            </abuseipdb_key>
+            <!-- pf tables that count as threat lists; empty: automatic -->
+            <threat_lists type="TextField">
+                <Mask>/^[A-Za-z0-9_.,-]{0,4096}$/</Mask>
+                <ValidationMessage>Choose threat lists from the offered tables.</ValidationMessage>
+            </threat_lists>
             <update_days type="IntegerField">
                 <Required>Y</Required>
                 <Default>3</Default>

@@ -21,6 +21,7 @@ def load(name):
 
 GEODB = load("firewallmap_geodb")
 COLLECTOR = load("firewallmap_collector")
+INVESTIGATE = load("firewallmap_investigate")
 SNAPSHOT = load("flow_snapshot")
 
 NAT_STATE = """all tcp 198.13.91.163:443 (192.168.1.2:443) <- 45.56.79.53:35799       ESTABLISHED:ESTABLISHED
@@ -417,6 +418,48 @@ class CacheStoreTest(unittest.TestCase):
             self.assertEqual(again.get("8.8.8.8"), {"lat": 1.0, "lon": 2.0})
 
 
+class InvestigateTest(unittest.TestCase):
+    RDAP = {
+        "name": "GOGL", "handle": "NET-8-8-8-0-2", "startAddress": "8.8.8.0", "endAddress": "8.8.8.255",
+        "events": [{"eventAction": "registration", "eventDate": "2023-12-28T17:24:33-05:00"}],
+        "entities": [{
+            "roles": ["registrant"], "vcardArray": ["vcard", [["fn", {}, "text", "Google LLC"]]],
+            "entities": [{"roles": ["abuse"], "vcardArray": ["vcard", [
+                ["fn", {}, "text", "Abuse"], ["email", {}, "text", "network-abuse@google.com"]]]}],
+        }],
+    }
+
+    def test_parses_rdap_owner_and_abuse_contact(self):
+        parsed = INVESTIGATE.parse_rdap(self.RDAP)
+        self.assertEqual(parsed["owner"], "Google LLC")
+        self.assertEqual(parsed["abuse_email"], "network-abuse@google.com")
+        self.assertEqual(parsed["range"], "8.8.8.0 – 8.8.8.255")
+        self.assertEqual(parsed["registered"], "2023-12-28")
+
+    def test_rejects_private_and_invalid_addresses(self):
+        self.assertEqual(INVESTIGATE.investigate("192.168.1.1", store=object(), fetchers={})["status"], "failed")
+        self.assertEqual(INVESTIGATE.investigate("8.8.8.8; rm -rf /", store=object(), fetchers={})["status"], "failed")
+
+    def test_caches_and_reports_errors_per_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = COLLECTOR.CacheStore(os.path.join(directory, "cache.db"))
+            calls = []
+
+            def rdap():
+                calls.append("rdap")
+                return {"name": "GOGL"}
+
+            def broken():
+                raise RuntimeError("boom secret-key")
+            result = INVESTIGATE.investigate("8.8.8.8", store=store, key="secret-key",
+                                             fetchers={"rdap": rdap, "abuseipdb": broken}, now=1000.0)
+            self.assertEqual(result["rdap"], {"name": "GOGL"})
+            self.assertEqual(result["abuseipdb"], {"error": "boom <key>"})
+            again = INVESTIGATE.investigate("8.8.8.8", store=store, fetchers={"rdap": rdap}, now=1001.0)
+            self.assertTrue(again["rdap"]["cached"])
+            self.assertEqual(calls, ["rdap"])
+
+
 class GeoDatabaseTest(unittest.TestCase):
     def test_reads_key_from_maxmind_alias_url_only(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -436,7 +479,7 @@ class GeoDatabaseTest(unittest.TestCase):
             with open(path, "w") as handle:
                 handle.write("<opnsense><OPNsense><FirewallMap><general><provider>dbip</provider>"
                              "<license_key/><update_days>7</update_days></general></FirewallMap></OPNsense></opnsense>")
-            self.assertEqual(GEODB.settings(path), {"provider": "dbip", "license_key": "", "update_days": 7})
+            self.assertEqual(GEODB.settings(path), {"provider": "dbip", "license_key": "", "update_days": 7, "threat_lists": ""})
             self.assertEqual(GEODB.settings(os.path.join(directory, "none.xml"))["provider"], "auto")
 
     def test_automatic_provider_prefers_maxmind_with_a_key(self):

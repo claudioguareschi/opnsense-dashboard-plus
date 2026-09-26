@@ -62,7 +62,7 @@ DATABASES = {
 
 def settings(path=CONFIG_XML):
     """Read the plugin's firewall-wide settings straight from config.xml."""
-    values = {"provider": "auto", "license_key": "", "update_days": 3}
+    values = {"provider": "auto", "license_key": "", "update_days": 3, "threat_lists": ""}
     try:
         general = ElementTree.parse(path).getroot().find("./OPNsense/FirewallMap/general")
     except (OSError, ElementTree.ParseError):
