@@ -44,7 +44,7 @@
         display: flex; flex-wrap: wrap; gap: 4px 12px; max-width: 70%;
     }
     .fwmap-legend-item i { display: inline-block; width: 18px; height: 3px; margin-right: 5px; vertical-align: middle; border-radius: 2px; }
-    #fwmap-side { width: 320px; flex: 0 0 320px; display: flex; flex-direction: column;
+    #fwmap-side { width: clamp(380px, 36vw, 640px); flex: 0 0 clamp(380px, 36vw, 640px); display: flex; flex-direction: column;
         height: calc(100vh - 280px); min-height: 420px; }
     #fwmap-talkers, #fwmap-details-box { border: 1px solid rgba(128, 128, 128, .25); border-radius: 6px; padding: 8px; }
     #fwmap-talkers { flex: 1 1 60%; overflow-y: auto; min-height: 0; }
@@ -132,6 +132,51 @@
         font-size: .9em; padding-top: 6px; }
     .fwmap-q-record { font-weight: normal; margin: 0; }
     .fwmap-q-source { opacity: .75; }
+
+    /* details panel: header, connection diagram, four cards, action bar */
+    .fwmap-d-head { display: flex; align-items: flex-start; gap: 10px; }
+    .fwmap-d-icon { font-size: 1.9em; opacity: .75; margin-top: 2px; }
+    .fwmap-d-title { flex: 1; min-width: 0; }
+    .fwmap-d-name { font-size: 1.25em; font-weight: 600; line-height: 1.2; word-break: break-all; }
+    .fwmap-d-sub { font-size: .85em; opacity: .75; }
+    .fwmap-d-verdict { text-align: right; white-space: nowrap; }
+    #fwmap-details-close { font-size: 1.4em; line-height: 1; text-decoration: none; margin-left: 4px; }
+    .fwmap-pill { display: inline-block; font-size: .8em; font-weight: 600; padding: 2px 9px; border-radius: 10px; white-space: nowrap; }
+    .fwmap-pill-ok { background: rgba(46, 139, 87, .15); color: rgb(30, 110, 65); }
+    .fwmap-pill-danger { background: rgb(196, 18, 48); color: #fff; }
+    .fwmap-pill-warning { background: rgba(230, 140, 0, .18); color: rgb(170, 95, 0); }
+    .fwmap-pill-blocked { background: rgba(90, 90, 90, .85); color: #fff; }
+    .fwmap-pill-muted { background: rgba(128, 128, 128, .18); }
+    .fwmap-picker { margin: 6px 0 0; font-size: .85em; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+    .fwmap-pick { padding: 0 6px; border-radius: 8px; }
+    .fwmap-pick.active { background: rgba(128, 128, 128, .2); font-weight: 600; }
+    .fwmap-diagram { display: flex; align-items: stretch; gap: 8px; margin: 10px 0 4px; }
+    .fwmap-end { flex: 1 1 0; min-width: 0; text-align: center; padding: 8px 6px; border-radius: 6px;
+        background: rgba(128, 128, 128, .09); border: 1px solid rgba(128, 128, 128, .18); }
+    .fwmap-end .fa { font-size: 1.5em; opacity: .7; }
+    .fwmap-end-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fwmap-end-sub { font-size: .8em; opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fwmap-link { flex: 0 0 34%; display: flex; flex-direction: column; justify-content: center; text-align: center; font-size: .85em; }
+    .fwmap-link-service { font-weight: 600; }
+    .fwmap-link-port { opacity: .75; }
+    .fwmap-link-arrow { position: relative; height: 12px; margin: 2px 6px; }
+    .fwmap-link-arrow::before { content: ""; position: absolute; left: 0; right: 6px; top: 5px; border-top: 1.5px solid currentColor; opacity: .7; }
+    .fwmap-link-arrow::after { content: ""; position: absolute; right: 0; top: 1px; border: 5px solid transparent; border-left: 7px solid currentColor; opacity: .7; }
+    .fwmap-link-blocked .fwmap-link-arrow .fa { position: relative; z-index: 1; color: rgb(196, 18, 48); background: inherit; }
+    .fwmap-link-rate { opacity: .75; }
+    .fwmap-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; margin-top: 8px; }
+    .fwmap-card { border: 1px solid rgba(128, 128, 128, .22); border-radius: 6px; padding: 6px 8px; min-width: 0; }
+    .fwmap-card-title { font-weight: 600; margin-bottom: 4px; }
+    .fwmap-card-title .fa { width: 1.2em; text-align: center; color: rgb(200, 90, 40); }
+    .fwmap-card-note { font-size: .8em; margin-bottom: 3px; }
+    .fwmap-kv { width: 100%; font-size: .88em; }
+    .fwmap-kv th { font-weight: normal; opacity: .7; padding: 1px 8px 1px 0; vertical-align: top; white-space: nowrap; width: 1%; }
+    .fwmap-kv td { padding: 1px 0; word-break: break-word; }
+    .fwmap-two { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .fwmap-empty-note { font-size: .88em; padding: 4px 6px; border-radius: 4px; background: rgba(128, 128, 128, .07); }
+    .fwmap-empty-note .fa-check { color: rgb(46, 139, 87); }
+    .fwmap-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .fwmap-actions .btn-group { margin-left: auto; }
     @media (max-width: 1100px) {
         #fwmap-layout { flex-direction: column; }
         #fwmap-split-side { display: none; }
@@ -252,6 +297,40 @@
         blacklist_pending: "{{ lang._('Not downloaded yet') }}",
         blacklist_error: "{{ lang._('last attempt failed') }}",
         blacklist_no_key: "{{ lang._('Add an AbuseIPDB API key in the Firewall Map widget settings to download it.') }}",
+        active: "{{ lang._('Active') }}",
+        allowed_flagged: "{{ lang._('Allowed · flagged') }}",
+        attempts: "{{ lang._('Attempts') }}",
+        blocked: "{{ lang._('Blocked') }}",
+        blocked_attempts: "{{ lang._('Blocked attempts') }}",
+        clean: "{{ lang._('Clean') }}",
+        connections: "{{ lang._('Connections') }}",
+        current_rate: "{{ lang._('Current rate') }}",
+        egress: "{{ lang._('Egress') }}",
+        idle: "{{ lang._('Idle') }}",
+        ids_on_address: "{{ lang._('Alerts on this address in the last hour (not necessarily this traffic)') }}",
+        ids_on_connection: "{{ lang._('Alerts raised by this exact connection') }}",
+        ids_only: "{{ lang._('Seen by Suricata') }}",
+        in_minutes: "{{ lang._('in %s min') }}",
+        inside_side: "{{ lang._('Inside side') }}",
+        listed: "{{ lang._('Listed') }}",
+        more: "{{ lang._('More') }}",
+        no_connection: "{{ lang._('No connection is open right now.') }}",
+        no_ids: "{{ lang._('No IDS alerts for this address') }}",
+        no_ids_sub: "{{ lang._('Suricata has not alerted on this address in the last hour.') }}",
+        not_checked: "{{ lang._('not checked') }}",
+        organization: "{{ lang._('Organization') }}",
+        other_ports: "{{ lang._('Other ports') }}",
+        other_services: "{{ lang._('Other services') }}",
+        port_forward: "{{ lang._('Port forward') }}",
+        remote_addresses_here: "{{ lang._('addresses here:') }}",
+        remote_side: "{{ lang._('Remote side') }}",
+        sec_ids_long: "{{ lang._('IDS (Suricata)') }}",
+        started: "{{ lang._('Started') }}",
+        started_inside_long: "{{ lang._('Started inside') }}",
+        started_outside_long: "{{ lang._('Started outside') }}",
+        target: "{{ lang._('Target') }}",
+        this_firewall_title: "{{ lang._('This firewall') }}",
+        tried: "{{ lang._('Tried') }}",
         review_queue: "{{ lang._('Review queue') }}",
         review_intro: "{{ lang._('Allowed traffic to or from flagged addresses') }}",
         record_threats: "{{ lang._('Record in the background') }}",

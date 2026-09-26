@@ -321,31 +321,6 @@
 
     /* ---------------------------------------------------------------- details and actions */
 
-    function addressRow(address) {
-        const links = [
-            `<a href="#" class="fwmap-copy" data-address="${esc(address)}">${esc(T.copy)}</a>`,
-            `<a href="https://bgp.he.net/ip/${encodeURIComponent(address)}" target="_blank" rel="noopener noreferrer">${esc(T.whois)}</a>`,
-            `<a href="https://www.abuseipdb.com/check/${encodeURIComponent(address)}" target="_blank" rel="noopener noreferrer">AbuseIPDB</a>`,
-        ];
-        const admin = state.isAdmin ? [
-            `<a href="#" class="fwmap-investigate" data-address="${esc(address)}"><b>${esc(T.investigate)}</b></a>`,
-            `<a href="#" class="fwmap-states" data-address="${esc(address)}">${esc(T.show_states)}</a>`,
-            `<a href="#" class="fwmap-kill" data-address="${esc(address)}">${esc(T.kill_states)}</a>`,
-            `<a href="#" class="fwmap-alias" data-address="${esc(address)}">${esc(T.add_to_alias)}</a>`,
-            `<a href="#" class="fwmap-mark" data-address="${esc(address)}" style="color:rgb(196,18,48)">${esc(T.mark_threat)}</a>`,
-        ] : [];
-        const card = state.investigations.get(address);
-        const flow = (state.selection?.members || []).find((member) => member.dest === address);
-        const block = state.selection?.block?.source === address ? state.selection.block : null;
-        const alert = state.selection?.alert?.source === address ? state.selection.alert : null;
-        const ids = flow?.ids || block?.ids || alert?.ids;
-        const summary = state.selection?.kind === 'idsflow' ? ''
-            : (flow ? connection(flow) : block ? blocked(block) : '') + idsLines(ids);
-        return `<div class="fwmap-address"><b>${esc(address)}</b>${summary}<div class="fwmap-links">${links.concat(admin).join(' · ')}</div>`
-            + (card ? `<div class="fwmap-investigation">${card}</div>` : '') + '</div>';
-    }
-
-    /** Who opened the connection: 'Inbound to mail 192.168.1.2:443 (HTTPS)' or 'Outbound'. */
     /** What the map knows about a remote address: hostname, network, country. */
     function remoteOf(address) {
         const location = (state.snapshot?.locations || []).find((item) => item.id === address) || {};
@@ -355,25 +330,6 @@
             org: state.settings.asn ? location.as_org : null,
             country: location.country,
         };
-    }
-
-    /** The one-line summary of a flow, then its services and current rates. */
-    function connection(flow) {
-        const style = flow.threat ? ' style="color:rgb(196,18,48)"' : '';
-        const sentences = FirewallMapRenderer.flowSummary(flow, remoteOf(flow.dest))
-            .map((sentence) => `<div class="fwmap-summary"${style}>${esc(sentence)}</div>`).join('');
-        const traffic = `<div class="text-muted">${(flow.services || []).slice(0, 3).map(esc).join(', ')}`
-            + `${(flow.services || []).length ? ' · ' : ''}↓ ${esc(formatRate(flow.rate_in || 0))} ↑ ${esc(formatRate(flow.rate_out || 0))}</div>`;
-        return sentences + traffic;
-    }
-
-    /** A blocked source: the summary, then every port it tried with its count. */
-    function blocked(block) {
-        const flagged = block.threat || (block.lists || []).length;
-        const ports = (block.services || []).map((service) => `${esc(service.name)}${service.port ? ` (${esc(service.port)})` : ''} ×${esc(service.hits)}`);
-        return `<div class="fwmap-summary"${flagged ? ' style="color:rgb(196,18,48)"' : ''}>${esc(FirewallMapRenderer.blockSummary(block, state.settings.asn))}</div>`
-            + `<div class="text-muted">${ports.join(', ')}${(block.port_count || 0) > ports.length ? ` +${esc(block.port_count - ports.length)}` : ''}`
-            + ` · ${esc(block.hits_per_minute)}/min</div>`;
     }
 
     /* ---------------------------------------------------------------- investigation card */
@@ -733,48 +689,221 @@
             .map((line) => `<div class="${cls}"><i class="fa fa-flag"></i> ${esc(line)}</div>`).join('');
     }
 
-    /** First thing to read: did the firewall let it through, and does that matter. */
-    function verdict(isBlocked, flagged, count, idsOnly) {
-        if (idsOnly) {
-            return `<div class="fwmap-verdict fwmap-verdict-blocked">${esc(T.verdict_ids)}</div>`;
-        }
-        let text = isBlocked ? T.verdict_blocked : flagged ? T.verdict_allowed_flagged : T.verdict_allowed;
-        const kind = isBlocked ? 'blocked' : flagged ? 'danger' : 'allowed';
-        if (!isBlocked && count > 1) {
-            text += ` · ${count} ${T.remote_addresses}`;
-        }
-        return `<div class="fwmap-verdict fwmap-verdict-${kind}">${esc(text)}</div>`;
+    /* ---------------------------------------------------------------- details panel */
+
+    function flagOf(code) {
+        return /^[A-Za-z]{2}$/.test(code || '')
+            ? String.fromCodePoint(...[...code.toUpperCase()].map((char) => 127397 + char.charCodeAt(0))) : '';
     }
 
-    /** A connection Suricata alerted on: the connection, the firewall's decision, IDS, reputation. */
-    function idsFlowDetails(flow) {
-        const row = (label, value) => value === null || value === undefined || value === ''
-            ? '' : `<tr><th>${esc(label)}</th><td>${value}</td></tr>`;
-        const inside = flow.inside_host?.name ? `${esc(flow.inside_host.name)} (${esc(flow.inside)})` : esc(flow.inside || T.this_firewall);
-        const path = flow.remote_started ? `${esc(flow.remote)} → ${inside}` : `${inside} → ${esc(flow.remote)}`;
-        const section = (title, body, extra = '') => `<div class="fwmap-sec"><div class="fwmap-sec-title">${esc(title)}${extra}</div>${body}</div>`;
-        const connectionSection = section(T.sec_connection, `<table class="fwmap-inv-table">
-            ${row(T.path, `${path} <span class="text-muted">${esc(flow.protocol.toUpperCase())}</span>`)}
-            ${row(T.started_by, esc(flow.remote_started ? T.started_outside : T.started_inside))}
-            ${row(T.via, esc(flow.public))}
-            ${row(T.state, esc(flow.active ? `${T.open_for} ${ago(Date.now() / 1000 - (flow.age || 0))} ${T.ago}` : T.closed))}
-            ${row(T.transferred, `↓ ${esc(formatBytes(flow.bytes_in || 0))} ↑ ${esc(formatBytes(flow.bytes_out || 0))}`)}
-        </table>`);
-        const firewallSection = section(T.sec_firewall, `<table class="fwmap-inv-table">
-            ${row(T.decision, esc(T.allowed))}
-            ${row(T.interface, esc(flow.interface))}
-            ${row(T.rule, esc(flow.rule))}
-        </table>`);
-        const signatures = flow.groups.flatMap((group) => group.signatures.map((item) => ({...item, flow_id: group.flow_id})));
-        const idsSection = section(T.sec_ids, signatures.map((item) => `<div class="fwmap-sig">
+    function pill(kind, text, icon) {
+        return `<span class="fwmap-pill fwmap-pill-${kind}">${icon ? `<i class="fa ${icon}"></i> ` : ''}${esc(text)}</span>`;
+    }
+
+    function place(item) {
+        return [item.city, item.country].filter(Boolean).map(plain).join(', ');
+    }
+
+    /** One box of the connection diagram: a host on either end. */
+    function endBox(icon, name, lines) {
+        return `<div class="fwmap-end"><i class="fa ${icon}"></i><div class="fwmap-end-name">${esc(name)}</div>`
+            + lines.filter(Boolean).map((line) => `<div class="fwmap-end-sub">${esc(line)}</div>`).join('') + '</div>';
+    }
+
+    function card(icon, title, body) {
+        return `<div class="fwmap-card"><div class="fwmap-card-title"><i class="fa ${icon}"></i> ${esc(title)}</div>${body}</div>`;
+    }
+
+    function rows(items) {
+        return `<table class="fwmap-kv">${items.filter(([, value]) => value !== null && value !== undefined && value !== '')
+            .map(([label, value]) => `<tr><th>${esc(label)}</th><td>${value}</td></tr>`).join('')}</table>`;
+    }
+
+    function serviceParts(name, port) {
+        const raw = /^(TCP|UDP)\/(\d+)$/.exec(name || '');
+        if (raw) {
+            return {name: `${raw[1]} ${raw[2]}`, port: `${raw[1]}/${raw[2]}`};
+        }
+        const [number, protocol] = String(port || '').split('/');
+        return {name: plain(name || '—'), port: number ? `${(protocol || '').toUpperCase()}/${number}` : ''};
+    }
+
+    function reputationCard(item) {
+        const listed = new Set(item.lists || []);
+        const lists = [...new Set([...(state.snapshot?.threat_lists || []), ...listed])];
+        const score = item.abuseipdb;
+        const abuse = score === null || score === undefined ? '<span class="text-muted">' + esc(T.not_checked) + '</span>'
+            : score >= 75 ? pill('danger', `${score}%`) : score >= 25 ? pill('warning', `${score}%`) : pill('ok', T.clean, 'fa-check');
+        const left = rows([['AbuseIPDB', abuse], ...lists.filter((name) => name !== 'AbuseIPDB (looked up)').map((name) =>
+            [listLabel(name), listed.has(name) ? pill('danger', T.listed) : '<span class="text-muted">—</span>'])]);
+        const right = rows([
+            ['ASN', item.asn ? esc(`AS${item.asn}`) : ''],
+            [T.organization, esc(plain(item.as_org || ''))],
+            [T.country, item.country ? `${flagOf(item.country_code)} ${esc(plain(item.country))}` : ''],
+        ]);
+        return card('fa-shield', T.sec_reputation, `<div class="fwmap-two">${left}${right}</div>`);
+    }
+
+    function idsCard(ids, groups) {
+        const signatures = groups ? groups.flatMap((group) => group.signatures)
+            : (ids?.signatures || []).map((item) => ({...item, last: null}));
+        if (!signatures.length) {
+            return card('fa-search', T.sec_ids_long, `<div class="fwmap-empty-note"><i class="fa fa-check"></i> ${esc(T.no_ids)}
+                <div class="text-muted">${esc(T.no_ids_sub)}</div></div>`);
+        }
+        const scope = groups ? T.ids_on_connection : T.ids_on_address;
+        return card('fa-search', T.sec_ids_long, `<div class="text-muted fwmap-card-note">${esc(scope)}</div>`
+            + signatures.map((item) => `<div class="fwmap-sig">
                 <div class="${item.severity <= 2 ? 'fwmap-ids-high' : 'fwmap-ids'}"><i class="fa fa-flag"></i> ${esc(item.signature)}</div>
-                <div class="text-muted">${esc(T.severity)} ${esc(item.severity)}${item.category ? ` · ${esc(item.category)}` : ''} · SID ${esc(item.sid)}
-                    · ${esc(item.count)}× · ${esc(new Date(item.last * 1000).toLocaleTimeString())}${item.action === 'blocked' ? ` · <b>${esc(T.ips_dropped)}</b>` : ''}</div>
-            </div>`).join(''), ` <span class="badge">${esc(flow.count)}</span>`);
-        const reputationSection = section(T.sec_reputation, (flow.lists || []).length
-            ? `<div style="font-weight:600;color:rgb(196,18,48)">${esc(T.listed_in)} ${flow.lists.map(esc).join(', ')}</div>`
-            : `<div class="text-muted">${esc(T.not_listed)}</div>`);
-        return connectionSection + firewallSection + idsSection + reputationSection;
+                <div class="text-muted">${esc(T.severity)} ${esc(item.severity)}${item.category ? ` · ${esc(item.category)}` : ''}${item.sid ? ` · SID ${esc(item.sid)}` : ''}
+                    · ${esc(item.count)}×${item.last ? ` · ${esc(new Date(item.last * 1000).toLocaleTimeString())}` : ''}${item.action === 'blocked' ? ` · <b>${esc(T.ips_dropped)}</b>` : ''}</div>
+            </div>`).join(''));
+    }
+
+    /** Everything the panel shows for one remote address of the selection. */
+    function detailsModel(selection, address) {
+        const flow = selection.kind === 'flow' ? (selection.members || []).find((member) => member.dest === address) : null;
+        const block = selection.kind === 'blocked' ? selection.block : null;
+        const alert = selection.kind === 'alert' ? selection.alert : null;
+        const ids = selection.kind === 'idsflow' ? selection.idsFlow : null;
+        const location = (state.snapshot?.locations || []).find((item) => item.id === address) || {};
+        const item = {...location, ...(block || alert || ids || {}), country_code: (block || alert || ids || {}).country_code || location.country_code};
+        const hostname = state.snapshot?.hostnames?.[address];
+        const remote = {
+            title: hostname || address, ip: address, hostname, place: place(item), cc: item.country_code,
+            org: state.settings.asn ? plain(item.as_org || '') : '',
+        };
+        const firewallName = T.this_firewall_title;
+        const origin = (state.snapshot?.locations || []).find((entry) => entry.local)?.id || '';
+        const remoteBox = endBox('fa-server', remote.title, [hostname ? address : '', [remote.place].filter(Boolean).join('')]);
+        if (flow) {
+            const outbound = flow.initiated !== 'remote';
+            const inside = (flow.inside || [])[0];
+            const target = (flow.targets || [])[0];
+            const name = (flow.services || [])[0];
+            const service = serviceParts(target && !outbound ? target.service : name,
+                target && !outbound && target.port ? `${target.port}/${target.protocol || 'tcp'}` : (flow.service_ports || {})[name]);
+            const localBox = outbound
+                ? (inside ? endBox('fa-desktop', inside.name || inside.ip, [inside.name ? inside.ip : '', inside.interface])
+                    : endBox('fa-shield', firewallName, [origin]))
+                : (target && !target.firewall ? endBox('fa-desktop', target.name || target.ip, [target.name ? target.ip : '', target.interface])
+                    : endBox('fa-shield', firewallName, [origin]));
+            const flagged = (flow.lists || []).length > 0;
+            const transferred = flow.transferred ? `↓ ${esc(formatBytes(flow.transferred[0]))} ↑ ${esc(formatBytes(flow.transferred[1]))}` : '';
+            return {
+                remote, address,
+                verdict: flagged ? pill('danger', T.allowed_flagged, 'fa-exclamation-triangle') : pill('ok', T.allowed, 'fa-check'),
+                sub: outbound ? T.started_inside_long : T.started_outside_long,
+                diagram: [outbound ? localBox : remoteBox, service, `↓ ${esc(formatRate(flow.rate_in || 0))} ↑ ${esc(formatRate(flow.rate_out || 0))}`, outbound ? remoteBox : localBox, false],
+                connection: rows([
+                    [T.protocol, esc(`${service.name}${service.port ? ` (${service.port})` : ''}`)],
+                    [T.other_services, (flow.services || []).slice(1).map(esc).join(', ')],
+                    [T.state, (flow.activity || 0) > 0 ? pill('ok', T.active, 'fa-check') : pill('muted', T.idle)],
+                    [T.started, flow.age ? esc(`${ago(Date.now() / 1000 - flow.age)} ${T.ago}`) : ''],
+                    [T.transferred, transferred],
+                    [T.current_rate, `↓ ${esc(formatRate(flow.rate_in || 0))} ↑ ${esc(formatRate(flow.rate_out || 0))}`],
+                    [T.connections, esc(flow.states)],
+                ]),
+                firewall: rows([
+                    [T.decision, pill('ok', T.allowed, 'fa-check')],
+                    [T.interface, esc(inside?.interface || (target && target.interface) || flow.egress || '')],
+                    [T.rule, esc(flow.rule || '')],
+                    [T.egress, esc(flow.egress || '')],
+                    ['NAT', inside && outbound ? esc(`${T.yes} (${inside.ip} → ${flow.origin})`)
+                        : target && !target.firewall ? esc(`${T.port_forward} (${flow.origin} → ${target.ip}${target.port ? `:${target.port}` : ''})`) : esc(T.no)],
+                ]),
+                ids: idsCard(flow.ids, null),
+                reputation: reputationCard({...item, lists: flow.lists, abuseipdb: flow.abuseipdb}),
+            };
+        }
+        if (ids) {
+            const inside = ids.inside_host;
+            const insideBox = inside ? endBox('fa-desktop', inside.name || inside.ip, [inside.name ? ids.inside : '', inside.interface])
+                : endBox('fa-shield', firewallName, [ids.public]);
+            const [, port] = ids.remote.split(':');
+            const service = {name: ids.protocol.toUpperCase(), port: port ? `${ids.protocol.toUpperCase()}/${port}` : ''};
+            const serious = ids.severity <= 2 || (ids.lists || []).length > 0;
+            return {
+                remote, address,
+                verdict: serious ? pill('danger', T.allowed_flagged, 'fa-exclamation-triangle') : pill('ok', T.allowed, 'fa-check'),
+                sub: ids.remote_started ? T.started_outside_long : T.started_inside_long,
+                diagram: [ids.remote_started ? remoteBox : insideBox, service, `↓ ${esc(formatBytes(ids.bytes_in || 0))} ↑ ${esc(formatBytes(ids.bytes_out || 0))}`, ids.remote_started ? insideBox : remoteBox, false],
+                connection: rows([
+                    [T.protocol, esc(ids.protocol.toUpperCase())],
+                    [T.inside_side, esc(ids.inside || T.this_firewall)],
+                    [T.via, esc(ids.public)],
+                    [T.remote_side, esc(ids.remote)],
+                    [T.state, ids.active ? pill('ok', T.active, 'fa-check') : pill('muted', T.closed)],
+                    [T.started, ids.age ? esc(`${ago(Date.now() / 1000 - ids.age)} ${T.ago}`) : ''],
+                    [T.transferred, `↓ ${esc(formatBytes(ids.bytes_in || 0))} ↑ ${esc(formatBytes(ids.bytes_out || 0))}`],
+                ]),
+                firewall: rows([
+                    [T.decision, pill('ok', T.allowed, 'fa-check')],
+                    [T.interface, esc(ids.interface || '')],
+                    [T.rule, esc(ids.rule || '')],
+                    ['NAT', ids.inside && !String(ids.inside).startsWith(ids.public.split(':')[0]) ? esc(`${T.yes} (${ids.inside} → ${ids.public})`) : esc(T.no)],
+                    ['IPS', ids.ips_dropped ? pill('danger', T.ips_dropped) : ''],
+                ]),
+                ids: idsCard(null, ids.groups),
+                reputation: reputationCard(item),
+            };
+        }
+        if (block) {
+            const service = serviceParts(block.services?.[0]?.name, block.services?.[0]?.port);
+            return {
+                remote, address,
+                verdict: pill('blocked', T.blocked, 'fa-ban'),
+                sub: T.blocked_attempts,
+                diagram: [remoteBox, service, `${esc(block.hits)}× ${esc(T.in_minutes.replace('%s', block.window_minutes))}`, endBox('fa-shield', firewallName, [block.target, block.interface]), true],
+                connection: rows([
+                    [T.tried, (block.services || []).map((entry) => `${esc(entry.name)}${entry.port ? ` (${esc(entry.port)})` : ''} ×${esc(entry.hits)}`).join('<br>')],
+                    [T.other_ports, block.port_count > (block.services || []).length ? esc(block.port_count - block.services.length) : ''],
+                    [T.attempts, esc(`${block.hits} · ${block.hits_per_minute}/min`)],
+                    [T.first_seen, block.seconds ? esc(`${ago(Date.now() / 1000 - block.seconds)} ${T.ago}`) : ''],
+                ]),
+                firewall: rows([
+                    [T.decision, pill('blocked', T.blocked, 'fa-ban')],
+                    [T.interface, esc(block.interface || '')],
+                    [T.rule, esc(block.rule || '')],
+                    [T.target, esc(block.target || '')],
+                ]),
+                ids: idsCard(block.ids, null),
+                reputation: reputationCard(item),
+            };
+        }
+        return {
+            remote, address,
+            verdict: pill('muted', T.ids_only, 'fa-flag'),
+            sub: T.verdict_ids,
+            diagram: null,
+            connection: `<div class="text-muted">${esc(T.no_connection)}</div>`,
+            firewall: `<div class="text-muted">${esc(T.no_connection)}</div>`,
+            ids: idsCard(alert?.ids, null),
+            reputation: reputationCard(item),
+        };
+    }
+
+    function actionBar(address, countryCode) {
+        const more = [
+            `<li><a href="https://bgp.he.net/ip/${encodeURIComponent(address)}" target="_blank" rel="noopener noreferrer"><i class="fa fa-globe"></i> ${esc(T.whois)}</a></li>`,
+            `<li><a href="https://www.abuseipdb.com/check/${encodeURIComponent(address)}" target="_blank" rel="noopener noreferrer"><i class="fa fa-external-link"></i> AbuseIPDB</a></li>`,
+            `<li><a href="#" class="fwmap-copy" data-address="${esc(address)}"><i class="fa fa-clipboard"></i> ${esc(T.copy)}</a></li>`,
+        ];
+        if (state.isAdmin) {
+            more.push('<li role="separator" class="divider"></li>',
+                `<li><a href="#" class="fwmap-alias" data-address="${esc(address)}"><i class="fa fa-list-ul"></i> ${esc(T.add_to_alias)}</a></li>`,
+                `<li><a href="#" class="fwmap-mark" data-address="${esc(address)}"><i class="fa fa-flag"></i> ${esc(T.mark_threat)}</a></li>`);
+            if (countryCode) {
+                more.push(`<li><a href="#" class="fwmap-country" data-code="${esc(countryCode)}"><i class="fa fa-map-marker"></i> ${esc(T.add_country)} (${esc(countryCode)})</a></li>`);
+            }
+        }
+        const admin = state.isAdmin ? `
+            <button type="button" class="btn btn-primary fwmap-investigate" data-address="${esc(address)}"><i class="fa fa-search"></i> ${esc(T.investigate)}</button>
+            <button type="button" class="btn btn-default fwmap-states" data-address="${esc(address)}"><i class="fa fa-list"></i> ${esc(T.show_states)}</button>
+            <button type="button" class="btn btn-default fwmap-kill" data-address="${esc(address)}"><i class="fa fa-times-circle"></i> ${esc(T.kill_states)}</button>` : '';
+        return `<div class="fwmap-actions">${admin}
+            <div class="btn-group dropup"><button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown">${esc(T.more)} <span class="caret"></span></button>
+            <ul class="dropdown-menu dropdown-menu-right">${more.join('')}</ul></div></div>`;
     }
 
     function renderDetails() {
@@ -784,24 +913,43 @@
             $details.html(`<div class="text-muted fwmap-empty">${esc(T.click_hint)}</div>`);
             return;
         }
-        const addresses = [...new Set(selection.addresses)].slice(0, 8);
-        const lists = [...new Set([...(selection.block?.lists || []), ...(selection.alert?.lists || []),
-            ...(selection.idsFlow?.lists || []),
-            ...(selection.members || []).flatMap((member) => member.lists || [])])];
-        const country = state.isAdmin && selection.countryCode
-            ? `<div class="fwmap-links"><a href="#" class="fwmap-country" data-code="${esc(selection.countryCode)}">`
-              + `${esc(T.add_country)} (${esc(selection.countryCode)})</a></div>` : '';
+        const addresses = [...new Set(selection.addresses)];
+        if (!addresses.includes(state.detailsAddress)) {
+            state.detailsAddress = addresses[0];
+        }
+        const address = state.detailsAddress;
+        const model = detailsModel(selection, address);
+        const picker = addresses.length > 1 ? `<div class="fwmap-picker"><span class="text-muted">${esc(addresses.length)} ${esc(T.remote_addresses_here)}</span>`
+            + addresses.slice(0, 12).map((entry) => `<a href="#" class="fwmap-pick${entry === address ? ' active' : ''}" data-address="${esc(entry)}">${esc(entry)}</a>`).join('')
+            + '</div>' : '';
+        const diagram = model.diagram ? `<div class="fwmap-diagram">${model.diagram[0]}
+            <div class="fwmap-link${model.diagram[4] ? ' fwmap-link-blocked' : ''}"><div class="fwmap-link-service">${esc(model.diagram[1].name)}</div>
+                <div class="fwmap-link-port">${esc(model.diagram[1].port)}</div>
+                <div class="fwmap-link-arrow">${model.diagram[4] ? '<i class="fa fa-ban"></i>' : ''}</div>
+                <div class="fwmap-link-rate">${model.diagram[2]}</div></div>
+            ${model.diagram[3]}</div>` : '';
+        const investigation = state.investigations.get(address);
         $details.html(`
-            <div class="fwmap-details-head">
-                <b>${esc(selection.title || '')}</b>
+            <div class="fwmap-d-head">
+                <i class="fa fa-globe fwmap-d-icon"></i>
+                <div class="fwmap-d-title">
+                    <div class="fwmap-d-name">${esc(model.remote.title)}</div>
+                    <div class="fwmap-d-sub">${model.remote.hostname ? `${esc(address)} · ` : ''}${model.remote.cc ? `${flagOf(model.remote.cc)} ` : ''}${esc(model.remote.place)}</div>
+                    ${model.remote.org ? `<div class="fwmap-d-sub">${esc(model.remote.org)}</div>` : ''}
+                </div>
+                <div class="fwmap-d-verdict">${model.verdict}<div class="fwmap-d-sub">${esc(model.sub)}</div></div>
                 <a href="#" id="fwmap-details-close" title="${esc(T.close)}">&times;</a>
             </div>
-            ${verdict(selection.kind === 'blocked', lists.length > 0 || (selection.kind === 'idsflow' && selection.idsFlow.severity <= 2),
-                addresses.length, selection.kind === 'alert')}
-            ${lists.length ? `<div style="font-weight:600;color:rgb(196,18,48)">${esc(T.listed_in)} ${lists.map(esc).join(', ')}</div>` : ''}
-            ${selection.kind === 'idsflow' ? idsFlowDetails(selection.idsFlow) : ''}
-            ${addresses.map(addressRow).join('')}
-            ${country}
+            ${picker}
+            ${diagram}
+            <div class="fwmap-cards">
+                ${card('fa-bar-chart', T.sec_connection, model.connection)}
+                ${card('fa-fire', T.sec_firewall, model.firewall)}
+                ${model.ids}
+                ${model.reputation}
+            </div>
+            ${investigation ? `<div class="fwmap-investigation">${investigation}</div>` : ''}
+            ${actionBar(address, selection.countryCode)}
         `);
     }
 
@@ -1097,6 +1245,11 @@
                 event.preventDefault();
                 addCountry(String($(this).data('code')));
             })
+            .on('click', '.fwmap-pick', function (event) {
+                event.preventDefault();
+                state.detailsAddress = String($(this).data('address'));
+                renderDetails();
+            })
             .on('click', '.fwmap-investigate', function (event) {
                 event.preventDefault();
                 investigate(String($(this).data('address')));
@@ -1154,7 +1307,7 @@
         } else {
             $side.css({width: '', flex: ''});
         }
-        const share = layout.talkers || 0.6;
+        const share = layout.talkers || 0.42;
         $('#fwmap-talkers').css('flex', `${share} 1 0`);
         $('#fwmap-details-box').css('flex', `${1 - share} 1 0`);
     }

@@ -640,7 +640,7 @@ class FlowTracker:
             total = totals.setdefault(pair, {
                 "toward": 0, "away": 0, "packets": 0, "states": 0, "protocols": set(), "services": {},
                 "inside": {}, "egress": {}, "remote_started": 0, "local_started": 0, "targets": {},
-                "ports": {}, "oldest": 0,
+                "ports": {}, "oldest": 0, "bytes_toward": 0, "bytes_away": 0, "rules": {},
             })
             weight = delta[0] + delta[1] + 1
             inside_side = inside_endpoint(record)
@@ -669,6 +669,11 @@ class FlowTracker:
             total["ports"].setdefault(service, service_port_label(record["protocol"], service_port))
             if record.get("age") is not None and record["age"] > total["oldest"]:
                 total["oldest"] = record["age"]
+            # bytes moved so far by the connections open now, and the rules that let them through
+            total["bytes_toward"] += current[0]
+            total["bytes_away"] += current[1]
+            if record.get("rule"):
+                total["rules"][record["rule"]] = total["rules"].get(record["rule"], 0) + 1
             total["toward"] += delta[0]
             total["away"] += delta[1]
             total["packets"] += delta[2]
@@ -697,6 +702,8 @@ class FlowTracker:
             flow["service_ports"] = {name: total["ports"][name] for name in flow["services"] if total["ports"].get(name)}
             # how long the oldest connection behind this flow has been open
             flow["age"] = total["oldest"]
+            flow["transferred"] = (total["bytes_toward"], total["bytes_away"])
+            flow["rule"] = max(total["rules"], key=total["rules"].get) if total["rules"] else None
             flow["inside"] = [address for address, _ in sorted(total["inside"].items(), key=lambda item: -item[1])][:MAX_INSIDE]
             flow["egress"] = max(total["egress"], key=total["egress"].get) if total["egress"] else None
             started = total["remote_started"] + total["local_started"]
@@ -1264,6 +1271,7 @@ def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, inte
             "asn": location.get("asn"),
             "as_org": location.get("as_org"),
             "lists": threat_lists_for(address, blocklists, reputation),
+            "abuseipdb": reputation.scores.get(address) if reputation is not None else None,
             "ids": alerts.summary(address) if alerts is not None else None,
         })
     return result
@@ -1291,6 +1299,7 @@ def alert_snapshot(alerts, geo, origin, shown, blocklists=None, reputation=None,
             "asn": location.get("asn"),
             "as_org": location.get("as_org"),
             "lists": threat_lists_for(address, blocklists, reputation),
+            "abuseipdb": reputation.scores.get(address) if reputation is not None else None,
             "ids": alerts.summary(address, now),
         })
     return result
@@ -1546,6 +1555,7 @@ class Correlator:
                 "asn": location.get("asn"),
                 "as_org": location.get("as_org"),
                 "lists": threat_lists_for(key[3], blocklists, reputation),
+                "abuseipdb": reputation.scores.get(key[3]) if reputation is not None else None,
             })
         return result
 
@@ -1680,6 +1690,7 @@ class Reputation:
         self.store = store
         self.threshold = threshold
         self.flagged = set()
+        self.scores = {}
         self.checked = None
 
     def refresh(self, now):
@@ -1693,6 +1704,9 @@ class Reputation:
             rows.update(self.store.get_all(REPUTATION_KIND, max_age=REPUTATION_MAX_AGE))
         self.flagged = {address for address, data in rows.items()
                         if isinstance(data, dict) and (data.get("score") or 0) >= self.threshold}
+        # every cached verdict, so the details can say "clean" as well as "listed"
+        self.scores = {address: data.get("score") for address, data in rows.items()
+                       if isinstance(data, dict) and data.get("score") is not None}
 
 
 def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None, context=None):
@@ -1732,6 +1746,9 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None
                         for target in flow.get("targets", [])],
             "service_ports": flow.get("service_ports", {}),
             "age": flow.get("age"),
+            "transferred": flow.get("transferred"),
+            "rule": context.get("descriptions", {}).get(flow.get("rule") or "", "") or None,
+            "abuseipdb": reputation.scores.get(remote) if reputation is not None else None,
         })
         # a permitted flow to a listed address is what deserves attention, not background scans
         flows[-1]["threat"] = bool(flows[-1]["lists"])
@@ -2042,7 +2059,7 @@ def run():
                 recorder.update(records, local_addresses, blocklists, reputation, now, geo, hostnames, alerts, correlator)
                 payload = snapshot(tracker, geo, local_addresses, role, now, time.time(), resolver, {
                     "names": leases, "networks": networks, "interfaces": interfaces, "blocklists": blocklists,
-                    "reputation": reputation, "alerts": alerts,
+                    "reputation": reputation, "alerts": alerts, "descriptions": descriptions,
                 })
                 origin = next((location["id"] for location in payload["locations"] if location["local"]), None)
                 if origin is None and local_addresses:
@@ -2055,6 +2072,8 @@ def run():
                 shown = {flow["dest"] for flow in payload["flows"]} | {block["source"] for block in payload["blocks"]}
                 payload["alerts"] = alert_snapshot(alerts, geo, origin, shown, blocklists, reputation)
                 payload["ids_flows"] = correlator.snapshot(geo, origin, leases, networks, interfaces, blocklists, reputation)
+                # which lists are consulted, so the details can show "not listed" per list
+                payload["threat_lists"] = list(blocklists.index[0]) + ([REPUTATION_LIST] if reputation.scores else [])
                 if origin and geo.get(origin) and not any(location["id"] == origin for location in payload["locations"]):
                     location = geo.get(origin)
                     payload["locations"].append({
