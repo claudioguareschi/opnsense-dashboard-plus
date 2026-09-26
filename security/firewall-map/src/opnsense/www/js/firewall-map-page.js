@@ -367,7 +367,7 @@
         {name: 'FWMAP_ET_Compromised', label: 'Emerging Threats compromised', url: 'https://rules.emergingthreats.net/blockrules/compromised-ips.txt',
             about: 'Hosts known to be compromised'},
         {name: 'FWMAP_FireHOL_L1', label: 'FireHOL level 1', url: 'https://iplists.firehol.org/files/firehol_level1.netset',
-            about: 'Combined attack sources (includes DROP, Feodo, DShield)'},
+            about: 'Combined attack sources (DROP, Feodo, DShield…). Also lists private and bogon ranges: do not use it to block LAN traffic.'},
     ];
 
     async function showFeeds() {

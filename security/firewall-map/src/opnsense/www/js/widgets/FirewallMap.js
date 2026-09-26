@@ -4,6 +4,8 @@
  */
 
 export default class FirewallMap extends BaseWidget {
+    static FIREWALL_WIDE = ['geo_provider', 'geo_key', 'geo_update_days', 'abuseipdb_key', 'threat_lists'];
+
     constructor(config) {
         super(config);
         this.tickTimeout = 2;
@@ -31,9 +33,14 @@ export default class FirewallMap extends BaseWidget {
         // only administrators may read (and change) the firewall-wide database settings
         try {
             this.geoSettings = await this.ajaxCall('/api/firewallmap/settings/get');
-            this.threatTables = await this.ajaxCall('/api/firewallmap/settings/tables');
         } catch (_) {
             this.geoSettings = null;
+            return null;
+        }
+        try {
+            this.threatTables = await this.ajaxCall('/api/firewallmap/settings/tables');
+        } catch (_) {
+            this.threatTables = {tables: [], automatic: []};
         }
         return this.geoSettings;
     }
@@ -142,6 +149,19 @@ export default class FirewallMap extends BaseWidget {
         poll();
     }
 
+    /**
+     * Firewall-wide values belong to the plugin, not to this user's dashboard layout: drop any copy
+     * the dashboard saved with the layout, so the dialog always starts from the server's values.
+     */
+    async getWidgetConfig() {
+        if (this.config?.widget) {
+            for (const key of FirewallMap.FIREWALL_WIDE) {
+                delete this.config.widget[key];
+            }
+        }
+        return super.getWidgetConfig();
+    }
+
     async getWidgetOptions() {
         const choices = (values) => values.map(([value, label]) => ({value, label}));
         if (this.geoSettings === null) {
@@ -229,16 +249,35 @@ export default class FirewallMap extends BaseWidget {
 
     async onWidgetOptionsChanged(values) {
         if (this.geoSettings?.provider && values && 'geo_provider' in values) {
-            const update = {
-                provider: values.geo_provider,
-                update_days: values.geo_update_days,
-                license_key: (values.geo_key || '').trim(),
-                abuseipdb_key: (values.abuseipdb_key || '').trim(),
-                threat_lists: (values.threat_lists || []).join(','),
-            };
+            const geo = this.geoSettings;
+            // send only what the administrator changed, so an unrelated save never overwrites
+            // another administrator's firewall-wide choices
+            const update = {};
+            if (values.geo_provider !== geo.provider) {
+                update.provider = values.geo_provider;
+            }
+            if (String(values.geo_update_days) !== String(geo.update_days)) {
+                update.update_days = values.geo_update_days;
+            }
+            if ((values.geo_key || '').trim()) {
+                update.license_key = values.geo_key.trim();
+            }
+            if ((values.abuseipdb_key || '').trim()) {
+                update.abuseipdb_key = values.abuseipdb_key.trim();
+            }
+            const lists = (values.threat_lists || []).join(',');
+            // without the table list (lookup failed) the selection cannot be trusted
+            if ((this.threatTables?.tables || []).length && lists !== (geo.threat_lists || '')) {
+                update.threat_lists = lists;
+            }
             // firewall-wide values are saved to the plugin, never into this user's dashboard layout
-            for (const key of ['geo_provider', 'geo_key', 'geo_update_days', 'abuseipdb_key', 'threat_lists']) {
+            for (const key of FirewallMap.FIREWALL_WIDE) {
                 delete values[key];
+            }
+            if (!Object.keys(update).length) {
+                this.settings = await this._settings();
+                this.renderer?.setSettings(this.settings);
+                return;
             }
             try {
                 const result = await this.ajaxCall('/api/firewallmap/settings/set', JSON.stringify(update), 'POST');

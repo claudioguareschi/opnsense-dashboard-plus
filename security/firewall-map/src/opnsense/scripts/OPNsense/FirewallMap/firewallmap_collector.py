@@ -145,12 +145,14 @@ def parse_states(output):
     """Parse `pfctl -vv -s state` using the same endpoint fields as OPNsense's state API."""
     records = []
     header = None
+    skipping = False
     for line in output.splitlines():
         if not line.startswith((" ", "\t")):
             parts = line.split()
             arrow = next((index for index, part in enumerate(parts) if part in ("->", "<-")), None)
             if len(parts) < 6 or arrow is None or arrow < 3 or arrow + 1 >= len(parts):
                 header = None
+                skipping = True
                 continue
             # "A [(A')] -> B [(B')] STATE": translations follow the endpoint they belong to
             direction = "out" if parts[arrow] == "->" else "in"
@@ -160,7 +162,9 @@ def parse_states(output):
             if not translated and not public_ipv4(left["address"]) and not public_ipv4(right["address"]):
                 # LAN-internal state (or the LAN side of a NAT pair): never drawn, skip its details
                 header = None
+                skipping = True
                 continue
+            skipping = False
             header = {
                 "interface": parts[0],
                 "protocol": parts[1],
@@ -173,6 +177,8 @@ def parse_states(output):
             continue
         # dispatch on the detail line's first word: running every pattern over every line was
         # the collector's largest CPU cost
+        if skipping:
+            continue  # detail lines of a skipped state must not attach to the previous record
         stripped = line.lstrip()
         if stripped.startswith("id:"):
             state_id = STATE_ID.search(stripped)
@@ -334,60 +340,92 @@ class CacheStore:
     """Small SQLite key/value store with expiry, shared by the collector's caches.
 
     One file, no service: GeoIP results, reverse DNS names and investigation lookups survive
-    restarts, are written incrementally and are pruned by age and count.
+    restarts, are written incrementally and are pruned by age and count. A cache must never
+    take the collector down: a damaged file is moved aside, and any later database error
+    degrades to "not cached" instead of raising.
     """
 
     def __init__(self, path=CACHE_DB):
         self.path = path
+        self.lock = threading.Lock()
+        try:
+            self.db = self._open(path)
+        except sqlite3.Error:
+            try:
+                os.replace(path, f"{path}.corrupt")
+                self.db = self._open(path)
+            except (OSError, sqlite3.Error):
+                self.db = self._open(":memory:")
+
+    @staticmethod
+    def _open(path):
         directory = os.path.dirname(path)
         if directory:
             os.makedirs(directory, exist_ok=True)
-        self.db = sqlite3.connect(path, timeout=5, isolation_level=None, check_same_thread=False)
-        self.db.execute("PRAGMA journal_mode=WAL")
-        self.db.execute("PRAGMA synchronous=NORMAL")
-        self.db.execute(
-            "CREATE TABLE IF NOT EXISTS cache (kind TEXT, key TEXT, value TEXT, stored REAL, PRIMARY KEY (kind, key))"
-        )
-        self.lock = threading.Lock()
+        db = sqlite3.connect(path, timeout=5, isolation_level=None, check_same_thread=False)
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA synchronous=NORMAL")
+        db.execute("CREATE TABLE IF NOT EXISTS cache (kind TEXT, key TEXT, value TEXT, stored REAL, PRIMARY KEY (kind, key))")
+        db.execute("SELECT count(*) FROM cache").fetchone()
+        return db
+
+    def _query(self, sql, parameters=()):
+        try:
+            with self.lock:
+                return self.db.execute(sql, parameters).fetchall()
+        except sqlite3.Error as error:
+            print(f"firewallmap: cache query failed: {error}", file=sys.stderr)
+            return []
 
     def get_all(self, kind, max_age=None, now=None):
         now = time.time() if now is None else now
-        with self.lock:
-            rows = self.db.execute("SELECT key, value, stored FROM cache WHERE kind = ?", (kind,)).fetchall()
-        return {key: json.loads(value) for key, value, stored in rows if max_age is None or now - stored < max_age}
+        rows = self._query("SELECT key, value, stored FROM cache WHERE kind = ?", (kind,))
+        result = {}
+        for key, value, stored in rows:
+            if max_age is None or now - stored < max_age:
+                try:
+                    result[key] = json.loads(value)
+                except ValueError:
+                    continue
+        return result
 
     def get(self, kind, key, max_age=None, now=None):
         now = time.time() if now is None else now
-        with self.lock:
-            row = self.db.execute("SELECT value, stored FROM cache WHERE kind = ? AND key = ?", (kind, key)).fetchone()
-        if row is None or (max_age is not None and now - row[1] >= max_age):
+        rows = self._query("SELECT value, stored FROM cache WHERE kind = ? AND key = ?", (kind, key))
+        if not rows or (max_age is not None and now - rows[0][1] >= max_age):
             return None
-        return json.loads(row[0])
+        try:
+            return json.loads(rows[0][0])
+        except ValueError:
+            return None
 
     def put_many(self, kind, items, now=None):
         now = time.time() if now is None else now
+        rows = [(kind, key, json.dumps(value), now) for key, value in items]
         with self.lock:
-            self.db.execute("BEGIN")
-            self.db.executemany(
-                "INSERT OR REPLACE INTO cache (kind, key, value, stored) VALUES (?, ?, ?, ?)",
-                [(kind, key, json.dumps(value), now) for key, value in items],
-            )
-            self.db.execute("COMMIT")
+            try:
+                self.db.execute("BEGIN")
+                self.db.executemany("INSERT OR REPLACE INTO cache (kind, key, value, stored) VALUES (?, ?, ?, ?)", rows)
+                self.db.execute("COMMIT")
+            except sqlite3.Error as error:
+                print(f"firewallmap: cache write failed: {error}", file=sys.stderr)
+                try:
+                    self.db.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
 
     def prune(self, kind, max_age=None, keep=None, now=None):
         now = time.time() if now is None else now
-        with self.lock:
-            if max_age is not None:
-                self.db.execute("DELETE FROM cache WHERE kind = ? AND stored < ?", (kind, now - max_age))
-            if keep is not None:
-                self.db.execute(
-                    "DELETE FROM cache WHERE kind = ? AND key NOT IN "
-                    "(SELECT key FROM cache WHERE kind = ? ORDER BY stored DESC LIMIT ?)", (kind, kind, keep),
-                )
+        if max_age is not None:
+            self._query("DELETE FROM cache WHERE kind = ? AND stored < ?", (kind, now - max_age))
+        if keep is not None:
+            self._query(
+                "DELETE FROM cache WHERE kind = ? AND key NOT IN "
+                "(SELECT key FROM cache WHERE kind = ? ORDER BY stored DESC LIMIT ?)", (kind, kind, keep),
+            )
 
     def clear(self, kind):
-        with self.lock:
-            self.db.execute("DELETE FROM cache WHERE kind = ?", (kind,))
+        self._query("DELETE FROM cache WHERE kind = ?", (kind,))
 
 
 class GeoCache:
@@ -423,8 +461,7 @@ class GeoCache:
 
     def forget_old_databases(self):
         """Drop cached locations from previous database files."""
-        with self.store.lock:
-            self.store.db.execute("DELETE FROM cache WHERE kind LIKE 'geo:%' AND kind != ?", (self.kind,))
+        self.store._query("DELETE FROM cache WHERE kind LIKE 'geo:%' AND kind != ?", (self.kind,))
 
     def resolve(self, addresses, budget=GEO_LOOKUPS_PER_SAMPLE):
         """Look up at most `budget` unknown addresses; unresolvable ones are cached as null."""
@@ -826,6 +863,7 @@ class HostnameResolver:
         wall = time.time()
         self.names = {}
         if store is not None:
+            store.prune("hostname", max_age=ttl, keep=MAX_HOSTNAMES)
             for address, (name, stamp) in store.get_all("hostname", max_age=ttl).items():
                 self.names[address] = (name, now - (wall - stamp))
         self.pending = {}
@@ -847,6 +885,7 @@ class HostnameResolver:
                 del self.pending[address]
         if resolved and self.store is not None:
             self.store.put_many("hostname", resolved)
+            self.store.prune("hostname", max_age=self.ttl, keep=MAX_HOSTNAMES)
         for address in [address for address, (_, stamp) in self.names.items() if now - stamp >= self.ttl]:
             del self.names[address]
         while len(self.names) > MAX_HOSTNAMES:

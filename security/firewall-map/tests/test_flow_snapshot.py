@@ -421,6 +421,27 @@ class CacheStoreTest(unittest.TestCase):
             self.assertEqual(again.get("8.8.8.8"), {"lat": 1.0, "lon": 2.0})
 
 
+class CacheResilienceTest(unittest.TestCase):
+    def test_corrupt_cache_file_is_moved_aside(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "cache.db")
+            with open(path, "wb") as handle:
+                handle.write(b"this is not a database" * 100)
+            store = COLLECTOR.CacheStore(path)
+            store.put_many("hostname", [("8.8.8.8", ["dns.google", 1.0])])
+            self.assertEqual(list(store.get_all("hostname")), ["8.8.8.8"])
+            self.assertTrue(os.path.exists(path + ".corrupt"))
+
+    def test_skipped_state_details_do_not_leak(self):
+        output = ("all tcp 198.13.91.163:1 (192.168.30.30:2) -> 34.209.15.107:8883       ESTABLISHED:ESTABLISHED\n"
+                  "   age 00:00:05, expires in 23:59:37, 1:1 pkts, 1:1 bytes\n   id: 01 creatorid: 02\n"
+                  "all tcp 192.168.30.30:5 -> 192.168.40.2:6       ESTABLISHED:ESTABLISHED\n"
+                  "   age 00:00:05, expires in 23:59:37, 1:1 pkts, 1:1 bytes\n   id: 03 creatorid: 04\n   origif: vlan03\n")
+        records = COLLECTOR.parse_states(output)
+        self.assertEqual(len(records), 1)
+        self.assertIsNone(records[0]["origif"])
+
+
 class InvestigateTest(unittest.TestCase):
     RDAP = {
         "name": "GOGL", "handle": "NET-8-8-8-0-2", "startAddress": "8.8.8.0", "endAddress": "8.8.8.255",

@@ -42,8 +42,11 @@ def abuseipdb_key(path=CONFIG_XML):
     return node.text.strip() if node is not None and node.text and node.text.strip() else None
 
 
-def fetch_json(url, headers=None):
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json", **(headers or {})})
+def fetch_json(url, secret_headers=None):
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+    for name, value in (secret_headers or {}).items():
+        # never forwarded if the provider redirects elsewhere
+        request.add_unredirected_header(name, value)
     with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
         return json.loads(response.read().decode("utf-8", "replace"))
 
