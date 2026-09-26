@@ -9,6 +9,7 @@
                 <Default>maxmind</Default>
                 <OptionValues>
                     <maxmind>MaxMind GeoLite2</maxmind>
+                    <maxmind_paid>MaxMind GeoIP2 City</maxmind_paid>
                     <dbip>DB-IP Lite</dbip>
                 </OptionValues>
             </provider>

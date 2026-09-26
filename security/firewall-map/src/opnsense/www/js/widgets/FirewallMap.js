@@ -36,7 +36,11 @@ export default class FirewallMap extends BaseWidget {
                 id: `${this.id}-option-geo-provider`,
                 title: this.translations.geo_provider,
                 type: 'select',
-                options: choices([['maxmind', 'MaxMind GeoLite2'], ['dbip', 'DB-IP Lite']]),
+                options: choices([
+                    ['maxmind', this.translations.provider_maxmind],
+                    ['maxmind_paid', this.translations.provider_maxmind_paid],
+                    ['dbip', this.translations.provider_dbip],
+                ]),
                 default: geo.provider,
             },
             geo_key: {
@@ -57,11 +61,55 @@ export default class FirewallMap extends BaseWidget {
         };
     }
 
+    /**
+     * The dashboard's options dialog only renders selects and text inputs. Once it is on screen,
+     * show "Lookup hostnames" as a checkbox (backed by its select) and show the license key field
+     * only while a MaxMind provider is selected.
+     */
+    _enhanceOptionsDialog() {
+        if (this.enhancingDialog) {
+            return;
+        }
+        this.enhancingDialog = true;
+        const started = Date.now();
+        const poll = () => {
+            const $hostnames = $(`#${this.id}-option-hostnames`);
+            const ready = $hostnames.length && $hostnames.closest('.bootstrap-select').length;
+            if (!ready) {
+                if (Date.now() - started < 3000) {
+                    setTimeout(poll, 50);
+                } else {
+                    this.enhancingDialog = false;
+                }
+                return;
+            }
+            this.enhancingDialog = false;
+            const $container = $hostnames.closest('.widget-option-container');
+            $container.find('.bootstrap-select').hide();
+            const $checkbox = $('<input type="checkbox" style="margin: 0 6px 0 0;">')
+                .prop('checked', $hostnames.val() === '1')
+                .on('change', (event) => $hostnames.val(event.target.checked ? '1' : '0'));
+            $container.children('div').first().empty().append(
+                $('<label style="font-weight: bold; cursor: pointer;"></label>')
+                    .append($checkbox, document.createTextNode(this.translations.hostnames)),
+                $('<div class="text-muted" style="font-size: .9em; margin: 0 0 4px 20px;"></div>')
+                    .text(this.translations.hostnames_hint),
+            );
+            const $provider = $(`#${this.id}-option-geo-provider`);
+            const $key = $(`#${this.id}-option-geo-key`).closest('.widget-option-container');
+            const toggleKey = () => $key.toggle(($provider.val() || '').startsWith('maxmind'));
+            $provider.on('change', toggleKey);
+            toggleKey();
+        };
+        poll();
+    }
+
     async getWidgetOptions() {
         const choices = (values) => values.map(([value, label]) => ({value, label}));
         if (this.geoSettings === null) {
             await this._loadGeoSettings();
         }
+        this._enhanceOptionsDialog();
         return {
             heavy_top: {
                 id: `${this.id}-option-heavy-top`,
@@ -98,7 +146,7 @@ export default class FirewallMap extends BaseWidget {
                 id: `${this.id}-option-hostnames`,
                 title: this.translations.hostnames,
                 type: 'select',
-                options: choices([['0', this.translations.labels_off], ['1', this.translations.hostnames_on]]),
+                options: choices([['0', this.translations.labels_off], ['1', this.translations.hostnames]]),
                 default: '0',
             },
             ...this._geoOptions(choices),

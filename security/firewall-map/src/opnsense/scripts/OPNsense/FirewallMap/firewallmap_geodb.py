@@ -46,6 +46,12 @@ DATABASES = {
         "asn": f"{GEOIP_DIR}/GeoLite2-ASN.mmdb",
         "editions": {"city": "GeoLite2-City", "asn": "GeoLite2-ASN"},
     },
+    # paid GeoIP2 City (same format, better accuracy); AS data still comes from GeoLite2-ASN
+    "maxmind_paid": {
+        "city": f"{GEOIP_DIR}/GeoIP2-City.mmdb",
+        "asn": f"{GEOIP_DIR}/GeoLite2-ASN.mmdb",
+        "editions": {"city": "GeoIP2-City", "asn": "GeoLite2-ASN"},
+    },
     "dbip": {
         "city": f"{GEOIP_DIR}/dbip-city-lite.mmdb",
         "asn": f"{GEOIP_DIR}/dbip-asn-lite.mmdb",
@@ -131,7 +137,7 @@ def status():
         "provider": values["provider"],
         "update_days": values["update_days"],
         "key_source": key_source,
-        "key_required": values["provider"] == "maxmind",
+        "key_required": values["provider"].startswith("maxmind"),
         "city": file_info(paths["city"]),
         "asn": file_info(paths["asn"]),
         "last_attempt": last.get("last_attempt"),
@@ -201,7 +207,7 @@ def update(force=False):
     provider = values["provider"]
     paths = DATABASES[provider]
     key = None
-    if provider == "maxmind":
+    if provider.startswith("maxmind"):
         key, _ = license_key(values)
         if not key:
             write_status({**read_status(), "last_attempt": datetime.now(timezone.utc).isoformat(),
@@ -232,7 +238,7 @@ def update(force=False):
                     continue
                 edition = paths["editions"][kind]
                 try:
-                    fetched = fetch_maxmind(edition, key, workdir) if provider == "maxmind" else fetch_dbip(edition, workdir)
+                    fetched = fetch_maxmind(edition, key, workdir) if provider.startswith("maxmind") else fetch_dbip(edition, workdir)
                     validate(fetched, probe)
                     os.chmod(fetched, 0o644)
                     os.makedirs(GEOIP_DIR, exist_ok=True)

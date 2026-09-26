@@ -531,7 +531,7 @@ def database_state(values):
     paths = geodb.DATABASES[values["provider"]]
     if os.path.exists(paths["city"]):
         return paths["city"], paths["asn"], None
-    if values["provider"] == "maxmind" and geodb.license_key(values)[0] is None:
+    if values["provider"].startswith("maxmind") and geodb.license_key(values)[0] is None:
         return paths["city"], paths["asn"], "maxmind_key_missing"
     return paths["city"], paths["asn"], "database_missing"
 
