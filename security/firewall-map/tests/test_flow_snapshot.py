@@ -353,6 +353,21 @@ class BlockTest(unittest.TestCase):
         self.assertIsNone(COLLECTOR.parse_block(self.LINE.replace(",block,in,", ",pass,in,")))
         self.assertIsNone(COLLECTOR.parse_block(self.LINE.replace(",block,in,", ",block,out,")))
 
+    def test_block_snapshot_names_services(self):
+        class Geo:
+            def resolve(self, addresses):
+                pass
+
+            def get(self, address):
+                return {"lat": 1.0, "lon": 2.0, "country": "NL", "country_name": "The Netherlands"}
+        blocks = COLLECTOR.BlockTracker(fade=6, show=60, window=600)
+        event = COLLECTOR.parse_block(self.LINE)
+        blocks.add(event, now=0.0)
+        blocks.add(event, now=30.0)
+        (block,) = COLLECTOR.block_snapshot(blocks, Geo(), {"198.13.91.163"}, "198.13.91.163", 30.0, {}, {})
+        self.assertEqual(block["services"], [{"name": "Telnet", "port": "23/tcp", "hits": 2}])
+        self.assertEqual((block["port_count"], block["seconds"], block["country"]), (1, 30, "The Netherlands"))
+
     def test_tracks_hits_fades_and_flags_threats(self):
         blocks = COLLECTOR.BlockTracker(fade=6, show=60, window=600)
         event = COLLECTOR.parse_block(self.LINE)

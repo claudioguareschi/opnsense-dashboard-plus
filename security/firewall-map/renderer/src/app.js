@@ -268,6 +268,22 @@ export function flowSummary(flow, remote) {
   return sentences;
 }
 
+/** The same kind of sentence for a source the firewall blocked (from the filter log). */
+export function blockSummary(block, showAsn = true) {
+  const place = [showAsn ? block.as_org : null, block.country].filter(Boolean).map(plain).join(', ');
+  const services = (block.services || []).slice(0, 2).map((service) => serviceLabel(service.name, service.port));
+  const others = Math.max(0, (block.port_count || services.length) - services.length);
+  const tried = services.length
+    ? `${services.join(services.length > 1 && !others ? ' and ' : ', ')}${others ? ` and ${others} other port${others > 1 ? 's' : ''}` : ''}`
+    : 'a connection';
+  const hits = block.hits ?? block.hits_per_minute;
+  const since = duration(block.seconds);
+  const rule = block.rule ? ` by "${plain(block.rule)}"` : '';
+  const where = block.interface ? ` on ${plain(block.interface)}` : '';
+  return `${block.source}${place ? ` (${place})` : ''} tried ${tried} on this firewall: blocked ${hits}× `
+    + `in the last ${block.window_minutes ?? 1} min${rule}${where}${since ? `, first seen ${since} ago` : ''}.`;
+}
+
 /** The summary as hover-card HTML; flagged flows read in the threat colour. */
 function connectionLine(flow, remote) {
   const style = flow.threat ? 'font-weight:600;color:rgb(196,18,48)' : 'font-weight:600';
@@ -493,10 +509,8 @@ function describeBlock(block, showAsn) {
     <div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}${approximate}</div>
     ${(block.lists || []).length ? `<div style="font-weight:600;color:rgb(196,18,48)">Listed in ${block.lists.map(escapeHtml).join(', ')}</div>` : ''}
     <div style="margin-top:3px"><div>${escapeHtml(block.source)}</div>${asn}</div>
-    <div style="margin-top:4px;font-weight:600">${block.threat ? 'Threat: ' : ''}Blocked ${block.hits ?? block.hits_per_minute}× in the last ${block.window_minutes ?? 1} minutes</div>
-    <div style="opacity:.7">${block.hits_per_minute} in the last minute</div>
-    <div>${escapeHtml(block.ports.join(', '))}</div>
-    <div style="opacity:.7">${escapeHtml(block.rule || 'Blocked')} · ${escapeHtml(block.interface)}</div>
+    <div style="margin-top:4px;font-weight:600${block.threat || (block.lists || []).length ? ';color:rgb(196,18,48)' : ''}">${escapeHtml(blockSummary(block, showAsn))}</div>
+    <div style="opacity:.7">${block.hits_per_minute} in the last minute${block.threat ? ' (hammering)' : ''}</div>
   `;
 }
 

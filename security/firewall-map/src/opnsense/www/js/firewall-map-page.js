@@ -298,7 +298,9 @@
         ] : [];
         const card = state.investigations.get(address);
         const flow = (state.selection?.members || []).find((member) => member.dest === address);
-        return `<div class="fwmap-address"><b>${esc(address)}</b>${flow ? connection(flow) : ''}<div class="fwmap-links">${links.concat(admin).join(' · ')}</div>`
+        const block = state.selection?.block?.source === address ? state.selection.block : null;
+        const summary = flow ? connection(flow) : block ? blocked(block) : '';
+        return `<div class="fwmap-address"><b>${esc(address)}</b>${summary}<div class="fwmap-links">${links.concat(admin).join(' · ')}</div>`
             + (card ? `<div class="fwmap-investigation">${card}</div>` : '') + '</div>';
     }
 
@@ -322,6 +324,15 @@
         const traffic = `<div class="text-muted">${(flow.services || []).slice(0, 3).map(esc).join(', ')}`
             + `${(flow.services || []).length ? ' · ' : ''}↓ ${esc(formatRate(flow.rate_in || 0))} ↑ ${esc(formatRate(flow.rate_out || 0))}</div>`;
         return sentences + traffic;
+    }
+
+    /** A blocked source: the summary, then every port it tried with its count. */
+    function blocked(block) {
+        const flagged = block.threat || (block.lists || []).length;
+        const ports = (block.services || []).map((service) => `${esc(service.name)}${service.port ? ` (${esc(service.port)})` : ''} ×${esc(service.hits)}`);
+        return `<div class="fwmap-summary"${flagged ? ' style="color:rgb(196,18,48)"' : ''}>${esc(FirewallMapRenderer.blockSummary(block, state.settings.asn))}</div>`
+            + `<div class="text-muted">${ports.join(', ')}${(block.port_count || 0) > ports.length ? ` +${esc(block.port_count - ports.length)}` : ''}`
+            + ` · ${esc(block.hits_per_minute)}/min</div>`;
     }
 
     /* ---------------------------------------------------------------- investigation card */

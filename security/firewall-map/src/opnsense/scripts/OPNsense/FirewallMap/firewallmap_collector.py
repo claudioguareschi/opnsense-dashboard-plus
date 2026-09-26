@@ -124,6 +124,13 @@ SERVICES = {
     ("tcp", "3389"): "RDP", ("udp", "4500"): "IPsec NAT-T", ("tcp", "5223"): "Apple Push",
     ("tcp", "5228"): "Google Push", ("udp", "51820"): "WireGuard", ("tcp", "8080"): "HTTP alt",
     ("tcp", "8443"): "HTTPS alt", ("udp", "19302"): "Google STUN",
+    # what scanners knock on most, so blocked attempts read as services too
+    ("tcp", "23"): "Telnet", ("tcp", "110"): "POP3", ("tcp", "135"): "MS RPC", ("tcp", "139"): "NetBIOS",
+    ("udp", "137"): "NetBIOS", ("tcp", "445"): "SMB", ("udp", "161"): "SNMP", ("tcp", "1433"): "MS SQL",
+    ("tcp", "1723"): "PPTP", ("udp", "1900"): "SSDP", ("tcp", "2375"): "Docker API", ("tcp", "3306"): "MySQL",
+    ("tcp", "5060"): "SIP", ("udp", "5060"): "SIP", ("tcp", "5432"): "PostgreSQL", ("tcp", "5900"): "VNC",
+    ("tcp", "6379"): "Redis", ("tcp", "8291"): "MikroTik Winbox", ("tcp", "9200"): "Elasticsearch",
+    ("tcp", "27017"): "MongoDB", ("udp", "11211"): "Memcached", ("tcp", "2222"): "SSH alt",
 }
 
 
@@ -1164,7 +1171,7 @@ class BlockTracker:
         if entry is None:
             if len(self.sources) >= self.max_sources:
                 del self.sources[next(iter(self.sources))]
-            entry = {"buckets": {}, "total": 0, "ports": {}}
+            entry = {"buckets": {}, "total": 0, "ports": {}, "first": now}
         self.sources[event["source"]] = entry
         bucket = int(now // BLOCK_BUCKET_SECONDS)
         entry["buckets"][bucket] = entry["buckets"].get(bucket, 0) + 1
@@ -1225,6 +1232,13 @@ def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, inte
             "total": entry["total"],
             "threat": per_minute >= THREAT_HITS_PER_MINUTE,
             "ports": [name for name, _ in sorted(entry["ports"].items(), key=lambda item: -item[1])][:5],
+            # the same service names and ports as permitted flows, busiest first
+            "services": [{"name": service_name(*(port.split("/", 1) + [None])[:2]),
+                          "port": f'{port.split("/", 1)[1]}/{port.split("/", 1)[0]}' if "/" in port else None,
+                          "hits": hits}
+                         for port, hits in sorted(entry["ports"].items(), key=lambda item: -item[1])][:5],
+            "port_count": len(entry["ports"]),
+            "seconds": round(now - entry.get("first", now)),
             "rule": descriptions.get(entry["rule"], ""),
             "interface": interfaces.get(entry["interface"], entry["interface"]),
             "lat": location["lat"],
