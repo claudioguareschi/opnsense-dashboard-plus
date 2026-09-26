@@ -83,7 +83,8 @@ CGNAT = ipaddress.ip_network("100.64.0.0/10")
 SETTINGS_REFRESH_SECONDS = 30
 CACHE_DB = "/var/db/firewallmap/cache.db"
 
-INTERVAL = 1.0
+# one PF walk every 2 s: the dashboard polls every 2 s, so faster sampling only costs CPU
+INTERVAL = 2.0
 FADE_SECONDS = 20.0
 MAX_FLOWS = 150
 RATE_SMOOTHING = 0.5
@@ -128,7 +129,13 @@ MMDB_NUMBER = re.compile(r"^(?P<value>[-+]?\d+(?:\.\d+)?) <(?:double|float|uint\
 
 def endpoint(value):
     """Split a PF endpoint while keeping address parsing deliberately IPv4-only."""
-    match = ENDPOINT.match(value.strip("()"))
+    value = value.strip("()")
+    # fast path for the common "a.b.c.d:port" / "a.b.c.d" forms (no regex: this runs per state)
+    if value.count(":") <= 1:
+        address, _, port = value.partition(":")
+        if address and (not port or port.isdigit()):
+            return {"address": address, "port": port or None}
+    match = ENDPOINT.match(value)
     if not match:
         return {"address": None, "port": None}
     return {"address": match.group("address"), "port": match.group("port")}
