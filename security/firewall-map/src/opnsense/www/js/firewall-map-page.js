@@ -307,7 +307,7 @@
             return `<div class="text-muted">${esc(T.outbound)}</div>`;
         }
         const targets = (flow.targets || []).slice(0, 3).map((target) =>
-            `${target.name ? `${esc(target.name)} ` : ''}${esc(target.ip)}:${esc(target.port)}`
+            `${target.name ? `${esc(target.name)} ` : ''}${esc(target.ip)}${target.port ? `:${esc(target.port)}` : ''}`
             + (target.service ? ` <span class="text-muted">(${esc(target.service)})</span>` : '')).join(', ');
         const label = flow.initiated === 'remote' ? T.inbound : T.inbound_outbound;
         return `<div style="font-weight:600">${esc(label)}${targets ? ` ${esc(T.to)} ${targets}` : ''}</div>`;

@@ -168,7 +168,7 @@ const INITIATOR_LABELS = {
 function targetLine(target) {
   const name = target.name ? `${escapeHtml(target.name)} ` : '';
   const service = target.service ? ` <span style="opacity:.75">${escapeHtml(target.service)}</span>` : '';
-  return `${name}${escapeHtml(target.ip)}:${escapeHtml(target.port)}${service}`;
+  return `${name}${escapeHtml(target.ip)}${target.port ? `:${escapeHtml(target.port)}` : ''}${service}`;
 }
 
 /** 'Inbound to mail 192.168.1.2:443 HTTPS' or 'Outbound' for one flow. */
