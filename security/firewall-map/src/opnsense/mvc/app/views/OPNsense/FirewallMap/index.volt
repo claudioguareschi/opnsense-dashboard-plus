@@ -255,6 +255,33 @@
     .fwmap-flag.flag-icon { width: 22px; height: 16px; line-height: 16px; background-size: cover; border-radius: 2px;
         box-shadow: 0 0 0 1px rgba(0, 0, 0, .1); vertical-align: -3px; margin-right: 6px; }
     .fwmap-talker-icon .fwmap-flag.flag-icon { width: 24px; height: 17px; margin: 0; }
+    /* compact details, sized like the mockup so the four cards fit without scrolling */
+    .fwmap-d-scroll { font-size: 13px; padding: 12px 14px 4px; }
+    .fwmap-d-name { font-size: 18px; font-weight: 600; letter-spacing: 0; }
+    .fwmap-d-line { font-size: 12.5px; margin-top: 2px; gap: 2px 10px; }
+    .fwmap-d-icon { width: 30px; height: 30px; }
+    .fwmap-d-verdict { margin-top: 8px; }
+    .fwmap-vpill { font-size: 12.5px; padding: 2px 12px; }
+    .fwmap-d-verdict-sub { font-size: 11.5px; margin-top: 5px; }
+    .fwmap-picker { font-size: 11.5px; margin-top: 6px; }
+    .fwmap-diagram { margin: 10px 0 8px; gap: 8px; }
+    .fwmap-end { padding: 7px 6px; font-size: 12.5px; background: rgba(128, 128, 128, .06); }
+    .fwmap-end .fwmap-ic { width: 24px; height: 24px; margin-bottom: 3px; }
+    .fwmap-link { font-size: 12px; }
+    .fwmap-cards { gap: 7px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    .fwmap-card-head { font-size: 13px; padding: 5px 9px; }
+    .fwmap-card-body { padding: 4px 9px 6px; }
+    .fwmap-kv { font-size: 12px; }
+    .fwmap-kv th { padding: 0 8px 0 0; }
+    .fwmap-kv td { padding: 0; }
+    .fwmap-empty-note { font-size: 11.5px; padding: 6px 9px; }
+    .fwmap-actions { padding: 9px 14px; }
+    .fwmap-actions .btn { padding: 6px 14px; font-size: 13.5px; }
+    .fwmap-actions .btn-primary { background: rgb(234, 88, 36); border-color: rgb(224, 78, 26); color: #fff; }
+    .fwmap-actions .btn-primary:hover { background: rgb(214, 72, 20); }
+    .fwmap-talker-icon { opacity: .8; }
+    .fwmap-talker-icon .fwmap-ic { stroke-width: 1.6; }
+    #fwmap-legend { font-size: .92em; }
     @media (max-width: 1100px) {
         #fwmap-layout { flex-direction: column; }
         #fwmap-split-side { display: none; }

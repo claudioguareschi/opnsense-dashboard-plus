@@ -397,8 +397,8 @@
             return;
         }
         const max = Math.max(...series, 1);
-        const offset = HISTORY_POINTS - series.length;
-        const points = series.map((value, index) => [((offset + index) / (HISTORY_POINTS - 1)) * width,
+        // a short history is spread over the whole width instead of a sliver at the right edge
+        const points = series.map((value, index) => [(index / (series.length - 1)) * width,
             height - 1 - (value / max) * (height - 3)]);
         context.beginPath();
         points.forEach(([x, y], index) => (index ? context.lineTo(x, y) : context.moveTo(x, y)));
