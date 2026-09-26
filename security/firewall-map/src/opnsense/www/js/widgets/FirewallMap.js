@@ -220,35 +220,7 @@ export default class FirewallMap extends BaseWidget {
      * background, body text, the link colour (theme accent) and the success colour (green).
      */
     _readTheme() {
-        const parse = (value) => {
-            const match = /rgba?\(([^)]+)\)/.exec(value || '');
-            if (!match) {
-                return null;
-            }
-            const [r, g, b, a = 1] = match[1].split(',').map((part) => parseFloat(part));
-            return a === 0 ? null : [r, g, b];
-        };
-        const map = document.getElementById(`${this.id}-firewall-map`);
-        let background = null;
-        for (let node = map?.parentElement; node && !background; node = node.parentElement) {
-            background = parse(getComputedStyle(node).backgroundColor);
-        }
-        background = background || [255, 255, 255];
-        const text = parse(getComputedStyle(map).color) || [55, 55, 54];
-        const probeColor = (element) => {
-            map.appendChild(element);
-            const color = parse(getComputedStyle(element).color);
-            element.remove();
-            return color;
-        };
-        const link = document.createElement('a');
-        link.href = '#';
-        const accent = probeColor(link) || [192, 62, 20];
-        const success = document.createElement('span');
-        success.className = 'text-success';
-        const green = probeColor(success) || [76, 175, 80];
-        const luminance = (0.2126 * background[0] + 0.7152 * background[1] + 0.0722 * background[2]) / 255;
-        return {dark: luminance < 0.5, background, text, accent, success: green};
+        return window.FirewallMapRenderer.readTheme(document.getElementById(`${this.id}-firewall-map`));
     }
 
     _applyTheme(theme) {

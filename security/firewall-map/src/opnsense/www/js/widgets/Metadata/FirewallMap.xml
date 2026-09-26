@@ -1,7 +1,7 @@
 <metadata>
     <firewallmap>
         <filename>FirewallMap.js</filename>
-        <link>/ui/diagnostics/firewall/log</link>
+        <link>/ui/firewallmap</link>
         <endpoints>
             <endpoint>/api/firewallmap/flow/snapshot</endpoint>
         </endpoints>

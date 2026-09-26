@@ -3,6 +3,8 @@
         <name>Dashboard: Firewall Map widget</name>
         <patterns>
             <pattern>api/firewallmap/flow/snapshot</pattern>
+            <pattern>ui/firewallmap</pattern>
+            <pattern>ui/firewallmap/*</pattern>
         </patterns>
     </page-dashboard-widget-firewall-map>
     <page-firewall-map-settings>

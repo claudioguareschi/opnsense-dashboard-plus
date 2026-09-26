@@ -258,6 +258,41 @@ export function palette(theme = DEFAULT_THEME) {
   };
 }
 
+/**
+ * Read the dashboard theme's own colours (OPNsense themes don't expose CSS variables): the
+ * background behind the map, body text, the link colour (theme accent) and the success green.
+ */
+export function readTheme(element) {
+  const parse = (value) => {
+    const match = /rgba?\(([^)]+)\)/.exec(value || '');
+    if (!match) {
+      return null;
+    }
+    const [r, g, b, a = 1] = match[1].split(',').map((part) => parseFloat(part));
+    return a === 0 ? null : [r, g, b];
+  };
+  let background = null;
+  for (let node = element?.parentElement; node && !background; node = node.parentElement) {
+    background = parse(getComputedStyle(node).backgroundColor);
+  }
+  background = background || [255, 255, 255];
+  const text = parse(getComputedStyle(element).color) || [55, 55, 54];
+  const probeColor = (probe) => {
+    element.appendChild(probe);
+    const color = parse(getComputedStyle(probe).color);
+    probe.remove();
+    return color;
+  };
+  const link = document.createElement('a');
+  link.href = '#';
+  const accent = probeColor(link) || [192, 62, 20];
+  const success = document.createElement('span');
+  success.className = 'text-success';
+  const green = probeColor(success) || [76, 175, 80];
+  const luminance = (0.2126 * background[0] + 0.7152 * background[1] + 0.0722 * background[2]) / 255;
+  return {dark: luminance < 0.5, background, text, accent, success: green};
+}
+
 function fitZoom(width) {
   // a not-yet-laid-out container reports 0; fall back to a typical widget width
   return Math.log2((width > 100 ? width : 480) / WORLD_TILE);
