@@ -1335,13 +1335,14 @@ def state_outside(record, pair):
     """(outside key, inside endpoint) of a PF state touching a public remote address, else None."""
     local, remote = pair
     nat = record["nat"]
-    if nat and nat["address"] == local:
-        public = nat
-    elif record["src"]["address"] == local:
+    # pfctl prints the wire side first for outbound states ("wire (original) -> remote") and last
+    # for inbound ones ("original (wire) <- remote"); the outbound NAT source port, including the
+    # firewall's own randomised DNS ports, is only right on the wire side
+    if record["direction"] == "out":
         public = record["src"]
-    elif record["dst"]["address"] == local:
-        public = record["dst"]
     else:
+        public = nat if nat else record["dst"]
+    if public["address"] != local:
         return None  # NAT to a tunnel address: Suricata on WAN never sees this tuple
     far = record["src"] if record["src"]["address"] == remote else record["dst"]
     if far["address"] != remote:

@@ -840,6 +840,17 @@ class CorrelationTest(unittest.TestCase):
         correlator.resolve(self.LOCAL, 1002.0)
         self.assertEqual(correlator.stats["current"], 1)
 
+    def test_firewall_own_dns_with_port_translation(self):
+        state = ("all udp 198.13.91.163:21021 (198.13.91.163:15069) -> 104.128.145.3:53       MULTIPLE:SINGLE\n"
+                 "   age 00:00:02, expires in 00:00:58, 1:1 pkts, 60:120 bytes\n   id: 0c creatorid: 01\n")
+        correlator = COLLECTOR.Correlator()
+        correlator.observe_states(COLLECTOR.parse_states(state), self.LOCAL, 1000.0)
+        alert = self.alert("198.13.91.163", 21021, "104.128.145.3", 53, signature="ET DNS Query for .cc TLD", severity=3)
+        alert["protocol"] = "udp"
+        correlator.add_alert(alert, self.LOCAL, 1000.0)
+        correlator.resolve(self.LOCAL, 1000.0)
+        self.assertEqual(correlator.stats["current"], 1)
+
     def test_rule_label_is_parsed_from_states(self):
         (record,) = COLLECTOR.parse_states(self.OUTBOUND)
         self.assertEqual(record["rule"], "abc123")
