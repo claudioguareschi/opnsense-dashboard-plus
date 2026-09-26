@@ -52,6 +52,51 @@
         investigations: new Map(),
     };
 
+    /* ---------------------------------------------------------------- icons */
+
+    // thin outline icons as in the design mockup (Font Awesome's solid glyphs are too heavy)
+    const ICON_PATHS = {
+        'globe': '<circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+        'laptop': '<rect x="4" y="4" width="16" height="11" rx="1.5"/><path d="M2 19h20"/>',
+        'server': '<rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><path d="M7 6.5h.01M7 17.5h.01M11 6.5h6M11 17.5h6"/>',
+        'shield': '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+        'shield-check': '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
+        'chart': '<path d="M3 3v18h18"/><path d="M8 17v-4M12 17V7M16 17v-7M20 17v-2"/>',
+        'search': '<circle cx="11" cy="11" r="7"/><path d="m21 21-5-5"/>',
+        'layers': '<path d="m12 2 10 5-10 5L2 7l10-5z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>',
+        'external': '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+        'list': '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+        'trash': '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6M14 11v6"/>',
+        'chevron': '<path d="m9 18 6-6-6-6"/>',
+        'check': '<path d="M20 6 9 17l-5-5"/>',
+        'x': '<path d="M18 6 6 18M6 6l12 12"/>',
+        'ban': '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+        'flag': '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/>',
+        'alert': '<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>',
+        'network': '<rect x="9" y="2" width="6" height="6" rx="1"/><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3M12 12V8"/>',
+        'plus': '<path d="M12 5v14M5 12h14"/>',
+        'minus': '<path d="M5 12h14"/>',
+        'expand': '<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>',
+    };
+    // the Font Awesome names used across the page, mapped to the outline set
+    const ICON_ALIASES = {
+        'fa-globe': 'globe', 'fa-desktop': 'laptop', 'fa-laptop': 'laptop', 'fa-server': 'server', 'fa-shield': 'shield',
+        'fa-bar-chart': 'chart', 'fa-search': 'search', 'fa-database': 'layers', 'fa-external-link': 'external',
+        'fa-list': 'list', 'fa-trash-o': 'trash', 'fa-chevron-right': 'chevron', 'fa-check': 'check', 'fa-times': 'x',
+        'fa-ban': 'ban', 'fa-flag': 'flag', 'fa-flag-o': 'flag', 'fa-exclamation-triangle': 'alert',
+        'fa-exclamation-circle': 'alert', 'fa-sitemap': 'network',
+    };
+
+    function ic(name, cls = '') {
+        const key = ICON_ALIASES[name] || name;
+        const paths = ICON_PATHS[key];
+        if (!paths) {
+            return `<i class="fa ${name} ${cls}"></i>`;
+        }
+        return `<svg class="fwmap-ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"`
+            + ` stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+    }
+
     /* ---------------------------------------------------------------- filtering */
 
     function locationsById(snapshot) {
@@ -250,7 +295,7 @@
             const dest = locations.get(flow.dest) || {};
             for (const inside of (flow.inside || []).slice(0, 1)) {
                 add('hosts', inside.ip, {label: inside.name || inside.ip, ip: inside.ip, iface: inside.interface,
-                    icon: 'fa-desktop', filter: {host: inside.ip}}, rate);
+                    icon: 'laptop', filter: {host: inside.ip}}, rate);
             }
             if (dest.country) {
                 add('countries', dest.country, {label: plain(dest.country), flag: flagOf(dest.country_code),
@@ -258,7 +303,7 @@
             }
             if (dest.asn) {
                 add('networks', String(dest.asn), {label: plain(dest.as_org || `AS${dest.asn}`), sub: `AS${dest.asn}`,
-                    icon: 'fa-sitemap', filter: {asn: String(dest.asn)}}, rate);
+                    icon: 'network', filter: {asn: String(dest.asn)}}, rate);
             }
         }
         // IDS: correlated connections first, then addresses with alert history
@@ -405,10 +450,10 @@
                 ? `<span class="fwmap-talker-flows">${esc(T.severity)} ${esc(row.severity)}</span>`
                 : `<span class="fwmap-talker-flows">${esc(row.flows)} ${esc(row.flows === 1 ? T.flow_one : T.flow_many)}</span>`;
             return `<div class="fwmap-talker${talkerActive(row) ? ' active' : ''}" data-index="${index}" title="${esc(ids ? T.select_hint : T.filter_hint)}">
-                <span class="fwmap-talker-icon">${row.flag || `<i class="fa ${row.icon}"></i>`}</span>
+                <span class="fwmap-talker-icon">${row.flag || `${ic(row.icon)}`}</span>
                 <span class="fwmap-talker-text"><span class="fwmap-talker-label">${esc(row.label)}</span>
                     <span class="fwmap-talker-sub">${sub}</span></span>
-                ${chart}${value}${extra}<i class="fa fa-chevron-right fwmap-talker-chevron"></i>
+                ${chart}${value}${extra}${ic('chevron', 'fwmap-talker-chevron')}
             </div>`;
         }).join(''));
         state.talkerRows = rows;
@@ -784,22 +829,23 @@
         }
         const cls = ids.severity <= 2 ? 'fwmap-ids fwmap-ids-high' : 'fwmap-ids';
         return FirewallMapRenderer.idsSummary(ids)
-            .map((line) => `<div class="${cls}"><i class="fa fa-flag"></i> ${esc(line)}</div>`).join('');
+            .map((line) => `<div class="${cls}">${ic('flag')} ${esc(line)}</div>`).join('');
     }
 
     /* ---------------------------------------------------------------- details panel */
 
+    /** A rectangular flag (OPNsense ships flag-icon-css); emoji flags render tiny or as letters. */
     function flagOf(code) {
         return /^[A-Za-z]{2}$/.test(code || '')
-            ? String.fromCodePoint(...[...code.toUpperCase()].map((char) => 127397 + char.charCodeAt(0))) : '';
+            ? `<span class="flag-icon flag-icon-${code.toLowerCase()} fwmap-flag"></span>` : '';
     }
 
     function bigPill(kind, text, icon) {
-        return `<span class="fwmap-vpill fwmap-vpill-${kind}">${icon ? `<i class="fa ${icon}"></i> ` : ''}${esc(text)}</span>`;
+        return `<span class="fwmap-vpill fwmap-vpill-${kind}">${icon ? `${ic(icon)} ` : ''}${esc(text)}</span>`;
     }
 
     function pill(kind, text, icon) {
-        return `<span class="fwmap-pill fwmap-pill-${kind}">${icon ? `<i class="fa ${icon}"></i> ` : ''}${esc(text)}</span>`;
+        return `<span class="fwmap-pill fwmap-pill-${kind}">${icon ? `${ic(icon)} ` : ''}${esc(text)}</span>`;
     }
 
     function place(item) {
@@ -808,15 +854,15 @@
 
     /** One box of the connection diagram: a host on either end. */
     function endBox(icon, name, lines) {
-        return `<div class="fwmap-end"><i class="fa ${icon}"></i><div class="fwmap-end-name">${esc(name)}</div>`
+        return `<div class="fwmap-end">${ic(icon)}<div class="fwmap-end-name">${esc(name)}</div>`
             + lines.filter(Boolean).map((line) => `<div class="fwmap-end-sub">${esc(line)}</div>`).join('') + '</div>';
     }
 
     /** A card of the details panel: icon, title and a chevron that opens the related view. */
     function card(icon, title, body, action) {
         const chevron = action ? `<a href="${action.href || '#'}" class="fwmap-card-go ${action.cls || ''}"${action.href ? ' target="_blank" rel="noopener"' : ''}`
-            + `${action.address ? ` data-address="${esc(action.address)}"` : ''} title="${esc(action.title)}"><i class="fa fa-chevron-right"></i></a>` : '';
-        return `<section class="fwmap-card"><div class="fwmap-card-head"><i class="fa ${icon}"></i><span>${esc(title)}</span>${chevron}</div>`
+            + `${action.address ? ` data-address="${esc(action.address)}"` : ''} title="${esc(action.title)}">${ic('chevron')}</a>` : '';
+        return `<section class="fwmap-card"><div class="fwmap-card-head">${ic(icon, 'fwmap-card-ic')}<span>${esc(title)}</span>${chevron}</div>`
             + `<div class="fwmap-card-body">${body}</div></section>`;
     }
 
@@ -855,14 +901,14 @@
         const signatures = groups ? groups.flatMap((group) => group.signatures)
             : (ids?.signatures || []).map((item) => ({...item, last: null}));
         if (!signatures.length) {
-            return card('fa-search', T.sec_ids_long, `<div class="fwmap-empty-note"><i class="fa fa-check"></i>
+            return card('fa-search', T.sec_ids_long, `<div class="fwmap-empty-note">${ic('check', 'fwmap-ok-ic')}
                 <div><div>${esc(T.no_ids)}</div><div class="fwmap-muted">${esc(T.no_ids_sub)}</div></div></div>`,
                 {href: '/ui/ids#alerts', title: T.open_ids});
         }
         const scope = groups ? T.ids_on_connection : T.ids_on_address;
         return card('fa-search', T.sec_ids_long, `<div class="fwmap-card-note">${esc(scope)}</div>`
             + signatures.map((item) => `<div class="fwmap-sig">
-                <div class="${item.severity <= 2 ? 'fwmap-ids-high' : 'fwmap-ids'}"><i class="fa fa-flag"></i> ${esc(item.signature)}</div>
+                <div class="${item.severity <= 2 ? 'fwmap-ids-high' : 'fwmap-ids'}">${ic('flag')} ${esc(item.signature)}</div>
                 <div class="text-muted">${esc(T.severity)} ${esc(item.severity)}${item.category ? ` · ${esc(item.category)}` : ''}${item.sid ? ` · SID ${esc(item.sid)}` : ''}
                     · ${esc(item.count)}×${item.last ? ` · ${esc(new Date(item.last * 1000).toLocaleTimeString())}` : ''}${item.action === 'blocked' ? ` · <b>${esc(T.ips_dropped)}</b>` : ''}</div>
             </div>`).join(''), {href: '/ui/ids#alerts', title: T.open_ids});
@@ -892,9 +938,9 @@
             const service = serviceParts(target && !outbound ? target.service : name,
                 target && !outbound && target.port ? `${target.port}/${target.protocol || 'tcp'}` : (flow.service_ports || {})[name]);
             const localBox = outbound
-                ? (inside ? endBox('fa-desktop', inside.name || inside.ip, [inside.name ? inside.ip : '', inside.interface])
+                ? (inside ? endBox('laptop', inside.name || inside.ip, [inside.name ? inside.ip : '', inside.interface])
                     : endBox('fa-shield', firewallName, [origin]))
-                : (target && !target.firewall ? endBox('fa-desktop', target.name || target.ip, [target.name ? target.ip : '', target.interface])
+                : (target && !target.firewall ? endBox('laptop', target.name || target.ip, [target.name ? target.ip : '', target.interface])
                     : endBox('fa-shield', firewallName, [origin]));
             const flagged = (flow.lists || []).length > 0;
             const transferred = flow.transferred ? `↓ ${esc(formatBytes(flow.transferred[0]))} ↑ ${esc(formatBytes(flow.transferred[1]))}` : '';
@@ -926,7 +972,7 @@
         }
         if (ids) {
             const inside = ids.inside_host;
-            const insideBox = inside ? endBox('fa-desktop', inside.name || inside.ip, [inside.name ? ids.inside : '', inside.interface])
+            const insideBox = inside ? endBox('laptop', inside.name || inside.ip, [inside.name ? ids.inside : '', inside.interface])
                 : endBox('fa-shield', firewallName, [ids.public]);
             const [, port] = ids.remote.split(':');
             const service = {name: ids.protocol.toUpperCase(), port: port ? `${ids.protocol.toUpperCase()}/${port}` : ''};
@@ -1006,9 +1052,9 @@
             }
         }
         const admin = state.isAdmin ? `
-            <button type="button" class="btn btn-primary fwmap-investigate" data-address="${esc(address)}"><i class="fa fa-external-link"></i> ${esc(T.investigate)}</button>
-            <button type="button" class="btn btn-default fwmap-states" data-address="${esc(address)}"><i class="fa fa-list"></i> ${esc(T.show_states)}</button>
-            <button type="button" class="btn btn-default fwmap-kill" data-address="${esc(address)}"><i class="fa fa-trash-o"></i> ${esc(T.kill_states)}</button>` : '';
+            <button type="button" class="btn btn-primary fwmap-investigate" data-address="${esc(address)}">${ic('external')} ${esc(T.investigate)}</button>
+            <button type="button" class="btn btn-default fwmap-states" data-address="${esc(address)}">${ic('list')} ${esc(T.show_states)}</button>
+            <button type="button" class="btn btn-default fwmap-kill" data-address="${esc(address)}">${ic('trash')} ${esc(T.kill_states)}</button>` : '';
         return `<div class="fwmap-actions">${admin}
             <div class="btn-group dropup"><button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown">${esc(T.more)} <span class="caret"></span></button>
             <ul class="dropdown-menu dropdown-menu-right">${more.join('')}</ul></div></div>`;
@@ -1033,14 +1079,14 @@
         const diagram = model.diagram ? `<div class="fwmap-diagram">${model.diagram[0]}
             <div class="fwmap-link${model.diagram[4] ? ' fwmap-link-blocked' : ''}"><div class="fwmap-link-service">${esc(model.diagram[1].name)}</div>
                 <div class="fwmap-link-port">${esc(model.diagram[1].port)}</div>
-                <div class="fwmap-link-arrow">${model.diagram[4] ? '<i class="fa fa-ban"></i>' : ''}</div>
+                <div class="fwmap-link-arrow">${model.diagram[4] ? ic('ban') : ''}</div>
                 <div class="fwmap-link-rate">${model.diagram[2]}</div></div>
             ${model.diagram[3]}</div>` : '';
         const investigation = state.investigations.get(address);
         $details.html(`
             <div class="fwmap-d-scroll">
                 <div class="fwmap-d-head">
-                    <i class="fa fa-globe fwmap-d-icon"></i>
+                    ${ic('globe', 'fwmap-d-icon')}
                     <div class="fwmap-d-title">
                         <div class="fwmap-d-name">${esc(model.remote.title)}</div>
                         <div class="fwmap-d-line">${model.remote.hostname ? `<b>${esc(address)}</b>` : ''}
@@ -1048,7 +1094,7 @@
                         ${model.remote.org ? `<div class="fwmap-d-line">${esc(model.remote.org)}</div>` : ''}
                     </div>
                     <div class="fwmap-d-verdict">${model.verdict}<div class="fwmap-d-verdict-sub">${esc(model.sub)}</div></div>
-                    <a href="#" id="fwmap-details-close" title="${esc(T.close)}"><i class="fa fa-times"></i></a>
+                    <a href="#" id="fwmap-details-close" title="${esc(T.close)}">${ic('x')}</a>
                 </div>
                 ${picker}
                 ${diagram}

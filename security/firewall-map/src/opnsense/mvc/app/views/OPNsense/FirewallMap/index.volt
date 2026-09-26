@@ -238,6 +238,23 @@
     .fwmap-actions .btn { padding: 7px 16px; font-size: 1em; }
     .fwmap-actions .btn .fa { margin-right: 4px; }
     .fwmap-actions .btn-group { margin-left: auto; }
+    /* outline icons and flag images, sized as in the mockup */
+    .fwmap-ic { width: 1.05em; height: 1.05em; vertical-align: -.17em; flex: none; }
+    .fwmap-d-icon { width: 34px; height: 34px; opacity: .7; margin-top: 2px; }
+    .fwmap-end .fwmap-ic { display: block; width: 28px; height: 28px; margin: 0 auto 5px; color: rgb(30, 110, 215); }
+    .fwmap-card-ic { width: 18px; height: 18px; color: rgb(232, 93, 40); }
+    .fwmap-card-go .fwmap-ic { width: 14px; height: 14px; }
+    .fwmap-ok-ic { width: 22px; height: 22px; color: rgb(40, 150, 70); stroke-width: 2.4; }
+    .fwmap-talker-icon .fwmap-ic { width: 22px; height: 22px; }
+    .fwmap-talker-chevron { width: 14px; height: 14px; opacity: .45; }
+    .fwmap-talker-search .fwmap-ic { position: absolute; left: 10px; top: 9px; width: 15px; height: 15px; opacity: .5; }
+    #fwmap-zoom .fwmap-ic { width: 16px; height: 16px; vertical-align: middle; }
+    #fwmap-details-close .fwmap-ic { width: 20px; height: 20px; stroke-width: 2.2; }
+    .fwmap-actions .btn .fwmap-ic { width: 17px; height: 17px; margin-right: 5px; vertical-align: -3px; }
+    .fwmap-vpill .fwmap-ic, .fwmap-pill .fwmap-ic { stroke-width: 2.6; width: .95em; height: .95em; }
+    .fwmap-flag.flag-icon { width: 22px; height: 16px; line-height: 16px; background-size: cover; border-radius: 2px;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, .1); vertical-align: -3px; margin-right: 6px; }
+    .fwmap-talker-icon .fwmap-flag.flag-icon { width: 24px; height: 17px; margin: 0; }
     @media (max-width: 1100px) {
         #fwmap-layout { flex-direction: column; }
         #fwmap-split-side { display: none; }
@@ -247,6 +264,7 @@
     }
 </style>
 
+<link rel="stylesheet" href="/ui/css/flags/flag-icon.css">
 <script>
     window.FirewallMapPageText = {
         firewall_map: "{{ lang._('Firewall Map') }}",
@@ -476,9 +494,9 @@
             <div id="fwmap-canvas"></div>
             <div id="fwmap-legend"></div>
             <div id="fwmap-zoom">
-                <button type="button" data-zoom="1" title="{{ lang._('Zoom in') }}"><i class="fa fa-plus"></i></button>
-                <button type="button" data-zoom="-1" title="{{ lang._('Zoom out') }}"><i class="fa fa-minus"></i></button>
-                <button type="button" data-zoom="fit" title="{{ lang._('Whole world') }}"><i class="fa fa-expand"></i></button>
+                <button type="button" data-zoom="1" title="{{ lang._('Zoom in') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button>
+                <button type="button" data-zoom="-1" title="{{ lang._('Zoom out') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg></button>
+                <button type="button" data-zoom="fit" title="{{ lang._('Whole world') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
             </div>
             <div id="fwmap-credit"></div>
         </div>
@@ -494,7 +512,7 @@
                     <li><a href="#" data-tab="ids">{{ lang._('IDS') }}</a></li>
                 </ul>
                 <div class="fwmap-talker-tools">
-                    <div class="fwmap-talker-search"><i class="fa fa-search"></i>
+                    <div class="fwmap-talker-search"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-5-5"/></svg>
                         <input type="search" class="form-control" id="fwmap-talker-search" placeholder="{{ lang._('Search…') }}"></div>
                     <select class="form-control" id="fwmap-talker-sort">
                         <option value="rate">{{ lang._('Top talkers') }}</option>
