@@ -135,7 +135,7 @@ def investigate(address, store=None, key=None, fetchers=None, now=None):
         parsed = ipaddress.IPv4Address(address)
     except ValueError:
         return {"status": "failed", "error": "not an IPv4 address"}
-    if not parsed.is_global:
+    if not parsed.is_global or parsed.is_multicast:
         return {"status": "failed", "error": "not a public address"}
     address = str(parsed)
     now = time.time() if now is None else now

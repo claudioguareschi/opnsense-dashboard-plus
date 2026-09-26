@@ -234,7 +234,8 @@ def public_ipv4(value):
         address = ipaddress.ip_address(value)
     except (TypeError, ValueError):
         return False
-    return address.version == 4 and address.is_global
+    # multicast (e.g. CARP advertisements to 224.0.0.18) counts as global in ipaddress, not here
+    return address.version == 4 and address.is_global and not address.is_multicast
 
 
 def flow_endpoints(record, local_addresses):

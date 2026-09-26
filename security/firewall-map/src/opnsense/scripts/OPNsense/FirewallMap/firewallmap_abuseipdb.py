@@ -54,7 +54,7 @@ def parse_list(text):
             address = ipaddress.IPv4Address(value)
         except ValueError:
             continue
-        if address.is_global:
+        if address.is_global and not address.is_multicast:
             addresses.append(str(address))
     return addresses
 

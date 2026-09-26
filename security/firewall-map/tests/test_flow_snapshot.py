@@ -678,6 +678,10 @@ class ThreatQueueTest(unittest.TestCase):
             self.assertEqual((row["status"], row["seen_after_block"]), ("new", True))
             self.assertEqual(THREATS.listing(db)["counts"], {"new": 1, "reviewed": 0, "dismissed": 0, "blocked": 0})
 
+    def test_multicast_is_not_a_remote_endpoint(self):
+        self.assertFalse(COLLECTOR.public_ipv4("224.0.0.18"))
+        self.assertTrue(COLLECTOR.public_ipv4("9.9.9.9"))
+
     def test_rejects_bad_input(self):
         with tempfile.TemporaryDirectory() as directory:
             db = THREATS.connect(os.path.join(directory, "cache.db"))
