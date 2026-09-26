@@ -131,7 +131,8 @@
             options.push(`<option value="${esc(current)}">${esc(current)}</option>`);
         }
         const html = options.join('');
-        if ($select.data('html') !== html) {
+        // never rebuild a dropdown the user is working with
+        if ($select.data('html') !== html && document.activeElement !== $select[0]) {
             $select.html(html).data('html', html);
         }
         $select.val(current);
@@ -243,8 +244,10 @@
         context.strokeStyle = color;
         context.lineWidth = 1.2;
         context.beginPath();
+        // newest point at the right edge, so a short history grows from the right
+        const offset = HISTORY_POINTS - series.length;
         series.forEach((value, index) => {
-            const x = (index / (HISTORY_POINTS - 1)) * width;
+            const x = ((offset + index) / (HISTORY_POINTS - 1)) * width;
             const y = height - 1 - (value / max) * (height - 2);
             index ? context.lineTo(x, y) : context.moveTo(x, y);
         });
@@ -268,13 +271,9 @@
                 <div class="fwmap-talker-rate">${formatRate(row.rate)}</div>
             </div>`).join(''));
         const accent = getComputedStyle(document.querySelector('#fwmap-talkers a') || document.body).color;
+        state.talkerRows = rows;
         $list.find('.fwmap-talker').each(function () {
-            const row = rows[$(this).data('index')];
-            sparkline($(this).find('canvas')[0], row.series, accent);
-            $(this).on('click', () => {
-                Object.assign(state.filters, row.filter);
-                refresh();
-            });
+            sparkline($(this).find('canvas')[0], rows[$(this).data('index')].series, accent);
         });
     }
 
@@ -311,6 +310,8 @@
             }
         }
         const kind = selection.kind === 'blocked' ? T.blocked_source : T.remote_endpoints;
+        const lists = [...new Set([...(selection.block?.lists || []),
+            ...(selection.members || []).flatMap((member) => member.lists || [])])];
         const country = state.isAdmin && selection.countryCode
             ? `<div class="fwmap-links"><a href="#" class="fwmap-country" data-code="${esc(selection.countryCode)}">`
               + `${esc(T.add_country)} (${esc(selection.countryCode)})</a></div>` : '';
@@ -320,6 +321,7 @@
                 <a href="#" id="fwmap-details-close" title="${esc(T.close)}">&times;</a>
             </div>
             <div class="text-muted">${esc(kind)}</div>
+            ${lists.length ? `<div style="font-weight:600;color:rgb(196,18,48)">${esc(T.listed_in)} ${lists.map(esc).join(', ')}</div>` : ''}
             ${addresses.map(addressRow).join('')}
             ${insides.length ? `<div class="text-muted" style="margin-top:6px">${esc(T.inside_hosts)}</div>`
               + insides.map((inside) => `<div>${esc(inside.name || inside.ip)} <span class="text-muted">${esc([inside.ip, inside.interface].filter(Boolean).join(' · '))}</span></div>`).join('') : ''}
@@ -345,15 +347,16 @@
     async function showStates(address) {
         try {
             const result = await postJSON('/api/diagnostics/firewall/query_states', {searchPhrase: address, rowCount: 100, current: 1});
+            const count = (result.rows || []).length;
             const rows = (result.rows || []).map((row) => `<tr><td>${esc(row.interface)}</td><td>${esc(row.proto)}</td>`
                 + `<td>${esc(row.src_addr)}:${esc(row.src_port)}</td><td>${esc(row.dst_addr)}:${esc(row.dst_port)}</td>`
                 + `<td>${esc(row.state)}</td><td>${esc(row.bytes ?? '')}</td></tr>`).join('');
             BootstrapDialog.show({
-                title: `${T.states_for} ${address}`, size: BootstrapDialog.SIZE_WIDE,
+                title: esc(`${T.states_for} ${address}`), size: BootstrapDialog.SIZE_WIDE,
                 message: rows
                     ? `<table class="table table-condensed table-striped"><thead><tr><th>${esc(T.interface)}</th><th>${esc(T.protocol)}</th>`
                       + `<th>${esc(T.source)}</th><th>${esc(T.destination)}</th><th>${esc(T.state)}</th><th>${esc(T.bytes)}</th></tr></thead>`
-                      + `<tbody>${rows}</tbody></table>${result.total > rows.length ? `<div class="text-muted">${esc(T.more_states)}</div>` : ''}`
+                      + `<tbody>${rows}</tbody></table>${result.total > count ? `<div class="text-muted">${esc(T.more_states)}</div>` : ''}`
                     : esc(T.no_states),
                 buttons: [{label: T.close, action: (dialog) => dialog.close()}],
             });
@@ -363,7 +366,7 @@
     }
 
     function killStates(address) {
-        confirmAction(`${T.kill_confirm} ${address}?`, async () => {
+        confirmAction(`${T.kill_confirm} ${address}? ${T.kill_scope}`, async () => {
             try {
                 const result = await postJSON('/api/diagnostics/firewall/kill_states', {filter: address});
                 notify(result.result === 'ok' ? `${T.killed} ${result.dropped_states}` : T.action_failed,
@@ -408,7 +411,7 @@
     }
 
     function addToAlias(address) {
-        chooseAlias(['host', 'hosts', 'network', 'networks', 'external'], `${T.add_to_alias}: ${address}`, (name) => {
+        chooseAlias(['host', 'hosts', 'network', 'networks', 'external'], esc(`${T.add_to_alias}: ${address}`), (name) => {
             confirmAction(`${T.add_confirm} ${address} → ${name}?`, async () => {
                 try {
                     const result = await postJSON(`/api/firewall/alias_util/add/${encodeURIComponent(name)}`, {address});
@@ -422,7 +425,7 @@
     }
 
     function addCountry(code) {
-        chooseAlias(['geoip', 'geoip (ip in country)'], `${T.add_country} (${code})`, (name, uuid) => {
+        chooseAlias(['geoip', 'geoip (ip in country)'], esc(`${T.add_country} (${code})`), (name, uuid) => {
             confirmAction(`${T.add_confirm} ${code} → ${name}?`, async () => {
                 try {
                     const current = await $.getJSON(`/api/firewall/alias/get_item/${encodeURIComponent(uuid)}`);
@@ -531,6 +534,15 @@
             state.filters = {traffic: 'all', service: '', iface: '', host: '', country: '', asn: ''};
             $('#fwmap-filter-traffic').val('all');
             refresh();
+        });
+        // delegated: the rows are redrawn every poll, a click must survive that
+        $('#fwmap-talkers-list').on('mousedown', '.fwmap-talker', function (event) {
+            event.preventDefault();
+            const row = (state.talkerRows || [])[$(this).data('index')];
+            if (row) {
+                Object.assign(state.filters, row.filter);
+                refresh();
+            }
         });
         $('#fwmap-talkers .nav a').on('click', function (event) {
             event.preventDefault();

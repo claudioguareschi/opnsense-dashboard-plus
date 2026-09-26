@@ -295,6 +295,7 @@ function describeBlock(block, showAsn) {
   const asn = showAsn && block.asn ? `<div style="opacity:.7">AS${block.asn} ${escapeHtml(block.as_org || '')}</div>` : '';
   return `
     <div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}${approximate}</div>
+    ${(block.lists || []).length ? `<div style="font-weight:600;color:rgb(196,18,48)">Listed in ${block.lists.map(escapeHtml).join(', ')}</div>` : ''}
     <div style="margin-top:3px"><div>${escapeHtml(block.source)}</div>${asn}</div>
     <div style="margin-top:4px;font-weight:600">${block.threat ? 'Threat: ' : ''}Blocked ${block.hits ?? block.hits_per_minute}× in the last ${block.window_minutes ?? 1} minutes</div>
     <div style="opacity:.7">${block.hits_per_minute} in the last minute</div>

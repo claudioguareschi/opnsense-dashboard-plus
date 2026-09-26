@@ -225,7 +225,9 @@ vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
                 handle.write("address,hwaddr,client_id,valid_lifetime,expire,subnet_id,fqdn_fwd,fqdn_rev,hostname,state\n"
                              "192.168.30.80,aa,01,3600,100,30,0,0,old-name,0\n"
                              "192.168.30.80,aa,01,3600,9999999999,30,0,0,homeassistant,0\n"
-                             "192.168.30.81,bb,02,3600,1,30,0,0,expired,0\n")
+                             "192.168.30.81,bb,02,3600,1,30,0,0,expired,0\n"
+                             "192.168.30.82,cc,03,3600,9999999999,30,0,0,reused,0\n"
+                             "192.168.30.82,cc,03,3600,9999999999,30,0,0,,0\n")
             dnsmasq = os.path.join(directory, "dnsmasq.leases")
             with open(dnsmasq, "w") as handle:
                 handle.write("9999999999 cc:cc 192.168.40.5 tv *\n9999999999 dd:dd 192.168.40.6 printer *\n")
@@ -255,7 +257,18 @@ class BlocklistTest(unittest.TestCase):
                              "<alias><name>Off</name><type>url</type><enabled>0</enabled></alias>"
                              "</aliases></Alias></Firewall></OPNsense></opnsense>")
             tables = ["Drop", "Office", "Off", "crowdsec_blacklists", "bogons"]
-            self.assertEqual(COLLECTOR.blocklist_tables(config, tables), {"Drop", "crowdsec_blacklists"})
+            self.assertEqual(COLLECTOR.blocklist_tables(config, tables, blocked={"Drop", "Off"}),
+                             {"Drop", "crowdsec_blacklists"})
+            # a URL alias used only by pass rules (an allowlist) is not a threat list
+            self.assertEqual(COLLECTOR.blocklist_tables(config, tables, blocked=set()), {"crowdsec_blacklists"})
+
+    def test_reads_block_rule_tables(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rules = os.path.join(directory, "rules.debug")
+            with open(rules, "w") as handle:
+                handle.write('block in log quick from {<Drop>} to {any} label "abc" # <NotThis>\n'
+                             'pass in quick from {<Allow>} to {any} label "def"\n')
+            self.assertEqual(COLLECTOR.blocked_rule_tables(rules), {"Drop"})
 
 
 class BlockTest(unittest.TestCase):
@@ -290,6 +303,15 @@ class BlockTest(unittest.TestCase):
         # and they age out of the 10-minute window
         self.assertEqual(blocks.visible(now + 1000), [])
         self.assertEqual(blocks.sources, {})
+
+    def test_eviction_keeps_recently_hit_sources(self):
+        blocks = COLLECTOR.BlockTracker(max_sources=2)
+        event = COLLECTOR.parse_block(self.LINE)
+        blocks.add({**event, "source": "45.56.79.1"}, now=1.0)
+        blocks.add({**event, "source": "45.56.79.2"}, now=2.0)
+        blocks.add({**event, "source": "45.56.79.1"}, now=3.0)
+        blocks.add({**event, "source": "45.56.79.3"}, now=4.0)
+        self.assertEqual(sorted(blocks.sources), ["45.56.79.1", "45.56.79.3"])
 
     def test_bounded_under_a_flood(self):
         blocks = COLLECTOR.BlockTracker(max_sources=3)
@@ -341,6 +363,10 @@ class RobustnessTest(unittest.TestCase):
         self.assertEqual(record["src"]["address"], "45.56.79.53")
         self.assertEqual(record["nat"]["address"], "198.13.91.163")
         self.assertEqual(record["state"], "ESTABLISHED:ESTABLISHED")
+
+    def test_cgnat_counts_as_inside(self):
+        self.assertTrue(COLLECTOR.private_ipv4("100.101.102.103"))
+        self.assertFalse(COLLECTOR.public_ipv4("100.101.102.103"))
 
     def test_transient_geo_failures_are_not_cached(self):
         calls = []

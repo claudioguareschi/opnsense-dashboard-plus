@@ -26,7 +26,7 @@
 
 <style>
     #fwmap-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
-    #fwmap-toolbar select { width: auto; max-width: 220px; display: inline-block; height: 30px; padding: 2px 6px; }
+    #fwmap-toolbar select { width: auto; min-width: 130px; max-width: 220px; display: inline-block; height: 30px; padding: 2px 6px; }
     #fwmap-toolbar label { margin: 0 2px 0 6px; font-weight: normal; opacity: .8; }
     #fwmap-filter-asn { display: none; }
     #fwmap-layout { display: flex; gap: 12px; }
@@ -104,6 +104,8 @@
         confirm: "{{ lang._('Confirm') }}",
         cancel: "{{ lang._('Cancel') }}",
         kill_confirm: "{{ lang._('Kill all firewall states involving') }}",
+        kill_scope: "{{ lang._('This ends the connections of every inside host to this address, and any traffic routed through it.') }}",
+        listed_in: "{{ lang._('Listed in') }}",
         killed: "{{ lang._('States killed:') }}",
         add_confirm: "{{ lang._('Add') }}",
         no_aliases: "{{ lang._('No suitable alias exists yet. Create one under Firewall ▸ Aliases first.') }}",

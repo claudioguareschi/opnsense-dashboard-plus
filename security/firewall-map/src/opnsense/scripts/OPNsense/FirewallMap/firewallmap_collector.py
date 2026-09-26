@@ -19,9 +19,11 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import time
 import xml.etree.ElementTree as ElementTree
-from collections import deque
+from array import array
+from bisect import bisect_left
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -72,6 +74,8 @@ BLOCKLIST_REFRESH_SECONDS = 300
 BLOCKLIST_ALIAS_TYPES = {"urltable", "url", "urljson", "external"}
 BLOCKLIST_TABLE_PREFIXES = ("crowdsec", "__qfeeds", "qfeeds", "spamhaus", "firehol", "abuse")
 BLOCKLIST_MAX_ENTRIES = 500000
+BLOCKLIST_MAX_TOTAL = 1000000
+CGNAT = ipaddress.ip_network("100.64.0.0/10")
 SETTINGS_REFRESH_SECONDS = 30
 GEO_CACHE_FILE = "/var/db/firewallmap/geo.json"
 
@@ -221,7 +225,8 @@ def private_ipv4(value):
         address = ipaddress.ip_address(value)
     except (TypeError, ValueError):
         return False
-    return address.version == 4 and address.is_private and not address.is_loopback
+    # carrier-grade NAT space (Tailscale, some VPN tunnels) is inside space too
+    return address.version == 4 and (address.is_private or address in CGNAT) and not address.is_loopback
 
 
 def inside_address(record):
@@ -267,6 +272,8 @@ def mmdb_lookup(database, address):
     except (OSError, subprocess.TimeoutExpired) as error:
         # a transient failure, not "no data": callers must not cache it
         raise LookupError(str(error)) from error
+    if result.returncode == 6 or "Could not find an entry" in result.stderr:
+        return {}  # not in the database: a definite miss that is cached
     if result.returncode != 0:
         raise LookupError(result.stderr.strip() or "mmdblookup failed")
     return parse_mmdb(result.stdout)
@@ -505,14 +512,34 @@ class FlowTracker:
         return ranked[:limit]
 
 
-def blocklist_tables(config=CONFIG_XML, tables=None):
-    """Names of pf tables that hold threat or block lists."""
+def blocked_rule_tables(path=RULES_DEBUG):
+    """Tables referenced by block or reject rules in the running ruleset."""
+    tables = set()
+    try:
+        with open(path, errors="replace") as handle:
+            for line in handle:
+                if line.startswith(("block", "reject")):
+                    tables.update(re.findall(r"<([A-Za-z0-9_.-]+)>", line.split(" label ")[0]))
+    except OSError:
+        pass
+    return tables
+
+
+def blocklist_tables(config=CONFIG_XML, tables=None, blocked=None):
+    """Names of pf tables that hold threat lists.
+
+    URL/external aliases count only when a block or reject rule uses them, since the same alias
+    types are often allowlists (cloud provider ranges...); feed tables with well-known names
+    (CrowdSec, Q-Feeds, Spamhaus...) always count.
+    """
     names = set()
+    blocked = blocked_rule_tables() if blocked is None else blocked
     try:
         root = ElementTree.parse(config).getroot()
         for alias in root.iterfind(".//OPNsense/Firewall/Alias/aliases/alias"):
-            if alias.findtext("type") in BLOCKLIST_ALIAS_TYPES and alias.findtext("enabled") != "0":
-                names.add(alias.findtext("name"))
+            name = alias.findtext("name")
+            if alias.findtext("type") in BLOCKLIST_ALIAS_TYPES and alias.findtext("enabled") != "0" and name in blocked:
+                names.add(name)
     except (OSError, ElementTree.ParseError):
         pass
     if tables is None:
@@ -525,51 +552,85 @@ def blocklist_tables(config=CONFIG_XML, tables=None):
 
 
 class BlocklistIndex:
-    """Longest-prefix lookup of IPv4 addresses in the contents of blocklist pf tables."""
+    """Longest-prefix lookup of IPv4 addresses in blocklist pf tables.
+
+    Compact: per prefix length a sorted array of network addresses with a parallel array of
+    table bitmasks, searched with bisect. Rebuilt in a background thread and swapped in whole,
+    so the sampling loop never waits for large tables.
+    """
 
     def __init__(self):
-        self.by_prefix = {}
+        self.index = ([], {})  # (table names, {prefixlen: (networks, masks)})
+        self.refreshing = False
 
-    def load(self, contents):
-        """contents: {table name: iterable of 'a.b.c.d' or 'a.b.c.d/nn' entries}."""
+    @staticmethod
+    def build(contents, max_total=BLOCKLIST_MAX_TOTAL):
+        names = sorted(contents)[:62]
         by_prefix = {}
-        for table, entries in contents.items():
-            for entry in entries:
+        total = 0
+        for bit, table in enumerate(names):
+            for entry in contents[table]:
                 entry = entry.strip()
                 if not entry or entry.startswith("!") or ":" in entry:
                     continue
                 try:
-                    network = ipaddress.ip_network(entry, strict=False)
+                    network = ipaddress.IPv4Network(entry, strict=False)
                 except ValueError:
                     continue
                 bucket = by_prefix.setdefault(network.prefixlen, {})
-                bucket.setdefault(int(network.network_address), set()).add(table)
-        self.by_prefix = by_prefix
+                key = int(network.network_address)
+                bucket[key] = bucket.get(key, 0) | (1 << bit)
+                total += 1
+                if total >= max_total:
+                    break
+        compact = {}
+        for prefixlen, bucket in by_prefix.items():
+            keys = sorted(bucket)
+            compact[prefixlen] = (array("I", keys), array("Q", (bucket[key] for key in keys)))
+        return names, compact
 
-    def refresh(self, tables):
-        contents = {}
-        for table in sorted(tables):
-            try:
-                output = subprocess.run(
-                    [PFCTL, "-t", table, "-T", "show"], capture_output=True, check=False, text=True, timeout=20,
-                ).stdout
-            except (OSError, subprocess.TimeoutExpired):
-                continue
-            entries = output.split()
-            if len(entries) <= BLOCKLIST_MAX_ENTRIES:
-                contents[table] = entries
-        self.load(contents)
+    def load(self, contents):
+        self.index = self.build(contents)
+
+    def _refresh(self, tables):
+        try:
+            contents = {}
+            for table in sorted(tables):
+                try:
+                    output = subprocess.run(
+                        [PFCTL, "-t", table, "-T", "show"], capture_output=True, check=False, text=True, timeout=20,
+                    ).stdout
+                except (OSError, subprocess.TimeoutExpired):
+                    continue
+                entries = output.split()
+                if len(entries) <= BLOCKLIST_MAX_ENTRIES:
+                    contents[table] = entries
+            self.index = self.build(contents)
+        finally:
+            self.refreshing = False
+
+    def refresh(self, tables, background=True):
+        if self.refreshing:
+            return
+        self.refreshing = True
+        if background:
+            threading.Thread(target=self._refresh, args=(tables,), daemon=True).start()
+        else:
+            self._refresh(tables)
 
     def lookup(self, address):
         try:
             value = int(ipaddress.IPv4Address(address))
         except ValueError:
             return []
-        matches = set()
-        for prefixlen, bucket in self.by_prefix.items():
-            mask = (0xFFFFFFFF << (32 - prefixlen)) & 0xFFFFFFFF if prefixlen else 0
-            matches.update(bucket.get(value & mask, ()))
-        return sorted(matches)
+        names, compact = self.index
+        mask = 0
+        for prefixlen, (networks, masks) in compact.items():
+            key = value & ((0xFFFFFFFF << (32 - prefixlen)) & 0xFFFFFFFF if prefixlen else 0)
+            position = bisect_left(networks, key)
+            if position < len(networks) and networks[position] == key:
+                mask |= masks[position]
+        return [name for bit, name in enumerate(names) if mask & (1 << bit)]
 
 
 KEA_LEASES = "/var/db/kea/kea-leases4.csv"
@@ -592,9 +653,12 @@ def lease_names(kea=KEA_LEASES, dnsmasq=DNSMASQ_LEASES, config=CONFIG_XML, now=N
                     expire = int(fields[column["expire"]] or 0)
                 except (KeyError, IndexError, ValueError):
                     continue
-                # Kea appends lease updates, so a later valid line supersedes an earlier one
+                # Kea appends lease updates: the latest line for an address wins, and an expired,
+                # released or nameless latest line clears the name
                 if name and expire >= now:
                     leases[address] = name
+                else:
+                    leases.pop(address, None)
     except OSError:
         pass
     try:
@@ -715,15 +779,20 @@ class FilterLogTail:
             return []
         data = self.handle.read(limit_bytes)
         if len(data) >= limit_bytes:
-            # a burst larger than we can draw: skip ahead instead of falling behind
+            # a burst larger than we can draw: skip ahead instead of falling behind, keeping only
+            # whole lines (the pending fragment no longer lines up with what follows)
             self.handle.seek(0, os.SEEK_END)
+            data = data.split(b"\n", 1)[-1] if self.pending else data
             self.pending = b""
             data = data.rsplit(b"\n", 1)[0] + b"\n"
         parts = (self.pending + data).split(b"\n")
         self.pending = parts.pop()
         try:
             if os.stat(self.path).st_ino != self.inode:
-                # rotated: read the new file from its start (old lines are dropped by timestamp)
+                # rotated: finish the old file, then read the new one from its start
+                # (old lines are dropped by their timestamps)
+                rest = (self.pending + self.handle.read(limit_bytes)).split(b"\n")
+                parts.extend(line for line in rest if line)
                 self._open(at_end=False)
         except OSError:
             pass
@@ -811,12 +880,14 @@ class BlockTracker:
     def add(self, event, now):
         if not public_ipv4(event["source"]):
             return
-        entry = self.sources.get(event["source"])
+        # dict order doubles as recency order: a hit moves the source to the end, so the least
+        # recently hit source is always first and eviction is O(1)
+        entry = self.sources.pop(event["source"], None)
         if entry is None:
             if len(self.sources) >= self.max_sources:
-                oldest = min(self.sources, key=lambda address: self.sources[address]["last"])
-                del self.sources[oldest]
-            entry = self.sources[event["source"]] = {"buckets": {}, "total": 0, "ports": {}}
+                del self.sources[next(iter(self.sources))]
+            entry = {"buckets": {}, "total": 0, "ports": {}}
+        self.sources[event["source"]] = entry
         bucket = int(now // BLOCK_BUCKET_SECONDS)
         entry["buckets"][bucket] = entry["buckets"].get(bucket, 0) + 1
         entry["total"] += 1
