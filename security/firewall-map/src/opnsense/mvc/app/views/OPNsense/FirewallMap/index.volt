@@ -25,8 +25,15 @@
  #}
 
 <style>
-    #fwmap-toolbar { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; margin-bottom: 12px; }
-    #fwmap-toolbar select { width: auto; min-width: 150px; max-width: 230px; display: inline-block; height: 34px; padding: 2px 8px; }
+    /* one row: the selects share the width and shrink, the buttons are compact */
+    #fwmap-toolbar { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; margin-bottom: 12px; }
+    #fwmap-toolbar select { flex: 1 1 0; width: auto; min-width: 84px; max-width: 200px; height: 32px; padding: 2px 6px;
+        text-overflow: ellipsis; }
+    #fwmap-toolbar .fwmap-tool-label { margin: 0 0 0 2px; white-space: nowrap; }
+    #fwmap-toolbar .fwmap-tool-btn { flex: none; height: 32px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; }
+    #fwmap-toolbar .fwmap-tool-btn .fwmap-ic { width: 16px; height: 16px; }
+    #fwmap-toolbar #fwmap-filter-asn { flex: none; white-space: nowrap; }
+    @media (max-width: 1500px) { #fwmap-toolbar .fwmap-tool-label, #fwmap-toolbar .fwmap-tool-text { display: none; } }
     #fwmap-toolbar label { margin: 0 2px 0 6px; font-weight: normal; opacity: .8; }
     #fwmap-filter-asn { display: none; }
     #fwmap-layout { display: flex; height: calc(100vh - 222px); min-height: 540px; }
@@ -492,14 +499,14 @@
     <div id="fwmap-layout">
         <div id="fwmap-main">
     <div id="fwmap-toolbar">
-            <label for="fwmap-color">{{ lang._('Colour') }}</label>
+            <label for="fwmap-color" class="fwmap-tool-label">{{ lang._('Colour') }}</label>
             <select id="fwmap-color" class="form-control">
                 <option value="initiator">{{ lang._('By who connected') }}</option>
                 <option value="direction">{{ lang._('By data direction') }}</option>
                 <option value="egress">{{ lang._('By egress') }}</option>
                 <option value="service">{{ lang._('By service') }}</option>
             </select>
-            <label for="fwmap-filter-traffic">{{ lang._('Show') }}</label>
+            <label for="fwmap-filter-traffic" class="fwmap-tool-label">{{ lang._('Show') }}</label>
             <select id="fwmap-filter-traffic" class="form-control">
                 <option value="all">{{ lang._('All traffic') }}</option>
                 <option value="permitted">{{ lang._('Permitted') }}</option>
@@ -516,9 +523,9 @@
             <span id="fwmap-filter-asn" class="label label-default">
                 <span></span> <a href="#" style="color:inherit" title="{{ lang._('Remove') }}">&times;</a>
             </span>
-            <button id="fwmap-reset" class="btn btn-default btn-sm" type="button">{{ lang._('Reset filters') }}</button>
-            <button id="fwmap-review" class="btn btn-default btn-sm" type="button" style="display:none; margin-left:auto">
-                <i class="fa fa-list-alt"></i> {{ lang._('Review queue') }} <span class="badge" id="fwmap-review-count"></span>
+            <button id="fwmap-reset" class="btn btn-default btn-sm fwmap-tool-btn" type="button" title="{{ lang._('Reset filters') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></button>
+            <button id="fwmap-review" class="btn btn-default btn-sm fwmap-tool-btn" type="button" style="display:none" title="{{ lang._('Review queue') }}">
+                <svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span class="fwmap-tool-text">{{ lang._('Review') }}</span> <span class="badge" id="fwmap-review-count"></span>
             </button>
         </div>
         <div id="fwmap-map">
