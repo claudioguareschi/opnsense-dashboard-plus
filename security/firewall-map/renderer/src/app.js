@@ -1,5 +1,5 @@
 /* Firewall Map+ renderer. Bundled locally from deck.gl. */
-import {Deck, MapView} from '@deck.gl/core';
+import {Deck, MapView, WebMercatorViewport} from '@deck.gl/core';
 import {GeoJsonLayer, PathLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
 import worldData from './world.json';
 
@@ -15,6 +15,10 @@ const HEAVY_TOP_MIN_RATE = 10000;
 // city labels appear once the map is zoomed this far past the fitted world view
 const LABEL_ZOOM_STEP = 1.2;
 const MAX_LABELS = 40;
+const LABEL_FONT_SIZE = 11;
+// approximate glyph width for placing labels before they are drawn
+const LABEL_CHAR_WIDTH = 6.2;
+const LABEL_PADDING = 3;
 // pulse speed maps log10(bytes/s) onto this range: ~1 B/s crawls, ~10 MB/s races
 const FASTEST_LOG_RATE = 7;
 // a direction counts as "both ways" when the smaller side carries at least this share
@@ -276,53 +280,86 @@ export function createFirewallMap(container, options = {}) {
       const labelsWereVisible = viewState.zoom >= viewState.minZoom + LABEL_ZOOM_STEP;
       viewState = {...next, minZoom: viewState.minZoom, maxZoom: viewState.maxZoom};
       deck.setProps({viewState});
-      if (labelsWereVisible !== viewState.zoom >= viewState.minZoom + LABEL_ZOOM_STEP) {
-        deck.setProps({layers: layers(lastData)});
+      if (labelsWereVisible || viewState.zoom >= viewState.minZoom + LABEL_ZOOM_STEP) {
+        // labels are placed in screen space, so re-place them as the map moves
+        labelLayer = buildLabelLayer();
+        deck.setProps({layers: compose()});
       }
     },
     controller: {scrollZoom: {smooth: true}, dragRotate: false, touchRotate: false},
     useDevicePixels: true,
     // arrow pointer so endpoints and arches can be hovered; the hand only while dragging
     getCursor: ({isDragging, isHovering}) => isDragging ? 'grabbing' : (isHovering ? 'pointer' : 'default'),
-    getTooltip: ({object, layer}) => {
-      if (!object || !layer) {
-        return null;
-      }
-      let html = null;
-      if (layer.id === 'firewall-map-endpoints' && object.local) {
-        const own = (lastData.flows || []).filter((flow) => flow.origin === object.id);
-        const rateIn = own.reduce((sum, flow) => sum + (flow.rate_in ?? 0), 0);
-        const rateOut = own.reduce((sum, flow) => sum + (flow.rate_out ?? 0), 0);
-        html = `<div style="font-weight:600;margin-bottom:2px">${escapeHtml(object.id)}</div>
-          <div>${own.length} active links</div>
-          <div style="margin-top:4px">↓ ${formatRate(rateIn)} &nbsp; ↑ ${formatRate(rateOut)}</div>`;
-      } else if (layer.id === 'firewall-map-endpoints') {
-        html = describe(object, flowsByDest.get(`${object.lat},${object.lon}`) || [], locationIndex, lastData.hostnames, settings.asn);
-      } else if (layer.id === 'firewall-map-arcs') {
-        html = describe(object.dest, object.members, locationIndex, lastData.hostnames, settings.asn);
-      }
-      return html && {
-        html,
-        style: {
-          background: colors.tooltip.background,
-          color: colors.tooltip.text,
-          border: `1px solid ${colors.tooltip.border}`,
-          borderRadius: '4px',
-          padding: '6px 8px',
-          fontSize: '12px',
-          lineHeight: '1.35',
-          boxShadow: '0 2px 8px rgba(0,0,0,.15)',
-          maxWidth: '320px',
-        },
-      };
-    },
+    onHover: (info) => showTooltip(info),
     layers: [],
   });
   // Exposed for in-browser diagnostics of the live widget.
   container.firewallMapDeck = deck;
 
+  // Hover cards live on <body> (fixed position) so they are never clipped by the widget
+  const tooltip = document.createElement('div');
+  tooltip.style.cssText = 'position:fixed;z-index:2000;pointer-events:none;display:none;'
+    + 'border-radius:4px;padding:6px 8px;font-size:12px;line-height:1.35;max-width:320px;'
+    + 'box-shadow:0 2px 8px rgba(0,0,0,.15);';
+  document.body.appendChild(tooltip);
+
+  function tooltipHtml(object, layer) {
+    if (!object || !layer) {
+      return null;
+    }
+    if (layer.id === 'firewall-map-endpoints' && object.local) {
+      const own = (lastData.flows || []).filter((flow) => flow.origin === object.id);
+      const rateIn = own.reduce((sum, flow) => sum + (flow.rate_in ?? 0), 0);
+      const rateOut = own.reduce((sum, flow) => sum + (flow.rate_out ?? 0), 0);
+      return `<div style="font-weight:600;margin-bottom:2px">${escapeHtml(object.id)}</div>
+        <div>${own.length} active links</div>
+        <div style="margin-top:4px">↓ ${formatRate(rateIn)} &nbsp; ↑ ${formatRate(rateOut)}</div>`;
+    }
+    if (layer.id === 'firewall-map-endpoints') {
+      return describe(object, flowsByDest.get(`${object.lat},${object.lon}`) || [], locationIndex, lastData.hostnames, settings.asn);
+    }
+    if (layer.id === 'firewall-map-arcs') {
+      return describe(object.dest, object.members, locationIndex, lastData.hostnames, settings.asn);
+    }
+    return null;
+  }
+
+  function showTooltip({object, layer, x, y}) {
+    const html = tooltipHtml(object, layer);
+    if (!html) {
+      tooltip.style.display = 'none';
+      return;
+    }
+    tooltip.innerHTML = html;
+    tooltip.style.background = colors.tooltip.background;
+    tooltip.style.color = colors.tooltip.text;
+    tooltip.style.border = `1px solid ${colors.tooltip.border}`;
+    tooltip.style.display = 'block';
+    // next to the pointer, flipped to the other side when it would leave the window
+    const bounds = container.getBoundingClientRect();
+    const width = tooltip.offsetWidth;
+    const height = tooltip.offsetHeight;
+    let left = bounds.left + x + 14;
+    let top = bounds.top + y + 14;
+    if (left + width > window.innerWidth - 4) {
+      left = bounds.left + x - width - 14;
+    }
+    if (top + height > window.innerHeight - 4) {
+      top = bounds.top + y - height - 14;
+    }
+    tooltip.style.left = `${Math.max(4, left)}px`;
+    tooltip.style.top = `${Math.max(4, top)}px`;
+  }
+
+  const hideTooltip = () => {
+    tooltip.style.display = 'none';
+  };
+  container.addEventListener('mouseleave', hideTooltip);
+
   let arcs = [];
   let baseLayers = [];
+  let labelLayer = null;
+  let labelCandidates = [];
   let frame = null;
   let lastFrame = 0;
   const started = performance.now();
@@ -348,7 +385,7 @@ export function createFirewallMap(container, options = {}) {
     }
     if (now - lastFrame >= FRAME_INTERVAL) {
       lastFrame = now;
-      deck.setProps({layers: [...baseLayers, pulseLayer((now - started) / 1000)]});
+      deck.setProps({layers: compose(now)});
     }
     if (arcs.length) {
       frame = requestAnimationFrame(draw);
@@ -369,6 +406,62 @@ export function createFirewallMap(container, options = {}) {
       seen.set(key, {text, lat: location.lat, lon: location.lon, rate: (current?.rate || 0) + (flow.rate || 0)});
     }
     return [...seen.values()].sort((a, b) => b.rate - a.rate).slice(0, MAX_LABELS);
+  }
+
+  /**
+   * Greedy screen-space placement: busiest places first, each label tries above, below,
+   * right and left of its point and is dropped when every spot overlaps a placed label.
+   */
+  function placeLabels(candidates) {
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    if (!width || !height) {
+      return [];
+    }
+    const viewport = new WebMercatorViewport({...viewState, width, height});
+    const placed = [];
+    const boxes = [];
+    for (const label of candidates) {
+      const [px, py] = viewport.project([label.lon, label.lat]);
+      const w = label.text.length * LABEL_CHAR_WIDTH + 2 * LABEL_PADDING;
+      const h = LABEL_FONT_SIZE + 2 * LABEL_PADDING;
+      const spots = [[0, -(h / 2 + 5)], [0, h / 2 + 5], [w / 2 + 6, 0], [-(w / 2 + 6), 0]];
+      for (const [dx, dy] of spots) {
+        const box = [px + dx - w / 2, py + dy - h / 2, px + dx + w / 2, py + dy + h / 2];
+        const inside = box[0] >= 0 && box[1] >= 0 && box[2] <= width && box[3] <= height;
+        const clear = boxes.every((other) => box[2] <= other[0] || box[0] >= other[2] || box[3] <= other[1] || box[1] >= other[3]);
+        if (inside && clear) {
+          boxes.push(box);
+          placed.push({...label, offset: [dx, dy]});
+          break;
+        }
+      }
+    }
+    return placed;
+  }
+
+  function buildLabelLayer() {
+    const visible = settings.labels && viewState.zoom >= viewState.minZoom + LABEL_ZOOM_STEP;
+    return new TextLayer({
+      id: 'firewall-map-labels',
+      data: visible ? placeLabels(labelCandidates) : [],
+      visible,
+      getPosition: (label) => [label.lon, label.lat],
+      getText: (label) => label.text,
+      getSize: LABEL_FONT_SIZE,
+      getColor: colors.label,
+      getPixelOffset: (label) => label.offset,
+      fontFamily: getComputedStyle(container).fontFamily || 'sans-serif',
+      outlineWidth: 3,
+      outlineColor: colors.background,
+      fontSettings: {sdf: true},
+      characterSet: 'auto',
+      updateTriggers: {getColor: colors.label},
+    });
+  }
+
+  function compose(now = performance.now()) {
+    return [...baseLayers, pulseLayer((now - started) / 1000), labelLayer].filter(Boolean);
   }
 
   function layers(data) {
@@ -427,24 +520,10 @@ export function createFirewallMap(container, options = {}) {
         radiusMinPixels: 2.5,
         updateTriggers: {getFillColor: colors.endpoint, getLineColor: colors.endpoint},
       }),
-      new TextLayer({
-        id: 'firewall-map-labels',
-        data: labels(data),
-        visible: settings.labels && viewState.zoom >= viewState.minZoom + LABEL_ZOOM_STEP,
-        getPosition: (label) => [label.lon, label.lat],
-        getText: (label) => label.text,
-        getSize: 11,
-        getColor: colors.label,
-        getPixelOffset: [0, -9],
-        fontFamily: getComputedStyle(container).fontFamily || 'sans-serif',
-        outlineWidth: 3,
-        outlineColor: colors.background,
-        fontSettings: {sdf: true},
-        characterSet: 'auto',
-        updateTriggers: {getColor: colors.label},
-      }),
     ];
-    const layerList = [...baseLayers, pulseLayer((performance.now() - started) / 1000)];
+    labelCandidates = labels(data);
+    labelLayer = buildLabelLayer();
+    const layerList = compose();
     if (arcs.length && frame === null) {
       frame = requestAnimationFrame(draw);
     }
@@ -470,6 +549,8 @@ export function createFirewallMap(container, options = {}) {
       const fitted = viewState.zoom <= viewState.minZoom + 0.01;
       viewState = {...viewState, minZoom: zoom, zoom: fitted ? zoom : Math.max(zoom, viewState.zoom)};
       deck.setProps({viewState});
+      labelLayer = buildLabelLayer();
+      deck.setProps({layers: compose()});
       deck.redraw(true);
     },
     destroy() {
@@ -477,6 +558,8 @@ export function createFirewallMap(container, options = {}) {
         cancelAnimationFrame(frame);
         frame = null;
       }
+      container.removeEventListener('mouseleave', hideTooltip);
+      tooltip.remove();
       deck.finalize();
     },
   };
