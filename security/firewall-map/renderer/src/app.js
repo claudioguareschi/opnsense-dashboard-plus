@@ -441,6 +441,8 @@ export function createFirewallMap(container, options = {}) {
     },
     controller: {scrollZoom: {smooth: true}, dragRotate: false, touchRotate: false},
     useDevicePixels: true,
+    // arcs are 1.5px wide: pick within a few pixels so clicks and hovers land reliably
+    pickingRadius: 6,
     // arrow pointer so endpoints and arches can be hovered; the hand only while dragging
     getCursor: ({isDragging, isHovering}) => isDragging ? 'grabbing' : (isHovering ? 'pointer' : 'default'),
     onHover: (info) => showTooltip(info),
