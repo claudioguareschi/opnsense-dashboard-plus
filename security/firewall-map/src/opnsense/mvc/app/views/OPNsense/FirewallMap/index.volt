@@ -227,8 +227,9 @@
     .fwmap-kv th { font-weight: normal; opacity: .7; padding: 1px 8px 1px 0; vertical-align: top; white-space: nowrap; width: 40%; }
     .fwmap-kv td { padding: 1px 0; overflow-wrap: anywhere; }
     .fwmap-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0 10px; }
-    .fwmap-two .fwmap-kv th { width: auto; }
-    .fwmap-two .fwmap-kv td { white-space: nowrap; }
+    .fwmap-two { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 2px 14px; }
+    .fwmap-two .fwmap-kv { table-layout: auto; }
+    .fwmap-two .fwmap-kv th { width: 1%; }
     .fwmap-card-note { font-size: .78em; opacity: .7; margin-bottom: 3px; }
     .fwmap-empty-note { display: flex; gap: 10px; align-items: center; font-size: .82em; padding: 7px 10px; border-radius: 4px;
         background: rgba(128, 128, 128, .07); }
@@ -253,7 +254,7 @@
     #fwmap-details-close .fwmap-ic { width: 20px; height: 20px; stroke-width: 2.2; }
     .fwmap-actions .btn .fwmap-ic { width: 17px; height: 17px; margin-right: 5px; vertical-align: -3px; }
     .fwmap-vpill .fwmap-ic, .fwmap-pill .fwmap-ic { stroke-width: 2.6; width: .95em; height: .95em; }
-    .fwmap-flag.flag-icon { width: 22px; height: 16px; line-height: 16px; background-size: cover; border-radius: 2px;
+    .fwmap-flag.flag-icon { width: 19px; height: 14px; line-height: 14px; background-size: cover; border-radius: 2px;
         box-shadow: 0 0 0 1px rgba(0, 0, 0, .1); vertical-align: -3px; margin-right: 6px; }
     .fwmap-talker-icon .fwmap-flag.flag-icon { width: 24px; height: 17px; margin: 0; }
     /* compact details, sized like the mockup so the four cards fit without scrolling */
