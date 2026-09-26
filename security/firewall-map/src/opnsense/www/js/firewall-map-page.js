@@ -646,6 +646,16 @@
             .append($('<div class="text-muted"></div>').text(text)));
     }
 
+    /** First thing to read: did the firewall let it through, and does that matter. */
+    function verdict(isBlocked, flagged, count) {
+        let text = isBlocked ? T.verdict_blocked : flagged ? T.verdict_allowed_flagged : T.verdict_allowed;
+        const kind = isBlocked ? 'blocked' : flagged ? 'danger' : 'allowed';
+        if (!isBlocked && count > 1) {
+            text += ` · ${count} ${T.remote_addresses}`;
+        }
+        return `<div class="fwmap-verdict fwmap-verdict-${kind}">${esc(text)}</div>`;
+    }
+
     function renderDetails() {
         const selection = state.selection;
         const $details = $('#fwmap-details');
@@ -654,7 +664,6 @@
             return;
         }
         const addresses = [...new Set(selection.addresses)].slice(0, 8);
-        const kind = selection.kind === 'blocked' ? T.blocked_source : T.remote_endpoints;
         const lists = [...new Set([...(selection.block?.lists || []),
             ...(selection.members || []).flatMap((member) => member.lists || [])])];
         const country = state.isAdmin && selection.countryCode
@@ -665,7 +674,7 @@
                 <b>${esc(selection.title || '')}</b>
                 <a href="#" id="fwmap-details-close" title="${esc(T.close)}">&times;</a>
             </div>
-            <div class="text-muted">${esc(kind)}</div>
+            ${verdict(selection.kind === 'blocked', lists.length > 0, addresses.length)}
             ${lists.length ? `<div style="font-weight:600;color:rgb(196,18,48)">${esc(T.listed_in)} ${lists.map(esc).join(', ')}</div>` : ''}
             ${addresses.map(addressRow).join('')}
             ${country}

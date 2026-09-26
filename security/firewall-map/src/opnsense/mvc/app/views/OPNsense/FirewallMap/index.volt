@@ -61,6 +61,10 @@
     .fwmap-details-head a { font-size: 1.3em; line-height: 1; text-decoration: none; }
     .fwmap-address { margin-top: 6px; }
     .fwmap-summary { font-weight: 600; }
+    .fwmap-verdict { margin: 4px 0; padding: 3px 8px; border-radius: 3px; font-weight: 600; }
+    .fwmap-verdict-allowed { background: rgba(46, 139, 87, .14); color: rgb(30, 110, 65); }
+    .fwmap-verdict-danger { background: rgb(196, 18, 48); color: #fff; }
+    .fwmap-verdict-blocked { background: rgba(128, 128, 128, .16); }
     .fwmap-links { font-size: .85em; }
     .fwmap-empty { padding: 6px 2px; }
     .fwmap-investigation { margin: 4px 0 8px; padding: 6px 8px; border-left: 3px solid rgba(128, 128, 128, .35); }
@@ -110,8 +114,10 @@
         no_talkers: "{{ lang._('No traffic yet') }}",
         filter_hint: "{{ lang._('Show only this on the map') }}",
         click_hint: "{{ lang._('Click an endpoint or arc on the map for details and actions.') }}",
-        remote_endpoints: "{{ lang._('Remote endpoints') }}",
-        blocked_source: "{{ lang._('Blocked source') }}",
+        verdict_allowed: "{{ lang._('Allowed: the firewall let this traffic through') }}",
+        verdict_allowed_flagged: "{{ lang._('Allowed: flagged traffic got through the firewall') }}",
+        verdict_blocked: "{{ lang._('Blocked: the firewall dropped this traffic') }}",
+        remote_addresses: "{{ lang._('remote addresses') }}",
         inside_hosts: "{{ lang._('Inside hosts') }}",
         copy: "{{ lang._('Copy') }}",
         whois: "{{ lang._('Whois') }}",

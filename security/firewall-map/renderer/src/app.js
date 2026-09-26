@@ -421,6 +421,7 @@ function describe(place, members, locations, hostnames = {}, showAsn = true) {
     : '';
   return `
     <div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}${approximate}</div>
+    ${verdictLine(false, lists.length > 0)}
     ${lists.length ? `<div style="font-weight:600;color:rgb(196,18,48)">Listed in ${lists.map(escapeHtml).join(', ')}</div>` : ''}
     ${addresses.join('')}${more}
     ${insideBlock}
@@ -500,6 +501,16 @@ export function buildBlocks(data) {
     .filter(Boolean);
 }
 
+/** Allowed or blocked, first; allowed traffic to a flagged address stands out. */
+function verdictLine(blocked, flagged) {
+  if (blocked) {
+    return '<div style="font-weight:600;opacity:.8">Blocked by the firewall</div>';
+  }
+  return flagged
+    ? '<div style="font-weight:600;background:rgb(196,18,48);color:#fff;padding:1px 6px;border-radius:3px">Allowed: flagged traffic got through</div>'
+    : '<div style="font-weight:600;color:rgb(30,110,65)">Allowed through the firewall</div>';
+}
+
 /** Hover card for a blocked source. */
 function describeBlock(block, showAsn) {
   const title = [block.city, block.country].filter(Boolean).join(', ') || block.source;
@@ -507,6 +518,7 @@ function describeBlock(block, showAsn) {
   const asn = showAsn && block.asn ? `<div style="opacity:.7">AS${block.asn} ${escapeHtml(block.as_org || '')}</div>` : '';
   return `
     <div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}${approximate}</div>
+    ${verdictLine(true, false)}
     ${(block.lists || []).length ? `<div style="font-weight:600;color:rgb(196,18,48)">Listed in ${block.lists.map(escapeHtml).join(', ')}</div>` : ''}
     <div style="margin-top:3px"><div>${escapeHtml(block.source)}</div>${asn}</div>
     <div style="margin-top:4px;font-weight:600${block.threat || (block.lists || []).length ? ';color:rgb(196,18,48)' : ''}">${escapeHtml(blockSummary(block, showAsn))}</div>
