@@ -566,6 +566,20 @@
         return `${Math.round(age / 86400)} d`;
     }
 
+    /** 8040 seconds read "2 h 14 min". */
+    function spanText(seconds) {
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 1) {
+            return `${Math.round(seconds)} s`;
+        }
+        if (minutes < 60) {
+            return `${minutes} min`;
+        }
+        const days = Math.floor(minutes / 1440);
+        const hours = Math.floor((minutes % 1440) / 60);
+        return days ? `${days} d ${hours} h` : `${hours} h ${minutes % 60} min`;
+    }
+
     function formatBytes(bytes) {
         return formatRate(bytes).replace('/s', '');
     }
@@ -950,12 +964,14 @@
                 sub: outbound ? T.started_inside_long : T.started_outside_long,
                 diagram: [outbound ? localBox : remoteBox, service, `↓ ${esc(formatRate(flow.rate_in || 0))} ↑ ${esc(formatRate(flow.rate_out || 0))}`, outbound ? remoteBox : localBox, false],
                 connection: rows([
-                    [T.protocol, esc(`${service.name}${service.port ? ` (${service.port})` : ''}`)],
+                    [T.protocol, esc(`${service.name}${service.port ? ` (${service.port.split('/')[0]})` : ''}`)],
+                    [T.remote_port, outbound && service.port ? esc(service.port.split('/')[1]) : ''],
                     [T.other_services, (flow.services || []).slice(1).map(esc).join(', ')],
                     [T.state, (flow.activity || 0) > 0 ? pill('ok', T.active, 'fa-check') : pill('muted', T.idle)],
                     [T.started, flow.age ? esc(`${ago(Date.now() / 1000 - flow.age)} ${T.ago}`) : ''],
                     [T.transferred, transferred],
                     [T.current_rate, `↓ ${esc(formatRate(flow.rate_in || 0))} ↑ ${esc(formatRate(flow.rate_out || 0))}`],
+                    [T.duration, flow.age ? esc(spanText(flow.age)) : ''],
                     [T.connections, esc(flow.states)],
                 ]),
                 firewall: rows([

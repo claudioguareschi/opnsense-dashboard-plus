@@ -434,6 +434,8 @@
         ids_alert: "{{ lang._('IDS alert') }}",
         open_ids: "{{ lang._('Open Suricata alerts') }}",
         open_log: "{{ lang._('Open the firewall log') }}",
+        remote_port: "{{ lang._('Remote port') }}",
+        duration: "{{ lang._('Duration') }}",
         alerts_short: "{{ lang._('alerts') }}",
         flow_one: "{{ lang._('flow') }}",
         flow_many: "{{ lang._('flows') }}",
