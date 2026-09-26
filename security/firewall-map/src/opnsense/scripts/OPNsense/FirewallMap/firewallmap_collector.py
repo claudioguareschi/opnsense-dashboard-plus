@@ -555,7 +555,10 @@ def run():
             values = geodb.settings()
             provider = values["provider"]
             city, asn, problem = database_state(values)
-            if geo is None or geo.database != city:
+            # a new provider or a refreshed database invalidates cached locations
+            if geo is None or geo.database != city or geo.database_mtime != geo._database_mtime():
+                if geo is not None:
+                    geo.save(force=True)
                 geo = GeoCache(database=city, asn_database=asn)
             settings_checked = started
         if problem:

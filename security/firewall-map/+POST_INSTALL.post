@@ -2,3 +2,5 @@
 if /usr/local/etc/rc.d/firewallmap onestatus > /dev/null 2>&1; then
 	/usr/local/etc/rc.d/firewallmap onerestart > /dev/null 2>&1
 fi
+# register the database update cron job
+/usr/local/sbin/pluginctl -s cron restart > /dev/null 2>&1
