@@ -298,20 +298,32 @@
         ] : [];
         const card = state.investigations.get(address);
         const flow = (state.selection?.members || []).find((member) => member.dest === address);
-        return `<div class="fwmap-address"><b>${esc(address)}</b>${flow ? connection(flow) : ''}<div class="fwmap-links">${links.concat(admin).join(' · ')}</div>`
+        return `<div class="fwmap-address"><b>${esc(address)}</b>${remoteIdentity(address)}${flow ? connection(flow) : ''}<div class="fwmap-links">${links.concat(admin).join(' · ')}</div>`
             + (card ? `<div class="fwmap-investigation">${card}</div>` : '') + '</div>';
     }
 
     /** Who opened the connection: 'Inbound to mail 192.168.1.2:443 (HTTPS)' or 'Outbound'. */
     function connection(flow) {
+        const traffic = `<div class="text-muted">${(flow.services || []).slice(0, 3).map(esc).join(', ')}`
+            + `${(flow.services || []).length ? ' · ' : ''}↓ ${esc(formatRate(flow.rate_in || 0))} ↑ ${esc(formatRate(flow.rate_out || 0))}</div>`;
         if (flow.initiated !== 'remote' && flow.initiated !== 'both') {
-            return `<div class="text-muted">${esc(T.outbound)}</div>`;
+            const inside = (flow.inside || []).slice(0, 3).map((host) =>
+                `${host.name ? `${esc(host.name)} ` : ''}<span class="text-muted">${esc([host.ip, host.interface].filter(Boolean).join(' · '))}</span>`);
+            return `<div><b>${esc(T.outbound)}</b> ${esc(T.from)} ${inside.length ? inside.join(', ') : esc(T.this_firewall)}</div>${traffic}`;
         }
         const targets = (flow.targets || []).slice(0, 3).map((target) =>
             `${target.name ? `${esc(target.name)} ` : ''}${esc(target.ip)}${target.port ? `:${esc(target.port)}` : ''}`
             + (target.service ? ` <span class="text-muted">(${esc(target.service)})</span>` : '')).join(', ');
         const label = flow.initiated === 'remote' ? T.inbound : T.inbound_outbound;
-        return `<div style="font-weight:600">${esc(label)}${targets ? ` ${esc(T.to)} ${targets}` : ''}</div>`;
+        return `<div style="font-weight:600">${esc(label)}${targets ? ` ${esc(T.to)} ${targets}` : ''}</div>${traffic}`;
+    }
+
+    /** Remote side: hostname (when looked up), then the network it belongs to. */
+    function remoteIdentity(address) {
+        const hostname = state.snapshot?.hostnames?.[address];
+        const location = (state.snapshot?.locations || []).find((item) => item.id === address);
+        return (hostname ? `<div>${esc(hostname)}</div>` : '')
+            + (state.settings.asn && location?.asn ? `<div class="text-muted">AS${esc(location.asn)} ${esc(location.as_org || '')}</div>` : '');
     }
 
     /* ---------------------------------------------------------------- investigation card */
@@ -619,14 +631,6 @@
             return;
         }
         const addresses = [...new Set(selection.addresses)].slice(0, 8);
-        const insides = [];
-        for (const member of selection.members || []) {
-            for (const inside of member.inside || []) {
-                if (!insides.some((known) => known.ip === inside.ip)) {
-                    insides.push(inside);
-                }
-            }
-        }
         const kind = selection.kind === 'blocked' ? T.blocked_source : T.remote_endpoints;
         const lists = [...new Set([...(selection.block?.lists || []),
             ...(selection.members || []).flatMap((member) => member.lists || [])])];
@@ -641,8 +645,6 @@
             <div class="text-muted">${esc(kind)}</div>
             ${lists.length ? `<div style="font-weight:600;color:rgb(196,18,48)">${esc(T.listed_in)} ${lists.map(esc).join(', ')}</div>` : ''}
             ${addresses.map(addressRow).join('')}
-            ${insides.length ? `<div class="text-muted" style="margin-top:6px">${esc(T.inside_hosts)}</div>`
-              + insides.map((inside) => `<div>${esc(inside.name || inside.ip)} <span class="text-muted">${esc([inside.ip, inside.interface].filter(Boolean).join(' · '))}</span></div>`).join('') : ''}
             ${country}
         `);
     }

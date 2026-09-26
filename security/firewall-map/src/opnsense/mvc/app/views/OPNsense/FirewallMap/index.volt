@@ -167,6 +167,7 @@
         inbound: "{{ lang._('Inbound') }}",
         inbound_outbound: "{{ lang._('Inbound and outbound') }}",
         outbound: "{{ lang._('Outbound') }}",
+        this_firewall: "{{ lang._('this firewall') }}",
         to: "{{ lang._('to') }}",
         blacklist: "{{ lang._('AbuseIPDB blacklist (downloaded daily)') }}",
         blacklist_addresses: "{{ lang._('addresses') }}",

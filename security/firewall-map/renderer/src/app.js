@@ -204,7 +204,10 @@ function connectionLine(flow) {
     const label = flow.initiated === 'remote' ? 'Inbound' : 'Inbound and outbound';
     return `<div style="font-weight:600">${label}${targets ? ` to ${targets}` : ''}</div>`;
   }
-  return '<div style="opacity:.75">Outbound</div>';
+  const inside = (flow.inside || []).slice(0, 2)
+    .map((host) => `${host.name ? `${escapeHtml(host.name)} ` : ''}${escapeHtml(host.ip)}`).join(', ');
+  // no inside host behind the state: the firewall itself opened it (DNS resolver, updates, VPN)
+  return `<div style="opacity:.75">Outbound from ${inside || 'this firewall'}</div>`;
 }
 
 // arches, blocked sources and endpoints fade in and out instead of popping
