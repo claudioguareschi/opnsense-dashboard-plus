@@ -551,7 +551,7 @@ def interface_names(path=CONFIG_XML):
     for node in list(interfaces) if interfaces is not None else []:
         device = node.findtext("if")
         if device:
-            names[device] = (node.findtext("descr") or node.tag).strip() or node.tag.upper()
+            names[device] = (node.findtext("descr") or "").strip() or node.tag.upper()
     return names
 
 
