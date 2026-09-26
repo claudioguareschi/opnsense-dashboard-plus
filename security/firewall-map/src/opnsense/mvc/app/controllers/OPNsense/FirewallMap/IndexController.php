@@ -35,6 +35,8 @@ class IndexController extends \OPNsense\Base\IndexController
     public function indexAction()
     {
         $this->view->title = gettext('Firewall Map');
+        /* cache_safe() keys on the firmware version; the plugin's renderer changes independently */
+        $this->view->rendererVersion = @filemtime('/usr/local/opnsense/www/js/firewall-map-renderer.js') ?: 0;
         $this->view->pick('OPNsense/FirewallMap/index');
     }
 }

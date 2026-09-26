@@ -56,7 +56,7 @@
     #firewallmap-page-credit { right: 12px; opacity: .7; }
 </style>
 
-<script src="{{ cache_safe('/ui/js/firewall-map-renderer.js') }}"></script>
+<script src="/ui/js/firewall-map-renderer.js?v={{ rendererVersion }}"></script>
 <script>
     $(async function () {
         const text = {
