@@ -144,12 +144,15 @@
     #fwmap-review-count:empty { display: none; }
     #fwmap-review-count { background: rgb(196, 18, 48); }
     /* review queue, as in the design mockup */
-    .fwmap-q-dialog .modal-header { background: #fff; color: #222; border-bottom: 2px solid rgb(234, 88, 36); padding: 14px 20px; }
+    .bootstrap-dialog.fwmap-q-dialog .modal-dialog { width: min(1320px, 94vw); max-width: none; }
+    .bootstrap-dialog.fwmap-q-dialog .modal-header { background: #fff !important; color: #222; border-bottom: 2px solid rgb(234, 88, 36);
+        padding: 14px 20px; border-radius: 6px 6px 0 0; }
+    .bootstrap-dialog.fwmap-q-dialog .bootstrap-dialog-title { color: #222; width: 100%; }
     .fwmap-q-dialog .modal-header .close, .fwmap-q-dialog .modal-header .bootstrap-dialog-close-button button { color: #444; opacity: .8; font-size: 26px; }
     .fwmap-q-dialog .modal-title { color: #222; }
     .fwmap-q-titlebar { display: flex; align-items: center; gap: 14px; }
     .fwmap-q-titlebar > div { flex: 1; }
-    .fwmap-q-title-ic { width: 30px; height: 30px; color: rgb(234, 88, 36); }
+    .fwmap-q-titlebar .fwmap-q-title-ic { width: 32px; height: 32px; color: rgb(234, 88, 36); }
     .fwmap-q-title { font-size: 22px; font-weight: 600; line-height: 1.2; }
     .fwmap-q-subtitle { font-size: 14px; opacity: .65; font-weight: normal; }
     .fwmap-q-newcount { font-size: 15px; color: rgb(234, 88, 36); font-weight: 600; margin-right: 18px; white-space: nowrap; }
@@ -182,7 +185,7 @@
         border: 1px solid rgba(214, 50, 30, .45); background: rgba(214, 50, 30, .05); }
     .fwmap-q-flow { min-width: 0; }
     .fwmap-q-diagram { display: flex; align-items: flex-start; gap: 12px; }
-    .fwmap-q-end { width: 34px; height: 34px; flex: none; margin-top: 8px; opacity: .8; }
+    .fwmap-q-diagram .fwmap-q-end { width: 34px; height: 34px; flex: none; margin-top: 6px; opacity: .8; stroke-width: 1.5; }
     .fwmap-q-link { flex: 1; min-width: 90px; text-align: center; }
     .fwmap-q-svc { font-size: 13.5px; opacity: .8; }
     .fwmap-q-arrow { position: relative; height: 12px; margin: 2px 0 4px; }
@@ -200,7 +203,7 @@
     .fwmap-q-when { display: flex; align-items: flex-start; gap: 10px; white-space: nowrap; font-size: 14px; opacity: .8; }
     .fwmap-q-when .fwmap-ic { width: 16px; height: 16px; vertical-align: -3px; }
     .fwmap-q-expand { color: inherit; }
-    .fwmap-q-expand .fwmap-ic { width: 18px; height: 18px; }
+    .fwmap-q-when .fwmap-q-expand .fwmap-ic { width: 20px; height: 20px; }
     .fwmap-q-warning { margin-top: 8px; color: rgb(214, 50, 30); font-weight: 600; }
     .fwmap-q-more { margin-top: 8px; padding: 8px 10px; border-radius: 4px; background: rgba(128, 128, 128, .06); font-size: 13.5px; }
     .fwmap-q-note { white-space: pre-wrap; margin-top: 8px; padding: 6px 10px; border-left: 3px solid rgba(128, 128, 128, .35);
