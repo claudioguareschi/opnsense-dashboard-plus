@@ -160,9 +160,6 @@
         last_reported: "{{ lang._('Last reported') }}",
         usage: "{{ lang._('Usage') }}",
         abuseipdb_hint: "{{ lang._('Add an AbuseIPDB API key in the Firewall Map widget settings to see abuse reports here.') }}",
-        threat_feeds: "{{ lang._('Threat feeds') }}",
-        add_feed: "{{ lang._('Add') }}",
-        feed_added: "{{ lang._('Added') }}",
         mark_threat: "{{ lang._('Mark as threat') }}",
         mark_confirm: "{{ lang._('Add') }}",
         mark_scope: "{{ lang._('to the FWMAP_Watchlist alias? The map will flag its traffic as a threat. No firewall rule is added.') }}",
@@ -201,7 +198,6 @@
         from: "{{ lang._('from') }}",
         seen_after_block: "{{ lang._('Traffic was seen after it was marked blocked: check that a rule uses the alias.') }}",
         queue_empty: "{{ lang._('Nothing here.') }}",
-        feeds_note: "{{ lang._('Each feed becomes a URL table alias refreshed daily. It marks matching traffic on the map only; no firewall rules are added.') }}",
     };
 </script>
 <script src="/ui/js/firewall-map-renderer.js?v={{ rendererVersion }}"></script>
@@ -233,9 +229,6 @@
         <button id="fwmap-reset" class="btn btn-default btn-sm" type="button">{{ lang._('Reset filters') }}</button>
         <button id="fwmap-review" class="btn btn-default btn-sm" type="button" style="display:none; margin-left:auto">
             <i class="fa fa-list-alt"></i> {{ lang._('Review queue') }} <span class="badge" id="fwmap-review-count"></span>
-        </button>
-        <button id="fwmap-feeds" class="btn btn-default btn-sm" type="button" style="display:none">
-            <i class="fa fa-shield"></i> {{ lang._('Threat feeds') }}
         </button>
     </div>
     <div id="fwmap-layout">

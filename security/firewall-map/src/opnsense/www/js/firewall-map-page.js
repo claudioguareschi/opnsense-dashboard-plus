@@ -493,7 +493,7 @@
         });
         const $tabs = $('<ul class="nav nav-pills fwmap-queue-tabs"></ul>');
         const $list = $('<div></div>');
-        $body.append(`<div class="text-muted">${esc(T.review_intro)}</div>`, $record, $tabs, $list);
+        $body.append(`<div class="text-muted">${esc(T.review_intro)}</div>`, blacklistStatus(settings), $record, $tabs, $list);
 
         const render = () => {
             $tabs.html([...STATUSES, 'all'].map((status) => `<li class="${status === view.status ? 'active' : ''}">`
@@ -592,7 +592,7 @@
         load();
     }
 
-    /* ---------------------------------------------------------------- threat feeds */
+    /* ---------------------------------------------------------------- AbuseIPDB blacklist */
 
     function blacklistStatus(settings) {
         const status = settings.abuseipdb_blacklist || {};
@@ -608,48 +608,6 @@
         return $('<div class="fwmap-feed"></div>').append($('<div></div>')
             .append($('<b></b>').text(T.blacklist))
             .append($('<div class="text-muted"></div>').text(text)));
-    }
-
-    async function showFeeds() {
-        let feeds = [];
-        let settings = {};
-        try {
-            feeds = ((await $.getJSON('/api/firewallmap/settings/tables')).tables || []).filter((table) => table.curated);
-            settings = await $.getJSON('/api/firewallmap/settings/get');
-        } catch (error) {
-            notify(`${T.action_failed}: ${error.statusText || error}`, BootstrapDialog.TYPE_DANGER);
-            return;
-        }
-        const $list = $('<div></div>');
-        for (const feed of feeds) {
-            const added = feed.installed;
-            const $row = $(`<div class="fwmap-feed"><div><b>${esc(feed.label)}</b><div class="text-muted">${esc(feed.description)}</div>`
-                + `<div class="text-muted" style="font-size:.85em">${esc(feed.url)}</div></div></div>`);
-            const $button = $(`<button type="button" class="btn btn-sm ${added ? 'btn-default' : 'btn-primary'}"></button>`)
-                .text(added ? T.feed_added : T.add_feed).prop('disabled', added);
-            $button.on('click', async () => {
-                $button.prop('disabled', true);
-                try {
-                    const saved = await postJSON('/api/firewall/alias/add_item', {alias: {
-                        enabled: '1', name: feed.name, type: 'urltable', content: feed.url, updatefreq: '1',
-                        description: `Firewall Map+ threat feed: ${feed.label}`,
-                    }});
-                    if (saved.result !== 'saved') {
-                        throw new Error(JSON.stringify(saved.validations || saved));
-                    }
-                    await postJSON('/api/firewall/alias/reconfigure', {});
-                    $button.removeClass('btn-primary').addClass('btn-default').text(T.feed_added);
-                } catch (error) {
-                    $button.prop('disabled', false);
-                    notify(`${T.action_failed}: ${error.message || error.statusText || error}`, BootstrapDialog.TYPE_DANGER);
-                }
-            });
-            $row.append($button);
-            $list.append($row);
-        }
-        $list.append(blacklistStatus(settings));
-        $list.append(`<div class="text-muted" style="margin-top:8px">${esc(T.feeds_note)}</div>`);
-        BootstrapDialog.show({title: T.threat_feeds, message: $list, buttons: [{label: T.close, action: (dialog) => dialog.close()}]});
     }
 
     function renderDetails() {
@@ -973,7 +931,6 @@
                 event.preventDefault();
                 investigate(String($(this).data('address')));
             });
-        $('#fwmap-feeds').on('click', () => showFeeds());
         $('#fwmap-review').on('click', () => showQueue());
     }
 
@@ -1063,7 +1020,6 @@
         }
 
         bindControls();
-        $('#fwmap-feeds').toggle(state.isAdmin);
         $('#fwmap-review').toggle(state.isAdmin);
         if (state.isAdmin) {
             refreshQueueCount();
