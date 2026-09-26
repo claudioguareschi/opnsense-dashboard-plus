@@ -154,6 +154,19 @@
         threat_feeds: "{{ lang._('Threat feeds') }}",
         add_feed: "{{ lang._('Add') }}",
         feed_added: "{{ lang._('Added') }}",
+        mark_threat: "{{ lang._('Mark as threat') }}",
+        mark_confirm: "{{ lang._('Add') }}",
+        mark_scope: "{{ lang._('to the FWMAP_Watchlist alias? The map will flag its traffic as a threat. No firewall rule is added.') }}",
+        marked: "{{ lang._('Its traffic is flagged on the map within five minutes.') }}",
+        inbound: "{{ lang._('Inbound') }}",
+        inbound_outbound: "{{ lang._('Inbound and outbound') }}",
+        outbound: "{{ lang._('Outbound') }}",
+        to: "{{ lang._('to') }}",
+        blacklist: "{{ lang._('AbuseIPDB blacklist (downloaded daily)') }}",
+        blacklist_addresses: "{{ lang._('addresses') }}",
+        blacklist_pending: "{{ lang._('Not downloaded yet') }}",
+        blacklist_error: "{{ lang._('last attempt failed') }}",
+        blacklist_no_key: "{{ lang._('Add an AbuseIPDB API key in the Firewall Map widget settings to download it.') }}",
         feeds_note: "{{ lang._('Each feed becomes a URL table alias refreshed daily. It marks matching traffic on the map only; no firewall rules are added.') }}",
     };
 </script>
@@ -165,6 +178,7 @@
         <label for="fwmap-color">{{ lang._('Colour') }}</label>
         <select id="fwmap-color" class="form-control">
             <option value="direction">{{ lang._('By direction') }}</option>
+            <option value="initiator">{{ lang._('By who connected') }}</option>
             <option value="egress">{{ lang._('By egress') }}</option>
             <option value="service">{{ lang._('By service') }}</option>
         </select>

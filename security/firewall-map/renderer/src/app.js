@@ -143,6 +143,7 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
       service: serviceCategory(members.slice().sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))[0]?.services?.[0]),
       egress: members.slice().sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))[0]?.egress || 'Unknown',
       threat: members.some((member) => member.threat),
+      initiated: initiatedBy(members),
       direction,
       activity,
       period: 6 - 5.2 * strength,
@@ -150,6 +151,36 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
     });
   });
   return arcs;
+}
+
+/** Who opened the connections of an arch: 'remote', 'local' or 'both'. */
+function initiatedBy(members) {
+  const sides = new Set(members.map((flow) => flow.initiated || 'local'));
+  return sides.size === 1 ? [...sides][0] : 'both';
+}
+
+const INITIATOR_LABELS = {
+  remote: 'Connected from outside',
+  local: 'Connected from inside',
+  both: 'Both sides connected',
+};
+// fixed colours for "colour by who connected"; none close to the threat crimson
+const INITIATOR_COLORS = {remote: [213, 94, 0], local: [0, 114, 178], both: [150, 150, 150]};
+
+function targetLine(target) {
+  const name = target.name ? `${escapeHtml(target.name)} ` : '';
+  const service = target.service ? ` <span style="opacity:.75">${escapeHtml(target.service)}</span>` : '';
+  return `${name}${escapeHtml(target.ip)}:${escapeHtml(target.port)}${service}`;
+}
+
+/** 'Inbound to mail 192.168.1.2:443 HTTPS' or 'Outbound' for one flow. */
+function connectionLine(flow) {
+  if (flow.initiated === 'remote' || flow.initiated === 'both') {
+    const targets = (flow.targets || []).slice(0, 2).map(targetLine).join(', ');
+    const label = flow.initiated === 'remote' ? 'Inbound' : 'Inbound and outbound';
+    return `<div style="font-weight:600">${label}${targets ? ` to ${targets}` : ''}</div>`;
+  }
+  return '<div style="opacity:.75">Outbound</div>';
 }
 
 function formatRate(bytes) {
@@ -187,7 +218,7 @@ function describe(place, members, locations, hostnames = {}, showAsn = true) {
       const hostname = hostnames?.[flow.dest] ? `<div>${escapeHtml(hostnames[flow.dest])}</div>` : '';
       const asn = showAsn && location?.asn
         ? `<div style="opacity:.7">AS${location.asn} ${escapeHtml(location.as_org || '')}</div>` : '';
-      return `<div style="margin-top:3px">${hostname}<div>${escapeHtml(flow.dest)}</div>${asn}</div>`;
+      return `<div style="margin-top:3px">${hostname}<div>${escapeHtml(flow.dest)}</div>${asn}${connectionLine(flow)}</div>`;
     });
   const more = members.length > 6 ? `<div>+${members.length - 6} more</div>` : '';
   const title = [place.city || place.region, place.country].filter(Boolean).join(', ') || place.name || place.id;
@@ -556,6 +587,10 @@ export function createFirewallMap(container, options = {}) {
     return settings.colorMode === 'egress' ? arc.egress : arc.service;
   }
 
+  function categorical() {
+    return settings.colorMode === 'egress' || settings.colorMode === 'service' || settings.colorMode === 'initiator';
+  }
+
   function categoryColor(name) {
     if (!categoryColors.has(name)) {
       categoryColors.set(name, CATEGORY_COLORS[categoryColors.size % CATEGORY_COLORS.length]);
@@ -570,8 +605,8 @@ export function createFirewallMap(container, options = {}) {
       // a permitted flow to a listed address
       return rgb(colors.block, Math.max(alpha, 170));
     }
-    if (settings.colorMode === 'egress' || settings.colorMode === 'service') {
-      const base = categoryColor(categoryOf(arc));
+    if (categorical()) {
+      const base = baseColor(arc);
       return rgb(arc.heavy ? mix(base, colors.dark ? [255, 255, 255] : [0, 0, 0], 0.2) : mix(colors.background.slice(0, 3), base, 0.8), alpha);
     }
     const scheme = arc.toward ? colors.toward : colors.away;
@@ -583,14 +618,26 @@ export function createFirewallMap(container, options = {}) {
     if (item.arc.threat) {
       return rgb(colors.block, alpha);
     }
-    if (settings.colorMode === 'egress' || settings.colorMode === 'service') {
-      return rgb(categoryColor(categoryOf(item.arc)), alpha);
+    if (categorical()) {
+      return rgb(baseColor(item.arc), alpha);
     }
     return rgb((item.toward ? colors.toward : colors.away).pulse, alpha);
   }
 
+  function baseColor(arc) {
+    return settings.colorMode === 'initiator' ? INITIATOR_COLORS[arc.initiated] : categoryColor(categoryOf(arc));
+  }
+
   function legend() {
-    if (settings.colorMode !== 'egress' && settings.colorMode !== 'service') {
+    if (settings.colorMode === 'initiator') {
+      const present = new Set(arcs.map((arc) => arc.initiated));
+      return [
+        ...['remote', 'local', 'both'].filter((side) => present.has(side))
+          .map((side) => ({label: INITIATOR_LABELS[side], color: INITIATOR_COLORS[side]})),
+        {label: 'Blocked / listed', color: colors.block},
+      ];
+    }
+    if (!categorical()) {
       return [
         {label: 'Toward the firewall', color: colors.toward.heavy},
         {label: 'Away from the firewall', color: colors.away.heavy},

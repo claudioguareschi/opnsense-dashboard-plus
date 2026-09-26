@@ -29,5 +29,9 @@
 function firewallmap_cron()
 {
     /* the updater only downloads when the database is older than the configured age */
-    return [['autocron' => ['/usr/local/sbin/configctl -d firewallmap geodb update', '17', '4']]];
+    return [
+        ['autocron' => ['/usr/local/sbin/configctl -d firewallmap geodb update', '17', '4']],
+        /* at most once a day; skipped without an AbuseIPDB key */
+        ['autocron' => ['/usr/local/sbin/configctl -d firewallmap abuseipdb update', '43', '4']],
+    ];
 }

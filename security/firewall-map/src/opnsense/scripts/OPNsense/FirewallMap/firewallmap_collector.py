@@ -79,6 +79,14 @@ BLOCKLIST_ALIAS_TYPES = {"urltable", "url", "urljson", "external"}
 BLOCKLIST_TABLE_PREFIXES = ("crowdsec", "__qfeeds", "qfeeds", "spamhaus", "firehol", "abuse", "fwmap_")
 BLOCKLIST_MAX_ENTRIES = 500000
 BLOCKLIST_MAX_TOTAL = 1000000
+# addresses an operator marked, and AbuseIPDB's daily blacklist, always count as threats
+WATCHLIST_TABLE = "FWMAP_Watchlist"
+ABUSEIPDB_BLACKLIST = "/var/db/firewallmap/abuseipdb_blacklist.txt"
+ABUSEIPDB_LIST = "AbuseIPDB blacklist"
+REPUTATION_LIST = "AbuseIPDB (looked up)"
+REPUTATION_THRESHOLD = 75
+REPUTATION_MAX_AGE = 30 * 86400
+REPUTATION_REFRESH_SECONDS = 60
 CGNAT = ipaddress.ip_network("100.64.0.0/10")
 SETTINGS_REFRESH_SECONDS = 30
 CACHE_DB = "/var/db/firewallmap/cache.db"
@@ -569,10 +577,17 @@ class FlowTracker:
                 delta = (0, 0, 0)
             total = totals.setdefault(pair, {
                 "toward": 0, "away": 0, "packets": 0, "states": 0, "protocols": set(), "services": {},
-                "inside": {}, "egress": {},
+                "inside": {}, "egress": {}, "remote_started": 0, "local_started": 0, "targets": {},
             })
             weight = delta[0] + delta[1] + 1
             inside = inside_address(record)
+            if remote_initiated:
+                total["remote_started"] += weight
+                # what the remote side connected to: a port-forward target or the firewall itself
+                target = f'{inside or pair[0]}:{record["dst"]["port"] or record["protocol"]}'
+                total["targets"][target] = total["targets"].get(target, 0) + weight
+            else:
+                total["local_started"] += weight
             if inside:
                 total["inside"][inside] = total["inside"].get(inside, 0) + weight
             if record.get("origif"):
@@ -606,6 +621,10 @@ class FlowTracker:
             flow["services"] = [name for name, _ in sorted(total["services"].items(), key=lambda item: -item[1])][:MAX_SERVICES]
             flow["inside"] = [address for address, _ in sorted(total["inside"].items(), key=lambda item: -item[1])][:MAX_INSIDE]
             flow["egress"] = max(total["egress"], key=total["egress"].get) if total["egress"] else None
+            started = total["remote_started"] + total["local_started"]
+            share = total["remote_started"] / started if started else 0.0
+            flow["initiated"] = "remote" if share >= 0.75 else "local" if share <= 0.25 else "both"
+            flow["targets"] = [target for target, _ in sorted(total["targets"].items(), key=lambda item: -item[1])][:MAX_INSIDE]
             if total["toward"] + total["away"] > 0:
                 flow["last_active"] = now
 
@@ -727,9 +746,11 @@ def threat_list_candidates(config=CONFIG_XML, tables=None):
 def chosen_threat_lists(setting, config=CONFIG_XML):
     """The administrator's choice when set, otherwise the automatic selection."""
     names = {name.strip() for name in (setting or "").split(",") if name.strip()}
-    if not names:
-        return blocklist_tables(config)
-    return names & set(pf_tables())
+    tables = set(pf_tables())
+    chosen = (names & tables) if names else blocklist_tables(config, list(tables))
+    if WATCHLIST_TABLE in tables:
+        chosen.add(WATCHLIST_TABLE)
+    return chosen
 
 
 class BlocklistIndex:
@@ -786,6 +807,11 @@ class BlocklistIndex:
                 entries = output.split()
                 if len(entries) <= BLOCKLIST_MAX_ENTRIES:
                     contents[table] = entries
+            try:
+                with open(ABUSEIPDB_BLACKLIST) as handle:
+                    contents[ABUSEIPDB_LIST] = handle.read().split()[:BLOCKLIST_MAX_ENTRIES]
+            except OSError:
+                pass
             self.index = self.build(contents)
         finally:
             self.refreshing = False
@@ -1119,7 +1145,8 @@ class BlockTracker:
         return max(0.0, 1.0 - (now - entry["last"]) / self.fade)
 
 
-def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, interfaces, blocklists=None):
+def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, interfaces, blocklists=None,
+                   reputation=None):
     """Map-ready blocked sources; each arc ends at the firewall address that was hit."""
     visible = blocks.visible(now)
     geo.resolve([address for address, _ in visible])
@@ -1150,9 +1177,45 @@ def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, inte
             "accuracy_km": location.get("accuracy_km"),
             "asn": location.get("asn"),
             "as_org": location.get("as_org"),
-            "lists": blocklists.lookup(address) if blocklists else [],
+            "lists": threat_lists_for(address, blocklists, reputation),
         })
     return result
+
+
+def describe_target(target, names, networks, interfaces, local_addresses):
+    """'192.168.1.2:443' -> the inside host (or this firewall) a remote connection was aimed at."""
+    address, _, port = target.rpartition(":")
+    if address in local_addresses:
+        return {"ip": address, "port": port, "name": "firewall", "interface": None,
+                "service": service_name("tcp", port) if port.isdigit() else port.upper()}
+    described = describe_inside(address, names, networks, interfaces)
+    described.update({"port": port, "service": service_name("tcp", port) if port.isdigit() else port.upper()})
+    return described
+
+
+def threat_lists_for(address, blocklists, reputation):
+    lists = blocklists.lookup(address) if blocklists else []
+    if reputation is not None and address in reputation.flagged:
+        lists = lists + [REPUTATION_LIST]
+    return lists
+
+
+class Reputation:
+    """Addresses already found abusive by an AbuseIPDB lookup, read from the investigation cache."""
+
+    def __init__(self, store, threshold=REPUTATION_THRESHOLD):
+        self.store = store
+        self.threshold = threshold
+        self.flagged = set()
+        self.checked = None
+
+    def refresh(self, now):
+        if self.checked is not None and now - self.checked < REPUTATION_REFRESH_SECONDS:
+            return
+        self.checked = now
+        rows = self.store.get_all("abuseipdb", max_age=REPUTATION_MAX_AGE) if self.store is not None else {}
+        self.flagged = {address for address, data in rows.items()
+                        if isinstance(data, dict) and (data.get("score") or 0) >= self.threshold}
 
 
 def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None, context=None):
@@ -1161,6 +1224,7 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None
     networks = context.get("networks", [])
     interfaces = context.get("interfaces", {})
     blocklists = context.get("blocklists")
+    reputation = context.get("reputation")
     visible = tracker.visible(now)
     geo.resolve([address for _, local, remote, _, _ in visible for address in (local, remote)])
     flows = []
@@ -1183,7 +1247,10 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None
             "services": flow.get("services", []),
             "inside": [describe_inside(address, names, networks, interfaces) for address in flow.get("inside", [])],
             "egress": interfaces.get(flow.get("egress"), flow.get("egress")),
-            "lists": blocklists.lookup(remote) if blocklists else [],
+            "lists": threat_lists_for(remote, blocklists, reputation),
+            "initiated": flow.get("initiated", "local"),
+            "targets": [describe_target(target, names, networks, interfaces, local_addresses)
+                        for target in flow.get("targets", [])],
         })
         # a permitted flow to a listed address is what deserves attention, not background scans
         flows[-1]["threat"] = bool(flows[-1]["lists"])
@@ -1298,6 +1365,7 @@ def run():
     backlog_loaded = False
     descriptions, interfaces, leases, block_meta_checked = {}, {}, {}, None
     blocklists, blocklists_checked = BlocklistIndex(), None
+    reputation = Reputation(store)
     geo = None
     problem = None
     local_addresses, role, networks = set(), None, []
@@ -1368,15 +1436,17 @@ def run():
                 if blocklists_checked is None or started - blocklists_checked >= BLOCKLIST_REFRESH_SECONDS:
                     blocklists.refresh(chosen_threat_lists(geodb.settings().get("threat_lists")))
                     blocklists_checked = started
+                reputation.refresh(now)
                 payload = snapshot(tracker, geo, local_addresses, role, now, time.time(), resolver, {
                     "names": leases, "networks": networks, "interfaces": interfaces, "blocklists": blocklists,
+                    "reputation": reputation,
                 })
                 origin = next((location["id"] for location in payload["locations"] if location["local"]), None)
                 if origin is None and local_addresses:
                     origin = sorted(local_addresses)[0]
                     geo.resolve([origin])
                 payload["blocks"] = block_snapshot(
-                    blocks, geo, local_addresses, origin, now, descriptions, interfaces, blocklists,
+                    blocks, geo, local_addresses, origin, now, descriptions, interfaces, blocklists, reputation,
                 )
                 if origin and geo.get(origin) and not any(location["id"] == origin for location in payload["locations"]):
                     location = geo.get(origin)

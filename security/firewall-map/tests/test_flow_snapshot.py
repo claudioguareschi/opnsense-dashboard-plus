@@ -22,6 +22,7 @@ def load(name):
 GEODB = load("firewallmap_geodb")
 COLLECTOR = load("firewallmap_collector")
 INVESTIGATE = load("firewallmap_investigate")
+ABUSEIPDB = load("firewallmap_abuseipdb")
 SNAPSHOT = load("flow_snapshot")
 
 NAT_STATE = """all tcp 198.13.91.163:443 (192.168.1.2:443) <- 45.56.79.53:35799       ESTABLISHED:ESTABLISHED
@@ -234,6 +235,38 @@ vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
                 handle.write("9999999999 cc:cc 192.168.40.5 tv *\n9999999999 dd:dd 192.168.40.6 printer *\n")
             names = COLLECTOR.lease_names(kea, dnsmasq, os.path.join(directory, "none.xml"), now=1000)
             self.assertEqual(names, {"192.168.30.80": "homeassistant", "192.168.40.5": "tv", "192.168.40.6": "printer"})
+
+
+class InitiatorTest(unittest.TestCase):
+    INBOUND = ("all tcp 192.168.1.2:443 (198.13.91.163:443) <- 94.154.43.203:51234       ESTABLISHED:ESTABLISHED\n"
+               "   age 00:00:01, expires in 23:59:37, 5:9 pkts, 400:9000 bytes\n   id: 0a creatorid: 01\n   origif: ix0\n")
+
+    def test_inbound_port_forward_reports_initiator_and_target(self):
+        tracker = COLLECTOR.FlowTracker(smoothing=1.0)
+        tracker.update([], {"198.13.91.163"}, now=0.0)
+        tracker.update(COLLECTOR.parse_states(self.INBOUND), {"198.13.91.163"}, now=2.0)
+        flow = tracker.flows[("198.13.91.163", "94.154.43.203")]
+        self.assertEqual(flow["initiated"], "remote")
+        self.assertEqual(flow["targets"], ["192.168.1.2:443"])
+        # the server's replies dominate: the bytes go away from the firewall although the remote started it
+        self.assertGreater(flow["rate_out"], flow["rate_in"])
+        target = COLLECTOR.describe_target("192.168.1.2:443", {"192.168.1.2": "mail"}, [], {}, {"198.13.91.163"})
+        self.assertEqual((target["name"], target["service"]), ("mail", "HTTPS"))
+
+    def test_outbound_flows_are_local(self):
+        tracker = COLLECTOR.FlowTracker(smoothing=1.0)
+        tracker.update(COLLECTOR.parse_states(InsideTest.NAT_OUT), {"198.13.91.163"}, now=0.0)
+        self.assertEqual(tracker.flows[("198.13.91.163", "34.209.15.107")]["initiated"], "local")
+
+    def test_reputation_from_cached_lookups(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = COLLECTOR.CacheStore(os.path.join(directory, "cache.db"))
+            store.put_many("abuseipdb", [("94.154.43.203", {"score": 100}), ("8.8.8.8", {"score": 0})])
+            reputation = COLLECTOR.Reputation(store)
+            reputation.refresh(now=0.0)
+            index = COLLECTOR.BlocklistIndex()
+            self.assertEqual(COLLECTOR.threat_lists_for("94.154.43.203", index, reputation), [COLLECTOR.REPUTATION_LIST])
+            self.assertEqual(COLLECTOR.threat_lists_for("8.8.8.8", index, reputation), [])
 
 
 class BlocklistTest(unittest.TestCase):
@@ -501,6 +534,37 @@ class InvestigateTest(unittest.TestCase):
             again = INVESTIGATE.investigate("8.8.8.8", store=store, fetchers={"rdap": rdap}, now=1001.0)
             self.assertTrue(again["rdap"]["cached"])
             self.assertEqual(calls, ["rdap"])
+
+
+class AbuseBlacklistTest(unittest.TestCase):
+    def test_downloads_parses_and_rate_limits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ABUSEIPDB.LIST_FILE = os.path.join(directory, "list.txt")
+            ABUSEIPDB.STATUS_FILE = os.path.join(directory, "status.json")
+            calls = []
+
+            def fetch(key):
+                calls.append(key)
+                return "94.154.43.203\n10.0.0.1\nnot-an-ip\n204.76.203.231\n"
+            self.assertEqual(ABUSEIPDB.update(key="", fetch=fetch)["reason"], "no key")
+            self.assertEqual(ABUSEIPDB.update(key="k", fetch=fetch, now=1000.0), {"result": "ok", "count": 2})
+            with open(ABUSEIPDB.LIST_FILE) as handle:
+                self.assertEqual(handle.read().split(), ["94.154.43.203", "204.76.203.231"])
+            self.assertEqual(ABUSEIPDB.update(key="k", fetch=fetch, now=2000.0)["reason"], "recent")
+            self.assertEqual(ABUSEIPDB.update(force=True, key="k", fetch=fetch, now=2000.0)["result"], "ok")
+            self.assertEqual(len(calls), 2)
+
+    def test_errors_never_contain_the_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ABUSEIPDB.LIST_FILE = os.path.join(directory, "list.txt")
+            ABUSEIPDB.STATUS_FILE = os.path.join(directory, "status.json")
+
+            def broken(key):
+                raise RuntimeError(f"failed with {key}")
+            result = ABUSEIPDB.update(force=True, key="secret", fetch=broken)
+            self.assertEqual(result["error"], "failed with <key>")
+            with open(ABUSEIPDB.STATUS_FILE) as handle:
+                self.assertNotIn("secret", handle.read())
 
 
 class GeoDatabaseTest(unittest.TestCase):

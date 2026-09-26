@@ -19,6 +19,8 @@
     const plain = (text) => String(text ?? '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
     const esc = (text) => plain(text).replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 
+    const WATCHLIST = 'FWMAP_Watchlist';
+
     function formatRate(bytes) {
         const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
         let value = bytes || 0;
@@ -291,10 +293,24 @@
             `<a href="#" class="fwmap-states" data-address="${esc(address)}">${esc(T.show_states)}</a>`,
             `<a href="#" class="fwmap-kill" data-address="${esc(address)}">${esc(T.kill_states)}</a>`,
             `<a href="#" class="fwmap-alias" data-address="${esc(address)}">${esc(T.add_to_alias)}</a>`,
+            `<a href="#" class="fwmap-mark" data-address="${esc(address)}" style="color:rgb(196,18,48)">${esc(T.mark_threat)}</a>`,
         ] : [];
         const card = state.investigations.get(address);
-        return `<div class="fwmap-address"><b>${esc(address)}</b><div class="fwmap-links">${links.concat(admin).join(' · ')}</div>`
+        const flow = (state.selection?.members || []).find((member) => member.dest === address);
+        return `<div class="fwmap-address"><b>${esc(address)}</b>${flow ? connection(flow) : ''}<div class="fwmap-links">${links.concat(admin).join(' · ')}</div>`
             + (card ? `<div class="fwmap-investigation">${card}</div>` : '') + '</div>';
+    }
+
+    /** Who opened the connection: 'Inbound to mail 192.168.1.2:443 (HTTPS)' or 'Outbound'. */
+    function connection(flow) {
+        if (flow.initiated !== 'remote' && flow.initiated !== 'both') {
+            return `<div class="text-muted">${esc(T.outbound)}</div>`;
+        }
+        const targets = (flow.targets || []).slice(0, 3).map((target) =>
+            `${target.name ? `${esc(target.name)} ` : ''}${esc(target.ip)}:${esc(target.port)}`
+            + (target.service ? ` <span class="text-muted">(${esc(target.service)})</span>` : '')).join(', ');
+        const label = flow.initiated === 'remote' ? T.inbound : T.inbound_outbound;
+        return `<div style="font-weight:600">${esc(label)}${targets ? ` ${esc(T.to)} ${targets}` : ''}</div>`;
     }
 
     /* ---------------------------------------------------------------- investigation card */
@@ -359,10 +375,28 @@
 
     /* ---------------------------------------------------------------- threat feeds */
 
+    function blacklistStatus(settings) {
+        const status = settings.abuseipdb_blacklist || {};
+        let text = T.blacklist_no_key;
+        if (settings.abuseipdb_configured) {
+            text = status.updated
+                ? `${status.count} ${T.blacklist_addresses}, ${T.updated} ${new Date(status.updated * 1000).toLocaleString()}`
+                : T.blacklist_pending;
+            if (status.error) {
+                text += ` (${T.blacklist_error}: ${status.error})`;
+            }
+        }
+        return $('<div class="fwmap-feed"></div>').append($('<div></div>')
+            .append($('<b></b>').text(T.blacklist))
+            .append($('<div class="text-muted"></div>').text(text)));
+    }
+
     async function showFeeds() {
         let feeds = [];
+        let settings = {};
         try {
             feeds = ((await $.getJSON('/api/firewallmap/settings/tables')).tables || []).filter((table) => table.curated);
+            settings = await $.getJSON('/api/firewallmap/settings/get');
         } catch (error) {
             notify(`${T.action_failed}: ${error.statusText || error}`, BootstrapDialog.TYPE_DANGER);
             return;
@@ -394,6 +428,7 @@
             $row.append($button);
             $list.append($row);
         }
+        $list.append(blacklistStatus(settings));
         $list.append(`<div class="text-muted" style="margin-top:8px">${esc(T.feeds_note)}</div>`);
         BootstrapDialog.show({title: T.threat_feeds, message: $list, buttons: [{label: T.close, action: (dialog) => dialog.close()}]});
     }
@@ -526,6 +561,33 @@
                     notify(`${T.action_failed}: ${error.statusText || error}`, BootstrapDialog.TYPE_DANGER);
                 }
             });
+        });
+    }
+
+    // a plain host alias; it only marks traffic on the map until the operator uses it in a rule
+    function markThreat(address) {
+        confirmAction(`${T.mark_confirm} ${address} ${T.mark_scope}`, async () => {
+            try {
+                const found = await postJSON('/api/firewall/alias/search_item', {current: 1, rowCount: -1, searchPhrase: WATCHLIST});
+                if (!(found.rows || []).some((row) => plain(row.name) === WATCHLIST)) {
+                    const saved = await postJSON('/api/firewall/alias/add_item', {alias: {
+                        enabled: '1', name: WATCHLIST, type: 'host', content: address,
+                        description: 'Firewall Map+ watchlist: addresses marked as threats (no rules use it unless you add one)',
+                    }});
+                    if (saved.result !== 'saved') {
+                        throw new Error(JSON.stringify(saved.validations || saved));
+                    }
+                    await postJSON('/api/firewall/alias/reconfigure', {});
+                } else {
+                    const result = await postJSON(`/api/firewall/alias_util/add/${WATCHLIST}`, {address});
+                    if (result.status !== 'done') {
+                        throw new Error(result.status_msg || result.status);
+                    }
+                }
+                notify(`${address} → ${WATCHLIST}. ${T.marked}`, BootstrapDialog.TYPE_SUCCESS);
+            } catch (error) {
+                notify(`${T.action_failed}: ${error.message || error.statusText || error}`, BootstrapDialog.TYPE_DANGER);
+            }
         });
     }
 
@@ -679,6 +741,10 @@
             .on('click', '.fwmap-alias', function (event) {
                 event.preventDefault();
                 addToAlias(String($(this).data('address')));
+            })
+            .on('click', '.fwmap-mark', function (event) {
+                event.preventDefault();
+                markThreat(String($(this).data('address')));
             })
             .on('click', '.fwmap-country', function (event) {
                 event.preventDefault();

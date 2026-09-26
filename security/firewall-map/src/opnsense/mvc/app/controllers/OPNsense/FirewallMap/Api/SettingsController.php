@@ -50,6 +50,7 @@ class SettingsController extends ApiControllerBase
             'provider' => (string)$general->provider,
             'update_days' => (string)$general->update_days,
             'abuseipdb_configured' => (string)$general->abuseipdb_key !== '',
+            'abuseipdb_blacklist' => json_decode((new Backend())->configdRun('firewallmap abuseipdb status'), true) ?: [],
             'threat_lists' => (string)$general->threat_lists,
             'database' => $this->status(),
         ];
@@ -77,6 +78,7 @@ class SettingsController extends ApiControllerBase
                 $general->abuseipdb_key = '';
             } elseif ($abuse !== '') {
                 $general->abuseipdb_key = $abuse;
+                $fetchBlacklist = true;
             }
         }
         if ($this->request->hasPost('license_key')) {
@@ -97,6 +99,9 @@ class SettingsController extends ApiControllerBase
         }
         $model->serializeToConfig();
         Config::getInstance()->save();
+        if (!empty($fetchBlacklist)) {
+            (new Backend())->configdRun('firewallmap abuseipdb refresh', true);
+        }
         (new Backend())->configdRun('firewallmap geodb update', true);
         return ['result' => 'saved'];
     }
