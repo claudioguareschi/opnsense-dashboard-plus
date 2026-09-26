@@ -25,6 +25,7 @@ firewallmap_start()
 }
 
 load_rc_config $name
-: ${firewallmap_enable="YES"}
+# started on demand by the dashboard API, never at boot
+: ${firewallmap_enable="NO"}
 
 run_rc_command "$1"

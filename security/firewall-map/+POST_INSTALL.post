@@ -1,3 +1,4 @@
-if [ -x /usr/local/etc/rc.d/firewallmap ]; then
-	/usr/local/etc/rc.d/firewallmap restart > /dev/null 2>&1
+# restart a running collector so it picks up the new code; an idle one stays stopped
+if /usr/local/etc/rc.d/firewallmap onestatus > /dev/null 2>&1; then
+	/usr/local/etc/rc.d/firewallmap onerestart > /dev/null 2>&1
 fi

@@ -161,6 +161,18 @@ class TrackerTest(unittest.TestCase):
         self.assertEqual([item[2] for item in visible], ["8.8.8.4", "8.8.8.3"])
 
 
+class IdleTest(unittest.TestCase):
+    def test_stops_only_after_grace_period_without_requests(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = os.path.join(directory, "last_request")
+            self.assertFalse(COLLECTOR.idle(started=1000, now=1100, marker=marker, idle_seconds=300))
+            self.assertTrue(COLLECTOR.idle(started=1000, now=1400, marker=marker, idle_seconds=300))
+            SNAPSHOT.mark_request(marker)
+            now = os.stat(marker).st_mtime
+            self.assertFalse(COLLECTOR.idle(started=now - 1000, now=now + 10, marker=marker, idle_seconds=300))
+            self.assertTrue(COLLECTOR.idle(started=now - 1000, now=now + 301, marker=marker, idle_seconds=300))
+
+
 class SnapshotReaderTest(unittest.TestCase):
     def test_reads_fresh_and_rejects_stale_output(self):
         with tempfile.TemporaryDirectory() as directory:

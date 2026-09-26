@@ -29,6 +29,9 @@ CITY_DATABASE = "/usr/local/share/GeoIP/GeoLite2-City.mmdb"
 # optional: used for AS number/organisation when the administrator installs it
 ASN_DATABASE = "/usr/local/share/GeoIP/GeoLite2-ASN.mmdb"
 OUTPUT_FILE = "/var/run/firewallmap/flows.json"
+# touched by the dashboard API on every read; the collector stops once nobody is watching
+REQUEST_MARKER = "/var/run/firewallmap/last_request"
+IDLE_SECONDS = 300
 GEO_CACHE_FILE = "/var/db/firewallmap/geo.json"
 
 INTERVAL = 1.0
@@ -446,7 +449,19 @@ def sample_states():
     return parse_states(result.stdout)
 
 
+def idle(started, now=None, marker=REQUEST_MARKER, idle_seconds=IDLE_SECONDS):
+    """True once no dashboard has read the summary for idle_seconds (with a start-up grace period)."""
+    now = time.time() if now is None else now
+    if now - started < idle_seconds:
+        return False
+    try:
+        return now - os.stat(marker).st_mtime >= idle_seconds
+    except OSError:
+        return True
+
+
 def run():
+    started_at = time.time()
     tracker = FlowTracker()
     geo = GeoCache()
     local_addresses, role = set(), None
@@ -471,6 +486,9 @@ def run():
             tracker.update(records, local_addresses, now)
             write_json(OUTPUT_FILE, snapshot(tracker, geo, local_addresses, role, now, time.time()))
             geo.save()
+        if idle(started_at):
+            geo.save(force=True)
+            return
         time.sleep(max(0.05, INTERVAL - (time.monotonic() - started)))
 
 
