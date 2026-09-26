@@ -177,6 +177,7 @@
     .fwmap-q-badge-new { background: rgb(214, 50, 30); color: #fff; }
     .fwmap-q-badge-reviewed { background: rgba(40, 150, 70, .16); color: rgb(28, 115, 55); }
     .fwmap-q-badge-blocked { background: rgb(80, 80, 80); color: #fff; }
+    .fwmap-q-hostname { font-size: 13px; opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
     .fwmap-q-org { margin-top: 3px; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fwmap-q-country { font-size: 15px; margin-top: 2px; }
     .fwmap-q-country .fwmap-flag.flag-icon { width: 20px; height: 15px; margin-right: 8px; vertical-align: -2px; }

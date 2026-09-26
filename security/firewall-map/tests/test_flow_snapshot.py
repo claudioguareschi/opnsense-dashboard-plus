@@ -717,6 +717,15 @@ class ThreatQueueTest(unittest.TestCase):
             self.assertEqual(THREATS.listing(db)["rows"][0]["remote"],
                              {"org": "Example ISP", "country": "United States", "asn": 64500})
 
+    def test_country_code_from_geo_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "cache.db")
+            store = COLLECTOR.CacheStore(path)
+            store.put_many("geo:2:city.mmdb:1", [("108.188.77.155", {"country": "RO", "lat": 1, "lon": 2})])
+            db = THREATS.connect(path)
+            THREATS.record(db, self.observe(self.INBOUND), now=100.0)
+            self.assertEqual(THREATS.listing(db)["rows"][0]["remote"]["country_code"], "RO")
+
     def test_rejects_bad_input(self):
         with tempfile.TemporaryDirectory() as directory:
             db = THREATS.connect(os.path.join(directory, "cache.db"))

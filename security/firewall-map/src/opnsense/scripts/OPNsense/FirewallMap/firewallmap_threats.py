@@ -167,6 +167,16 @@ def service_name(protocol, port):
     return firewallmap_collector.service_name(protocol, port)
 
 
+def cached_country(db, address):
+    """Country code of an address from the collector's local GeoIP cache (same database file)."""
+    try:
+        found = db.execute("SELECT value FROM cache WHERE kind LIKE 'geo:%' AND key = ? ORDER BY stored DESC LIMIT 1",
+                           (address,)).fetchone()
+        return (json.loads(found[0]) or {}).get("country") if found else None
+    except (sqlite3.Error, ValueError, AttributeError):
+        return None
+
+
 def inside_names():
     """DHCP names of inside hosts, so entries read "mail" rather than 192.168.1.2."""
     try:
@@ -200,6 +210,12 @@ def listing(db, status=None):
         for target in data.get("targets", []):
             protocol, port = str(target).split("|")[0], str(target).split("|")[-1]
             row["target_services"][target] = service_name(protocol, port or None)
+        remote = row.setdefault("remote", {})
+        if not remote.get("country_code"):
+            # entries recorded before the code was kept: take it from the local geolocation cache
+            code = cached_country(db, address)
+            if code:
+                remote["country_code"] = code
         rows.append(row)
     return {"status": "ok", "rows": rows, "counts": counts, "names": inside_names()}
 

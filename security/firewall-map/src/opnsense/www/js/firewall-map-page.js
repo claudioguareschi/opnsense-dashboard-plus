@@ -691,6 +691,7 @@
                 <div class="fwmap-q-who">
                     <div class="fwmap-q-ipline"><span class="fwmap-q-ip">${address}</span>
                         <span class="fwmap-q-badge fwmap-q-badge-${status}">${esc(T[`status_${status}`])}</span></div>
+                    ${remote.hostname ? `<div class="fwmap-q-hostname" title="${esc(remote.hostname)}">${esc(remote.hostname)}</div>` : ''}
                     ${org ? `<div class="fwmap-q-org">${esc(org)}</div>` : ''}
                     ${remote.country ? `<div class="fwmap-q-country">${flagOf(cc)}${esc(remote.country)}</div>` : ''}
                     ${chips ? `<div class="fwmap-q-chips">${chips}</div>` : ''}
