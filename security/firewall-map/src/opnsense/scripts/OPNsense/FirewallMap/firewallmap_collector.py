@@ -61,6 +61,7 @@ RC_SCRIPT = "/usr/local/etc/rc.d/firewallmap"
 FILTER_LOG = "/var/log/filter/latest.log"
 # Suricata's alert log (EVE JSON); read locally, only alert events
 EVE_LOG = "/var/log/suricata/eve.json"
+IDS_STATS_FILE = "/var/run/firewallmap/ids_stats.json"
 IDS_LIST = "Suricata IDS"
 # alerts are remembered this long per remote address; severity 1-2 flags the address as a threat
 ALERT_WINDOW_SECONDS = 3600
@@ -160,6 +161,7 @@ def service_name(protocol, port):
 
 COUNTERS = re.compile(r"(?P<packets_in>\d+):(?P<packets_out>\d+) pkts,\s+(?P<bytes_in>\d+):(?P<bytes_out>\d+) bytes")
 AGE = re.compile(r"\bage (?:(?P<days>\d+)d)?(?P<h>\d+):(?P<m>\d+):(?P<s>\d+)")
+RLABEL = re.compile(r"\brlabel ([^,\s]+)")
 STATE_ID = re.compile(r"\bid: (?P<id>[0-9a-f]+) creatorid: (?P<creator>[0-9a-f]+)")
 ORIGIF = re.compile(r"\borigif: (?P<ifname>\S+)")
 ENDPOINT = re.compile(r"^(?P<address>.+?)(?::(?P<port>\d+))?$")
@@ -246,6 +248,8 @@ def parse_states(output):
                 + int(age.group("m")) * 60 + int(age.group("s"))
             ) if age else None,
             **{key: int(value) for key, value in counters.groupdict().items()},
+            # the rule that created the state (same label as in the firewall log)
+            "rule": (RLABEL.search(line) or [None, None])[1] if "rlabel" in line else None,
         })
         header = None
     return records
@@ -1124,6 +1128,7 @@ def parse_block(line):
         "source": source,
         "destination": destination,
         "port": ports[1] or None,
+        "source_port": ports[0] or None,
     }
 
 
@@ -1312,6 +1317,187 @@ def threat_lists_for(address, blocklists, reputation, alerts=None):
     return lists
 
 
+# how long a closed connection or a blocked attempt stays matchable by a late Suricata alert
+CORRELATION_SECONDS = 600
+MAX_CORRELATION_KEYS = 20000
+# an alert can arrive before the next PF sample sees its connection: retry this long
+CORRELATION_RETRY_SECONDS = 15
+MAX_PENDING_ALERTS = 2000
+MAX_IDS_FLOWS = 500
+
+
+def outside_key(protocol, public_ip, public_port, remote_ip, remote_port):
+    """The connection as seen outside NAT, which is what Suricata on WAN observes."""
+    return (protocol, public_ip, str(public_port or ""), remote_ip, str(remote_port or ""))
+
+
+def state_outside(record, pair):
+    """(outside key, inside endpoint) of a PF state touching a public remote address, else None."""
+    local, remote = pair
+    nat = record["nat"]
+    if nat and nat["address"] == local:
+        public = nat
+    elif record["src"]["address"] == local:
+        public = record["src"]
+    elif record["dst"]["address"] == local:
+        public = record["dst"]
+    else:
+        return None  # NAT to a tunnel address: Suricata on WAN never sees this tuple
+    far = record["src"] if record["src"]["address"] == remote else record["dst"]
+    if far["address"] != remote:
+        return None
+    return outside_key(record["protocol"], local, public["port"], remote, far["port"])
+
+
+class Correlator:
+    """Joins Suricata alerts to the exact connection that raised them.
+
+    PF states and blocked attempts are indexed by their outside tuple (protocol, public address and
+    port, remote address and port). An alert matches an open connection, one seen in the last
+    CORRELATION_SECONDS, or a blocked attempt; otherwise it stays address-level history. Alerts on
+    the same Suricata flow are grouped. `stats` counts every outcome so the matching can be checked.
+    """
+
+    def __init__(self):
+        self.current = {}
+        self.recent = {}   # key -> connection, most recently seen last
+        self.blocked = {}  # key -> blocked attempt, most recent last
+        self.pending = []
+        self.flows = {}    # key -> {"connection", "kind", "alerts": {flow_id: {...}}}
+        self.stats = {"alerts": 0, "current": 0, "recent": 0, "blocked": 0, "unmatched": 0,
+                      "ambiguous": 0, "no_ports": 0, "pending": 0}
+        self.unmatched_samples = []
+
+    def observe_states(self, records, local_addresses, now, descriptions=None):
+        current = {}
+        ambiguous = set()
+        for record in records:
+            pair = flow_endpoints(record, local_addresses)
+            if pair is None:
+                continue
+            key = state_outside(record, pair)
+            if key is None:
+                continue
+            inside = inside_endpoint(record)
+            connection = {
+                "key": key,
+                "inside": f'{inside["address"]}:{inside["port"]}' if inside and inside["port"] else
+                          (inside["address"] if inside else None),
+                "public": f"{key[1]}:{key[2]}" if key[2] else key[1],
+                "remote": f"{key[3]}:{key[4]}" if key[4] else key[3],
+                "protocol": key[0],
+                "remote_started": orientation(record, pair[1])[0],
+                "bytes_in": record.get("bytes_in", 0),
+                "bytes_out": record.get("bytes_out", 0),
+                "age": record.get("age"),
+                "rule": record.get("rule"),
+                "rule_description": (descriptions or {}).get(record.get("rule") or "", ""),
+                "interface": record.get("origif"),
+                "state": record.get("state"),
+                "seen": now,
+            }
+            previous = current.get(key)
+            if previous and previous["inside"] != connection["inside"]:
+                ambiguous.add(key)
+            current[key] = connection
+        self.current = current
+        self.ambiguous_keys = ambiguous
+        for key, connection in current.items():
+            self.recent.pop(key, None)
+            self.recent[key] = connection
+        self._expire(now)
+
+    def observe_block(self, event, at, descriptions=None):
+        key = outside_key(event["protocol"], event["destination"], event.get("port"), event["source"],
+                          event.get("source_port"))
+        self.blocked.pop(key, None)
+        self.blocked[key] = {"key": key, "time": at, "rule": event.get("rule"),
+                             "rule_description": (descriptions or {}).get(event.get("rule") or "", ""),
+                             "interface": event.get("interface")}
+
+    def _expire(self, now):
+        for store in (self.recent, self.blocked):
+            for key in [key for key, item in store.items() if now - item.get("seen", item.get("time", now)) > CORRELATION_SECONDS]:
+                del store[key]
+            while len(store) > MAX_CORRELATION_KEYS:
+                del store[next(iter(store))]
+        for key in [key for key, flow in self.flows.items() if now - flow["last"] > ALERT_WINDOW_SECONDS]:
+            del self.flows[key]
+        while len(self.flows) > MAX_IDS_FLOWS:
+            del self.flows[min(self.flows, key=lambda key: self.flows[key]["last"])]
+
+    @staticmethod
+    def alert_key(alert, local_addresses):
+        src, dst = alert["src"], alert["dst"]
+        if src in local_addresses or not public_ipv4(src):
+            return outside_key(alert["protocol"], src, alert["src_port"], dst, alert["dst_port"])
+        return outside_key(alert["protocol"], dst, alert["dst_port"], src, alert["src_port"])
+
+    def add_alert(self, alert, local_addresses, now):
+        self.stats["alerts"] += 1
+        if not alert["src_port"] or not alert["dst_port"]:
+            self.stats["no_ports"] += 1  # ICMP and other port-less protocols: address history only
+            return None
+        if len(self.pending) >= MAX_PENDING_ALERTS:
+            self.pending.pop(0)
+        self.pending.append((now, alert))
+        return None
+
+    def resolve(self, local_addresses, now):
+        """Try pending alerts against what PF and the firewall log have shown; give up after a while."""
+        still = []
+        for received, alert in self.pending:
+            key = self.alert_key(alert, local_addresses)
+            if key in self.current:
+                kind = "ambiguous" if key in getattr(self, "ambiguous_keys", ()) else "current"
+                connection = self.current[key]
+            elif key in self.recent:
+                kind, connection = "recent", self.recent[key]
+            elif key in self.blocked:
+                kind, connection = "blocked", self.blocked[key]
+            elif now - received < CORRELATION_RETRY_SECONDS:
+                still.append((received, alert))
+                continue
+            else:
+                self.stats["unmatched"] += 1
+                self.unmatched_samples = (self.unmatched_samples + [{
+                    "time": alert["time"], "key": list(key), "signature": alert["signature"]}])[-20:]
+                continue
+            self.stats[kind] += 1
+            self._attach(key, kind, connection, alert, now)
+        self.pending = still
+        self.stats["pending"] = len(still)
+
+    def _attach(self, key, kind, connection, alert, now):
+        flow = self.flows.get(key)
+        if flow is None:
+            flow = self.flows[key] = {"key": key, "kind": kind, "connection": connection, "alerts": {},
+                                      "first": now, "last": now}
+        if kind != "blocked" or flow["kind"] == "blocked":
+            # a real connection outranks a blocked attempt with the same tuple
+            flow["kind"], flow["connection"] = kind, connection
+        flow["last"] = now
+        group = flow["alerts"].setdefault(str(alert.get("flow_id") or "-"), {})
+        signature = group.setdefault(alert["sid"] or alert["signature"], {
+            "sid": alert["sid"], "signature": alert["signature"], "category": alert["category"],
+            "severity": alert["severity"], "action": alert["action"], "count": 0,
+            "first": alert["time"] or now, "last": alert["time"] or now,
+        })
+        signature["count"] += 1
+        signature["last"] = max(signature["last"], alert["time"] or now)
+        signature["action"] = alert["action"]
+
+    def diagnostics(self):
+        stats = dict(self.stats)
+        matched = stats["current"] + stats["recent"] + stats["blocked"]
+        decided = matched + stats["unmatched"] + stats["ambiguous"]
+        stats["correlated_share"] = round(matched / decided, 3) if decided else None
+        stats["ids_flows"] = len(self.flows)
+        stats["index"] = {"current": len(self.current), "recent": len(self.recent), "blocked": len(self.blocked)}
+        stats["unmatched_samples"] = self.unmatched_samples[-5:]
+        return stats
+
+
 def parse_alert(line):
     """One Suricata EVE alert, or None for any other event (cheap check before JSON parsing)."""
     if '"event_type":"alert"' not in line and '"event_type": "alert"' not in line:
@@ -1337,6 +1523,7 @@ def parse_alert(line):
         "category": alert.get("category") or "",
         "severity": alert.get("severity") or 3,
         "action": alert.get("action") or "allowed",
+        "flow_id": event.get("flow_id"),
     }
 
 
@@ -1395,11 +1582,13 @@ class AlertTracker:
             return False
         return min(item["severity"] for item in entry["signatures"].values()) <= ALERT_FLAG_SEVERITY
 
-    def feed(self, lines, local_addresses):
+    def feed(self, lines, local_addresses, correlator=None, now=None):
         for line in lines:
             alert = parse_alert(line)
             if alert:
                 self.add(alert, local_addresses)
+                if correlator is not None:
+                    correlator.add_alert(alert, local_addresses, now if now is not None else time.time())
 
     def summary(self, address, now=None):
         """What the map shows for an address: count, worst severity and the top signatures."""
@@ -1662,6 +1851,7 @@ def run():
     log = FilterLogTail()
     backlog_loaded = False
     alerts = AlertTracker()
+    correlator = Correlator()
     eve = FilterLogTail(EVE_LOG)
     eve_loaded = False
     descriptions, interfaces, leases, block_meta_checked = {}, {}, {}, None
@@ -1708,8 +1898,17 @@ def run():
                     blocklists.refresh(chosen_threat_lists(values.get("threat_lists")))
                     blocklists_checked = started
                 reputation.refresh(time.monotonic())
-                alerts.feed(eve.lines(), local_addresses)
-                alerts.expire(time.time())
+                wall = time.time()
+                correlator.observe_states(records, local_addresses, wall, descriptions)
+                # blocked attempts stay matchable for late alerts even with no map open
+                for line in log.lines():
+                    event = parse_block(line)
+                    if event and event["destination"] in local_addresses:
+                        correlator.observe_block(event, wall, descriptions)
+                alerts.feed(eve.lines(), local_addresses, correlator, wall)
+                correlator.resolve(local_addresses, wall)
+                alerts.expire(wall)
+                write_json(IDS_STATS_FILE, correlator.diagnostics())
                 recorder.update(records, local_addresses, blocklists, reputation, time.monotonic(), geo, hostnames, alerts)
             # wake at once when a viewer opens the map, not at the end of the slow interval
             while time.monotonic() - started < BACKGROUND_INTERVAL and not requested(REQUEST_MARKER, 2):
@@ -1757,6 +1956,7 @@ def run():
                         at = block_event_time(line, now, wall)
                         if at is not None:
                             blocks.add(event, at)
+                            correlator.observe_block(event, wall, descriptions)
                 if block_meta_checked is None or started - block_meta_checked >= BLOCK_REFRESH_SECONDS:
                     descriptions, interfaces, leases = rule_descriptions(), interface_names(), lease_names()
                     block_meta_checked = started
@@ -1766,11 +1966,15 @@ def run():
                 reputation.refresh(now)
                 # while the map is open the queue is always fed; the setting and the widget only
                 # decide whether recording continues in the background
+                correlator.observe_states(records, local_addresses, wall, descriptions)
                 if not eve_loaded:
                     eve_loaded = True
+                    # older alerts can only be address history: their connections are not indexed yet
                     alerts.feed(eve.backlog(ALERT_BACKLOG_BYTES), local_addresses)
-                alerts.feed(eve.lines(), local_addresses)
-                alerts.expire(time.time())
+                alerts.feed(eve.lines(), local_addresses, correlator, wall)
+                correlator.resolve(local_addresses, wall)
+                alerts.expire(wall)
+                write_json(IDS_STATS_FILE, correlator.diagnostics())
                 recorder.update(records, local_addresses, blocklists, reputation, now, geo, hostnames, alerts)
                 payload = snapshot(tracker, geo, local_addresses, role, now, time.time(), resolver, {
                     "names": leases, "networks": networks, "interfaces": interfaces, "blocklists": blocklists,

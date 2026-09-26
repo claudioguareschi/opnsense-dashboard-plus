@@ -784,5 +784,66 @@ class AlertTest(unittest.TestCase):
         self.assertEqual(alerts.sources, {})
 
 
+class CorrelationTest(unittest.TestCase):
+    LOCAL = {"198.13.91.163"}
+    OUTBOUND = ("all tcp 198.13.91.163:13526 (192.168.30.52:52114) -> 162.217.103.70:443       ESTABLISHED:ESTABLISHED\n"
+                "   age 00:04:00, expires in 23:59:37, 5:9 pkts, 400:9000 bytes, rule 106, rlabel abc123, allow-opts\n"
+                "   id: 0a creatorid: 01\n   origif: igb1\n")
+    INBOUND = ("all tcp 192.168.1.2:443 (198.13.91.163:443) <- 94.154.43.203:51234       ESTABLISHED:ESTABLISHED\n"
+               "   age 00:00:05, expires in 23:59:37, 5:9 pkts, 400:9000 bytes, rule 7, rlabel fwd1\n   id: 0b creatorid: 01\n")
+
+    def alert(self, src, sport, dst, dport, flow_id=1, signature="ET MALWARE Possible C2 Activity", severity=1):
+        return {"time": 1000.0, "src": src, "dst": dst, "src_port": sport, "dst_port": dport, "protocol": "tcp",
+                "sid": 1, "signature": signature, "category": "Malware Command and Control",
+                "severity": severity, "action": "allowed", "flow_id": flow_id}
+
+    def test_outbound_nat_connection_is_found_by_its_outside_tuple(self):
+        correlator = COLLECTOR.Correlator()
+        correlator.observe_states(COLLECTOR.parse_states(self.OUTBOUND), self.LOCAL, 1000.0, {"abc123": "IoT to Internet"})
+        correlator.add_alert(self.alert("198.13.91.163", 13526, "162.217.103.70", 443), self.LOCAL, 1000.0)
+        correlator.add_alert(self.alert("162.217.103.70", 443, "198.13.91.163", 13526), self.LOCAL, 1000.5)
+        correlator.resolve(self.LOCAL, 1001.0)
+        (flow,) = correlator.flows.values()
+        self.assertEqual((flow["kind"], flow["connection"]["inside"], flow["connection"]["rule_description"]),
+                         ("current", "192.168.30.52:52114", "IoT to Internet"))
+        # both directions of the same Suricata flow group under one flow_id and signature
+        self.assertEqual(flow["alerts"]["1"][1]["count"], 2)
+        self.assertEqual(correlator.diagnostics()["current"], 2)
+        self.assertEqual(correlator.diagnostics()["correlated_share"], 1.0)
+
+    def test_port_forward_recent_blocked_and_unmatched(self):
+        correlator = COLLECTOR.Correlator()
+        correlator.observe_states(COLLECTOR.parse_states(self.INBOUND), self.LOCAL, 1000.0)
+        correlator.observe_states([], self.LOCAL, 1100.0)  # the connection closed
+        correlator.add_alert(self.alert("94.154.43.203", 51234, "198.13.91.163", 443), self.LOCAL, 1100.0)
+        block = COLLECTOR.parse_block(BlockTest.LINE)
+        correlator.observe_block(block, 1100.0)
+        correlator.add_alert(self.alert(block["source"], int(block["source_port"]), block["destination"],
+                                        int(block["port"]), flow_id=2), self.LOCAL, 1100.0)
+        correlator.add_alert(self.alert("45.1.1.1", 4444, "198.13.91.163", 22, flow_id=3), self.LOCAL, 1100.0)
+        correlator.resolve(self.LOCAL, 1101.0)
+        self.assertEqual(correlator.stats["pending"], 1)  # the unknown one waits for a later sample
+        correlator.resolve(self.LOCAL, 1100.0 + COLLECTOR.CORRELATION_RETRY_SECONDS + 1)
+        stats = correlator.diagnostics()
+        self.assertEqual((stats["recent"], stats["blocked"], stats["unmatched"], stats["pending"]), (1, 1, 1, 0))
+        kinds = sorted(flow["kind"] for flow in correlator.flows.values())
+        self.assertEqual(kinds, ["blocked", "recent"])
+        # connections are forgotten after the correlation window
+        correlator.observe_states([], self.LOCAL, 1100.0 + COLLECTOR.CORRELATION_SECONDS + 1)
+        self.assertEqual((len(correlator.recent), len(correlator.blocked)), (0, 0))
+
+    def test_alert_before_the_state_is_sampled_still_matches(self):
+        correlator = COLLECTOR.Correlator()
+        correlator.add_alert(self.alert("198.13.91.163", 13526, "162.217.103.70", 443), self.LOCAL, 1000.0)
+        correlator.resolve(self.LOCAL, 1000.0)
+        correlator.observe_states(COLLECTOR.parse_states(self.OUTBOUND), self.LOCAL, 1002.0)
+        correlator.resolve(self.LOCAL, 1002.0)
+        self.assertEqual(correlator.stats["current"], 1)
+
+    def test_rule_label_is_parsed_from_states(self):
+        (record,) = COLLECTOR.parse_states(self.OUTBOUND)
+        self.assertEqual(record["rule"], "abc123")
+
+
 if __name__ == "__main__":
     unittest.main()
