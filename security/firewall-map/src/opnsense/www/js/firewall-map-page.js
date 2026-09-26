@@ -940,7 +940,7 @@
         return {
             remote, address,
             verdict: pill('muted', T.ids_only, 'fa-flag'),
-            sub: T.verdict_ids,
+            sub: T.ids_only_sub,
             diagram: null,
             connection: `<div class="text-muted">${esc(T.no_connection)}</div>`,
             firewall: `<div class="text-muted">${esc(T.no_connection)}</div>`,

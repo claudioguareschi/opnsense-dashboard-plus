@@ -48,7 +48,7 @@
         height: calc(100vh - 280px); min-height: 420px; }
     #fwmap-talkers, #fwmap-details-box { border: 1px solid rgba(128, 128, 128, .25); border-radius: 6px; padding: 8px; }
     #fwmap-talkers { flex: 1 1 60%; overflow-y: auto; min-height: 0; }
-    #fwmap-details-box { flex: 1 1 40%; overflow-y: auto; min-height: 0; }
+    #fwmap-details-box { flex: 1 1 40%; overflow-y: auto; overflow-x: hidden; min-height: 0; }
     /* drag handles: between map and side panel, and between the two side boxes; double-click resets */
     .fwmap-splitter { flex: 0 0 12px; position: relative; touch-action: none; user-select: none; }
     .fwmap-splitter::after { content: ""; position: absolute; border-radius: 2px; background: rgba(128, 128, 128, .35);
@@ -143,9 +143,10 @@
     .fwmap-d-head { display: flex; align-items: flex-start; gap: 10px; }
     .fwmap-d-icon { font-size: 1.9em; opacity: .75; margin-top: 2px; }
     .fwmap-d-title { flex: 1; min-width: 0; }
-    .fwmap-d-name { font-size: 1.25em; font-weight: 600; line-height: 1.2; word-break: break-all; }
+    .fwmap-d-name { font-size: 1.25em; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
     .fwmap-d-sub { font-size: .85em; opacity: .75; }
-    .fwmap-d-verdict { text-align: right; white-space: nowrap; }
+    .fwmap-d-verdict { text-align: right; max-width: 45%; }
+    .fwmap-d-verdict .fwmap-d-sub { white-space: normal; }
     #fwmap-details-close { font-size: 1.4em; line-height: 1; text-decoration: none; margin-left: 4px; }
     .fwmap-pill { display: inline-block; font-size: .8em; font-weight: 600; padding: 2px 9px; border-radius: 10px; white-space: nowrap; }
     .fwmap-pill-ok { background: rgba(46, 139, 87, .15); color: rgb(30, 110, 65); }
@@ -177,8 +178,8 @@
     .fwmap-card-note { font-size: .8em; margin-bottom: 3px; }
     .fwmap-kv { width: 100%; font-size: .88em; }
     .fwmap-kv th { font-weight: normal; opacity: .7; padding: 1px 8px 1px 0; vertical-align: top; white-space: nowrap; width: 1%; }
-    .fwmap-kv td { padding: 1px 0; word-break: break-word; }
-    .fwmap-two { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .fwmap-kv td { padding: 1px 0; overflow-wrap: anywhere; }
+    .fwmap-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 2px 10px; }
     .fwmap-empty-note { font-size: .88em; padding: 4px 6px; border-radius: 4px; background: rgba(128, 128, 128, .07); }
     .fwmap-empty-note .fa-check { color: rgb(46, 139, 87); }
     .fwmap-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
@@ -316,6 +317,7 @@
         ids_on_address: "{{ lang._('Alerts on this address in the last hour (not necessarily this traffic)') }}",
         ids_on_connection: "{{ lang._('Alerts raised by this exact connection') }}",
         ids_only: "{{ lang._('Seen by Suricata') }}",
+        ids_only_sub: "{{ lang._('No open connection') }}",
         in_minutes: "{{ lang._('in %s min') }}",
         inside_side: "{{ lang._('Inside side') }}",
         listed: "{{ lang._('Listed') }}",
