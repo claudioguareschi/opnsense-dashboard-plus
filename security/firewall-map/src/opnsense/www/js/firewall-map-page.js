@@ -709,7 +709,7 @@
                     </div>
                     <div class="fwmap-q-meta">
                         <span>${ic('calendar')} ${esc(T.first_seen)} ${esc(ago(row.first_seen))} ${esc(T.ago)}</span>
-                        <span>${ic('chart')} ${esc(row.samples)} ${esc(T.samples)}</span>
+                        <span>${ic('chart')} ${esc(row.samples)} ${esc(row.samples === 1 ? T.sample : T.samples)}</span>
                         <span>${ic('swap')} ${esc(T.peak)} ${esc(formatBytes(row.peak_bytes || 0))}</span>
                     </div>
                     ${idsLines(row.ids)}
@@ -917,7 +917,11 @@
                 + `<span class="fwmap-q-newcount"><b></b> ${esc(T.new_short)}</span></div>`,
             size: BootstrapDialog.SIZE_WIDE, message: $body, cssClass: 'fwmap-q-dialog',
             buttons: [{label: T.close, action: (dialog) => dialog.close()}],
-            onshown: (dialog) => dialog.getModalFooter().prepend($footer),
+            onshown: (dialog) => {
+                dialog.getModalFooter().prepend($footer);
+                // the list can load before the header exists
+                $('.fwmap-q-newcount b').text(view.counts.new ?? '');
+            },
             onhidden: () => refreshQueueCount(),
         });
         load();

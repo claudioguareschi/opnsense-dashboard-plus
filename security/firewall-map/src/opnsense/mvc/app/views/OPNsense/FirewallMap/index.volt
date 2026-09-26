@@ -489,6 +489,7 @@
         check_now: "{{ lang._('Check now') }}",
         no_key: "{{ lang._('no API key') }}",
         not_listed_short: "{{ lang._('Not listed') }}",
+        sample: "{{ lang._('sample') }}",
         other_target: "{{ lang._('other target') }}",
         other_targets: "{{ lang._('other targets') }}",
         other_hosts: "{{ lang._('more inside') }}",
