@@ -160,6 +160,14 @@ export default class FirewallMap extends BaseWidget {
                 options: choices([['1', this.translations.blocks], ['0', this.translations.labels_off]]),
                 default: '1',
             },
+            block_min: {
+                id: `${this.id}-option-block-min`,
+                title: this.translations.block_min,
+                type: 'select',
+                options: choices(['1', '2', '3', '5', '10'].map(
+                    (value) => [value, value === '1' ? this.translations.every_attempt : `${value} ${this.translations.attempts}`])),
+                default: '3',
+            },
             hostnames: {
                 id: `${this.id}-option-hostnames`,
                 title: this.translations.hostnames,
@@ -188,6 +196,7 @@ export default class FirewallMap extends BaseWidget {
             hostnames: config.hostnames === '1',
             asn: config.asn !== '0',
             blocks: config.blocks !== '0',
+            blockMin: parseInt(config.block_min ?? '3', 10) || 3,
         };
     }
 
@@ -315,7 +324,7 @@ export default class FirewallMap extends BaseWidget {
         }
         this.polling = true;
         try {
-            const query = this.settings?.hostnames ? '?hostnames=1' : '';
+            const query = `?blocks_min=${this.settings?.blockMin ?? 3}${this.settings?.hostnames ? '&hostnames=1' : ''}`;
             const snapshot = await this.ajaxCall(`/api/firewallmap/flow/snapshot${query}`);
             if (snapshot.status === 'starting') {
                 this._status(this.translations.collector_starting);
@@ -339,9 +348,15 @@ export default class FirewallMap extends BaseWidget {
                 ? '<a href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a>' : '');
             const count = snapshot.flows?.length || 0;
             let status = count ? `${count} ${this.translations.active_flows}` : this.translations.no_flows;
-            const blocked = this.settings?.blocks ? (snapshot.blocks || []).filter((block) => block.activity > 0).length : 0;
-            if (blocked) {
-                status += ` · ${blocked} ${this.translations.blocked_sources}`;
+            if (this.settings?.blocks) {
+                const shown = (snapshot.blocks || []).length;
+                const below = snapshot.blocks_below || 0;
+                if (shown || below) {
+                    status += ` · ${shown} ${this.translations.blocked_sources}`;
+                    if (below) {
+                        status += ` · ${below} ${this.translations.below_threshold}`;
+                    }
+                }
             }
             if (snapshot.carp === 'backup') {
                 status += ` · ${this.translations.carp_backup}`;

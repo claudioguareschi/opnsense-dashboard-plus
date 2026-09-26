@@ -47,13 +47,14 @@ IDLE_SECONDS = 300
 FILTER_LOG = "/var/log/filter/latest.log"
 RULES_DEBUG = "/tmp/rules.debug"
 CONFIG_XML = "/conf/config.xml"
-# a blocked source fades this long after its last hit, and is reported for a while after
+# a blocked source fades this long after its last hit and is reported while hit in the last minute;
+# hits are counted over a longer window so slow scanners still reach a viewer's display threshold
 BLOCK_FADE_SECONDS = 6
-BLOCK_KEEP_SECONDS = 60
-BLOCK_WINDOW_SECONDS = 60
+BLOCK_SHOW_SECONDS = 60
+BLOCK_WINDOW_SECONDS = 600
 # a source hitting at least this often per minute is drawn as a threat
 THREAT_HITS_PER_MINUTE = 30
-MAX_BLOCK_SOURCES = 60
+MAX_BLOCK_SOURCES = 300
 MAX_LOG_LINES_PER_SAMPLE = 5000
 BLOCK_REFRESH_SECONDS = 60
 SETTINGS_REFRESH_SECONDS = 30
@@ -558,9 +559,9 @@ def interface_names(path=CONFIG_XML):
 class BlockTracker:
     """Inbound firewall blocks per public source: recent hits, ports tried, rule and interface."""
 
-    def __init__(self, fade=BLOCK_FADE_SECONDS, keep=BLOCK_KEEP_SECONDS, window=BLOCK_WINDOW_SECONDS):
+    def __init__(self, fade=BLOCK_FADE_SECONDS, show=BLOCK_SHOW_SECONDS, window=BLOCK_WINDOW_SECONDS):
         self.fade = fade
-        self.keep = keep
+        self.show = show
         self.window = window
         self.sources = {}
 
@@ -584,14 +585,19 @@ class BlockTracker:
         entry["ports"][port] = entry["ports"].get(port, 0) + 1
 
     def visible(self, now, limit=MAX_BLOCK_SOURCES):
+        """Sources hit within the last `show` seconds, most persistent first."""
         for address in list(self.sources):
             entry = self.sources[address]
             while entry["hits"] and now - entry["hits"][0] > self.window:
                 entry["hits"].popleft()
-            if now - entry["last"] > self.keep:
+            if not entry["hits"]:
                 del self.sources[address]
-        ranked = sorted(self.sources.items(), key=lambda item: (-item[1]["last"], -len(item[1]["hits"])))
-        return ranked[:limit]
+        recent = [(address, entry) for address, entry in self.sources.items() if now - entry["last"] <= self.show]
+        recent.sort(key=lambda item: (-len(item[1]["hits"]), -item[1]["last"]))
+        return recent[:limit]
+
+    def per_minute(self, entry, now):
+        return sum(1 for hit in entry["hits"] if now - hit <= 60)
 
     def activity(self, entry, now):
         return max(0.0, 1.0 - (now - entry["last"]) / self.fade)
@@ -607,14 +613,16 @@ def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, inte
         if location is None:
             continue
         target = entry["destination"]
-        hits = len(entry["hits"])
+        per_minute = blocks.per_minute(entry, now)
         result.append({
             "source": address,
             "target": target,
             "activity": round(blocks.activity(entry, now), 3),
-            "hits_per_minute": hits,
+            "hits": len(entry["hits"]),
+            "window_minutes": blocks.window // 60,
+            "hits_per_minute": per_minute,
             "total": entry["total"],
-            "threat": hits >= THREAT_HITS_PER_MINUTE,
+            "threat": per_minute >= THREAT_HITS_PER_MINUTE,
             "ports": [name for name, _ in sorted(entry["ports"].items(), key=lambda item: -item[1])][:5],
             "rule": descriptions.get(entry["rule"], ""),
             "interface": interfaces.get(entry["interface"], entry["interface"]),

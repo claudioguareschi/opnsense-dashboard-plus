@@ -188,16 +188,27 @@ class BlockTest(unittest.TestCase):
         self.assertIsNone(COLLECTOR.parse_block(self.LINE.replace(",block,in,", ",block,out,")))
 
     def test_tracks_hits_fades_and_flags_threats(self):
-        blocks = COLLECTOR.BlockTracker(fade=6, keep=60, window=60)
+        blocks = COLLECTOR.BlockTracker(fade=6, show=60, window=600)
         event = COLLECTOR.parse_block(self.LINE)
         for second in range(COLLECTOR.THREAT_HITS_PER_MINUTE):
             blocks.add(event, now=float(second))
         now = float(COLLECTOR.THREAT_HITS_PER_MINUTE - 1)
         (address, entry), = blocks.visible(now)
-        self.assertEqual(len(entry["hits"]), COLLECTOR.THREAT_HITS_PER_MINUTE)
+        self.assertEqual(blocks.per_minute(entry, now), COLLECTOR.THREAT_HITS_PER_MINUTE)
         self.assertEqual(blocks.activity(entry, now), 1.0)
         self.assertAlmostEqual(blocks.activity(entry, now + 3), 0.5)
+        # quiet for over a minute: no longer drawn, but its hits still count toward the window
         self.assertEqual(blocks.visible(now + 61), [])
+        blocks.add(event, now=now + 300)
+        (address, entry), = blocks.visible(now + 300)
+        self.assertEqual(len(entry["hits"]), COLLECTOR.THREAT_HITS_PER_MINUTE + 1)
+        self.assertEqual(blocks.per_minute(entry, now + 300), 1)
+
+    def test_reader_applies_viewer_threshold(self):
+        payload = {"blocks": [{"hits": 1}, {"hits": 3}, {"hits": 7}]}
+        result = SNAPSHOT.apply_block_threshold(payload, 3)
+        self.assertEqual([block["hits"] for block in result["blocks"]], [3, 7])
+        self.assertEqual(result["blocks_below"], 1)
 
 
 class GeoDatabaseTest(unittest.TestCase):

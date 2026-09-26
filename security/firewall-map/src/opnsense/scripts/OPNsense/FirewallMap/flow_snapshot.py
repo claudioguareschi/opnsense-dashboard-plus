@@ -64,7 +64,18 @@ def fetch_database():
         pass
 
 
-def main(want_hostnames=False):
+def apply_block_threshold(payload, minimum):
+    """Keep blocked sources with at least `minimum` hits in the window; count the rest."""
+    blocks = payload.get("blocks")
+    if blocks is None:
+        return payload
+    shown = [block for block in blocks if block.get("hits", 1) >= minimum]
+    payload["blocks"] = shown
+    payload["blocks_below"] = len(blocks) - len(shown)
+    return payload
+
+
+def main(want_hostnames=False, block_minimum=1):
     mark_request()
     if want_hostnames:
         mark_request(HOSTNAME_MARKER)
@@ -76,8 +87,11 @@ def main(want_hostnames=False):
         fetch_database()
     if not want_hostnames:
         payload.pop("hostnames", None)
-    return payload
+    return apply_block_threshold(payload, block_minimum)
 
 
 if __name__ == "__main__":
-    print(json.dumps(main(want_hostnames="hostnames" in sys.argv[1:]), separators=(",", ":")))
+    arguments = sys.argv[1:]
+    minimum = next((int(value) for value in arguments if value.isdigit()), 1)
+    print(json.dumps(main(want_hostnames="hostnames" in arguments, block_minimum=max(1, min(minimum, 100))),
+                     separators=(",", ":")))

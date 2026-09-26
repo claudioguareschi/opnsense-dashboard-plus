@@ -20,6 +20,10 @@
             <none>None</none>
             <blocks>Show blocked traffic</blocks>
             <blocked_sources>blocked sources</blocked_sources>
+            <below_threshold>below threshold</below_threshold>
+            <block_min>Show blocked sources after</block_min>
+            <every_attempt>every attempt</every_attempt>
+            <attempts>attempts in 10 minutes</attempts>
             <hostnames>Lookup hostnames</hostnames>
             <asn>Show ASN</asn>
             <provider_maxmind>MaxMind GeoLite2 (free)</provider_maxmind>

@@ -244,7 +244,8 @@ function describeBlock(block, showAsn) {
   return `
     <div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}${approximate}</div>
     <div style="margin-top:3px"><div>${escapeHtml(block.source)}</div>${asn}</div>
-    <div style="margin-top:4px;font-weight:600">${block.threat ? 'Threat: ' : ''}Blocked ${block.hits_per_minute}× in the last minute</div>
+    <div style="margin-top:4px;font-weight:600">${block.threat ? 'Threat: ' : ''}Blocked ${block.hits ?? block.hits_per_minute}× in the last ${block.window_minutes ?? 1} minutes</div>
+    <div style="opacity:.7">${block.hits_per_minute} in the last minute</div>
     <div>${escapeHtml(block.ports.join(', '))}</div>
     <div style="opacity:.7">${escapeHtml(block.rule || 'Blocked')} · ${escapeHtml(block.interface)}</div>
   `;

@@ -44,7 +44,9 @@ class FlowController extends ApiControllerBase
         $backend = new Backend();
         /* reverse DNS only runs while a viewer who enabled it is polling */
         $mode = $this->request->get('hostnames') === '1' ? 'hostnames' : 'plain';
-        $result = json_decode($backend->configdpRun('firewallmap flow snapshot', [$mode]) ?? '', true);
+        /* per-viewer threshold: blocked sources need this many hits before they are drawn */
+        $minimum = max(1, min(100, (int)($this->request->get('blocks_min') ?? 1)));
+        $result = json_decode($backend->configdpRun('firewallmap flow snapshot', [$mode, (string)$minimum]) ?? '', true);
 
         return is_array($result) ? $result : ['status' => 'failed', 'flows' => []];
     }
