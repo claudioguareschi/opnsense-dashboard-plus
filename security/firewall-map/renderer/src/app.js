@@ -381,6 +381,8 @@ function mix(a, b, amount) {
   return a.map((value, index) => Math.round(value + (b[index] - value) * amount));
 }
 
+const ORANGE = [240, 140, 0];
+
 /** Map palette derived from the dashboard theme so the widget blends in. */
 export function palette(theme = DEFAULT_THEME) {
   const {dark, background, text, accent, success} = {...DEFAULT_THEME, ...theme};
@@ -392,6 +394,8 @@ export function palette(theme = DEFAULT_THEME) {
     // towards the firewall uses the theme accent, away from it the theme's success green
     toward: {link: mix(background, accent, 0.7), heavy: shade(accent, 0.2), pulse: shade(accent, 0.15)},
     away: {link: mix(background, success, 0.7), heavy: shade(success, 0.2), pulse: shade(success, 0.15)},
+    // a clear orange for connections started outside: the theme accent can be close to the threat crimson
+    inbound: {link: mix(background, ORANGE, 0.75), heavy: mix(ORANGE, dark ? [255, 255, 255] : [0, 0, 0], 0.08), pulse: ORANGE},
     neutral: {link: mix(background, [150, 150, 150], 0.7), heavy: [128, 128, 128], pulse: [120, 120, 120]},
     endpoint: rgb(mix(accent, text, 0.2), 220),
     // a crimson distinct from the theme accent, reserved for blocked traffic and threats
@@ -627,7 +631,7 @@ export function createFirewallMap(container, options = {}) {
 
   // green: started inside the network; orange (theme accent): started from outside
   function initiatorScheme(side) {
-    return side === 'remote' ? colors.toward : side === 'local' ? colors.away : colors.neutral;
+    return side === 'remote' ? colors.inbound : side === 'local' ? colors.away : colors.neutral;
   }
 
   function baseColor(arc) {
@@ -667,7 +671,7 @@ export function createFirewallMap(container, options = {}) {
       getRadius: (item) => item.arc.heavy ? 3.4 : 2.4,
       radiusUnits: 'pixels',
       getFillColor: (item) => pulseColor(item),
-      updateTriggers: {getPosition: seconds, getFillColor: [colors.toward.pulse, colors.away.pulse, settings.colorMode, categoryKey]},
+      updateTriggers: {getPosition: seconds, getFillColor: [colors.toward.pulse, colors.away.pulse, colors.inbound.pulse, settings.colorMode, categoryKey]},
     });
   }
 
@@ -823,7 +827,7 @@ export function createFirewallMap(container, options = {}) {
         pickable: true,
         widthMinPixels: 1,
         getColor: (arc) => arcColor(arc),
-        updateTriggers: {getColor: [colors.toward.link, colors.away.link, settings.colorMode, categoryKey]},
+        updateTriggers: {getColor: [colors.toward.link, colors.away.link, colors.inbound.link, settings.colorMode, categoryKey]},
       }),
       new PathLayer({
         id: 'firewall-map-blocks',
