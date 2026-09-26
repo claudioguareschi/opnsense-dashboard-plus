@@ -155,8 +155,13 @@ function formatRate(bytes) {
   return `${value >= 100 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
 }
 
+// OPNsense HTML-escapes &, < and > in API responses (e.g. "AT&amp;T"); undo that before display
+function plain(text) {
+  return String(text ?? '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
 function escapeHtml(text) {
-  return String(text ?? '').replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+  return plain(text).replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 }
 
 /** Hover card for an endpoint (all flows to that place) or a single arch. */
@@ -482,7 +487,7 @@ export function createFirewallMap(container, options = {}) {
       data: visible ? placeLabels(labelCandidates) : [],
       visible,
       getPosition: (label) => [label.lon, label.lat],
-      getText: (label) => label.text,
+      getText: (label) => plain(label.text),
       getSize: LABEL_FONT_SIZE,
       getColor: colors.label,
       getPixelOffset: (label) => label.offset,
