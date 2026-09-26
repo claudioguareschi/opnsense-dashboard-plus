@@ -34,6 +34,7 @@ def connect(path=DATABASE):
         os.makedirs(directory, exist_ok=True)
     db = sqlite3.connect(path, timeout=5, isolation_level=None, check_same_thread=False)
     db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA synchronous=NORMAL")
     db.execute(
         "CREATE TABLE IF NOT EXISTS threats (address TEXT PRIMARY KEY, first_seen REAL, last_seen REAL, "
         "samples INTEGER, data TEXT, status TEXT DEFAULT 'new', note TEXT DEFAULT '', status_changed REAL)"
@@ -63,7 +64,10 @@ def observe(records, flow_endpoints, lists_for, local_addresses, inside_endpoint
             continue
         entry = seen.setdefault(remote, {
             "lists": lists, "inbound": 0, "outbound": 0, "targets": [], "inside": [], "services": [], "bytes": 0,
+            "youngest": None,
         })
+        if record.get("age") is not None:
+            entry["youngest"] = record["age"] if entry["youngest"] is None else min(entry["youngest"], record["age"])
         inside = inside_endpoint(record)
         remote_started, service_port = orientation(record, remote)
         if remote_started:
@@ -89,14 +93,29 @@ def observe(records, flow_endpoints, lists_for, local_addresses, inside_endpoint
 
 
 def record(db, seen, now=None):
-    """Upsert what was seen; activity after 'blocked' reopens the entry, since the block did not hold."""
+    """Upsert what was seen, in one transaction so an operator's concurrent status change is kept."""
     now = time.time() if now is None else now
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        _record(db, seen, now)
+    except BaseException:
+        db.execute("ROLLBACK")
+        raise
+    db.execute("COMMIT")
+
+
+# states created within this long of a block may predate it (the sample and the click race)
+BLOCK_SLACK_SECONDS = 30
+
+
+def _record(db, seen, now):
     for address, entry in seen.items():
-        row = db.execute("SELECT data, status FROM threats WHERE address = ?", (address,)).fetchone()
+        row = db.execute("SELECT data, status, status_changed FROM threats WHERE address = ?", (address,)).fetchone()
         if row is None:
             data = {**entry, "inbound": entry["inbound"] > 0, "outbound": entry["outbound"] > 0,
                     "peak_bytes": entry["bytes"]}
             data.pop("bytes")
+            data.pop("youngest")
             db.execute(
                 "INSERT INTO threats (address, first_seen, last_seen, samples, data, status, note, status_changed) "
                 "VALUES (?, ?, ?, 1, ?, 'new', '', NULL)", (address, now, now, json.dumps(data)))
@@ -113,7 +132,11 @@ def record(db, seen, now=None):
         data["outbound"] = bool(data.get("outbound")) or entry["outbound"] > 0
         data["peak_bytes"] = max(data.get("peak_bytes", 0), entry["bytes"])
         status = row[1]
-        if status == "blocked":
+        # only a connection opened after the block reopens it; existing and closing states
+        # (TIME_WAIT lingers for a minute or more) are not new traffic
+        youngest = entry.get("youngest")
+        if (status == "blocked" and youngest is not None
+                and now - youngest > (row[2] or 0) + BLOCK_SLACK_SECONDS):
             data["seen_after_block"] = True
             status = "new"
         db.execute("UPDATE threats SET last_seen = ?, samples = samples + 1, data = ?, status = ? WHERE address = ?",
@@ -128,6 +151,10 @@ def prune(db, now=None):
 
 
 def listing(db, status=None):
+    counts = dict(db.execute("SELECT status, count(*) FROM threats GROUP BY status").fetchall())
+    counts = {name: counts.get(name, 0) for name in STATUSES}
+    if status == "counts":
+        return {"status": "ok", "rows": [], "counts": counts}
     sql = "SELECT address, first_seen, last_seen, samples, data, status, note, status_changed FROM threats"
     parameters = ()
     if status in STATUSES:
@@ -141,8 +168,7 @@ def listing(db, status=None):
             data = {}
         rows.append({"address": address, "first_seen": first, "last_seen": last, "samples": samples,
                      "status": current, "note": note or "", "status_changed": changed, **data})
-    counts = dict(db.execute("SELECT status, count(*) FROM threats GROUP BY status").fetchall())
-    return {"status": "ok", "rows": rows, "counts": {name: counts.get(name, 0) for name in STATUSES}}
+    return {"status": "ok", "rows": rows, "counts": counts}
 
 
 def set_status(db, address, status, note=None, now=None):
@@ -153,10 +179,13 @@ def set_status(db, address, status, note=None, now=None):
     if status not in STATUSES:
         return {"result": "failed", "error": "unknown status"}
     now = time.time() if now is None else now
+    # a new decision clears the "seen after block" warning
+    clear = "json_remove(data, '$.seen_after_block')"
     if note is None:
-        cursor = db.execute("UPDATE threats SET status = ?, status_changed = ? WHERE address = ?", (status, now, address))
+        cursor = db.execute(f"UPDATE threats SET status = ?, status_changed = ?, data = {clear} WHERE address = ?",
+                            (status, now, address))
     else:
-        cursor = db.execute("UPDATE threats SET status = ?, status_changed = ?, note = ? WHERE address = ?",
+        cursor = db.execute(f"UPDATE threats SET status = ?, status_changed = ?, note = ?, data = {clear} WHERE address = ?",
                             (status, now, note[:MAX_NOTE], address))
     return {"result": "saved"} if cursor.rowcount else {"result": "failed", "error": "not in the review queue"}
 

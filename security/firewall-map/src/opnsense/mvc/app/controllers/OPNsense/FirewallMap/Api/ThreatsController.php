@@ -39,7 +39,7 @@ class ThreatsController extends ApiControllerBase
 
     public function listAction($status = null)
     {
-        $status = in_array($status, self::STATUSES, true) ? $status : 'all';
+        $status = in_array($status, self::STATUSES, true) || $status === 'counts' ? $status : 'all';
         $result = json_decode((new Backend())->configdpRun('firewallmap threats list', [$status]) ?? '', true);
         return is_array($result) ? $result : ['status' => 'failed', 'rows' => [], 'counts' => []];
     }

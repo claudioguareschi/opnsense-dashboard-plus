@@ -672,11 +672,18 @@ class ThreatQueueTest(unittest.TestCase):
             # a status change alone keeps the note
             THREATS.set_status(db, "108.188.77.155", "blocked")
             self.assertEqual(THREATS.listing(db)["rows"][0]["note"], note)
-            # traffic after "blocked" means the block did not hold: back to new, flagged
-            THREATS.record(db, self.observe(self.INBOUND), now=300.0)
+            # states that already existed (or linger in TIME_WAIT) do not reopen it
+            THREATS.set_status(db, "108.188.77.155", "blocked", now=300.0)
+            THREATS.record(db, self.observe(self.INBOUND), now=310.0)
+            self.assertEqual(THREATS.listing(db)["rows"][0]["status"], "blocked")
+            # a connection opened after the block means it did not hold: back to new, flagged
+            THREATS.record(db, self.observe(self.INBOUND), now=400.0)
             row = THREATS.listing(db)["rows"][0]
             self.assertEqual((row["status"], row["seen_after_block"]), ("new", True))
             self.assertEqual(THREATS.listing(db)["counts"], {"new": 1, "reviewed": 0, "dismissed": 0, "blocked": 0})
+            self.assertEqual(THREATS.listing(db, "counts")["rows"], [])
+            THREATS.set_status(db, "108.188.77.155", "reviewed")
+            self.assertNotIn("seen_after_block", THREATS.listing(db)["rows"][0])
 
     def test_multicast_is_not_a_remote_endpoint(self):
         self.assertFalse(COLLECTOR.public_ipv4("224.0.0.18"))
@@ -706,7 +713,8 @@ class ThreatQueueTest(unittest.TestCase):
             self.assertTrue(COLLECTOR.recording_wanted({"record_threats": "1"}, path))
             self.assertFalse(COLLECTOR.recording_wanted({"record_threats": "0"}, path))
             with open(path, "w") as handle:
-                handle.write("<opnsense><system><user><dashboard>e30=</dashboard></user></system></opnsense>")
+                handle.write("<opnsense><system><user><dashboard>bnVsbA==</dashboard></user>"
+                             "<user><dashboard>e30=</dashboard></user></system></opnsense>")
             self.assertFalse(COLLECTOR.widget_in_use(path))
 
 

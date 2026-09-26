@@ -456,7 +456,7 @@
 
     async function refreshQueueCount() {
         try {
-            const result = await $.getJSON('/api/firewallmap/threats/list/new');
+            const result = await $.getJSON('/api/firewallmap/threats/list/counts');
             $('#fwmap-review-count').text(result.counts?.new || '');
         } catch (_) {
             $('#fwmap-review-count').text('');

@@ -295,8 +295,9 @@ def orientation(record, remote):
         return True, record["dst"]["port"]
     # behind outbound NAT the source port that matters is the inside host's, not the translated one
     source, target = (inside_endpoint(record) or record["src"])["port"], record["dst"]["port"]
+    # the client side must look ephemeral: keeps NFS (reserved port to 2049) and IKE (500 to 4500) outbound
     if (record["protocol"] in ("tcp", "udp") and source and target and source.isdigit() and target.isdigit()
-            and int(source) < 1024 <= int(target)):
+            and int(source) < 1024 and int(target) >= 10000):
         return True, source
     return False, target
 
@@ -1359,6 +1360,8 @@ def widget_in_use(path=CONFIG_XML):
             dashboard = json.loads(base64.b64decode(node.text or "").decode("utf-8", "replace"))
         except (ValueError, binascii.Error):
             continue
+        if not isinstance(dashboard, dict):
+            continue
         if any(isinstance(widget, dict) and widget.get("id") == "firewallmap" for widget in dashboard.get("widgets") or []):
             return True
     return False
@@ -1557,8 +1560,9 @@ def run():
                     blocklists.refresh(chosen_threat_lists(geodb.settings().get("threat_lists")))
                     blocklists_checked = started
                 reputation.refresh(now)
-                if recording:
-                    recorder.update(records, local_addresses, blocklists, reputation, now)
+                # while the map is open the queue is always fed; the setting and the widget only
+                # decide whether recording continues in the background
+                recorder.update(records, local_addresses, blocklists, reputation, now)
                 payload = snapshot(tracker, geo, local_addresses, role, now, time.time(), resolver, {
                     "names": leases, "networks": networks, "interfaces": interfaces, "blocklists": blocklists,
                     "reputation": reputation,
