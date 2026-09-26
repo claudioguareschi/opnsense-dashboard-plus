@@ -78,7 +78,7 @@
         border-bottom: 1px solid rgba(128, 128, 128, .2); }
     #fwmap-review-count:empty { display: none; }
     #fwmap-review-count { background: rgb(196, 18, 48); }
-    .fwmap-q-dialog .modal-title .fwmap-q-subtitle { font-size: .75em; font-weight: normal; opacity: .85; margin-left: 10px; }
+    .fwmap-q-dialog .modal-title .fwmap-q-subtitle { font-size: .8em; font-weight: normal; opacity: .85; margin-left: 4px; }
     .fwmap-q-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
     .fwmap-q-tabs { flex: 1 1 auto; margin: 0; }
     .fwmap-q-tabs > li > a { padding: 5px 12px; }
@@ -110,7 +110,8 @@
         background: rgba(128, 128, 128, .07); }
     .fwmap-q-actions { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; margin-top: 8px; }
     .fwmap-q-tools { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: .9em; }
-    .fwmap-q-decisions { display: flex; flex-wrap: wrap; gap: 4px; }
+    .fwmap-q-decisions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+    .fwmap-q-decisions .btn { margin: 0; line-height: 1.5; }
     .fwmap-q-footer { float: left; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; text-align: left;
         font-size: .9em; padding-top: 6px; }
     .fwmap-q-record { font-weight: normal; margin: 0; }

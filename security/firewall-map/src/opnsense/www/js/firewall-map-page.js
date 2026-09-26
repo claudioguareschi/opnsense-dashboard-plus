@@ -654,7 +654,7 @@
             .append($record)
             .append(blacklistStatus(settings));
         BootstrapDialog.show({
-            title: `<i class="fa fa-list-alt"></i> ${esc(T.review_queue)} <span class="fwmap-q-subtitle">${esc(T.review_intro)}</span>`,
+            title: `<i class="fa fa-list-alt"></i> ${esc(T.review_queue)} <span class="fwmap-q-subtitle">· ${esc(T.review_intro)}</span>`,
             size: BootstrapDialog.SIZE_WIDE, message: $body, cssClass: 'fwmap-q-dialog',
             buttons: [{label: T.close, action: (dialog) => dialog.close()}],
             onshown: (dialog) => dialog.getModalFooter().prepend($footer),
