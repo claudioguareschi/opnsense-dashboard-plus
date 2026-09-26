@@ -1103,15 +1103,7 @@
     /** Pointer drag on a handle; `move` gets the pointer event, the map redraws once per frame. */
     function draggable($handle, move, reset) {
         let frame = null;
-        $handle.on('pointerdown', function (event) {
-            event.preventDefault();
-            this.setPointerCapture(event.pointerId);
-            $handle.addClass('fwmap-dragging');
-            $('body').addClass('fwmap-resizing');
-        }).on('pointermove', function (event) {
-            if (!this.hasPointerCapture(event.pointerId)) {
-                return;
-            }
+        const onMove = (event) => {
             move(event);
             if (frame === null) {
                 frame = requestAnimationFrame(() => {
@@ -1119,14 +1111,24 @@
                     state.renderer?.resize();
                 });
             }
-        }).on('pointerup pointercancel', function (event) {
-            if (this.hasPointerCapture(event.pointerId)) {
-                this.releasePointerCapture(event.pointerId);
-            }
+        };
+        const onUp = () => {
+            document.removeEventListener('pointermove', onMove);
+            document.removeEventListener('pointerup', onUp);
+            document.removeEventListener('pointercancel', onUp);
             $handle.removeClass('fwmap-dragging');
             $('body').removeClass('fwmap-resizing');
             saveLayout(state.layout);
             state.renderer?.resize();
+        };
+        $handle.on('pointerdown', (event) => {
+            event.preventDefault();
+            // listen on the document so a fast drag that leaves the thin handle keeps working
+            document.addEventListener('pointermove', onMove);
+            document.addEventListener('pointerup', onUp);
+            document.addEventListener('pointercancel', onUp);
+            $handle.addClass('fwmap-dragging');
+            $('body').addClass('fwmap-resizing');
         }).on('dblclick', () => {
             reset();
             applyLayout(state.layout);
