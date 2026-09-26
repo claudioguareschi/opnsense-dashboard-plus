@@ -61,6 +61,7 @@
     $(async function () {
         const text = {
             active_flows: "{{ lang._('active flows') }}",
+            blocked_sources: "{{ lang._('blocked sources') }}",
             no_flows: "{{ lang._('No active public flows') }}",
             starting: "{{ lang._('Starting flow collector…') }}",
             unavailable: "{{ lang._('Live flow data is unavailable') }}",
@@ -94,6 +95,7 @@
             labels: config.labels !== '0',
             hostnames: config.hostnames === '1',
             asn: config.asn !== '0',
+            blocks: config.blocks !== '0',
         };
 
         let renderer;
@@ -136,6 +138,10 @@
                         ? '<a href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a>' : '');
                     const count = snapshot.flows?.length || 0;
                     let message = count ? `${count} ${text.active_flows}` : text.no_flows;
+                    const blocked = settings.blocks ? (snapshot.blocks || []).filter((block) => block.activity > 0).length : 0;
+                    if (blocked) {
+                        message += ` · ${blocked} ${text.blocked_sources}`;
+                    }
                     if (snapshot.carp === 'backup') {
                         message += ` · ${text.carp_backup}`;
                     }

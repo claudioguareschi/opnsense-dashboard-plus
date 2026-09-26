@@ -18,6 +18,8 @@
             <labels_zoomed>When zoomed in</labels_zoomed>
             <labels_off>Off</labels_off>
             <none>None</none>
+            <blocks>Show blocked traffic</blocks>
+            <blocked_sources>blocked sources</blocked_sources>
             <hostnames>Lookup hostnames</hostnames>
             <asn>Show ASN</asn>
             <provider_maxmind>MaxMind GeoLite2 (free)</provider_maxmind>

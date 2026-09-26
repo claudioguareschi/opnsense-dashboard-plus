@@ -10,7 +10,10 @@ const ARC_SAMPLES = 32;
 const LINK_WIDTH = 1.5;
 const HEAVY_WIDTH = 3;
 // heavy talkers: the busiest few links (if above a floor), or anything above a byte rate
-const DEFAULT_OPTIONS = {heavyTop: 5, heavyRate: 1000000, maxArcs: 120, labels: true, asn: true};
+const DEFAULT_OPTIONS = {heavyTop: 5, heavyRate: 1000000, maxArcs: 120, labels: true, asn: true, blocks: true};
+// blocked traffic: pulses race into the firewall; threats also throb at their source
+const BLOCK_PULSE_PERIOD = 1.1;
+const THREAT_THROB_PERIOD = 0.9;
 const HEAVY_TOP_MIN_RATE = 10000;
 // city labels appear once the map is zoomed this far past the fitted world view
 const LABEL_ZOOM_STEP = 1.2;
@@ -193,6 +196,60 @@ function describe(place, members, locations, hostnames = {}, showAsn = true) {
   `;
 }
 
+/** A gently bent path from a blocked source into the firewall (bends the other way from flows). */
+function blockPath(source, target) {
+  const x0 = source.lon;
+  const y0 = mercatorY(source.lat);
+  const x1 = target.lon;
+  const y1 = mercatorY(target.lat);
+  const length = Math.hypot(x1 - x0, y1 - y0) || 1;
+  let nx = -(y1 - y0) / length;
+  let ny = (x1 - x0) / length;
+  if (ny > 0) {
+    nx = -nx;
+    ny = -ny;
+  }
+  const bend = Math.max(length * 0.18, 1);
+  const cx = (x0 + x1) / 2 + nx * bend;
+  const cy = (y0 + y1) / 2 + ny * bend;
+  const path = [];
+  for (let step = 0; step <= ARC_SAMPLES; step++) {
+    const t = step / ARC_SAMPLES;
+    const u = 1 - t;
+    path.push([u * u * x0 + 2 * u * t * cx + t * t * x1, latitudeFromMercator(u * u * y0 + 2 * u * t * cy + t * t * y1)]);
+  }
+  return path;
+}
+
+export function buildBlocks(data) {
+  const locations = new Map((data.locations || []).map((location) => [location.id, location]));
+  return (data.blocks || [])
+    .map((block) => {
+      const target = locations.get(block.target) || (data.locations || []).find((location) => location.local);
+      return target ? {
+        ...block,
+        path: blockPath(block, target),
+        period: BLOCK_PULSE_PERIOD,
+        phase: hash(block.source),
+      } : null;
+    })
+    .filter(Boolean);
+}
+
+/** Hover card for a blocked source. */
+function describeBlock(block, showAsn) {
+  const title = [block.city, block.country].filter(Boolean).join(', ') || block.source;
+  const approximate = !block.city && block.accuracy_km ? ` <span style="opacity:.7">(± ${block.accuracy_km} km)</span>` : '';
+  const asn = showAsn && block.asn ? `<div style="opacity:.7">AS${block.asn} ${escapeHtml(block.as_org || '')}</div>` : '';
+  return `
+    <div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}${approximate}</div>
+    <div style="margin-top:3px"><div>${escapeHtml(block.source)}</div>${asn}</div>
+    <div style="margin-top:4px;font-weight:600">${block.threat ? 'Threat: ' : ''}Blocked ${block.hits_per_minute}× in the last minute</div>
+    <div>${escapeHtml(block.ports.join(', '))}</div>
+    <div style="opacity:.7">${escapeHtml(block.rule || 'Blocked')} · ${escapeHtml(block.interface)}</div>
+  `;
+}
+
 function pulsePosition(arc, seconds, reverse) {
   let t = (seconds / arc.period + arc.phase) % 1;
   if (reverse) {
@@ -253,6 +310,8 @@ export function palette(theme = DEFAULT_THEME) {
     toward: {link: mix(background, accent, 0.7), heavy: shade(accent, 0.2), pulse: shade(accent, 0.15)},
     away: {link: mix(background, success, 0.7), heavy: shade(success, 0.2), pulse: shade(success, 0.15)},
     endpoint: rgb(mix(accent, text, 0.2), 220),
+    // a crimson distinct from the theme accent, reserved for blocked traffic and threats
+    block: dark ? [255, 77, 109] : [196, 18, 48],
     label: rgb(mix(text, background, 0.15), 230),
     tooltip: {
       background: `rgb(${background.join(',')})`,
@@ -358,6 +417,9 @@ export function createFirewallMap(container, options = {}) {
     if (layer.id === 'firewall-map-endpoints') {
       return describe(object, flowsByDest.get(`${object.lat},${object.lon}`) || [], locationIndex, lastData.hostnames, settings.asn);
     }
+    if (layer.id === 'firewall-map-blocks' || layer.id === 'firewall-map-block-sources') {
+      return describeBlock(object, settings.asn);
+    }
     if (layer.id === 'firewall-map-arcs') {
       return describe(object.dest, object.members, locationIndex, lastData.hostnames, settings.asn);
     }
@@ -405,6 +467,7 @@ export function createFirewallMap(container, options = {}) {
   const started = performance.now();
 
   let pulseItems = [];
+  let blockArcs = [];
 
   function pulseLayer(seconds) {
     return new ScatterplotLayer({
@@ -418,6 +481,35 @@ export function createFirewallMap(container, options = {}) {
     });
   }
 
+  function blockPulseLayers(seconds) {
+    const active = blockArcs.filter((block) => block.activity > 0);
+    return [
+      new ScatterplotLayer({
+        id: 'firewall-map-block-pulses',
+        data: active,
+        getPosition: (block) => pulsePosition(block, seconds, false),
+        getRadius: (block) => block.threat ? 3.6 : 2.6,
+        radiusUnits: 'pixels',
+        getFillColor: (block) => rgb(colors.block, Math.round(80 + 175 * block.activity)),
+        updateTriggers: {getPosition: seconds, getFillColor: colors.block},
+      }),
+      new ScatterplotLayer({
+        id: 'firewall-map-threats',
+        data: blockArcs.filter((block) => block.threat),
+        getPosition: (block) => [block.lon, block.lat],
+        // a throbbing halo around sources hammering the firewall
+        getRadius: () => 6 + 6 * ((seconds / THREAT_THROB_PERIOD) % 1),
+        radiusUnits: 'pixels',
+        stroked: true,
+        filled: false,
+        lineWidthUnits: 'pixels',
+        getLineWidth: 1.5,
+        getLineColor: () => rgb(colors.block, Math.round(220 * (1 - (seconds / THREAT_THROB_PERIOD) % 1))),
+        updateTriggers: {getRadius: seconds, getLineColor: [seconds, colors.block]},
+      }),
+    ];
+  }
+
   function draw(now) {
     frame = null;
     if (!deck) {
@@ -427,7 +519,7 @@ export function createFirewallMap(container, options = {}) {
       lastFrame = now;
       deck.setProps({layers: compose(now)});
     }
-    if (arcs.length) {
+    if (arcs.length || blockArcs.length) {
       frame = requestAnimationFrame(draw);
     }
   }
@@ -501,12 +593,14 @@ export function createFirewallMap(container, options = {}) {
   }
 
   function compose(now = performance.now()) {
-    return [...baseLayers, pulseLayer((now - started) / 1000), labelLayer].filter(Boolean);
+    const seconds = (now - started) / 1000;
+    return [...baseLayers, pulseLayer(seconds), ...blockPulseLayers(seconds), labelLayer].filter(Boolean);
   }
 
   function layers(data) {
     arcs = buildArcs(data, settings);
     pulseItems = pulses(arcs);
+    blockArcs = settings.blocks ? buildBlocks(data) : [];
     locationIndex = new Map((data.locations || []).map((location) => [location.id, location]));
     flowsByDest = new Map();
     for (const flow of data.flows || []) {
@@ -544,6 +638,29 @@ export function createFirewallMap(container, options = {}) {
         },
         updateTriggers: {getColor: [colors.toward.link, colors.away.link]},
       }),
+      new PathLayer({
+        id: 'firewall-map-blocks',
+        data: blockArcs,
+        getPath: (block) => block.path,
+        getWidth: (block) => block.threat ? 2.4 : 1.4,
+        widthUnits: 'pixels',
+        capRounded: true,
+        jointRounded: true,
+        pickable: true,
+        // bright while hits arrive, then a faint trace that can still be hovered
+        getColor: (block) => rgb(colors.block, Math.round(35 + 185 * block.activity)),
+        updateTriggers: {getColor: colors.block},
+      }),
+      new ScatterplotLayer({
+        id: 'firewall-map-block-sources',
+        data: blockArcs,
+        getPosition: (block) => [block.lon, block.lat],
+        getRadius: (block) => block.threat ? 3.5 : 2.5,
+        radiusUnits: 'pixels',
+        pickable: true,
+        getFillColor: (block) => rgb(colors.block, Math.round(90 + 165 * block.activity)),
+        updateTriggers: {getFillColor: colors.block},
+      }),
       new ScatterplotLayer({
         id: 'firewall-map-endpoints',
         data: data.locations || [],
@@ -564,7 +681,7 @@ export function createFirewallMap(container, options = {}) {
     labelCandidates = labels(data);
     labelLayer = buildLabelLayer();
     const layerList = compose();
-    if (arcs.length && frame === null) {
+    if ((arcs.length || blockArcs.length) && frame === null) {
       frame = requestAnimationFrame(draw);
     }
     return layerList;

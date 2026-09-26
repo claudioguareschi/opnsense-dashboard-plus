@@ -174,6 +174,32 @@ class IdleTest(unittest.TestCase):
             self.assertTrue(COLLECTOR.idle(started=now - 1000, now=now + 301, marker=marker, idle_seconds=300))
 
 
+class BlockTest(unittest.TestCase):
+    LINE = ('<134>1 2026-09-25T21:27:07-04:00 fw filterlog 31386 - [meta sequenceId="1"] '
+            '15,,,ecd3a310894625657c6591b80daa956a,igb1,match,block,in,4,0x0,,244,54321,0,none,6,tcp,40,'
+            '45.56.79.53,198.13.91.163,51234,23,0,S,1,,1024,,')
+
+    def test_parses_inbound_block(self):
+        event = COLLECTOR.parse_block(self.LINE)
+        self.assertEqual(event["source"], "45.56.79.53")
+        self.assertEqual(event["destination"], "198.13.91.163")
+        self.assertEqual((event["protocol"], event["port"], event["interface"]), ("tcp", "23", "igb1"))
+        self.assertIsNone(COLLECTOR.parse_block(self.LINE.replace(",block,in,", ",pass,in,")))
+        self.assertIsNone(COLLECTOR.parse_block(self.LINE.replace(",block,in,", ",block,out,")))
+
+    def test_tracks_hits_fades_and_flags_threats(self):
+        blocks = COLLECTOR.BlockTracker(fade=6, keep=60, window=60)
+        event = COLLECTOR.parse_block(self.LINE)
+        for second in range(COLLECTOR.THREAT_HITS_PER_MINUTE):
+            blocks.add(event, now=float(second))
+        now = float(COLLECTOR.THREAT_HITS_PER_MINUTE - 1)
+        (address, entry), = blocks.visible(now)
+        self.assertEqual(len(entry["hits"]), COLLECTOR.THREAT_HITS_PER_MINUTE)
+        self.assertEqual(blocks.activity(entry, now), 1.0)
+        self.assertAlmostEqual(blocks.activity(entry, now + 3), 0.5)
+        self.assertEqual(blocks.visible(now + 61), [])
+
+
 class GeoDatabaseTest(unittest.TestCase):
     def test_reads_key_from_maxmind_alias_url_only(self):
         with tempfile.TemporaryDirectory() as directory:

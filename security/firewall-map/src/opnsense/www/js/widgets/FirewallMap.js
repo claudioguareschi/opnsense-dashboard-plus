@@ -85,7 +85,11 @@ export default class FirewallMap extends BaseWidget {
             }
             this.enhancingDialog = false;
             // yes/no options render as checkboxes backed by their (hidden) selects
-            for (const [option, label] of [['hostnames', this.translations.hostnames], ['asn', this.translations.asn]]) {
+            for (const [option, label] of [
+                ['blocks', this.translations.blocks],
+                ['hostnames', this.translations.hostnames],
+                ['asn', this.translations.asn],
+            ]) {
                 const $select = $(`#${this.id}-option-${option}`);
                 const $container = $select.closest('.widget-option-container');
                 $container.find('.bootstrap-select').hide();
@@ -144,6 +148,13 @@ export default class FirewallMap extends BaseWidget {
                 options: choices([['1', this.translations.labels_zoomed], ['0', this.translations.labels_off]]),
                 default: '1',
             },
+            blocks: {
+                id: `${this.id}-option-blocks`,
+                title: this.translations.blocks,
+                type: 'select',
+                options: choices([['1', this.translations.blocks], ['0', this.translations.labels_off]]),
+                default: '1',
+            },
             hostnames: {
                 id: `${this.id}-option-hostnames`,
                 title: this.translations.hostnames,
@@ -171,6 +182,7 @@ export default class FirewallMap extends BaseWidget {
             labels: config.labels !== '0',
             hostnames: config.hostnames === '1',
             asn: config.asn !== '0',
+            blocks: config.blocks !== '0',
         };
     }
 
@@ -321,6 +333,10 @@ export default class FirewallMap extends BaseWidget {
                 ? '<a href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a>' : '');
             const count = snapshot.flows?.length || 0;
             let status = count ? `${count} ${this.translations.active_flows}` : this.translations.no_flows;
+            const blocked = this.settings?.blocks ? (snapshot.blocks || []).filter((block) => block.activity > 0).length : 0;
+            if (blocked) {
+                status += ` · ${blocked} ${this.translations.blocked_sources}`;
+            }
             if (snapshot.carp === 'backup') {
                 status += ` · ${this.translations.carp_backup}`;
             }
