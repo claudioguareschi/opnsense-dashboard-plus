@@ -666,6 +666,7 @@ class ThreatQueueTest(unittest.TestCase):
             self.assertEqual((rows[0]["first_seen"], rows[0]["last_seen"], rows[0]["samples"], rows[0]["status"]),
                              (100.0, 200.0, 2, "new"))
             self.assertTrue(rows[0]["inbound"])
+            self.assertEqual(rows[0]["target_services"], {"tcp|192.168.1.2|80": "HTTP"})
             note = "Port forward probe; checked logs ✓"
             encoded = __import__("base64").urlsafe_b64encode(note.encode()).decode().rstrip("=")
             self.assertEqual(THREATS.main(["set", "108.188.77.155", "blocked", encoded], path=os.path.join(directory, "cache.db")),

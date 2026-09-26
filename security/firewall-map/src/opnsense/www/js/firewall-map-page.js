@@ -427,7 +427,8 @@
         const targets = (row.targets || []).map((target) => {
             const [protocol, ip, port] = String(target).split('|');
             const firewall = !/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(ip);
-            return {ip, port, protocol, name: firewall ? 'firewall' : names.get(ip), firewall, service: serviceFor(protocol, port)};
+            return {ip, port, protocol, name: firewall ? 'firewall' : names.get(ip), firewall,
+                service: (row.target_services || {})[target] || serviceFor(protocol, port)};
         });
         const pseudo = {
             initiated: row.inbound && row.outbound ? 'both' : row.inbound ? 'remote' : 'local',

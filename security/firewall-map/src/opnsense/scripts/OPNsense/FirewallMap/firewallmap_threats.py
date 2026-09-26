@@ -154,6 +154,12 @@ def prune(db, now=None):
                (KEEP_ROWS,))
 
 
+def service_name(protocol, port):
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import firewallmap_collector  # noqa: E402  (imported lazily: the collector imports this module)
+    return firewallmap_collector.service_name(protocol, port)
+
+
 def listing(db, status=None):
     counts = dict(db.execute("SELECT status, count(*) FROM threats GROUP BY status").fetchall())
     counts = {name: counts.get(name, 0) for name in STATUSES}
@@ -170,8 +176,14 @@ def listing(db, status=None):
             data = json.loads(data)
         except ValueError:
             data = {}
-        rows.append({"address": address, "first_seen": first, "last_seen": last, "samples": samples,
-                     "status": current, "note": note or "", "status_changed": changed, **data})
+        row = {"address": address, "first_seen": first, "last_seen": last, "samples": samples,
+               "status": current, "note": note or "", "status_changed": changed, **data}
+        # name each inbound target's service (entries recorded before ports were kept have none)
+        row["target_services"] = {}
+        for target in data.get("targets", []):
+            protocol, port = str(target).split("|")[0], str(target).split("|")[-1]
+            row["target_services"][target] = service_name(protocol, port or None)
+        rows.append(row)
     return {"status": "ok", "rows": rows, "counts": counts}
 
 
