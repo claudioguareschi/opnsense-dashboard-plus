@@ -25,151 +25,147 @@
  #}
 
 <style>
-    #firewallmap-page {
-        position: relative;
-        /* header, page title, content padding and the fixed footer */
-        height: calc(100vh - 235px);
-        min-height: 420px;
-        overflow: hidden;
-        border-radius: 6px;
+    #fwmap-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+    #fwmap-toolbar select { width: auto; max-width: 220px; display: inline-block; height: 30px; padding: 2px 6px; }
+    #fwmap-toolbar label { margin: 0 2px 0 6px; font-weight: normal; opacity: .8; }
+    #fwmap-filter-asn { display: none; }
+    #fwmap-layout { display: flex; gap: 12px; }
+    #fwmap-map {
+        position: relative; flex: 1; min-width: 0; overflow: hidden; border-radius: 6px;
+        /* header, page title, toolbar, content padding and the fixed footer */
+        height: calc(100vh - 280px); min-height: 420px;
     }
-    #firewallmap-page-grid {
-        pointer-events: none;
-        position: absolute;
-        inset: 0;
-        z-index: 0;
-        background-size: 48px 48px;
+    #fwmap-grid { pointer-events: none; position: absolute; inset: 0; z-index: 0; background-size: 48px 48px; }
+    #fwmap-canvas { position: absolute; inset: 0; z-index: 1; text-align: left; }
+    #fwmap-status { position: absolute; left: 14px; bottom: 10px; z-index: 2; font-size: .85em; pointer-events: none; }
+    #fwmap-credit { position: absolute; right: 12px; bottom: 10px; z-index: 2; font-size: .8em; opacity: .7; }
+    #fwmap-legend {
+        position: absolute; left: 12px; top: 10px; z-index: 2; font-size: .8em; pointer-events: none;
+        display: flex; flex-wrap: wrap; gap: 4px 12px; max-width: 70%;
     }
-    #firewallmap-page-canvas {
-        position: absolute;
-        inset: 0;
-        z-index: 1;
-        text-align: left;
+    .fwmap-legend-item i { display: inline-block; width: 18px; height: 3px; margin-right: 5px; vertical-align: middle; border-radius: 2px; }
+    #fwmap-side { width: 320px; flex: 0 0 320px; display: flex; flex-direction: column; gap: 12px;
+        height: calc(100vh - 280px); min-height: 420px; }
+    #fwmap-talkers, #fwmap-details-box { border: 1px solid rgba(128, 128, 128, .25); border-radius: 6px; padding: 8px; }
+    #fwmap-talkers { flex: 1 1 60%; overflow-y: auto; min-height: 0; }
+    #fwmap-details-box { flex: 1 1 40%; overflow-y: auto; min-height: 0; }
+    #fwmap-talkers .nav { margin-bottom: 6px; }
+    #fwmap-talkers .nav > li > a { padding: 4px 10px; }
+    .fwmap-talker { display: flex; align-items: center; gap: 8px; padding: 3px 2px; cursor: pointer; border-radius: 4px; }
+    .fwmap-talker:hover { background: rgba(128, 128, 128, .12); }
+    .fwmap-talker-text { flex: 1; min-width: 0; }
+    .fwmap-talker-label, .fwmap-talker-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fwmap-talker-sub { font-size: .8em; opacity: .7; }
+    .fwmap-talker-rate { width: 70px; text-align: right; font-size: .85em; }
+    .fwmap-details-head { display: flex; justify-content: space-between; }
+    .fwmap-details-head a { font-size: 1.3em; line-height: 1; text-decoration: none; }
+    .fwmap-address { margin-top: 6px; }
+    .fwmap-links { font-size: .85em; }
+    .fwmap-empty { padding: 6px 2px; }
+    @media (max-width: 1100px) {
+        #fwmap-layout { flex-direction: column; }
+        #fwmap-side { width: auto; flex: none; height: auto; }
     }
-    #firewallmap-page-status, #firewallmap-page-credit {
-        position: absolute;
-        bottom: 10px;
-        z-index: 2;
-        font-size: .85em;
-    }
-    #firewallmap-page-status { left: 14px; pointer-events: none; }
-    #firewallmap-page-credit { right: 12px; opacity: .7; }
 </style>
 
-<script src="/ui/js/firewall-map-renderer.js?v={{ rendererVersion }}"></script>
 <script>
-    $(async function () {
-        const text = {
-            active_flows: "{{ lang._('active flows') }}",
-            blocked_sources: "{{ lang._('blocked sources') }}",
-            below_threshold: "{{ lang._('below threshold') }}",
-            no_flows: "{{ lang._('No active public flows') }}",
-            starting: "{{ lang._('Starting flow collector…') }}",
-            unavailable: "{{ lang._('Live flow data is unavailable') }}",
-            webgl: "{{ lang._('WebGL is required for Firewall Map+') }}",
-            renderer_failed: "{{ lang._('Map renderer failed to initialise') }}",
-            carp_backup: "{{ lang._('CARP backup: traffic is passing through the master') }}",
-            key_missing: "{{ lang._('A MaxMind license key is needed: add it in the Firewall Map widget settings or in the GeoIP alias settings, or choose DB-IP Lite') }}",
-            downloading: "{{ lang._('Downloading the geolocation database…') }}",
-        };
-        const $map = $('#firewallmap-page');
-        const status = (message) => $('#firewallmap-page-status').text(message || '');
-
-        const canvas = document.createElement('canvas');
-        if (!(canvas.getContext('webgl2') || canvas.getContext('webgl'))) {
-            status(text.webgl);
-            return;
-        }
-
-        // same per-user settings as the dashboard widget
-        let config = {};
-        try {
-            const dashboard = await $.getJSON('/api/core/dashboard/getDashboard');
-            config = (dashboard.dashboard?.widgets || []).find((widget) => widget.id === 'firewallmap')?.widget || {};
-        } catch (error) {
-            console.error('Firewall Map+: dashboard settings unavailable', error);
-        }
-        const settings = {
-            heavyTop: parseInt(config.heavy_top ?? '5', 10),
-            heavyRate: parseInt(config.heavy_rate ?? '1000000', 10),
-            maxArcs: parseInt(config.max_arcs ?? '150', 10),
-            labels: config.labels !== '0',
-            hostnames: config.hostnames === '1',
-            asn: config.asn !== '0',
-            blocks: config.blocks !== '0',
-            blockMin: parseInt(config.block_min ?? '3', 10) || 3,
-        };
-
-        let renderer;
-        try {
-            const theme = FirewallMapRenderer.readTheme($map[0]);
-            const rgba = (color, alpha) => `rgba(${color.join(', ')}, ${alpha})`;
-            $map.css({
-                background: `rgb(${theme.background.join(', ')})`,
-                boxShadow: `inset 0 0 0 1px ${rgba(theme.accent, theme.dark ? 0.3 : 0.18)}`,
-            });
-            const line = rgba(theme.text, theme.dark ? 0.07 : 0.05);
-            $('#firewallmap-page-grid').css('background-image',
-                `linear-gradient(${line} 1px, transparent 1px), linear-gradient(90deg, ${line} 1px, transparent 1px)`);
-            $('#firewallmap-page-status').css('color', rgba(theme.text, 0.75));
-            const container = document.getElementById('firewallmap-page-canvas');
-            renderer = FirewallMapRenderer.create(container, {theme, settings});
-            $(container).children('canvas').css({left: 0, top: 0});
-        } catch (error) {
-            console.error('Firewall Map+: renderer initialisation failed', error);
-            status(`${text.renderer_failed}: ${error?.message || error}`);
-            return;
-        }
-
-        $(window).on('resize', () => renderer.resize());
-
-        const query = `?blocks_min=${settings.blockMin}${settings.hostnames ? '&hostnames=1' : ''}`;
-        const tick = async () => {
-            try {
-                const snapshot = await $.getJSON(`/api/firewallmap/flow/snapshot${query}`);
-                if (snapshot.status === 'starting') {
-                    status(text.starting);
-                } else if (snapshot.status === 'no_database') {
-                    renderer.render({flows: [], locations: []});
-                    status(snapshot.reason === 'maxmind_key_missing' ? text.key_missing : text.downloading);
-                } else if (snapshot.status !== 'ok') {
-                    status(text.unavailable);
-                } else {
-                    renderer.render(snapshot);
-                    $('#firewallmap-page-credit').html(snapshot.provider === 'dbip'
-                        ? '<a href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a>' : '');
-                    const count = snapshot.flows?.length || 0;
-                    let message = count ? `${count} ${text.active_flows}` : text.no_flows;
-                    if (settings.blocks) {
-                        const shown = (snapshot.blocks || []).length;
-                        const below = snapshot.blocks_below || 0;
-                        if (shown || below) {
-                            message += ` · ${shown} ${text.blocked_sources}`;
-                            if (below) {
-                                message += ` · ${below} ${text.below_threshold}`;
-                            }
-                        }
-                    }
-                    if (snapshot.carp === 'backup') {
-                        message += ` · ${text.carp_backup}`;
-                    }
-                    status(message);
-                }
-            } catch (error) {
-                console.error('Firewall Map+: flow update failed', error);
-                status(text.unavailable);
-            }
-            setTimeout(tick, 2000);
-        };
-        tick();
-    });
+    window.FirewallMapPageText = {
+        firewall_map: "{{ lang._('Firewall Map') }}",
+        active_flows: "{{ lang._('active flows') }}",
+        blocked_sources: "{{ lang._('blocked sources') }}",
+        below_threshold: "{{ lang._('below threshold') }}",
+        listed_flows: "{{ lang._('to listed addresses') }}",
+        no_flows: "{{ lang._('No active public flows') }}",
+        starting: "{{ lang._('Starting flow collector…') }}",
+        unavailable: "{{ lang._('Live flow data is unavailable') }}",
+        webgl: "{{ lang._('WebGL is required for Firewall Map+') }}",
+        renderer_failed: "{{ lang._('Map renderer failed to initialise') }}",
+        carp_backup: "{{ lang._('CARP backup: traffic is passing through the master') }}",
+        key_missing: "{{ lang._('A MaxMind license key is needed: add it in the Firewall Map widget settings or in the GeoIP alias settings, or choose DB-IP Lite') }}",
+        downloading: "{{ lang._('Downloading the geolocation database…') }}",
+        database_failed: "{{ lang._('Geolocation database download failed') }}",
+        all_services: "{{ lang._('All services') }}",
+        all_interfaces: "{{ lang._('All interfaces') }}",
+        all_hosts: "{{ lang._('All inside hosts') }}",
+        all_countries: "{{ lang._('All countries') }}",
+        no_talkers: "{{ lang._('No traffic yet') }}",
+        filter_hint: "{{ lang._('Show only this on the map') }}",
+        click_hint: "{{ lang._('Click an endpoint or arc on the map for details and actions.') }}",
+        remote_endpoints: "{{ lang._('Remote endpoints') }}",
+        blocked_source: "{{ lang._('Blocked source') }}",
+        inside_hosts: "{{ lang._('Inside hosts') }}",
+        copy: "{{ lang._('Copy') }}",
+        whois: "{{ lang._('Whois') }}",
+        show_states: "{{ lang._('States') }}",
+        kill_states: "{{ lang._('Kill states') }}",
+        add_to_alias: "{{ lang._('Add to alias') }}",
+        add_country: "{{ lang._('Add country to GeoIP alias') }}",
+        close: "{{ lang._('Close') }}",
+        confirm: "{{ lang._('Confirm') }}",
+        cancel: "{{ lang._('Cancel') }}",
+        kill_confirm: "{{ lang._('Kill all firewall states involving') }}",
+        killed: "{{ lang._('States killed:') }}",
+        add_confirm: "{{ lang._('Add') }}",
+        no_aliases: "{{ lang._('No suitable alias exists yet. Create one under Firewall ▸ Aliases first.') }}",
+        action_failed: "{{ lang._('The action failed') }}",
+        states_for: "{{ lang._('States for') }}",
+        no_states: "{{ lang._('No states found.') }}",
+        more_states: "{{ lang._('Only the first 100 states are shown.') }}",
+        interface: "{{ lang._('Interface') }}",
+        protocol: "{{ lang._('Protocol') }}",
+        source: "{{ lang._('Source') }}",
+        destination: "{{ lang._('Destination') }}",
+        state: "{{ lang._('State') }}",
+        bytes: "{{ lang._('Bytes') }}",
+    };
 </script>
+<script src="/ui/js/firewall-map-renderer.js?v={{ rendererVersion }}"></script>
+<script src="/ui/js/firewall-map-page.js?v={{ pageVersion }}"></script>
 
 <div class="content-box" style="padding: 12px;">
-    <div id="firewallmap-page">
-        <div id="firewallmap-page-grid" aria-hidden="true"></div>
-        <div id="firewallmap-page-canvas"></div>
-        <div id="firewallmap-page-status"></div>
-        <div id="firewallmap-page-credit"></div>
+    <div id="fwmap-toolbar">
+        <label for="fwmap-color">{{ lang._('Colour') }}</label>
+        <select id="fwmap-color" class="form-control">
+            <option value="direction">{{ lang._('By direction') }}</option>
+            <option value="egress">{{ lang._('By egress') }}</option>
+            <option value="service">{{ lang._('By service') }}</option>
+        </select>
+        <label for="fwmap-filter-traffic">{{ lang._('Show') }}</label>
+        <select id="fwmap-filter-traffic" class="form-control">
+            <option value="all">{{ lang._('All traffic') }}</option>
+            <option value="permitted">{{ lang._('Permitted') }}</option>
+            <option value="blocked">{{ lang._('Blocked') }}</option>
+            <option value="threats">{{ lang._('Threats') }}</option>
+        </select>
+        <select id="fwmap-filter-service" class="form-control"></select>
+        <select id="fwmap-filter-iface" class="form-control"></select>
+        <select id="fwmap-filter-host" class="form-control"></select>
+        <select id="fwmap-filter-country" class="form-control"></select>
+        <span id="fwmap-filter-asn" class="label label-default">
+            <span></span> <a href="#" style="color:inherit" title="{{ lang._('Remove') }}">&times;</a>
+        </span>
+        <button id="fwmap-reset" class="btn btn-default btn-sm" type="button">{{ lang._('Reset filters') }}</button>
+    </div>
+    <div id="fwmap-layout">
+        <div id="fwmap-map">
+            <div id="fwmap-grid" aria-hidden="true"></div>
+            <div id="fwmap-canvas"></div>
+            <div id="fwmap-legend"></div>
+            <div id="fwmap-status"></div>
+            <div id="fwmap-credit"></div>
+        </div>
+        <div id="fwmap-side">
+            <div id="fwmap-talkers">
+                <ul class="nav nav-tabs">
+                    <li class="active"><a href="#" data-tab="hosts">{{ lang._('Hosts') }}</a></li>
+                    <li><a href="#" data-tab="countries">{{ lang._('Countries') }}</a></li>
+                    <li><a href="#" data-tab="networks">{{ lang._('Networks') }}</a></li>
+                </ul>
+                <div id="fwmap-talkers-list"></div>
+            </div>
+            <div id="fwmap-details-box">
+                <div id="fwmap-details"></div>
+            </div>
+        </div>
     </div>
 </div>

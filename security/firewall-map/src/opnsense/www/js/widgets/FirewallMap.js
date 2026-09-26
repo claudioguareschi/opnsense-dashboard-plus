@@ -18,6 +18,15 @@ export default class FirewallMap extends BaseWidget {
         this.geoSettings = null;
     }
 
+    _settingsError(message) {
+        BootstrapDialog.show({
+            type: BootstrapDialog.TYPE_DANGER,
+            title: this.translations.title,
+            message: $('<div></div>').text(`${this.translations.settings_failed}: ${message}`),
+            buttons: [{label: 'OK', action: (dialog) => dialog.close()}],
+        });
+    }
+
     async _loadGeoSettings() {
         // only administrators may read (and change) the firewall-wide database settings
         try {
@@ -60,8 +69,8 @@ export default class FirewallMap extends BaseWidget {
                 id: `${this.id}-option-geo-update`,
                 title: this.translations.geo_update,
                 type: 'select',
-                options: choices([['1', '1'], ['3', '3'], ['7', '7'], ['14', '14'], ['30', '30']].map(
-                    ([value]) => [value, `${value} ${this.translations.days}`])),
+                options: choices([...new Set(['1', '3', '7', '14', '30', String(geo.update_days)])]
+                    .sort((a, b) => a - b).map((value) => [value, `${value} ${this.translations.days}`])),
                 default: geo.update_days,
             },
         };
@@ -216,9 +225,11 @@ export default class FirewallMap extends BaseWidget {
                 const result = await this.ajaxCall('/api/firewallmap/settings/set', JSON.stringify(update), 'POST');
                 if (result.result !== 'saved') {
                     console.error('Firewall Map+: settings not saved', result);
+                    this._settingsError((result.validations || []).join(' ') || result.result);
                 }
             } catch (error) {
                 console.error('Firewall Map+: settings not saved', error);
+                this._settingsError(error?.statusText || String(error));
             }
             await this._loadGeoSettings();
         }
@@ -334,8 +345,9 @@ export default class FirewallMap extends BaseWidget {
             if (snapshot.status === 'no_database') {
                 // no locations without a geolocation database: keep the map empty and say why
                 this.renderer.render({flows: [], locations: []});
-                this._status(snapshot.reason === 'maxmind_key_missing'
-                    ? this.translations.key_missing : this.translations.database_downloading);
+                this._status(snapshot.reason === 'maxmind_key_missing' ? this.translations.key_missing
+                    : snapshot.error ? `${this.translations.database_failed}: ${snapshot.error}`
+                    : this.translations.database_downloading);
                 return;
             }
             if (snapshot.status !== 'ok') {

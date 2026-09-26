@@ -38,6 +38,8 @@
             <key_from_alias>Using the key from the GeoIP alias (enter one to override)</key_from_alias>
             <key_none>Required for MaxMind</key_none>
             <key_missing>A MaxMind license key is needed: add it in this widget's settings or in the GeoIP alias settings, or choose DB-IP Lite</key_missing>
+            <database_failed>Geolocation database download failed</database_failed>
+            <settings_failed>Firewall-wide settings were not saved</settings_failed>
             <database_downloading>Downloading the geolocation database…</database_downloading>
             <carp_backup>CARP backup: traffic is passing through the master</carp_backup>
             <data_unavailable>Live flow data is unavailable</data_unavailable>

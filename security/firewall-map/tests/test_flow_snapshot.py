@@ -174,6 +174,90 @@ class IdleTest(unittest.TestCase):
             self.assertTrue(COLLECTOR.idle(started=now - 1000, now=now + 301, marker=marker, idle_seconds=300))
 
 
+class InsideTest(unittest.TestCase):
+    NAT_OUT = """all tcp 198.13.91.163:19421 (192.168.30.30:51858) -> 34.209.15.107:8883       ESTABLISHED:ESTABLISHED
+   [499210651 + 65535]  [1522661447 + 31469]
+   age 21:44:28, expires in 23:59:37, 429:258 pkts, 27391:18836 bytes, allow-opts
+   id: 5415dc6a00000000 creatorid: fc08c4c0
+   origif: igb1
+"""
+    IFCONFIG = """igb1: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
+\tinet 152.44.11.230 netmask 0xffffff00 broadcast 152.44.11.255
+vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
+\tinet 192.168.30.248 netmask 0xffffff00 broadcast 192.168.30.255
+\tinet 192.168.30.250 netmask 0xffffffff vhid 30
+"""
+
+    def test_parses_origif_and_inside_host(self):
+        record = COLLECTOR.parse_states(self.NAT_OUT)[0]
+        self.assertEqual(record["origif"], "igb1")
+        self.assertEqual(COLLECTOR.inside_address(record), "192.168.30.30")
+
+    def test_vpn_egress_is_drawn_from_the_firewall(self):
+        tunnel = self.NAT_OUT.replace("198.13.91.163:19421", "10.74.109.115:19421").replace("origif: igb1", "origif: wg0")
+        record = COLLECTOR.parse_states(tunnel)[0]
+        self.assertEqual(COLLECTOR.flow_endpoints(record, {"198.13.91.163", "152.44.11.230"}),
+                         ("152.44.11.230", "34.209.15.107"))
+        self.assertEqual(record["origif"], "wg0")
+        lan_side = "all tcp 192.168.30.30:51858 -> 34.209.15.107:8883       ESTABLISHED:ESTABLISHED\n" \
+                   "   age 00:00:05, expires in 23:59:37, 1:1 pkts, 1:1 bytes\n   id: 01 creatorid: 02\n"
+        self.assertIsNone(COLLECTOR.flow_endpoints(COLLECTOR.parse_states(lan_side)[0], {"198.13.91.163"}))
+
+    def test_maps_inside_host_to_interface_and_name(self):
+        networks = COLLECTOR.interface_networks(self.IFCONFIG)
+        self.assertEqual(networks[0][0].prefixlen, 32)
+        described = COLLECTOR.describe_inside("192.168.30.30", {"192.168.30.30": "nas"}, networks,
+                                              {"vlan03": "VLAN30_IOT"})
+        self.assertEqual(described, {"ip": "192.168.30.30", "name": "nas", "interface": "VLAN30_IOT"})
+
+    def test_tracker_reports_inside_hosts_and_egress(self):
+        tracker = COLLECTOR.FlowTracker(smoothing=1.0)
+        records = COLLECTOR.parse_states(self.NAT_OUT)
+        tracker.update(records, {"198.13.91.163"}, now=0.0)
+        flow = tracker.flows[("198.13.91.163", "34.209.15.107")]
+        self.assertEqual(flow["inside"], ["192.168.30.30"])
+        self.assertEqual(flow["egress"], "igb1")
+
+    def test_reads_kea_and_dnsmasq_leases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            kea = os.path.join(directory, "kea.csv")
+            with open(kea, "w") as handle:
+                handle.write("address,hwaddr,client_id,valid_lifetime,expire,subnet_id,fqdn_fwd,fqdn_rev,hostname,state\n"
+                             "192.168.30.80,aa,01,3600,100,30,0,0,old-name,0\n"
+                             "192.168.30.80,aa,01,3600,9999999999,30,0,0,homeassistant,0\n"
+                             "192.168.30.81,bb,02,3600,1,30,0,0,expired,0\n")
+            dnsmasq = os.path.join(directory, "dnsmasq.leases")
+            with open(dnsmasq, "w") as handle:
+                handle.write("9999999999 cc:cc 192.168.40.5 tv *\n9999999999 dd:dd 192.168.40.6 printer *\n")
+            names = COLLECTOR.lease_names(kea, dnsmasq, os.path.join(directory, "none.xml"), now=1000)
+            self.assertEqual(names, {"192.168.30.80": "homeassistant", "192.168.40.5": "tv", "192.168.40.6": "printer"})
+
+
+class BlocklistTest(unittest.TestCase):
+    def test_longest_prefix_lookup_across_tables(self):
+        index = COLLECTOR.BlocklistIndex()
+        index.load({
+            "spamhaus_drop": ["45.56.0.0/16", "   203.0.113.7", "!10.0.0.0/8", "2001:db8::/32"],
+            "crowdsec_blacklists": ["45.56.79.53"],
+        })
+        self.assertEqual(index.lookup("45.56.79.53"), ["crowdsec_blacklists", "spamhaus_drop"])
+        self.assertEqual(index.lookup("203.0.113.7"), ["spamhaus_drop"])
+        self.assertEqual(index.lookup("10.1.2.3"), [])
+        self.assertEqual(index.lookup("not-an-ip"), [])
+
+    def test_selects_feed_tables(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = os.path.join(directory, "config.xml")
+            with open(config, "w") as handle:
+                handle.write("<opnsense><OPNsense><Firewall><Alias><aliases>"
+                             "<alias><name>Drop</name><type>urltable</type><enabled>1</enabled></alias>"
+                             "<alias><name>Office</name><type>host</type><enabled>1</enabled></alias>"
+                             "<alias><name>Off</name><type>url</type><enabled>0</enabled></alias>"
+                             "</aliases></Alias></Firewall></OPNsense></opnsense>")
+            tables = ["Drop", "Office", "Off", "crowdsec_blacklists", "bogons"]
+            self.assertEqual(COLLECTOR.blocklist_tables(config, tables), {"Drop", "crowdsec_blacklists"})
+
+
 class BlockTest(unittest.TestCase):
     LINE = ('<134>1 2026-09-25T21:27:07-04:00 fw filterlog 31386 - [meta sequenceId="1"] '
             '15,,,ecd3a310894625657c6591b80daa956a,igb1,match,block,in,4,0x0,,244,54321,0,none,6,tcp,40,'
@@ -201,8 +285,40 @@ class BlockTest(unittest.TestCase):
         self.assertEqual(blocks.visible(now + 61), [])
         blocks.add(event, now=now + 300)
         (address, entry), = blocks.visible(now + 300)
-        self.assertEqual(len(entry["hits"]), COLLECTOR.THREAT_HITS_PER_MINUTE + 1)
+        self.assertEqual(blocks.hits(entry), COLLECTOR.THREAT_HITS_PER_MINUTE + 1)
         self.assertEqual(blocks.per_minute(entry, now + 300), 1)
+        # and they age out of the 10-minute window
+        self.assertEqual(blocks.visible(now + 1000), [])
+        self.assertEqual(blocks.sources, {})
+
+    def test_bounded_under_a_flood(self):
+        blocks = COLLECTOR.BlockTracker(max_sources=3)
+        event = COLLECTOR.parse_block(self.LINE)
+        for index in range(10):
+            blocks.add({**event, "source": f"45.56.79.{index}", "port": str(index)}, now=float(index))
+        self.assertEqual(sorted(blocks.sources), ["45.56.79.7", "45.56.79.8", "45.56.79.9"])
+        for port in range(100):
+            blocks.add({**event, "port": str(port)}, now=20.0)
+        self.assertEqual(len(blocks.sources["45.56.79.53"]["ports"]), COLLECTOR.MAX_PORTS_PER_SOURCE)
+
+    def test_log_tail_returns_complete_lines_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "latest.log")
+            with open(path, "w") as handle:
+                handle.write("old line\n")
+            tail = COLLECTOR.FilterLogTail(path)
+            self.assertEqual(tail.lines(), [])
+            with open(path, "a") as handle:
+                handle.write("first\nsec")
+            self.assertEqual(tail.lines(), ["first"])
+            with open(path, "a") as handle:
+                handle.write("ond\n")
+            self.assertEqual(tail.lines(), ["second"])
+
+    def test_old_log_lines_do_not_count_as_current(self):
+        wall = COLLECTOR.log_time(self.LINE)
+        self.assertEqual(COLLECTOR.block_event_time(self.LINE, 100.0, wall + 30), 70.0)
+        self.assertIsNone(COLLECTOR.block_event_time(self.LINE, 100.0, wall + 3600))
 
     def test_reads_log_timestamps(self):
         self.assertEqual(COLLECTOR.log_time(self.LINE),
@@ -214,6 +330,40 @@ class BlockTest(unittest.TestCase):
         result = SNAPSHOT.apply_block_threshold(payload, 3)
         self.assertEqual([block["hits"] for block in result["blocks"]], [3, 7])
         self.assertEqual(result["blocks_below"], 1)
+
+
+class RobustnessTest(unittest.TestCase):
+    def test_parses_translation_after_both_endpoints(self):
+        line = ("all tcp 192.168.1.2:443 (198.13.91.163:443) <- 45.56.79.53:35799 (10.0.0.9:35799)"
+                "       ESTABLISHED:ESTABLISHED\n   age 00:00:05, expires in 23:59:37, 1:1 pkts, 1:1 bytes\n"
+                "   id: 01 creatorid: 02\n")
+        record = COLLECTOR.parse_states(line)[0]
+        self.assertEqual(record["src"]["address"], "45.56.79.53")
+        self.assertEqual(record["nat"]["address"], "198.13.91.163")
+        self.assertEqual(record["state"], "ESTABLISHED:ESTABLISHED")
+
+    def test_transient_geo_failures_are_not_cached(self):
+        calls = []
+
+        def flaky(address):
+            calls.append(address)
+            if len(calls) == 1:
+                raise LookupError("timeout")
+            return {"lat": 1.0, "lon": 2.0}
+        with tempfile.TemporaryDirectory() as directory:
+            geo = COLLECTOR.GeoCache(path=os.path.join(directory, "geo.json"), lookup=flaky)
+            geo.resolve(["8.8.8.8"])
+            self.assertNotIn("8.8.8.8", geo.entries)
+            geo.resolve(["8.8.8.8"])
+            self.assertEqual(geo.get("8.8.8.8"), {"lat": 1.0, "lon": 2.0})
+
+    def test_single_collector_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "collector.lock")
+            first = COLLECTOR.acquire_lock(path)
+            self.assertIsNotNone(first)
+            self.assertIsNone(COLLECTOR.acquire_lock(path))
+            first.close()
 
 
 class GeoDatabaseTest(unittest.TestCase):

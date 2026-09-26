@@ -56,9 +56,22 @@ BLOCK_WINDOW_SECONDS = 600
 THREAT_HITS_PER_MINUTE = 30
 MAX_BLOCK_SOURCES = 300
 MAX_LOG_LINES_PER_SAMPLE = 5000
+MAX_LOG_BYTES_PER_SAMPLE = 4 * 1024 * 1024
+# bounded memory under floods: tracked blocked sources and ports remembered per source
+MAX_TRACKED_SOURCES = 5000
+MAX_PORTS_PER_SOURCE = 20
+BLOCK_BUCKET_SECONDS = 10
+MAX_HOSTNAMES = 5000
+MAX_FAILURE_BACKOFF = 30.0
+COLLECTOR_LOCK = "/var/run/firewallmap/collector.lock"
 # read back this much of the log when the collector starts, so the 10-minute hit window is full
 BACKLOG_BYTES = 2 * 1024 * 1024
 BLOCK_REFRESH_SECONDS = 60
+# threat intelligence: pf tables behind URL/external aliases and well-known feed tables
+BLOCKLIST_REFRESH_SECONDS = 300
+BLOCKLIST_ALIAS_TYPES = {"urltable", "url", "urljson", "external"}
+BLOCKLIST_TABLE_PREFIXES = ("crowdsec", "__qfeeds", "qfeeds", "spamhaus", "firehol", "abuse")
+BLOCKLIST_MAX_ENTRIES = 500000
 SETTINGS_REFRESH_SECONDS = 30
 GEO_CACHE_FILE = "/var/db/firewallmap/geo.json"
 
@@ -72,6 +85,7 @@ GEO_LOOKUPS_PER_SAMPLE = 25
 GEO_CACHE_MAX = 20000
 GEO_CACHE_VERSION = 2
 MAX_SERVICES = 4
+MAX_INSIDE = 3
 
 SERVICES = {
     ("tcp", "20"): "FTP data", ("tcp", "21"): "FTP", ("tcp", "22"): "SSH", ("tcp", "25"): "SMTP",
@@ -97,6 +111,7 @@ def service_name(protocol, port):
 COUNTERS = re.compile(r"(?P<packets_in>\d+):(?P<packets_out>\d+) pkts,\s+(?P<bytes_in>\d+):(?P<bytes_out>\d+) bytes")
 AGE = re.compile(r"\bage (?:(?P<days>\d+)d)?(?P<h>\d+):(?P<m>\d+):(?P<s>\d+)")
 STATE_ID = re.compile(r"\bid: (?P<id>[0-9a-f]+) creatorid: (?P<creator>[0-9a-f]+)")
+ORIGIF = re.compile(r"\borigif: (?P<ifname>\S+)")
 ENDPOINT = re.compile(r"^(?P<address>.+?)(?::(?P<port>\d+))?$")
 MMDB_KEY = re.compile(r'^"(?P<key>[^"]+)":\s*$')
 MMDB_STRING = re.compile(r'^"(?P<value>.*)" <utf8_string>$')
@@ -118,12 +133,14 @@ def parse_states(output):
     for line in output.splitlines():
         if not line.startswith((" ", "\t")):
             parts = line.split()
-            if len(parts) < 6:
+            arrow = next((index for index, part in enumerate(parts) if part in ("->", "<-")), None)
+            if len(parts) < 6 or arrow is None or arrow < 3 or arrow + 1 >= len(parts):
                 header = None
                 continue
-            direction = "out" if parts[-3] == "->" else "in"
+            # "A [(A')] -> B [(B')] STATE": translations follow the endpoint they belong to
+            direction = "out" if parts[arrow] == "->" else "in"
             left = endpoint(parts[2])
-            right = endpoint(parts[-2])
+            right = endpoint(parts[arrow + 1])
             header = {
                 "interface": parts[0],
                 "protocol": parts[1],
@@ -131,12 +148,17 @@ def parse_states(output):
                 "direction": direction,
                 "src": left if direction == "out" else right,
                 "dst": right if direction == "out" else left,
-                "nat": endpoint(parts[3]) if parts[3].startswith("(") else None,
+                "nat": endpoint(parts[3]) if arrow > 3 and parts[3].startswith("(") else None,
             }
             continue
         state_id = STATE_ID.search(line)
         if state_id and records and records[-1].get("id") is None:
             records[-1]["id"] = f"{state_id.group('id')}/{state_id.group('creator')}"
+            continue
+        origif = ORIGIF.search(line)
+        if origif and records and records[-1].get("origif") is None:
+            # the interface the state was created on: for NAT states, the egress (WAN, VPN, ...)
+            records[-1]["origif"] = origif.group("ifname")
             continue
         if header is None:
             continue
@@ -147,6 +169,7 @@ def parse_states(output):
         records.append({
             **header,
             "id": None,
+            "origif": None,
             "age": (
                 int(age.group("days") or 0) * 86400 + int(age.group("h")) * 3600
                 + int(age.group("m")) * 60 + int(age.group("s"))
@@ -180,12 +203,33 @@ def flow_endpoints(record, local_addresses):
         local = src
     elif dst in local_addresses:
         local = dst
+    elif nat and private_ipv4(src) and public_ipv4(dst) and local_addresses:
+        # outbound NAT to a tunnel address (e.g. a WireGuard or IPsec egress): draw it from the
+        # firewall's own location, the egress interface tells which path it took
+        local = min(local_addresses)
+        return local, dst
     else:
         return None
     remote = dst if local == src else src
     if not public_ipv4(remote) or remote == local or remote in local_addresses:
         return None
     return local, remote
+
+
+def private_ipv4(value):
+    try:
+        address = ipaddress.ip_address(value)
+    except (TypeError, ValueError):
+        return False
+    return address.version == 4 and address.is_private and not address.is_loopback
+
+
+def inside_address(record):
+    """The LAN host behind a NAT state (the private address among source, destination and NAT)."""
+    for side in (record["nat"], record["src"], record["dst"]):
+        if side and private_ipv4(side["address"]):
+            return side["address"]
+    return None
 
 
 def parse_mmdb(output):
@@ -220,8 +264,11 @@ def mmdb_lookup(database, address):
             [MMDBLOOKUP, "--file", database, "--ip", address],
             capture_output=True, check=False, text=True, timeout=2,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return {}
+    except (OSError, subprocess.TimeoutExpired) as error:
+        # a transient failure, not "no data": callers must not cache it
+        raise LookupError(str(error)) from error
+    if result.returncode != 0:
+        raise LookupError(result.stderr.strip() or "mmdblookup failed")
     return parse_mmdb(result.stdout)
 
 
@@ -244,7 +291,10 @@ def lookup_location(address, city_database=CITY_DATABASE, asn_database=ASN_DATAB
         "country_name": values.get(("country", "names", "en")) or values.get(("registered_country", "names", "en")),
     }
     if os.path.exists(asn_database):
-        asn = mmdb_lookup(asn_database, address)
+        try:
+            asn = mmdb_lookup(asn_database, address)
+        except LookupError:
+            asn = {}
         if ("autonomous_system_number",) in asn:
             location["asn"] = int(asn[("autonomous_system_number",)])
             location["as_org"] = asn.get(("autonomous_system_organization",))
@@ -302,9 +352,12 @@ class GeoCache:
             if budget <= 0:
                 break
             if address not in self.entries:
-                self.entries[address] = self.lookup(address)
-                self.dirty = True
                 budget -= 1
+                try:
+                    self.entries[address] = self.lookup(address)
+                except LookupError:
+                    continue  # try again on a later sample
+                self.dirty = True
 
     def get(self, address):
         return self.entries.get(address)
@@ -319,14 +372,35 @@ def write_json(path, payload):
     os.replace(temporary, path)
 
 
+def interface_networks(output):
+    """[(IPv4Network, device)] for every IPv4 address configured on an interface."""
+    networks = []
+    device = None
+    for line in output.splitlines():
+        header = re.match(r"^(\S+?):\s+flags=", line)
+        if header:
+            device = header.group(1)
+            continue
+        match = re.search(r"\binet\s+(\d+(?:\.\d+){3})\s+netmask\s+(0x[0-9a-fA-F]+)", line)
+        if match and device:
+            try:
+                prefix = bin(int(match.group(2), 16)).count("1")
+                networks.append((ipaddress.ip_network(f"{match.group(1)}/{prefix}", strict=False), device))
+            except ValueError:
+                continue
+    # most specific first, so a host matches its own subnet before a wider one
+    networks.sort(key=lambda item: -item[0].prefixlen)
+    return networks
+
+
 def host_info():
-    """Return (public IPv4 addresses on this firewall, CARP role or None)."""
+    """Return (public IPv4 addresses on this firewall, CARP role or None, interface networks)."""
     try:
         output = subprocess.run(
             [IFCONFIG, "-a"], capture_output=True, check=False, text=True, timeout=2,
         ).stdout
     except (OSError, subprocess.TimeoutExpired):
-        return set(), None
+        return set(), None, []
     addresses = {address for address in re.findall(r"\binet\s+(\d+(?:\.\d+){3})", output) if public_ipv4(address)}
     roles = set(re.findall(r"\bcarp: (MASTER|BACKUP|INIT)\b", output))
     if not roles:
@@ -335,7 +409,7 @@ def host_info():
         role = "master"
     else:
         role = "backup"
-    return addresses, role
+    return addresses, role, interface_networks(output)
 
 
 class FlowTracker:
@@ -373,7 +447,16 @@ class FlowTracker:
                 delta = current
             else:
                 delta = (0, 0, 0)
-            total = totals.setdefault(pair, {"toward": 0, "away": 0, "packets": 0, "states": 0, "protocols": set(), "services": {}})
+            total = totals.setdefault(pair, {
+                "toward": 0, "away": 0, "packets": 0, "states": 0, "protocols": set(), "services": {},
+                "inside": {}, "egress": {},
+            })
+            weight = delta[0] + delta[1] + 1
+            inside = inside_address(record)
+            if inside:
+                total["inside"][inside] = total["inside"].get(inside, 0) + weight
+            if record.get("origif"):
+                total["egress"][record["origif"]] = total["egress"].get(record["origif"], 0) + weight
             service = service_name(record["protocol"], record["dst"]["port"])
             total["services"][service] = total["services"].get(service, 0) + delta[0] + delta[1] + 1
             total["toward"] += delta[0]
@@ -401,6 +484,8 @@ class FlowTracker:
             flow["protocols"] = sorted(total["protocols"])
             # busiest services first
             flow["services"] = [name for name, _ in sorted(total["services"].items(), key=lambda item: -item[1])][:MAX_SERVICES]
+            flow["inside"] = [address for address, _ in sorted(total["inside"].items(), key=lambda item: -item[1])][:MAX_INSIDE]
+            flow["egress"] = max(total["egress"], key=total["egress"].get) if total["egress"] else None
             if total["toward"] + total["away"] > 0:
                 flow["last_active"] = now
 
@@ -418,6 +503,126 @@ class FlowTracker:
                 ranked.append((max(flow["rate"], 1.0) * activity, local, remote, flow, activity))
         ranked.sort(key=lambda item: item[0], reverse=True)
         return ranked[:limit]
+
+
+def blocklist_tables(config=CONFIG_XML, tables=None):
+    """Names of pf tables that hold threat or block lists."""
+    names = set()
+    try:
+        root = ElementTree.parse(config).getroot()
+        for alias in root.iterfind(".//OPNsense/Firewall/Alias/aliases/alias"):
+            if alias.findtext("type") in BLOCKLIST_ALIAS_TYPES and alias.findtext("enabled") != "0":
+                names.add(alias.findtext("name"))
+    except (OSError, ElementTree.ParseError):
+        pass
+    if tables is None:
+        try:
+            tables = subprocess.run([PFCTL, "-sT"], capture_output=True, check=False, text=True, timeout=10).stdout.split()
+        except (OSError, subprocess.TimeoutExpired):
+            tables = []
+    names.update(table for table in tables if table.lower().startswith(BLOCKLIST_TABLE_PREFIXES))
+    return {name for name in names if name and name in tables}
+
+
+class BlocklistIndex:
+    """Longest-prefix lookup of IPv4 addresses in the contents of blocklist pf tables."""
+
+    def __init__(self):
+        self.by_prefix = {}
+
+    def load(self, contents):
+        """contents: {table name: iterable of 'a.b.c.d' or 'a.b.c.d/nn' entries}."""
+        by_prefix = {}
+        for table, entries in contents.items():
+            for entry in entries:
+                entry = entry.strip()
+                if not entry or entry.startswith("!") or ":" in entry:
+                    continue
+                try:
+                    network = ipaddress.ip_network(entry, strict=False)
+                except ValueError:
+                    continue
+                bucket = by_prefix.setdefault(network.prefixlen, {})
+                bucket.setdefault(int(network.network_address), set()).add(table)
+        self.by_prefix = by_prefix
+
+    def refresh(self, tables):
+        contents = {}
+        for table in sorted(tables):
+            try:
+                output = subprocess.run(
+                    [PFCTL, "-t", table, "-T", "show"], capture_output=True, check=False, text=True, timeout=20,
+                ).stdout
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            entries = output.split()
+            if len(entries) <= BLOCKLIST_MAX_ENTRIES:
+                contents[table] = entries
+        self.load(contents)
+
+    def lookup(self, address):
+        try:
+            value = int(ipaddress.IPv4Address(address))
+        except ValueError:
+            return []
+        matches = set()
+        for prefixlen, bucket in self.by_prefix.items():
+            mask = (0xFFFFFFFF << (32 - prefixlen)) & 0xFFFFFFFF if prefixlen else 0
+            matches.update(bucket.get(value & mask, ()))
+        return sorted(matches)
+
+
+KEA_LEASES = "/var/db/kea/kea-leases4.csv"
+DNSMASQ_LEASES = "/var/db/dnsmasq.leases"
+
+
+def lease_names(kea=KEA_LEASES, dnsmasq=DNSMASQ_LEASES, config=CONFIG_XML, now=None):
+    """IPv4 -> hostname from DHCP: Kea reservations win over Kea leases, then dnsmasq leases."""
+    now = time.time() if now is None else now
+    leases = {}
+    try:
+        with open(kea, errors="replace") as handle:
+            header = handle.readline().strip().split(",")
+            column = {name: index for index, name in enumerate(header)}
+            for line in handle:
+                fields = line.rstrip("\n").split(",")
+                try:
+                    address = fields[column["address"]]
+                    name = fields[column["hostname"]].strip().rstrip(".")
+                    expire = int(fields[column["expire"]] or 0)
+                except (KeyError, IndexError, ValueError):
+                    continue
+                # Kea appends lease updates, so a later valid line supersedes an earlier one
+                if name and expire >= now:
+                    leases[address] = name
+    except OSError:
+        pass
+    try:
+        with open(dnsmasq, errors="replace") as handle:
+            for line in handle:
+                fields = line.split()
+                if len(fields) >= 4 and fields[3] != "*" and private_ipv4(fields[2]):
+                    leases.setdefault(fields[2], fields[3])
+    except OSError:
+        pass
+    try:
+        root = ElementTree.parse(config).getroot()
+        for reservation in root.iterfind(".//Kea/dhcp4/reservations/reservation"):
+            address, name = reservation.findtext("ip_address"), reservation.findtext("hostname")
+            if address and name:
+                leases[address.strip()] = name.strip()
+    except (OSError, ElementTree.ParseError):
+        pass
+    return leases
+
+
+def describe_inside(address, names, networks, interfaces):
+    device = next((device for network, device in networks if ipaddress.ip_address(address) in network), None)
+    return {
+        "ip": address,
+        "name": names.get(address),
+        "interface": interfaces.get(device, device) if device else None,
+    }
 
 
 class HostnameResolver:
@@ -442,6 +647,10 @@ class HostnameResolver:
             if future.done():
                 self.names[address] = (future.result(), now)
                 del self.pending[address]
+        for address in [address for address, (_, stamp) in self.names.items() if now - stamp >= self.ttl]:
+            del self.names[address]
+        while len(self.names) > MAX_HOSTNAMES:
+            del self.names[min(self.names, key=lambda address: self.names[address][1])]
         budget = self.per_sample - len(self.pending)
         for address in addresses:
             if budget <= 0:
@@ -465,16 +674,20 @@ def requested(marker, seconds, now=None):
 
 
 class FilterLogTail:
-    """Follow the firewall log from its current end, surviving the daily rotation of latest.log."""
+    """Follow the firewall log from its current end, surviving the daily rotation of latest.log.
+
+    Only complete lines are returned; a line still being written is kept until its newline arrives.
+    """
 
     def __init__(self, path=FILTER_LOG):
         self.path = path
         self.handle = None
         self.inode = None
+        self.pending = b""
 
     def _open(self, at_end):
         try:
-            handle = open(self.path, "r", errors="replace")
+            handle = open(self.path, "rb")
             inode = os.fstat(handle.fileno()).st_ino
         except OSError:
             return
@@ -482,7 +695,7 @@ class FilterLogTail:
             handle.seek(0, os.SEEK_END)
         if self.handle:
             self.handle.close()
-        self.handle, self.inode = handle, inode
+        self.handle, self.inode, self.pending = handle, inode, b""
 
     def backlog(self, max_bytes=BACKLOG_BYTES):
         """Lines from the end of the current log, used once at start to fill the hit window."""
@@ -491,29 +704,30 @@ class FilterLogTail:
             return []
         end = self.handle.tell()
         self.handle.seek(max(0, end - max_bytes))
+        data = self.handle.read(end - self.handle.tell())
         if end > max_bytes:
-            self.handle.readline()  # skip the partial first line
-        lines = self.handle.readlines()
-        self.handle.seek(end)
-        return lines
+            data = data.split(b"\n", 1)[-1]  # drop the partial first line
+        return [line.decode("utf-8", "replace") for line in data.split(b"\n") if line]
 
-    def lines(self, limit=MAX_LOG_LINES_PER_SAMPLE):
+    def lines(self, limit_bytes=MAX_LOG_BYTES_PER_SAMPLE):
         if self.handle is None:
             self._open(at_end=True)
             return []
-        result = []
-        for line in self.handle:
-            result.append(line)
-            if len(result) >= limit:
-                # a burst larger than we can draw: skip ahead instead of falling behind
-                self.handle.seek(0, os.SEEK_END)
-                break
+        data = self.handle.read(limit_bytes)
+        if len(data) >= limit_bytes:
+            # a burst larger than we can draw: skip ahead instead of falling behind
+            self.handle.seek(0, os.SEEK_END)
+            self.pending = b""
+            data = data.rsplit(b"\n", 1)[0] + b"\n"
+        parts = (self.pending + data).split(b"\n")
+        self.pending = parts.pop()
         try:
             if os.stat(self.path).st_ino != self.inode:
+                # rotated: read the new file from its start (old lines are dropped by timestamp)
                 self._open(at_end=False)
         except OSError:
             pass
-        return result
+        return [line.decode("utf-8", "replace") for line in parts if line]
 
 
 def log_time(line):
@@ -580,12 +794,18 @@ def interface_names(path=CONFIG_XML):
 
 
 class BlockTracker:
-    """Inbound firewall blocks per public source: recent hits, ports tried, rule and interface."""
+    """Inbound firewall blocks per public source: recent hits, ports tried, rule and interface.
 
-    def __init__(self, fade=BLOCK_FADE_SECONDS, show=BLOCK_SHOW_SECONDS, window=BLOCK_WINDOW_SECONDS):
+    Memory is bounded even under a spoofed-source flood: hits are kept as 10-second bucket
+    counts, ports per source are capped, and the least recently seen sources are evicted.
+    """
+
+    def __init__(self, fade=BLOCK_FADE_SECONDS, show=BLOCK_SHOW_SECONDS, window=BLOCK_WINDOW_SECONDS,
+                 max_sources=MAX_TRACKED_SOURCES):
         self.fade = fade
         self.show = show
         self.window = window
+        self.max_sources = max_sources
         self.sources = {}
 
     def add(self, event, now):
@@ -593,40 +813,48 @@ class BlockTracker:
             return
         entry = self.sources.get(event["source"])
         if entry is None:
-            entry = self.sources[event["source"]] = {
-                "hits": deque(), "total": 0, "ports": {}, "protocols": set(),
-                "destination": event["destination"], "rule": event["rule"], "interface": event["interface"],
-            }
-        entry["hits"].append(now)
+            if len(self.sources) >= self.max_sources:
+                oldest = min(self.sources, key=lambda address: self.sources[address]["last"])
+                del self.sources[oldest]
+            entry = self.sources[event["source"]] = {"buckets": {}, "total": 0, "ports": {}}
+        bucket = int(now // BLOCK_BUCKET_SECONDS)
+        entry["buckets"][bucket] = entry["buckets"].get(bucket, 0) + 1
         entry["total"] += 1
-        entry["last"] = now
+        entry["last"] = max(now, entry.get("last", now))
         entry["destination"] = event["destination"]
         entry["rule"] = event["rule"]
         entry["interface"] = event["interface"]
-        entry["protocols"].add(event["protocol"])
         port = f'{event["protocol"]}/{event["port"]}' if event["port"] else event["protocol"]
-        entry["ports"][port] = entry["ports"].get(port, 0) + 1
+        if port in entry["ports"] or len(entry["ports"]) < MAX_PORTS_PER_SOURCE:
+            entry["ports"][port] = entry["ports"].get(port, 0) + 1
+
+    def hits(self, entry):
+        return sum(entry["buckets"].values())
+
+    def per_minute(self, entry, now):
+        first = int((now - 60) // BLOCK_BUCKET_SECONDS) + 1
+        return sum(count for bucket, count in entry["buckets"].items() if bucket >= first)
 
     def visible(self, now, limit=MAX_BLOCK_SOURCES):
         """Sources hit within the last `show` seconds, most persistent first."""
+        oldest_bucket = int((now - self.window) // BLOCK_BUCKET_SECONDS) + 1
+        recent = []
         for address in list(self.sources):
             entry = self.sources[address]
-            while entry["hits"] and now - entry["hits"][0] > self.window:
-                entry["hits"].popleft()
-            if not entry["hits"]:
+            for bucket in [bucket for bucket in entry["buckets"] if bucket < oldest_bucket]:
+                del entry["buckets"][bucket]
+            if not entry["buckets"]:
                 del self.sources[address]
-        recent = [(address, entry) for address, entry in self.sources.items() if now - entry["last"] <= self.show]
-        recent.sort(key=lambda item: (-len(item[1]["hits"]), -item[1]["last"]))
+            elif now - entry["last"] <= self.show:
+                recent.append((address, entry))
+        recent.sort(key=lambda item: (-self.hits(item[1]), -item[1]["last"]))
         return recent[:limit]
-
-    def per_minute(self, entry, now):
-        return sum(1 for hit in entry["hits"] if now - hit <= 60)
 
     def activity(self, entry, now):
         return max(0.0, 1.0 - (now - entry["last"]) / self.fade)
 
 
-def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, interfaces):
+def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, interfaces, blocklists=None):
     """Map-ready blocked sources; each arc ends at the firewall address that was hit."""
     visible = blocks.visible(now)
     geo.resolve([address for address, _ in visible])
@@ -641,7 +869,7 @@ def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, inte
             "source": address,
             "target": target,
             "activity": round(blocks.activity(entry, now), 3),
-            "hits": len(entry["hits"]),
+            "hits": blocks.hits(entry),
             "window_minutes": blocks.window // 60,
             "hits_per_minute": per_minute,
             "total": entry["total"],
@@ -653,14 +881,21 @@ def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, inte
             "lon": location["lon"],
             "city": location.get("city") or location.get("region"),
             "country": location.get("country_name") or location.get("country"),
+            "country_code": location.get("country"),
             "accuracy_km": location.get("accuracy_km"),
             "asn": location.get("asn"),
             "as_org": location.get("as_org"),
+            "lists": blocklists.lookup(address) if blocklists else [],
         })
     return result
 
 
-def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None):
+def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None, context=None):
+    context = context or {}
+    names = context.get("names", {})
+    networks = context.get("networks", [])
+    interfaces = context.get("interfaces", {})
+    blocklists = context.get("blocklists")
     visible = tracker.visible(now)
     geo.resolve([address for _, local, remote, _, _ in visible for address in (local, remote)])
     flows = []
@@ -681,7 +916,12 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None
             "states": flow["states"],
             "protocols": flow["protocols"],
             "services": flow.get("services", []),
+            "inside": [describe_inside(address, names, networks, interfaces) for address in flow.get("inside", [])],
+            "egress": interfaces.get(flow.get("egress"), flow.get("egress")),
+            "lists": blocklists.lookup(remote) if blocklists else [],
         })
+        # a permitted flow to a listed address is what deserves attention, not background scans
+        flows[-1]["threat"] = bool(flows[-1]["lists"])
     locations = []
     for address in sorted(location_ids):
         location = geo.get(address)
@@ -694,6 +934,7 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None
             "region": location.get("region"),
             "accuracy_km": location.get("accuracy_km"),
             "country": location.get("country_name") or location.get("country"),
+            "country_code": location.get("country"),
             "lat": location["lat"],
             "lon": location["lon"],
             "local": address in local_addresses,
@@ -702,11 +943,11 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None
             entry["asn"] = location["asn"]
             entry["as_org"] = location.get("as_org")
         locations.append(entry)
-    names = {}
+    resolved = {}
     if hostnames is not None:
         remotes = [flow["dest"] for flow in flows]
         hostnames.update(remotes, now)
-        names = {address: hostnames.get(address) for address in remotes if hostnames.get(address)}
+        resolved = {address: hostnames.get(address) for address in remotes if hostnames.get(address)}
     return {
         "status": "ok",
         "sampled_at": datetime.fromtimestamp(wall_time, timezone.utc).isoformat(),
@@ -715,7 +956,7 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None
         "tracked_flows": len(tracker.flows),
         "flows": flows,
         "locations": locations,
-        "hostnames": names,
+        "hostnames": resolved,
     }
 
 
@@ -750,24 +991,53 @@ def database_state(values):
     return paths["city"], paths["asn"], "database_missing"
 
 
+def acquire_lock(path=COLLECTOR_LOCK):
+    """Only one collector may run; a second one started concurrently exits at once."""
+    import fcntl
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    handle = open(path, "w")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
+
+
+def block_event_time(line, now, wall):
+    """Monotonic time of a log line from its own timestamp (None when outside the hit window)."""
+    stamp = log_time(line)
+    if stamp is None:
+        return now
+    age = wall - stamp
+    if age > BLOCK_WINDOW_SECONDS:
+        return None
+    return now - max(0.0, age)
+
+
 def run():
+    lock = acquire_lock()
+    if lock is None:
+        return
     started_at = time.time()
+    failures = 0
     tracker = FlowTracker()
     hostnames = HostnameResolver()
     blocks = BlockTracker()
     log = FilterLogTail()
     backlog_loaded = False
-    descriptions, interfaces, block_meta_checked = {}, {}, None
+    descriptions, interfaces, leases, block_meta_checked = {}, {}, {}, None
+    blocklists, blocklists_checked = BlocklistIndex(), None
     geo = None
     problem = None
-    local_addresses, role = set(), None
+    local_addresses, role, networks = set(), None, []
     host_checked = None
     settings_checked = None
     provider = "maxmind"
     while True:
         started = time.monotonic()
         if host_checked is None or started - host_checked >= HOST_REFRESH_SECONDS:
-            local_addresses, role = host_info()
+            local_addresses, role, networks = host_info()
             host_checked = started
         if settings_checked is None or started >= settings_checked + SETTINGS_REFRESH_SECONDS:
             values = geodb.settings()
@@ -783,6 +1053,7 @@ def run():
             write_json(OUTPUT_FILE, {
                 "status": "no_database",
                 "reason": problem,
+                "error": geodb.read_status().get("last_error"),
                 "sampled_at": datetime.now(timezone.utc).isoformat(),
                 "flows": [],
                 "locations": [],
@@ -793,7 +1064,9 @@ def run():
         else:
             try:
                 records = sample_states()
+                failures = 0
             except (OSError, subprocess.TimeoutExpired, RuntimeError) as error:
+                failures += 1
                 write_json(OUTPUT_FILE, {
                     "status": "failed",
                     "error": str(error),
@@ -805,30 +1078,35 @@ def run():
                 now = time.monotonic()
                 tracker.update(records, local_addresses, now)
                 resolver = hostnames if requested(HOSTNAME_MARKER, HOSTNAME_REQUEST_SECONDS) else None
+                wall = time.time()
+                lines = log.lines()
                 if not backlog_loaded:
                     backlog_loaded = True
-                    wall = time.time()
-                    for line in log.backlog():
-                        event = parse_block(line)
-                        stamp = log_time(line) if event else None
-                        if event and stamp and wall - stamp <= BLOCK_WINDOW_SECONDS \
-                                and event["destination"] in local_addresses:
-                            blocks.add(event, now - (wall - stamp))
-                for line in log.lines():
+                    lines = log.backlog() + lines
+                for line in lines:
                     event = parse_block(line)
                     # only connection attempts aimed at this firewall's own public addresses; blocked
                     # forwarded traffic (e.g. another host's outbound packets) is not an inbound probe
                     if event and event["destination"] in local_addresses:
-                        blocks.add(event, now)
+                        at = block_event_time(line, now, wall)
+                        if at is not None:
+                            blocks.add(event, at)
                 if block_meta_checked is None or started - block_meta_checked >= BLOCK_REFRESH_SECONDS:
-                    descriptions, interfaces = rule_descriptions(), interface_names()
+                    descriptions, interfaces, leases = rule_descriptions(), interface_names(), lease_names()
                     block_meta_checked = started
-                payload = snapshot(tracker, geo, local_addresses, role, now, time.time(), resolver)
+                if blocklists_checked is None or started - blocklists_checked >= BLOCKLIST_REFRESH_SECONDS:
+                    blocklists.refresh(blocklist_tables())
+                    blocklists_checked = started
+                payload = snapshot(tracker, geo, local_addresses, role, now, time.time(), resolver, {
+                    "names": leases, "networks": networks, "interfaces": interfaces, "blocklists": blocklists,
+                })
                 origin = next((location["id"] for location in payload["locations"] if location["local"]), None)
                 if origin is None and local_addresses:
                     origin = sorted(local_addresses)[0]
                     geo.resolve([origin])
-                payload["blocks"] = block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, interfaces)
+                payload["blocks"] = block_snapshot(
+                    blocks, geo, local_addresses, origin, now, descriptions, interfaces, blocklists,
+                )
                 if origin and geo.get(origin) and not any(location["id"] == origin for location in payload["locations"]):
                     location = geo.get(origin)
                     payload["locations"].append({
@@ -841,7 +1119,13 @@ def run():
             if geo is not None:
                 geo.save(force=True)
             return
-        time.sleep(max(0.05, INTERVAL - (time.monotonic() - started)))
+        # never run back to back: rest at least as long as a slow sample took, and back off
+        # exponentially while sampling keeps failing
+        took = time.monotonic() - started
+        rest = max(INTERVAL - took, took, 0.05)
+        if failures:
+            rest = max(rest, min(MAX_FAILURE_BACKOFF, 2.0 ** failures))
+        time.sleep(rest)
 
 
 if __name__ == "__main__":

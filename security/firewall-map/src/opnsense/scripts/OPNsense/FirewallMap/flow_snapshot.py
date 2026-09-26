@@ -53,8 +53,18 @@ def mark_request(path=REQUEST_MARKER):
         pass
 
 
-def fetch_database():
-    """A missing database is downloaded in the background (the updater serialises itself)."""
+FETCH_MARKER = "/var/run/firewallmap/fetch_started"
+FETCH_EVERY_SECONDS = 60
+
+
+def fetch_database(marker=FETCH_MARKER, now=None):
+    """A missing database is downloaded in the background, at most once a minute."""
+    try:
+        if (now or time.time()) - os.stat(marker).st_mtime < FETCH_EVERY_SECONDS:
+            return
+    except OSError:
+        pass
+    mark_request(marker)
     try:
         subprocess.Popen(
             ["/usr/local/bin/python3", GEODB, "update"],

@@ -10,7 +10,9 @@ const ARC_SAMPLES = 32;
 const LINK_WIDTH = 1.5;
 const HEAVY_WIDTH = 3;
 // heavy talkers: the busiest few links (if above a floor), or anything above a byte rate
-const DEFAULT_OPTIONS = {heavyTop: 5, heavyRate: 1000000, maxArcs: 120, labels: true, asn: true, blocks: true};
+const DEFAULT_OPTIONS = {
+  heavyTop: 5, heavyRate: 1000000, maxArcs: 120, labels: true, asn: true, blocks: true, colorMode: 'direction',
+};
 // blocked traffic: pulses race into the firewall; threats also throb at their source
 const BLOCK_PULSE_PERIOD = 1.1;
 const THREAT_THROB_PERIOD = 0.9;
@@ -138,6 +140,9 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
       members,
       // colour follows the dominant direction; pulses show both when traffic flows both ways
       toward: inShare >= 0.5,
+      service: serviceCategory(members.slice().sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))[0]?.services?.[0]),
+      egress: members.slice().sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))[0]?.egress || 'Unknown',
+      threat: members.some((member) => member.threat),
       direction,
       activity,
       period: 6 - 5.2 * strength,
@@ -188,12 +193,59 @@ function describe(place, members, locations, hostnames = {}, showAsn = true) {
   const title = [place.city || place.region, place.country].filter(Boolean).join(', ') || place.name || place.id;
   // GeoLite places region- or country-level matches at a representative point; say how rough it is
   const approximate = !place.city && place.accuracy_km ? ` <span style="opacity:.7">(± ${place.accuracy_km} km)</span>` : '';
+  const insides = [];
+  for (const flow of members) {
+    for (const inside of flow.inside || []) {
+      if (!insides.some((known) => known.ip === inside.ip)) {
+        insides.push(inside);
+      }
+    }
+  }
+  const egress = [...new Set(members.map((flow) => flow.egress).filter(Boolean))];
+  const lists = [...new Set(members.flatMap((flow) => flow.lists || []))];
+  const insideBlock = insides.length
+    ? `<div style="margin-top:4px;opacity:.75">Inside</div>${insides.slice(0, 4).map(insideLine).join('')}`
+      + (insides.length > 4 ? `<div>+${insides.length - 4} more</div>` : '')
+    : '';
   return `
     <div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}${approximate}</div>
+    ${lists.length ? `<div style="font-weight:600;color:rgb(196,18,48)">Listed in ${lists.map(escapeHtml).join(', ')}</div>` : ''}
     ${addresses.join('')}${more}
-    <div style="margin-top:4px">↓ ${formatRate(rateIn)} &nbsp; ↑ ${formatRate(rateOut)}</div>
+    ${insideBlock}
+    <div style="margin-top:4px">↓ ${formatRate(rateIn)} &nbsp; ↑ ${formatRate(rateOut)}${egress.length ? ` &nbsp; via ${egress.map(escapeHtml).join(', ')}` : ''}</div>
     ${services.length ? `<div>${services.map(escapeHtml).join(', ')}</div>` : ''}
   `;
+}
+
+// categories for "colour by service"; each flow uses its busiest service
+const SERVICE_CATEGORIES = [
+  ['Web', /^(HTTPS?|HTTP alt|HTTPS alt)$/],
+  ['QUIC', /^QUIC$/],
+  ['DNS', /^DNS/],
+  ['NTP', /^NTP$/],
+  ['VPN', /^(OpenVPN|WireGuard|IKE|IPsec NAT-T)$/],
+  ['Mail', /^(SMTP|SMTPS|Submission|IMAP|IMAPS|POP3S)$/],
+  ['Remote access', /^(SSH|RDP)$/],
+  ['Push / STUN', /(Push|STUN)/],
+];
+// colour-blind friendly categorical colours, none of them close to the crimson used for threats
+const CATEGORY_COLORS = [
+  [0, 114, 178], [230, 159, 0], [0, 158, 115], [204, 121, 167],
+  [86, 180, 233], [140, 109, 49], [27, 158, 158], [120, 94, 240], [150, 150, 150],
+];
+
+export function serviceCategory(service) {
+  if (!service) {
+    return 'Other';
+  }
+  const match = SERVICE_CATEGORIES.find(([, pattern]) => pattern.test(service));
+  return match ? match[0] : 'Other';
+}
+
+function insideLine(inside) {
+  const name = inside.name ? `${escapeHtml(inside.name)} ` : '';
+  const where = [inside.ip, inside.interface].filter(Boolean).map(escapeHtml).join(' · ');
+  return `<div>${name}<span style="opacity:.75">(${where})</span></div>`;
 }
 
 /** A gently bent path from a blocked source into the firewall (bends the other way from flows). */
@@ -391,6 +443,11 @@ export function createFirewallMap(container, options = {}) {
     // arrow pointer so endpoints and arches can be hovered; the hand only while dragging
     getCursor: ({isDragging, isHovering}) => isDragging ? 'grabbing' : (isHovering ? 'pointer' : 'default'),
     onHover: (info) => showTooltip(info),
+    onClick: (info) => {
+      if (options.onSelect && info.object && info.layer) {
+        options.onSelect(selection(info.object, info.layer.id));
+      }
+    },
     layers: [],
   });
   // Exposed for in-browser diagnostics of the live widget.
@@ -402,6 +459,25 @@ export function createFirewallMap(container, options = {}) {
     + 'border-radius:4px;padding:6px 8px;font-size:12px;line-height:1.35;max-width:320px;'
     + 'box-shadow:0 2px 8px rgba(0,0,0,.15);';
   document.body.appendChild(tooltip);
+
+  /** What was clicked, in a form the page can act on (addresses, inside hosts, country). */
+  function selection(object, layerId) {
+    if (layerId === 'firewall-map-blocks' || layerId === 'firewall-map-block-sources') {
+      return {kind: 'blocked', addresses: [object.source], country: object.country, countryCode: object.country_code,
+        title: object.city || object.country, block: object};
+    }
+    if (layerId === 'firewall-map-arcs') {
+      return {kind: 'flow', addresses: object.members.map((member) => member.dest), country: object.dest.country,
+        countryCode: object.dest.country_code, title: object.dest.city || object.dest.region || object.dest.country,
+        members: object.members};
+    }
+    if (layerId === 'firewall-map-endpoints' && !object.local) {
+      const members = flowsByDest.get(`${object.lat},${object.lon}`) || [];
+      return {kind: 'flow', addresses: members.map((member) => member.dest), country: object.country,
+        countryCode: object.country_code, title: object.city || object.region || object.country, members};
+    }
+    return null;
+  }
 
   function tooltipHtml(object, layer) {
     if (!object || !layer) {
@@ -469,6 +545,62 @@ export function createFirewallMap(container, options = {}) {
 
   let pulseItems = [];
   let blockArcs = [];
+  // stable colour per category across refreshes (first seen keeps its colour)
+  const categoryColors = new Map();
+  let categoryKey = '';
+
+  function categoryOf(arc) {
+    return settings.colorMode === 'egress' ? arc.egress : arc.service;
+  }
+
+  function categoryColor(name) {
+    if (!categoryColors.has(name)) {
+      categoryColors.set(name, CATEGORY_COLORS[categoryColors.size % CATEGORY_COLORS.length]);
+      categoryKey = [...categoryColors.keys()].join('|');
+    }
+    return categoryColors.get(name);
+  }
+
+  function arcColor(arc) {
+    const alpha = Math.round((arc.heavy ? 150 : 70) + 105 * arc.activity);
+    if (arc.threat) {
+      // a permitted flow to a listed address
+      return rgb(colors.block, Math.max(alpha, 170));
+    }
+    if (settings.colorMode === 'egress' || settings.colorMode === 'service') {
+      const base = categoryColor(categoryOf(arc));
+      return rgb(arc.heavy ? mix(base, colors.dark ? [255, 255, 255] : [0, 0, 0], 0.2) : mix(colors.background.slice(0, 3), base, 0.8), alpha);
+    }
+    const scheme = arc.toward ? colors.toward : colors.away;
+    return rgb(arc.heavy ? scheme.heavy : scheme.link, alpha);
+  }
+
+  function pulseColor(item) {
+    const alpha = Math.round(110 + 145 * item.arc.activity);
+    if (item.arc.threat) {
+      return rgb(colors.block, alpha);
+    }
+    if (settings.colorMode === 'egress' || settings.colorMode === 'service') {
+      return rgb(categoryColor(categoryOf(item.arc)), alpha);
+    }
+    return rgb((item.toward ? colors.toward : colors.away).pulse, alpha);
+  }
+
+  function legend() {
+    if (settings.colorMode !== 'egress' && settings.colorMode !== 'service') {
+      return [
+        {label: 'Toward the firewall', color: colors.toward.heavy},
+        {label: 'Away from the firewall', color: colors.away.heavy},
+        {label: 'Blocked / listed', color: colors.block},
+      ];
+    }
+    const present = [...new Set(arcs.map(categoryOf))];
+    present.sort((a, b) => (a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b)));
+    return [
+      ...present.map((label) => ({label, color: categoryColor(label)})),
+      {label: 'Blocked / listed', color: colors.block},
+    ];
+  }
 
   function pulseLayer(seconds) {
     return new ScatterplotLayer({
@@ -477,8 +609,8 @@ export function createFirewallMap(container, options = {}) {
       getPosition: (item) => pulsePosition(item.arc, seconds, item.reverse),
       getRadius: (item) => item.arc.heavy ? 3.4 : 2.4,
       radiusUnits: 'pixels',
-      getFillColor: (item) => rgb((item.toward ? colors.toward : colors.away).pulse, Math.round(110 + 145 * item.arc.activity)),
-      updateTriggers: {getPosition: seconds, getFillColor: [colors.toward.pulse, colors.away.pulse]},
+      getFillColor: (item) => pulseColor(item),
+      updateTriggers: {getPosition: seconds, getFillColor: [colors.toward.pulse, colors.away.pulse, settings.colorMode, categoryKey]},
     });
   }
 
@@ -633,11 +765,8 @@ export function createFirewallMap(container, options = {}) {
         jointRounded: true,
         pickable: true,
         widthMinPixels: 1,
-        getColor: (arc) => {
-          const scheme = arc.toward ? colors.toward : colors.away;
-          return rgb(arc.heavy ? scheme.heavy : scheme.link, Math.round((arc.heavy ? 150 : 70) + 105 * arc.activity));
-        },
-        updateTriggers: {getColor: [colors.toward.link, colors.away.link]},
+        getColor: (arc) => arcColor(arc),
+        updateTriggers: {getColor: [colors.toward.link, colors.away.link, settings.colorMode, categoryKey]},
       }),
       new PathLayer({
         id: 'firewall-map-blocks',
@@ -693,6 +822,7 @@ export function createFirewallMap(container, options = {}) {
       lastData = data;
       deck.setProps({layers: layers(data)});
     },
+    legend,
     setSettings(next) {
       settings = {...DEFAULT_OPTIONS, ...next};
       deck.setProps({layers: layers(lastData)});
