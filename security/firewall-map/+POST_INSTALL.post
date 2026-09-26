@@ -6,3 +6,5 @@ fi
 /usr/local/sbin/pluginctl -s cron restart > /dev/null 2>&1
 # fetch the geolocation database right away (MaxMind with a key, otherwise DB-IP Lite)
 /usr/local/sbin/configctl -d firewallmap geodb update > /dev/null 2>&1
+# fetch the AbuseIPDB blacklist when a key is set (skipped if it was fetched in the last 20 hours)
+/usr/local/sbin/configctl -d firewallmap abuseipdb update > /dev/null 2>&1

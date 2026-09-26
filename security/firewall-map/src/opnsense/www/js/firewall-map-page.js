@@ -44,7 +44,7 @@
         snapshot: null,
         settings: null,
         filters: {traffic: 'all', service: '', iface: '', host: '', country: '', asn: ''},
-        colorMode: 'direction',
+        colorMode: 'initiator',
         talkerTab: 'hosts',
         history: new Map(),
         isAdmin: false,

@@ -177,8 +177,8 @@
     <div id="fwmap-toolbar">
         <label for="fwmap-color">{{ lang._('Colour') }}</label>
         <select id="fwmap-color" class="form-control">
-            <option value="direction">{{ lang._('By direction') }}</option>
             <option value="initiator">{{ lang._('By who connected') }}</option>
+            <option value="direction">{{ lang._('By data direction') }}</option>
             <option value="egress">{{ lang._('By egress') }}</option>
             <option value="service">{{ lang._('By service') }}</option>
         </select>

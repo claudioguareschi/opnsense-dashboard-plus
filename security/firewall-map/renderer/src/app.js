@@ -11,7 +11,7 @@ const LINK_WIDTH = 1.5;
 const HEAVY_WIDTH = 3;
 // heavy talkers: the busiest few links (if above a floor), or anything above a byte rate
 const DEFAULT_OPTIONS = {
-  heavyTop: 5, heavyRate: 1000000, maxArcs: 120, labels: true, asn: true, blocks: true, colorMode: 'direction',
+  heavyTop: 5, heavyRate: 1000000, maxArcs: 120, labels: true, asn: true, blocks: true, colorMode: 'initiator',
 };
 // blocked traffic: pulses race into the firewall; threats also throb at their source
 const BLOCK_PULSE_PERIOD = 1.1;
@@ -160,12 +160,10 @@ function initiatedBy(members) {
 }
 
 const INITIATOR_LABELS = {
-  remote: 'Connected from outside',
-  local: 'Connected from inside',
-  both: 'Both sides connected',
+  local: 'Started inside',
+  remote: 'Started outside',
+  both: 'Started from both sides',
 };
-// fixed colours for "colour by who connected"; none close to the threat crimson
-const INITIATOR_COLORS = {remote: [213, 94, 0], local: [0, 114, 178], both: [150, 150, 150]};
 
 function targetLine(target) {
   const name = target.name ? `${escapeHtml(target.name)} ` : '';
@@ -394,6 +392,7 @@ export function palette(theme = DEFAULT_THEME) {
     // towards the firewall uses the theme accent, away from it the theme's success green
     toward: {link: mix(background, accent, 0.7), heavy: shade(accent, 0.2), pulse: shade(accent, 0.15)},
     away: {link: mix(background, success, 0.7), heavy: shade(success, 0.2), pulse: shade(success, 0.15)},
+    neutral: {link: mix(background, [150, 150, 150], 0.7), heavy: [128, 128, 128], pulse: [120, 120, 120]},
     endpoint: rgb(mix(accent, text, 0.2), 220),
     // a crimson distinct from the theme accent, reserved for blocked traffic and threats
     block: dark ? [255, 77, 109] : [196, 18, 48],
@@ -588,7 +587,7 @@ export function createFirewallMap(container, options = {}) {
   }
 
   function categorical() {
-    return settings.colorMode === 'egress' || settings.colorMode === 'service' || settings.colorMode === 'initiator';
+    return settings.colorMode === 'egress' || settings.colorMode === 'service';
   }
 
   function categoryColor(name) {
@@ -609,7 +608,7 @@ export function createFirewallMap(container, options = {}) {
       const base = baseColor(arc);
       return rgb(arc.heavy ? mix(base, colors.dark ? [255, 255, 255] : [0, 0, 0], 0.2) : mix(colors.background.slice(0, 3), base, 0.8), alpha);
     }
-    const scheme = arc.toward ? colors.toward : colors.away;
+    const scheme = settings.colorMode === 'initiator' ? initiatorScheme(arc.initiated) : arc.toward ? colors.toward : colors.away;
     return rgb(arc.heavy ? scheme.heavy : scheme.link, alpha);
   }
 
@@ -621,19 +620,27 @@ export function createFirewallMap(container, options = {}) {
     if (categorical()) {
       return rgb(baseColor(item.arc), alpha);
     }
-    return rgb((item.toward ? colors.toward : colors.away).pulse, alpha);
+    // by who connected, pulses keep the arc's colour; their movement shows which way the data goes
+    const scheme = settings.colorMode === 'initiator' ? initiatorScheme(item.arc.initiated) : item.toward ? colors.toward : colors.away;
+    return rgb(scheme.pulse, alpha);
+  }
+
+  // green: started inside the network; orange (theme accent): started from outside
+  function initiatorScheme(side) {
+    return side === 'remote' ? colors.toward : side === 'local' ? colors.away : colors.neutral;
   }
 
   function baseColor(arc) {
-    return settings.colorMode === 'initiator' ? INITIATOR_COLORS[arc.initiated] : categoryColor(categoryOf(arc));
+    return categoryColor(categoryOf(arc));
   }
 
   function legend() {
     if (settings.colorMode === 'initiator') {
-      const present = new Set(arcs.map((arc) => arc.initiated));
+      // always show inside and outside, so the meaning of green and orange is never a guess
+      const present = new Set(['local', 'remote', ...arcs.map((arc) => arc.initiated)]);
       return [
-        ...['remote', 'local', 'both'].filter((side) => present.has(side))
-          .map((side) => ({label: INITIATOR_LABELS[side], color: INITIATOR_COLORS[side]})),
+        ...['local', 'remote', 'both'].filter((side) => present.has(side))
+          .map((side) => ({label: INITIATOR_LABELS[side], color: initiatorScheme(side).heavy})),
         {label: 'Blocked / listed', color: colors.block},
       ];
     }
