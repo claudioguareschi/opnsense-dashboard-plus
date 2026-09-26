@@ -606,7 +606,7 @@ def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, inte
         location = geo.get(address)
         if location is None:
             continue
-        target = entry["destination"] if entry["destination"] in local_addresses else origin
+        target = entry["destination"]
         hits = len(entry["hits"])
         result.append({
             "source": address,
@@ -773,7 +773,9 @@ def run():
                 resolver = hostnames if requested(HOSTNAME_MARKER, HOSTNAME_REQUEST_SECONDS) else None
                 for line in log.lines():
                     event = parse_block(line)
-                    if event:
+                    # only connection attempts aimed at this firewall's own public addresses; blocked
+                    # forwarded traffic (e.g. another host's outbound packets) is not an inbound probe
+                    if event and event["destination"] in local_addresses:
                         blocks.add(event, now)
                 if block_meta_checked is None or started - block_meta_checked >= BLOCK_REFRESH_SECONDS:
                     descriptions, interfaces = rule_descriptions(), interface_names()
