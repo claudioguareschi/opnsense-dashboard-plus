@@ -164,6 +164,9 @@
     .fwmap-q-bulkbar { display: flex; gap: 8px; }
     .fwmap-q-bulkbar .btn { height: 38px; display: inline-flex; align-items: center; gap: 7px; font-size: 14px; }
     .fwmap-q-bulkbar .btn .fwmap-ic { width: 16px; height: 16px; }
+    .fwmap-q-conns { width: 100%; margin-top: 8px; font-size: 13px; border-collapse: collapse; }
+    .fwmap-q-conns th { font-weight: 600; opacity: .7; padding: 4px 8px 4px 0; border-bottom: 1px solid rgba(128, 128, 128, .25); white-space: nowrap; }
+    .fwmap-q-conns td { padding: 5px 8px 5px 0; vertical-align: top; border-bottom: 1px solid rgba(128, 128, 128, .1); }
     .fwmap-q-moreitems { text-align: center; padding: 10px 0 4px; }
     .fwmap-q-searchbox { position: relative; width: 38%; min-width: 240px; }
     .fwmap-q-searchbox .fwmap-ic { position: absolute; left: 12px; top: 10px; width: 17px; height: 17px; opacity: .6; }
@@ -494,6 +497,10 @@
         check_now: "{{ lang._('Check now') }}",
         no_key: "{{ lang._('no API key') }}",
         not_listed_short: "{{ lang._('Not listed') }}",
+        more_connection: "{{ lang._('more connection') }}",
+        more_connections: "{{ lang._('more connections') }}",
+        connection_col: "{{ lang._('Connection') }}",
+        no_snapshot: "{{ lang._('No connection snapshot yet: it is taken the next time this address has an open connection.') }}",
         show_more: "{{ lang._('Show %s more') }}",
         showing: "{{ lang._('%s of %t shown') }}",
         dismiss_all: "{{ lang._('Dismiss all (%s)') }}",

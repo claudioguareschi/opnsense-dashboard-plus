@@ -900,6 +900,19 @@ class CorrelationTest(unittest.TestCase):
         (connection,) = correlator.current.values()
         self.assertEqual(connection["rule_description"], "IoT to Internet")
 
+    def test_connection_snapshot_for_the_queue(self):
+        correlator = COLLECTOR.Correlator()
+        correlator.observe_states(COLLECTOR.parse_states(self.OUTBOUND), self.LOCAL, 1000.0, {"abc123": "IoT to Internet"})
+        correlator.add_alert(self.alert("198.13.91.163", 13526, "162.217.103.70", 443), self.LOCAL, 1000.0)
+        correlator.resolve(self.LOCAL, 1000.0)
+        (item,) = COLLECTOR.connection_snapshot("162.217.103.70", correlator, {"192.168.30.52": "seachartly"}, {"igb1": "WAN"},
+                                                wall=1240.0)
+        self.assertEqual((item["inside"], item["inside_name"], item["public"], item["remote"], item["rule"], item["started"]),
+                         ("192.168.30.52:52114", "seachartly", "198.13.91.163:13526", "162.217.103.70:443", "IoT to Internet", 1000))
+        self.assertEqual(item["ids"][0]["signature"], "ET MALWARE Possible C2 Activity")
+        merged = THREATS.merge_connections([item], [{**item, "ids": [], "seen": 2000}])
+        self.assertEqual((len(merged), merged[0]["seen"], bool(merged[0]["ids"])), (1, 2000, True))
+
     def test_rule_label_is_parsed_from_states(self):
         (record,) = COLLECTOR.parse_states(self.OUTBOUND)
         self.assertEqual(record["rule"], "abc123")

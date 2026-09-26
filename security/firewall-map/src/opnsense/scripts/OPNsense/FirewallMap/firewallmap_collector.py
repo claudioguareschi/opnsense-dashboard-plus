@@ -1854,6 +1854,52 @@ def recording_wanted(values=None, path=CONFIG_XML):
     return values.get("record_threats", "1") != "0" and widget_in_use(path)
 
 
+MAX_SNAPSHOT_CONNECTIONS = 6
+
+
+def connection_snapshot(address, correlator, names, interfaces, wall=None):
+    """The connections to one flagged address as PF sees them right now (plus any Suricata linked).
+
+    Each carries both sides (inside host, public side, remote), the rule and interface that let it
+    through, bytes and age, and the Suricata signatures correlated to that exact connection.
+    """
+    wall = time.time() if wall is None else wall
+    keys = [key for key in correlator.current if key[3] == address]
+    keys += [key for key in correlator.flows if key[3] == address and key not in correlator.current]
+    result = []
+    for key in keys:
+        connection = correlator.current.get(key) or correlator.flows[key]["connection"]
+        flow = correlator.flows.get(key)
+        inside_ip = (connection.get("inside") or "").rsplit(":", 1)[0] if connection.get("inside") else ""
+        signatures = []
+        if flow:
+            for group in flow["alerts"].values():
+                for item in group.values():
+                    signatures.append({field: item[field] for field in ("sid", "signature", "severity", "count", "action")})
+        age = connection.get("age")
+        result.append({
+            "key": "|".join(key),
+            "open": key in correlator.current,
+            "protocol": key[0],
+            "inside": connection.get("inside"),
+            "inside_name": names.get(inside_ip) if inside_ip else None,
+            "public": connection.get("public"),
+            "remote": connection.get("remote"),
+            "remote_started": connection.get("remote_started"),
+            "rule": connection.get("rule_description") or connection.get("rule"),
+            "interface": interfaces.get(connection.get("interface"), connection.get("interface")),
+            "bytes_in": connection.get("bytes_in"),
+            "bytes_out": connection.get("bytes_out"),
+            "started": round(wall - age) if age is not None else None,
+            "seen": round(wall),
+            "kind": flow["kind"] if flow else "current",
+            "ids": sorted(signatures, key=lambda item: (item["severity"], -item["count"]))[:3],
+        })
+    # the busiest first, IDS-linked ones always kept
+    result.sort(key=lambda item: (not item["ids"], -((item["bytes_in"] or 0) + (item["bytes_out"] or 0))))
+    return result[:MAX_SNAPSHOT_CONNECTIONS]
+
+
 class ThreatRecorder:
     """Feeds the review queue; a database problem never stops the collector."""
 
@@ -1864,7 +1910,7 @@ class ThreatRecorder:
         self.pruned = None
 
     def update(self, records, local_addresses, blocklists, reputation, now, geo=None, hostnames=None, alerts=None,
-               correlator=None):
+               correlator=None, names=None, interfaces=None):
         if self.recorded is not None and now - self.recorded < THREAT_RECORD_SECONDS:
             return
         self.recorded = now
@@ -1891,6 +1937,9 @@ class ThreatRecorder:
             if alerts is not None:
                 for address, entry in seen.items():
                     entry["ids"] = alerts.summary(address)
+            if correlator is not None:
+                for address, entry in seen.items():
+                    entry["connections"] = connection_snapshot(address, correlator, names or {}, interfaces or {})
             threats.record(self.db, seen)
             if self.pruned is None or now - self.pruned >= THREAT_PRUNE_SECONDS:
                 threats.prune(self.db)
@@ -2022,7 +2071,7 @@ def run():
                 alerts.expire(wall)
                 write_json(IDS_STATS_FILE, correlator.diagnostics())
                 recorder.update(records, local_addresses, blocklists, reputation, time.monotonic(), geo, hostnames, alerts,
-                                correlator)
+                                correlator, leases, interfaces)
             # wake at once when a viewer opens the map, not at the end of the slow interval
             while time.monotonic() - started < BACKGROUND_INTERVAL and not requested(REQUEST_MARKER, 2):
                 time.sleep(1.0)
@@ -2088,7 +2137,8 @@ def run():
                 correlator.resolve(local_addresses, wall)
                 alerts.expire(wall)
                 write_json(IDS_STATS_FILE, correlator.diagnostics())
-                recorder.update(records, local_addresses, blocklists, reputation, now, geo, hostnames, alerts, correlator)
+                recorder.update(records, local_addresses, blocklists, reputation, now, geo, hostnames, alerts, correlator,
+                                leases, interfaces)
                 payload = snapshot(tracker, geo, local_addresses, role, now, time.time(), resolver, {
                     "names": leases, "networks": networks, "interfaces": interfaces, "blocklists": blocklists,
                     "reputation": reputation, "alerts": alerts, "descriptions": descriptions,

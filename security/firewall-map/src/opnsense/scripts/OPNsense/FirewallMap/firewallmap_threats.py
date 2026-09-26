@@ -118,6 +118,7 @@ def _record(db, seen, now):
                     "peak_bytes": entry["bytes"]}
             data.pop("bytes")
             data.pop("youngest")
+            data["connections"] = merge_connections([], entry.get("connections") or [])
             data["remote"] = entry.get("remote") or {}
             if not data.get("ids"):
                 data.pop("ids", None)
@@ -140,6 +141,7 @@ def _record(db, seen, now):
         data["peak_bytes"] = max(data.get("peak_bytes", 0), entry["bytes"])
         # newer facts win, but a sample without them never erases what was recorded
         data["remote"] = {**data.get("remote", {}), **(entry.get("remote") or {})}
+        data["connections"] = merge_connections(data.get("connections") or [], entry.get("connections") or [])
         if entry.get("ids"):
             data["ids"] = entry["ids"]  # the latest Suricata picture for this address
         status = row[1]
@@ -152,6 +154,21 @@ def _record(db, seen, now):
             status = "new"
         db.execute("UPDATE threats SET last_seen = ?, samples = samples + 1, data = ?, status = ? WHERE address = ?",
                    (now, json.dumps(data), status, address))
+
+
+MAX_CONNECTIONS = 8
+
+
+def merge_connections(old, new):
+    """Keep the latest picture of each connection; IDS-linked ones first, then the most recent."""
+    merged = {item["key"]: item for item in old if isinstance(item, dict) and item.get("key")}
+    for item in new:
+        previous = merged.get(item["key"], {})
+        if previous.get("ids") and not item.get("ids"):
+            item = {**item, "ids": previous["ids"]}
+        merged[item["key"]] = item
+    ordered = sorted(merged.values(), key=lambda item: (not item.get("ids"), -(item.get("seen") or 0)))
+    return ordered[:MAX_CONNECTIONS]
 
 
 def prune(db, now=None):
