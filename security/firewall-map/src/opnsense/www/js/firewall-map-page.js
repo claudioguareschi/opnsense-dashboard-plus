@@ -1068,6 +1068,95 @@
             [group, [...entries.values()].sort((a, b) => b.rate - a.rate)]));
     }
 
+    /* ---------------------------------------------------------------- resizable panels */
+
+    const LAYOUT_KEY = 'firewallmap.layout';
+
+    function readLayout() {
+        try {
+            return JSON.parse(window.localStorage.getItem(LAYOUT_KEY) || '{}') || {};
+        } catch (_) {
+            return {};
+        }
+    }
+
+    function saveLayout(layout) {
+        try {
+            window.localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+        } catch (_) {
+            // private windows or blocked storage: the sizes just are not remembered
+        }
+    }
+
+    function applyLayout(layout) {
+        const $side = $('#fwmap-side');
+        if (layout.side) {
+            $side.css({width: `${layout.side}px`, flex: `0 0 ${layout.side}px`});
+        } else {
+            $side.css({width: '', flex: ''});
+        }
+        const share = layout.talkers || 0.6;
+        $('#fwmap-talkers').css('flex', `${share} 1 0`);
+        $('#fwmap-details-box').css('flex', `${1 - share} 1 0`);
+    }
+
+    /** Pointer drag on a handle; `move` gets the pointer event, the map redraws once per frame. */
+    function draggable($handle, move, reset) {
+        let frame = null;
+        $handle.on('pointerdown', function (event) {
+            event.preventDefault();
+            this.setPointerCapture(event.pointerId);
+            $handle.addClass('fwmap-dragging');
+            $('body').addClass('fwmap-resizing');
+        }).on('pointermove', function (event) {
+            if (!this.hasPointerCapture(event.pointerId)) {
+                return;
+            }
+            move(event);
+            if (frame === null) {
+                frame = requestAnimationFrame(() => {
+                    frame = null;
+                    state.renderer?.resize();
+                });
+            }
+        }).on('pointerup pointercancel', function (event) {
+            if (this.hasPointerCapture(event.pointerId)) {
+                this.releasePointerCapture(event.pointerId);
+            }
+            $handle.removeClass('fwmap-dragging');
+            $('body').removeClass('fwmap-resizing');
+            saveLayout(state.layout);
+            state.renderer?.resize();
+        }).on('dblclick', () => {
+            reset();
+            applyLayout(state.layout);
+            saveLayout(state.layout);
+            state.renderer?.resize();
+        });
+    }
+
+    function bindSplitters() {
+        state.layout = readLayout();
+        applyLayout(state.layout);
+        draggable($('#fwmap-split-side'), (event) => {
+            const bounds = $('#fwmap-layout')[0].getBoundingClientRect();
+            // the side panel is right of the map: its width is what lies right of the pointer
+            const width = Math.round(bounds.right - event.clientX - 6);
+            state.layout.side = Math.max(220, Math.min(width, Math.round(bounds.width * 0.6)));
+            applyLayout(state.layout);
+        }, () => {
+            delete state.layout.side;
+        });
+        draggable($('#fwmap-split-details'), (event) => {
+            const bounds = $('#fwmap-side')[0].getBoundingClientRect();
+            const share = (event.clientY - bounds.top) / bounds.height;
+            state.layout.talkers = Math.max(0.15, Math.min(share, 0.85));
+            applyLayout(state.layout);
+        }, () => {
+            delete state.layout.talkers;
+        });
+    }
+
     $(async function () {
         const $map = $('#fwmap-map');
         const canvas = document.createElement('canvas');
@@ -1131,6 +1220,7 @@
         }
 
         bindControls();
+        bindSplitters();
         $('#fwmap-review').toggle(state.isAdmin);
         if (state.isAdmin) {
             refreshQueueCount();

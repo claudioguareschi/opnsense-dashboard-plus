@@ -29,7 +29,7 @@
     #fwmap-toolbar select { width: auto; min-width: 130px; max-width: 220px; display: inline-block; height: 30px; padding: 2px 6px; }
     #fwmap-toolbar label { margin: 0 2px 0 6px; font-weight: normal; opacity: .8; }
     #fwmap-filter-asn { display: none; }
-    #fwmap-layout { display: flex; gap: 12px; }
+    #fwmap-layout { display: flex; }
     #fwmap-map {
         position: relative; flex: 1; min-width: 0; overflow: hidden; border-radius: 6px;
         /* header, page title, toolbar, content padding and the fixed footer */
@@ -44,11 +44,21 @@
         display: flex; flex-wrap: wrap; gap: 4px 12px; max-width: 70%;
     }
     .fwmap-legend-item i { display: inline-block; width: 18px; height: 3px; margin-right: 5px; vertical-align: middle; border-radius: 2px; }
-    #fwmap-side { width: 320px; flex: 0 0 320px; display: flex; flex-direction: column; gap: 12px;
+    #fwmap-side { width: 320px; flex: 0 0 320px; display: flex; flex-direction: column;
         height: calc(100vh - 280px); min-height: 420px; }
     #fwmap-talkers, #fwmap-details-box { border: 1px solid rgba(128, 128, 128, .25); border-radius: 6px; padding: 8px; }
     #fwmap-talkers { flex: 1 1 60%; overflow-y: auto; min-height: 0; }
     #fwmap-details-box { flex: 1 1 40%; overflow-y: auto; min-height: 0; }
+    /* drag handles: between map and side panel, and between the two side boxes; double-click resets */
+    .fwmap-splitter { flex: 0 0 12px; position: relative; touch-action: none; user-select: none; }
+    .fwmap-splitter::after { content: ""; position: absolute; border-radius: 2px; background: rgba(128, 128, 128, .35);
+        transition: background .15s; }
+    .fwmap-splitter:hover::after, .fwmap-splitter.fwmap-dragging::after { background: rgba(128, 128, 128, .75); }
+    .fwmap-splitter-v { cursor: col-resize; }
+    .fwmap-splitter-v::after { left: 5px; top: 50%; width: 3px; height: 40px; margin-top: -20px; }
+    .fwmap-splitter-h { cursor: row-resize; }
+    .fwmap-splitter-h::after { top: 5px; left: 50%; height: 3px; width: 40px; margin-left: -20px; }
+    body.fwmap-resizing, body.fwmap-resizing * { user-select: none !important; }
     #fwmap-talkers .nav { margin-bottom: 6px; }
     #fwmap-talkers .nav > li > a { padding: 4px 10px; }
     .fwmap-talker { display: flex; align-items: center; gap: 8px; padding: 3px 2px; cursor: pointer; border-radius: 4px; }
@@ -120,6 +130,7 @@
     .fwmap-q-source { opacity: .75; }
     @media (max-width: 1100px) {
         #fwmap-layout { flex-direction: column; }
+        #fwmap-split-side { display: none; }
         #fwmap-side { width: auto; flex: none; height: auto; }
     }
 </style>
@@ -287,6 +298,7 @@
             <div id="fwmap-status"></div>
             <div id="fwmap-credit"></div>
         </div>
+        <div class="fwmap-splitter fwmap-splitter-v" id="fwmap-split-side" title="{{ lang._('Drag to resize, double-click to reset') }}"></div>
         <div id="fwmap-side">
             <div id="fwmap-talkers">
                 <ul class="nav nav-tabs">
@@ -296,6 +308,7 @@
                 </ul>
                 <div id="fwmap-talkers-list"></div>
             </div>
+            <div class="fwmap-splitter fwmap-splitter-h" id="fwmap-split-details" title="{{ lang._('Drag to resize, double-click to reset') }}"></div>
             <div id="fwmap-details-box">
                 <div id="fwmap-details"></div>
             </div>
