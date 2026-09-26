@@ -229,10 +229,10 @@
 
     /* ---------------------------------------------------------------- top talkers */
 
-    /** "VLAN10_MGMT" reads as "MGMT"; the full name stays in the tooltip. */
+    /** "VLAN10_MGMT" reads as "MGMT (VLAN10)"; the configured name stays in the tooltip. */
     function shortInterface(name) {
-        const short = plain(name || '').replace(/^VLAN\d+[_ -]+/i, '');
-        return short || plain(name || '');
+        const match = /^VLAN(\d+)[_ -]+(.+)$/i.exec(plain(name || ''));
+        return match ? `${match[2]} (VLAN${match[1]})` : plain(name || '');
     }
 
     /** Top talkers by host, country and network, plus the addresses Suricata alerted on. */
@@ -812,10 +812,12 @@
             + lines.filter(Boolean).map((line) => `<div class="fwmap-end-sub">${esc(line)}</div>`).join('') + '</div>';
     }
 
-    /** A titled section of the details panel (icon and title, a guide line, key/value rows). */
-    function card(icon, title, body) {
-        return `<section class="fwmap-sec"><div class="fwmap-sec-head"><i class="fa ${icon}"></i><span>${esc(title)}</span></div>`
-            + `<div class="fwmap-sec-body">${body}</div></section>`;
+    /** A card of the details panel: icon, title and a chevron that opens the related view. */
+    function card(icon, title, body, action) {
+        const chevron = action ? `<a href="${action.href || '#'}" class="fwmap-card-go ${action.cls || ''}"${action.href ? ' target="_blank" rel="noopener"' : ''}`
+            + `${action.address ? ` data-address="${esc(action.address)}"` : ''} title="${esc(action.title)}"><i class="fa fa-chevron-right"></i></a>` : '';
+        return `<section class="fwmap-card"><div class="fwmap-card-head"><i class="fa ${icon}"></i><span>${esc(title)}</span>${chevron}</div>`
+            + `<div class="fwmap-card-body">${body}</div></section>`;
     }
 
     function rows(items) {
@@ -845,7 +847,8 @@
             [T.organization, esc(plain(item.as_org || ''))],
             [T.country, item.country ? `${flagOf(item.country_code)} ${esc(plain(item.country))}` : ''],
         ]);
-        return card('fa-database', T.sec_reputation, `<div class="fwmap-two">${left}${right}</div>`);
+        return card('fa-database', T.sec_reputation, `<div class="fwmap-two">${left}${right}</div>`,
+            state.isAdmin ? {cls: 'fwmap-investigate', address: item.ip || item.dest || item.source || state.detailsAddress, title: T.investigate} : null);
     }
 
     function idsCard(ids, groups) {
@@ -853,15 +856,16 @@
             : (ids?.signatures || []).map((item) => ({...item, last: null}));
         if (!signatures.length) {
             return card('fa-search', T.sec_ids_long, `<div class="fwmap-empty-note"><i class="fa fa-check"></i>
-                <div><div>${esc(T.no_ids)}</div><div class="fwmap-muted">${esc(T.no_ids_sub)}</div></div></div>`);
+                <div><div>${esc(T.no_ids)}</div><div class="fwmap-muted">${esc(T.no_ids_sub)}</div></div></div>`,
+                {href: '/ui/ids#alerts', title: T.open_ids});
         }
         const scope = groups ? T.ids_on_connection : T.ids_on_address;
-        return card('fa-search', T.sec_ids_long, `<div class="text-muted fwmap-card-note">${esc(scope)}</div>`
+        return card('fa-search', T.sec_ids_long, `<div class="fwmap-card-note">${esc(scope)}</div>`
             + signatures.map((item) => `<div class="fwmap-sig">
                 <div class="${item.severity <= 2 ? 'fwmap-ids-high' : 'fwmap-ids'}"><i class="fa fa-flag"></i> ${esc(item.signature)}</div>
                 <div class="text-muted">${esc(T.severity)} ${esc(item.severity)}${item.category ? ` · ${esc(item.category)}` : ''}${item.sid ? ` · SID ${esc(item.sid)}` : ''}
                     · ${esc(item.count)}×${item.last ? ` · ${esc(new Date(item.last * 1000).toLocaleTimeString())}` : ''}${item.action === 'blocked' ? ` · <b>${esc(T.ips_dropped)}</b>` : ''}</div>
-            </div>`).join(''));
+            </div>`).join(''), {href: '/ui/ids#alerts', title: T.open_ids});
     }
 
     /** Everything the panel shows for one remote address of the selection. */
@@ -1036,6 +1040,7 @@
         $details.html(`
             <div class="fwmap-d-scroll">
                 <div class="fwmap-d-head">
+                    <i class="fa fa-globe fwmap-d-icon"></i>
                     <div class="fwmap-d-title">
                         <div class="fwmap-d-name">${esc(model.remote.title)}</div>
                         <div class="fwmap-d-line">${model.remote.hostname ? `<b>${esc(address)}</b>` : ''}
@@ -1047,10 +1052,12 @@
                 </div>
                 ${picker}
                 ${diagram}
-                ${card('fa-plug', T.sec_connection, model.connection)}
-                ${card('fa-shield', T.sec_firewall, model.firewall)}
-                ${model.ids}
-                ${model.reputation}
+                <div class="fwmap-cards">
+                    ${card('fa-bar-chart', T.sec_connection, model.connection, state.isAdmin ? {cls: 'fwmap-states', address, title: T.show_states} : null)}
+                    ${card('fa-shield', T.sec_firewall, model.firewall, {href: '/ui/diagnostics/firewall/log', title: T.open_log})}
+                    ${model.ids}
+                    ${model.reputation}
+                </div>
                 ${investigation ? `<div class="fwmap-investigation">${investigation}</div>` : ''}
             </div>
             ${actionBar(address, selection.countryCode)}
@@ -1394,6 +1401,14 @@
             $('#fwmap-filter-traffic').val(next).trigger('change');
         });
         setInterval(updatedLine, 1000);
+        $('#fwmap-zoom').on('click', 'button', function () {
+            const step = $(this).data('zoom');
+            if (step === 'fit') {
+                state.renderer.fit();
+            } else {
+                state.renderer.zoom(Number(step));
+            }
+        });
     }
 
     // re-rank the current tab from the last snapshot without adding a history point
@@ -1434,7 +1449,7 @@
         } else {
             $side.css({width: '', flex: ''});
         }
-        const share = layout.talkers || 0.42;
+        const share = layout.talkers || 0.5;
         $('#fwmap-talkers').css('flex', `${share} 1 0`);
         $('#fwmap-details-box').css('flex', `${1 - share} 1 0`);
     }

@@ -1292,6 +1292,20 @@ export function createFirewallMap(container, options = {}) {
       colors = palette(theme);
       deck.setProps({layers: layers(lastData)});
     },
+    /** Zoom by `steps` (positive in, negative out) around the centre; `fit` shows the whole world. */
+    zoom(steps) {
+      const zoom = Math.max(viewState.minZoom, Math.min(viewState.maxZoom, viewState.zoom + steps));
+      viewState = {...viewState, zoom, transitionDuration: 250};
+      deck.setProps({viewState});
+      labelLayer = buildLabelLayer();
+      deck.setProps({layers: compose()});
+    },
+    fit() {
+      viewState = {...viewState, longitude: VIEW_LONGITUDE, latitude: VIEW_LATITUDE, zoom: viewState.minZoom, transitionDuration: 300};
+      deck.setProps({viewState});
+      labelLayer = buildLabelLayer();
+      deck.setProps({layers: compose()});
+    },
     resize() {
       // keep the whole world fitted to the widget width as it is resized
       const zoom = fitZoom(container.clientWidth);

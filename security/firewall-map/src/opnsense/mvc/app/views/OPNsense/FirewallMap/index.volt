@@ -25,19 +25,30 @@
  #}
 
 <style>
-    #fwmap-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
-    #fwmap-toolbar select { width: auto; min-width: 130px; max-width: 220px; display: inline-block; height: 30px; padding: 2px 6px; }
+    #fwmap-toolbar { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; margin-bottom: 12px; }
+    #fwmap-toolbar select { width: auto; min-width: 150px; max-width: 230px; display: inline-block; height: 34px; padding: 2px 8px; }
     #fwmap-toolbar label { margin: 0 2px 0 6px; font-weight: normal; opacity: .8; }
     #fwmap-filter-asn { display: none; }
-    #fwmap-layout { display: flex; }
+    #fwmap-layout { display: flex; height: calc(100vh - 175px); min-height: 560px; }
+    #fwmap-main { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid rgba(128, 128, 128, .18);
+        border-radius: 6px; padding: 12px 12px 0; }
+    #fwmap-zoom { position: absolute; left: 12px; top: 40px; z-index: 3; display: flex; flex-direction: column;
+        border: 1px solid rgba(128, 128, 128, .3); border-radius: 4px; overflow: hidden; background: var(--fwmap-panel, #fff);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .08); }
+    #fwmap-zoom button { width: 30px; height: 30px; border: 0; background: transparent; color: inherit; }
+    #fwmap-zoom button + button { border-top: 1px solid rgba(128, 128, 128, .25); }
+    #fwmap-zoom button:hover { background: rgba(128, 128, 128, .12); }
+    #fwmap-statusbar { display: flex; align-items: center; gap: 12px; padding: 12px 6px; font-size: .92em;
+        border-top: 1px solid rgba(128, 128, 128, .15); margin-top: 8px; }
+    #fwmap-statusbar #fwmap-status { flex: 1; min-width: 0; }
     #fwmap-map {
-        position: relative; flex: 1; min-width: 0; overflow: hidden; border-radius: 6px;
+        position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; border-radius: 6px;
         /* header, page title, toolbar, content padding and the fixed footer */
-        height: calc(100vh - 280px); min-height: 420px;
+        
     }
     #fwmap-grid { pointer-events: none; position: absolute; inset: 0; z-index: 0; background-size: 48px 48px; }
     #fwmap-canvas { position: absolute; inset: 0; z-index: 1; text-align: left; }
-    #fwmap-status { position: absolute; left: 14px; bottom: 10px; z-index: 2; font-size: .85em; pointer-events: none; }
+    #fwmap-status { font-size: 1em; }
     #fwmap-credit { position: absolute; right: 12px; bottom: 10px; z-index: 2; font-size: .8em; opacity: .7; }
     #fwmap-legend {
         position: absolute; left: 12px; top: 10px; z-index: 2; font-size: .8em; pointer-events: none;
@@ -45,13 +56,13 @@
     }
     .fwmap-legend-item i { display: inline-block; width: 22px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
     .fwmap-legend-item i.fwmap-legend-ring { width: 11px; height: 11px; border-radius: 50%; border: 2px solid rgb(196, 18, 48); background: transparent; }
-    .fwmap-status-ids { pointer-events: auto; color: rgb(232, 93, 40); }
+    .fwmap-status-ids { color: rgb(220, 50, 40); }
     .fwmap-status-ids.active { font-weight: 600; text-decoration: underline; }
-    #fwmap-updated { position: absolute; right: 12px; bottom: 28px; z-index: 2; font-size: .85em; opacity: .75; pointer-events: none; }
+    #fwmap-updated { white-space: nowrap; opacity: .8; }
     .fwmap-live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: rgb(40, 150, 70); margin-left: 4px; }
     .fwmap-live.stale { background: rgb(200, 140, 0); }
-    #fwmap-side { width: clamp(380px, 36vw, 640px); flex: 0 0 clamp(380px, 36vw, 640px); display: flex; flex-direction: column;
-        height: calc(100vh - 280px); min-height: 420px; }
+    #fwmap-side { width: clamp(400px, 38vw, 680px); flex: 0 0 clamp(400px, 38vw, 680px); display: flex; flex-direction: column;
+        height: 100%; min-height: 0; }
     #fwmap-talkers, #fwmap-details-box { border: 1px solid rgba(128, 128, 128, .22); border-radius: 6px;
         background: var(--fwmap-panel, transparent); box-shadow: 0 1px 3px rgba(0, 0, 0, .06); }
     #fwmap-talkers { flex: 1 1 60%; min-height: 0; display: flex; flex-direction: column; padding: 10px 12px 6px; }
@@ -164,60 +175,66 @@
     .fwmap-q-source { opacity: .75; }
 
     /* details panel, as in the design mockup: header, verdict pill, diagram, stacked sections, action bar */
-    .fwmap-d-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 18px 8px; }
+    .fwmap-d-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 14px 14px 6px; }
     .fwmap-d-head { display: flex; align-items: flex-start; gap: 12px; }
+    .fwmap-d-icon { font-size: 2em; opacity: .7; margin-top: 2px; }
     .fwmap-d-title { flex: 1; min-width: 0; }
-    .fwmap-d-name { font-size: 1.45em; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; letter-spacing: -.01em; }
-    .fwmap-d-line { font-size: .92em; margin-top: 3px; display: flex; flex-wrap: wrap; gap: 2px 12px; opacity: .85; }
-    .fwmap-d-line b { font-weight: 600; opacity: 1; }
-    .fwmap-d-verdict { text-align: center; margin-top: 18px; }
-    .fwmap-d-verdict-sub { font-size: .85em; opacity: .65; margin-top: 8px; }
-    #fwmap-details-close { font-size: 1.2em; line-height: 1; margin-left: 2px; color: rgb(232, 93, 40); }
-    .fwmap-vpill { display: inline-block; font-weight: 600; font-size: 1.02em; padding: 5px 18px; border-radius: 18px; white-space: nowrap; }
-    .fwmap-vpill-ok { background: rgb(40, 150, 70); color: #fff; box-shadow: 0 0 0 6px rgba(40, 150, 70, .14); }
-    .fwmap-vpill-danger { background: rgb(196, 18, 48); color: #fff; box-shadow: 0 0 0 6px rgba(196, 18, 48, .14); }
-    .fwmap-vpill-blocked { background: rgb(80, 80, 80); color: #fff; box-shadow: 0 0 0 6px rgba(80, 80, 80, .14); }
-    .fwmap-vpill-muted { background: rgba(128, 128, 128, .2); box-shadow: 0 0 0 6px rgba(128, 128, 128, .08); }
-    .fwmap-pill { display: inline-block; font-size: .85em; font-weight: 600; padding: 1px 9px; border-radius: 10px; white-space: nowrap; }
+    .fwmap-d-name { font-size: 1.4em; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
+    .fwmap-d-line { font-size: .88em; margin-top: 3px; display: flex; flex-wrap: wrap; gap: 2px 12px; opacity: .8; }
+    .fwmap-d-line b { font-weight: 500; }
+    .fwmap-d-verdict { text-align: center; margin-top: 16px; }
+    .fwmap-d-verdict-sub { font-size: .8em; opacity: .65; margin-top: 6px; }
+    #fwmap-details-close { font-size: 1.15em; line-height: 1; margin-left: 2px; color: rgb(232, 93, 40); }
+    .fwmap-vpill { display: inline-block; font-weight: 600; font-size: .92em; padding: 3px 14px; border-radius: 14px; white-space: nowrap; }
+    .fwmap-vpill-ok { background: rgb(40, 150, 70); color: #fff; box-shadow: 0 0 0 4px rgba(40, 150, 70, .14); }
+    .fwmap-vpill-danger { background: rgb(196, 18, 48); color: #fff; box-shadow: 0 0 0 4px rgba(196, 18, 48, .14); }
+    .fwmap-vpill-blocked { background: rgb(80, 80, 80); color: #fff; box-shadow: 0 0 0 4px rgba(80, 80, 80, .14); }
+    .fwmap-vpill-muted { background: rgba(128, 128, 128, .2); box-shadow: 0 0 0 4px rgba(128, 128, 128, .08); }
+    .fwmap-pill { display: inline-block; font-size: .92em; font-weight: 500; padding: 0 8px; border-radius: 9px; white-space: nowrap; }
     .fwmap-pill-ok { background: rgba(40, 150, 70, .16); color: rgb(28, 115, 55); }
     .fwmap-pill-danger { background: rgb(196, 18, 48); color: #fff; }
     .fwmap-pill-warning { background: rgba(230, 140, 0, .18); color: rgb(170, 95, 0); }
     .fwmap-pill-blocked { background: rgba(80, 80, 80, .85); color: #fff; }
     .fwmap-pill-muted { background: rgba(128, 128, 128, .18); }
-    .fwmap-picker { margin: 10px 0 0; font-size: .85em; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+    .fwmap-picker { margin: 8px 0 0; font-size: .85em; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
     .fwmap-pick { padding: 0 6px; border-radius: 8px; }
     .fwmap-pick.active { background: rgba(128, 128, 128, .2); font-weight: 600; }
-    .fwmap-diagram { display: flex; align-items: stretch; gap: 10px; margin: 18px 0 14px; }
-    .fwmap-end { flex: 1 1 0; min-width: 0; text-align: center; padding: 12px 8px; border-radius: 6px; background: rgba(128, 128, 128, .09); }
-    .fwmap-end .fa { font-size: 1.6em; color: rgb(30, 110, 215); margin-bottom: 4px; }
+    .fwmap-diagram { display: flex; align-items: stretch; gap: 10px; margin: 14px 0 10px; }
+    .fwmap-end { flex: 1 1 0; min-width: 0; text-align: center; padding: 10px 8px; border-radius: 5px; background: rgba(128, 128, 128, .08);
+        border: 1px solid rgba(128, 128, 128, .12); font-size: .92em; }
+    .fwmap-end .fa { font-size: 1.55em; color: rgb(30, 110, 215); margin-bottom: 3px; }
     .fwmap-end-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .fwmap-end-sub { font-size: .88em; opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .fwmap-end-sub + .fwmap-end-sub { font-size: .82em; }
-    .fwmap-link { flex: 0 0 30%; display: flex; flex-direction: column; justify-content: center; text-align: center; font-size: .9em; }
+    .fwmap-end-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fwmap-end-sub + .fwmap-end-sub { font-size: .9em; opacity: .7; }
+    .fwmap-link { flex: 0 0 30%; display: flex; flex-direction: column; justify-content: center; text-align: center; font-size: .88em; }
     .fwmap-link-service { font-weight: 600; }
     .fwmap-link-port { opacity: .75; }
     .fwmap-link-arrow { position: relative; height: 14px; margin: 4px 2px 6px; }
-    .fwmap-link-arrow::before { content: ""; position: absolute; left: 0; right: 7px; top: 6px; border-top: 1.5px solid currentColor; opacity: .55; }
-    .fwmap-link-arrow::after { content: ""; position: absolute; right: 0; top: 2px; border: 5px solid transparent; border-left: 8px solid currentColor; opacity: .55; }
+    .fwmap-link-arrow::before { content: ""; position: absolute; left: 0; right: 7px; top: 6px; border-top: 1.5px solid currentColor; opacity: .6; }
+    .fwmap-link-arrow::after { content: ""; position: absolute; right: 0; top: 2px; border: 5px solid transparent; border-left: 8px solid currentColor; opacity: .6; }
     .fwmap-link-blocked .fwmap-link-arrow .fa { position: relative; z-index: 1; color: rgb(196, 18, 48); }
-    .fwmap-link-rate { opacity: .7; font-size: .92em; }
-    .fwmap-sec { padding: 12px 0 10px; border-top: 1px solid rgba(128, 128, 128, .18); }
-    .fwmap-sec-head { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 1.02em; margin-bottom: 8px; }
-    .fwmap-sec-head .fa { width: 22px; text-align: center; font-size: 1.1em; color: rgb(232, 93, 40); }
-    .fwmap-sec-body { margin-left: 10px; padding-left: 21px; border-left: 1px solid rgba(128, 128, 128, .18); }
-    .fwmap-kv { width: 100%; font-size: .92em; border-collapse: collapse; }
-    .fwmap-kv th { font-weight: normal; opacity: .65; padding: 3px 10px 3px 0; vertical-align: top; white-space: nowrap; width: 42%; }
-    .fwmap-kv td { padding: 3px 0; overflow-wrap: anywhere; }
-    .fwmap-kv tr + tr th, .fwmap-kv tr + tr td { border-top: 1px solid rgba(128, 128, 128, .07); }
-    .fwmap-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0 18px; }
-    .fwmap-two .fwmap-kv th { width: 50%; }
-    .fwmap-card-note { font-size: .82em; opacity: .7; margin-bottom: 4px; }
-    .fwmap-empty-note { display: flex; gap: 12px; align-items: center; font-size: .92em; padding: 10px 14px; border-radius: 6px;
+    .fwmap-link-rate { opacity: .7; }
+    .fwmap-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; }
+    .fwmap-card { border: 1px solid rgba(128, 128, 128, .22); border-radius: 5px; min-width: 0; }
+    .fwmap-card-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: .95em; padding: 6px 10px;
+        border-bottom: 1px solid rgba(128, 128, 128, .15); }
+    .fwmap-card-head .fa:first-child { width: 18px; text-align: center; color: rgb(232, 93, 40); }
+    .fwmap-card-head span { flex: 1; }
+    .fwmap-card-go { color: inherit; opacity: .5; font-size: .85em; }
+    .fwmap-card-go:hover { opacity: 1; }
+    .fwmap-card-body { padding: 5px 10px 7px; }
+    .fwmap-kv { width: 100%; font-size: .84em; border-collapse: collapse; }
+    .fwmap-kv th { font-weight: normal; opacity: .7; padding: 1px 8px 1px 0; vertical-align: top; white-space: nowrap; width: 40%; }
+    .fwmap-kv td { padding: 1px 0; overflow-wrap: anywhere; }
+    .fwmap-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0 10px; }
+    .fwmap-two .fwmap-kv th { width: 45%; }
+    .fwmap-card-note { font-size: .78em; opacity: .7; margin-bottom: 3px; }
+    .fwmap-empty-note { display: flex; gap: 10px; align-items: center; font-size: .82em; padding: 7px 10px; border-radius: 4px;
         background: rgba(128, 128, 128, .07); }
-    .fwmap-empty-note .fa-check { color: rgb(40, 150, 70); font-size: 1.3em; }
-    .fwmap-muted { opacity: .65; font-size: .92em; }
-    .fwmap-sig { margin-bottom: 6px; }
-    .fwmap-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 18px; border-top: 1px solid rgba(128, 128, 128, .18); }
+    .fwmap-empty-note .fa-check { color: rgb(40, 150, 70); font-size: 1.2em; }
+    .fwmap-muted { opacity: .65; }
+    .fwmap-sig { margin-bottom: 5px; font-size: .88em; }
+    .fwmap-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 14px; border-top: 1px solid rgba(128, 128, 128, .18); }
     .fwmap-actions .btn { padding: 7px 16px; font-size: 1em; }
     .fwmap-actions .btn .fa { margin-right: 4px; }
     .fwmap-actions .btn-group { margin-left: auto; }
@@ -225,6 +242,8 @@
         #fwmap-layout { flex-direction: column; }
         #fwmap-split-side { display: none; }
         #fwmap-side { width: auto; flex: none; height: auto; }
+        #fwmap-layout { height: auto; }
+        #fwmap-map { flex: none; height: 60vh; }
     }
 </style>
 
@@ -366,6 +385,8 @@
         select_hint: "{{ lang._('Show the details') }}",
         last_updated: "{{ lang._('Last updated:') }}",
         ids_alert: "{{ lang._('IDS alert') }}",
+        open_ids: "{{ lang._('Open Suricata alerts') }}",
+        open_log: "{{ lang._('Open the firewall log') }}",
         alerts_short: "{{ lang._('alerts') }}",
         flow_one: "{{ lang._('flow') }}",
         flow_many: "{{ lang._('flows') }}",
@@ -418,44 +439,50 @@
 <script src="/ui/js/firewall-map-page.js?v={{ pageVersion }}"></script>
 
 <div class="content-box" style="padding: 12px;">
-    <div id="fwmap-toolbar">
-        <label for="fwmap-color">{{ lang._('Colour') }}</label>
-        <select id="fwmap-color" class="form-control">
-            <option value="initiator">{{ lang._('By who connected') }}</option>
-            <option value="direction">{{ lang._('By data direction') }}</option>
-            <option value="egress">{{ lang._('By egress') }}</option>
-            <option value="service">{{ lang._('By service') }}</option>
-        </select>
-        <label for="fwmap-filter-traffic">{{ lang._('Show') }}</label>
-        <select id="fwmap-filter-traffic" class="form-control">
-            <option value="all">{{ lang._('All traffic') }}</option>
-            <option value="permitted">{{ lang._('Permitted') }}</option>
-            <option value="blocked">{{ lang._('Blocked') }}</option>
-            <option value="threats">{{ lang._('Threats that got through') }}</option>
-            <option value="ids">{{ lang._('IDS alerts') }}</option>
-            <option value="ids_flows">{{ lang._('IDS flows') }}</option>
-            <option value="ids_addresses">{{ lang._('IDS addresses') }}</option>
-        </select>
-        <select id="fwmap-filter-service" class="form-control"></select>
-        <select id="fwmap-filter-iface" class="form-control"></select>
-        <select id="fwmap-filter-host" class="form-control"></select>
-        <select id="fwmap-filter-country" class="form-control"></select>
-        <span id="fwmap-filter-asn" class="label label-default">
-            <span></span> <a href="#" style="color:inherit" title="{{ lang._('Remove') }}">&times;</a>
-        </span>
-        <button id="fwmap-reset" class="btn btn-default btn-sm" type="button">{{ lang._('Reset filters') }}</button>
-        <button id="fwmap-review" class="btn btn-default btn-sm" type="button" style="display:none; margin-left:auto">
-            <i class="fa fa-list-alt"></i> {{ lang._('Review queue') }} <span class="badge" id="fwmap-review-count"></span>
-        </button>
-    </div>
     <div id="fwmap-layout">
+        <div id="fwmap-main">
+    <div id="fwmap-toolbar">
+            <label for="fwmap-color">{{ lang._('Colour') }}</label>
+            <select id="fwmap-color" class="form-control">
+                <option value="initiator">{{ lang._('By who connected') }}</option>
+                <option value="direction">{{ lang._('By data direction') }}</option>
+                <option value="egress">{{ lang._('By egress') }}</option>
+                <option value="service">{{ lang._('By service') }}</option>
+            </select>
+            <label for="fwmap-filter-traffic">{{ lang._('Show') }}</label>
+            <select id="fwmap-filter-traffic" class="form-control">
+                <option value="all">{{ lang._('All traffic') }}</option>
+                <option value="permitted">{{ lang._('Permitted') }}</option>
+                <option value="blocked">{{ lang._('Blocked') }}</option>
+                <option value="threats">{{ lang._('Threats that got through') }}</option>
+                <option value="ids">{{ lang._('IDS alerts') }}</option>
+                <option value="ids_flows">{{ lang._('IDS flows') }}</option>
+                <option value="ids_addresses">{{ lang._('IDS addresses') }}</option>
+            </select>
+            <select id="fwmap-filter-service" class="form-control"></select>
+            <select id="fwmap-filter-iface" class="form-control"></select>
+            <select id="fwmap-filter-host" class="form-control"></select>
+            <select id="fwmap-filter-country" class="form-control"></select>
+            <span id="fwmap-filter-asn" class="label label-default">
+                <span></span> <a href="#" style="color:inherit" title="{{ lang._('Remove') }}">&times;</a>
+            </span>
+            <button id="fwmap-reset" class="btn btn-default btn-sm" type="button">{{ lang._('Reset filters') }}</button>
+            <button id="fwmap-review" class="btn btn-default btn-sm" type="button" style="display:none; margin-left:auto">
+                <i class="fa fa-list-alt"></i> {{ lang._('Review queue') }} <span class="badge" id="fwmap-review-count"></span>
+            </button>
+        </div>
         <div id="fwmap-map">
             <div id="fwmap-grid" aria-hidden="true"></div>
             <div id="fwmap-canvas"></div>
             <div id="fwmap-legend"></div>
-            <div id="fwmap-status"></div>
+            <div id="fwmap-zoom">
+                <button type="button" data-zoom="1" title="{{ lang._('Zoom in') }}"><i class="fa fa-plus"></i></button>
+                <button type="button" data-zoom="-1" title="{{ lang._('Zoom out') }}"><i class="fa fa-minus"></i></button>
+                <button type="button" data-zoom="fit" title="{{ lang._('Whole world') }}"><i class="fa fa-expand"></i></button>
+            </div>
             <div id="fwmap-credit"></div>
-            <div id="fwmap-updated"></div>
+        </div>
+        <div id="fwmap-statusbar"><div id="fwmap-status"></div><div id="fwmap-updated"></div></div>
         </div>
         <div class="fwmap-splitter fwmap-splitter-v" id="fwmap-split-side" title="{{ lang._('Drag to resize, double-click to reset') }}"></div>
         <div id="fwmap-side">
