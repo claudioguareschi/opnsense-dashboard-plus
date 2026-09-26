@@ -292,6 +292,9 @@
     .fwmap-talker-icon { opacity: .8; }
     .fwmap-talker-icon .fwmap-ic { stroke-width: 1.6; }
     #fwmap-legend { font-size: .92em; }
+    .fwmap-not-listed { color: rgb(28, 115, 55); opacity: .85; }
+    .fwmap-not-listed .fwmap-ic { stroke-width: 2.4; width: .95em; height: .95em; }
+    .fwmap-abuse-check { white-space: nowrap; font-weight: 500; }
     @media (max-width: 1100px) {
         #fwmap-layout { flex-direction: column; }
         #fwmap-split-side { display: none; }
@@ -443,6 +446,10 @@
         open_ids: "{{ lang._('Open Suricata alerts') }}",
         open_log: "{{ lang._('Open the firewall log') }}",
         port_word: "{{ lang._('Port') }}",
+        checking: "{{ lang._('checking…') }}",
+        check_now: "{{ lang._('Check now') }}",
+        no_key: "{{ lang._('no API key') }}",
+        not_listed_short: "{{ lang._('Not listed') }}",
         remote_port: "{{ lang._('Remote port') }}",
         duration: "{{ lang._('Duration') }}",
         alerts_short: "{{ lang._('alerts') }}",

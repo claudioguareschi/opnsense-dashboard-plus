@@ -50,6 +50,9 @@
         isAdmin: false,
         selection: null,
         investigations: new Map(),
+        abuseScores: new Map(),
+        abuseChecking: new Set(),
+        abuseConfigured: false,
     };
 
     /* ---------------------------------------------------------------- icons */
@@ -523,12 +526,33 @@
         return html;
     }
 
+    /** AbuseIPDB alone, from the Reputation card: the verdict fills in without opening the full investigation. */
+    async function checkAbuse(address) {
+        state.abuseChecking.add(address);
+        renderDetails();
+        try {
+            const result = await $.getJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`);
+            if (result.abuseipdb && typeof result.abuseipdb.score === 'number') {
+                state.abuseScores.set(address, result.abuseipdb.score);
+            } else {
+                notify(`AbuseIPDB: ${result.abuseipdb?.error || result.error || T.lookup_failed}`, BootstrapDialog.TYPE_WARNING);
+            }
+        } catch (error) {
+            notify(`${T.action_failed}: ${error.statusText || error}`, BootstrapDialog.TYPE_DANGER);
+        }
+        state.abuseChecking.delete(address);
+        renderDetails();
+    }
+
     async function investigate(address) {
         state.investigations.set(address, `<div class="text-muted"><i class="fa fa-spinner fa-spin"></i> ${esc(T.looking_up)}</div>`);
         renderDetails();
         try {
             const result = await $.getJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`);
             state.investigations.set(address, investigationCard(result));
+            if (result.abuseipdb && typeof result.abuseipdb.score === 'number') {
+                state.abuseScores.set(address, result.abuseipdb.score);
+            }
         } catch (error) {
             state.investigations.set(address, `<div class="text-danger">${esc(T.action_failed)}: ${esc(error.statusText || error)}</div>`);
         }
@@ -898,11 +922,24 @@
     function reputationCard(item) {
         const listed = new Set(item.lists || []);
         const lists = [...new Set([...(state.snapshot?.threat_lists || []), ...listed])];
-        const score = item.abuseipdb;
-        const abuse = score === null || score === undefined ? '<span class="text-muted">' + esc(T.not_checked) + '</span>'
-            : score >= 75 ? pill('danger', `${score}%`) : score >= 25 ? pill('warning', `${score}%`) : pill('ok', T.clean, 'fa-check');
+        const address = item.address;
+        const known = state.abuseScores.get(address);
+        const score = item.abuseipdb ?? known;
+        let abuse;
+        if (state.abuseChecking.has(address)) {
+            abuse = `<span class="fwmap-muted">${esc(T.checking)}</span>`;
+        } else if (score === null || score === undefined) {
+            // a lookup is one click away when the firewall has an AbuseIPDB key
+            abuse = state.isAdmin && state.abuseConfigured
+                ? `<a href="#" class="fwmap-abuse-check" data-address="${esc(address)}">${ic('search')} ${esc(T.check_now)}</a>`
+                : `<span class="fwmap-muted" title="${esc(T.abuseipdb_hint)}">${esc(T.no_key)}</span>`;
+        } else {
+            abuse = score >= 75 ? pill('danger', `${score}%`) : score >= 25 ? pill('warning', `${score}%`) : pill('ok', T.clean, 'fa-check');
+        }
+        // listed stands out in red; everything else reads as a quiet green "not listed"
+        const notListed = `<span class="fwmap-not-listed">${ic('check')} ${esc(T.not_listed_short)}</span>`;
         const left = rows([['AbuseIPDB', abuse], ...lists.filter((name) => name !== 'AbuseIPDB (looked up)').map((name) =>
-            [listLabel(name), listed.has(name) ? pill('danger', T.listed) : '<span class="text-muted">—</span>'])]);
+            [listLabel(name), listed.has(name) ? pill('danger', T.listed, 'fa-ban') : notListed])]);
         const right = rows([
             ['ASN', item.asn ? esc(`AS${item.asn}`) : ''],
             [T.organization, esc(plain(item.as_org || ''))],
@@ -984,7 +1021,7 @@
                         : target && !target.firewall ? esc(`${T.port_forward} (${flow.origin} → ${target.ip}${target.port ? `:${target.port}` : ''})`) : esc(T.no)],
                 ]),
                 ids: idsCard(flow.ids, null),
-                reputation: reputationCard({...item, lists: flow.lists, abuseipdb: flow.abuseipdb}),
+                reputation: reputationCard({...item, address, lists: flow.lists, abuseipdb: flow.abuseipdb}),
             };
         }
         if (ids) {
@@ -1016,7 +1053,7 @@
                     ['IPS', ids.ips_dropped ? pill('danger', T.ips_dropped) : ''],
                 ]),
                 ids: idsCard(null, ids.groups),
-                reputation: reputationCard(item),
+                reputation: reputationCard({...item, address}),
             };
         }
         if (block) {
@@ -1042,7 +1079,7 @@
                     [T.target, esc(block.target || '')],
                 ]),
                 ids: idsCard(block.ids, null),
-                reputation: reputationCard(item),
+                reputation: reputationCard({...item, address}),
             };
         }
         return {
@@ -1053,7 +1090,7 @@
             connection: `<div class="text-muted">${esc(T.no_connection)}</div>`,
             firewall: `<div class="text-muted">${esc(T.no_connection)}</div>`,
             ids: idsCard(alert?.ids, null),
-            reputation: reputationCard(item),
+            reputation: reputationCard({...item, address}),
         };
     }
 
@@ -1453,6 +1490,10 @@
                 event.preventDefault();
                 addCountry(String($(this).data('code')));
             })
+            .on('click', '.fwmap-abuse-check', function (event) {
+                event.preventDefault();
+                checkAbuse(String($(this).data('address')));
+            })
             .on('click', '.fwmap-pick', function (event) {
                 event.preventDefault();
                 state.detailsAddress = String($(this).data('address'));
@@ -1623,7 +1664,9 @@
 
         // investigation actions are offered to administrators (who can read the plugin settings)
         try {
-            state.isAdmin = !!(await $.getJSON('/api/firewallmap/settings/get')).provider;
+            const pluginSettings = await $.getJSON('/api/firewallmap/settings/get');
+            state.isAdmin = !!pluginSettings.provider;
+            state.abuseConfigured = !!pluginSettings.abuseipdb_configured;
         } catch (_) {
             state.isAdmin = false;
         }
