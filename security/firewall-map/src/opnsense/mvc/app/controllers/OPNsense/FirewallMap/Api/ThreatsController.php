@@ -35,7 +35,7 @@ use OPNsense\Core\Backend;
  */
 class ThreatsController extends ApiControllerBase
 {
-    private const STATUSES = ['new', 'reviewed', 'dismissed', 'blocked'];
+    private const STATUSES = ['new', 'reviewed', 'dismissed', 'blocked', 'dropped'];
 
     public function listAction($status = null)
     {

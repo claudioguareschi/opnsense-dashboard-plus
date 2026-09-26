@@ -21,7 +21,7 @@ import sys
 import time
 
 DATABASE = "/var/db/firewallmap/cache.db"
-STATUSES = ("new", "reviewed", "dismissed", "blocked")
+STATUSES = ("new", "reviewed", "dismissed", "blocked", "dropped")
 KEEP_SECONDS = 90 * 86400
 KEEP_ROWS = 5000
 MAX_ITEMS = 8  # per list kept for one address (targets, inside hosts, services, lists)
@@ -118,13 +118,14 @@ def _record(db, seen, now):
                     "peak_bytes": entry["bytes"]}
             data.pop("bytes")
             data.pop("youngest")
+            status = data.pop("status_hint", None) or "new"
             data["connections"] = merge_connections([], entry.get("connections") or [])
             data["remote"] = entry.get("remote") or {}
             if not data.get("ids"):
                 data.pop("ids", None)
             db.execute(
                 "INSERT INTO threats (address, first_seen, last_seen, samples, data, status, note, status_changed) "
-                "VALUES (?, ?, ?, 1, ?, 'new', '', NULL)", (address, now, now, json.dumps(data)))
+                "VALUES (?, ?, ?, 1, ?, ?, '', NULL)", (address, now, now, json.dumps(data), status))
             continue
         try:
             data = json.loads(row[0])
@@ -145,6 +146,8 @@ def _record(db, seen, now):
         if entry.get("ids"):
             data["ids"] = entry["ids"]  # the latest Suricata picture for this address
         status = row[1]
+        if status == "dropped" and not entry.get("status_hint"):
+            status = "new"  # traffic from an address the IPS had dropped got through: needs review
         # only a connection opened after the block reopens it; existing and closing states
         # (TIME_WAIT lingers for a minute or more) are not new traffic
         youngest = entry.get("youngest")

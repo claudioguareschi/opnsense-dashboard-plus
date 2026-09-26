@@ -1365,6 +1365,81 @@ MAX_PENDING_ALERTS = 2000
 MAX_IDS_FLOWS = 500
 
 
+def make_connection(key, **fields):
+    """The one shape every connection takes, whether it comes from a PF state, a blocked attempt in
+    the firewall log or a Suricata alert alone. Fields a source cannot know stay None.
+
+    decision: "pass" (a firewall state let it through), "block" (the firewall dropped it) or None
+    (only Suricata saw it, e.g. dropped by the IPS before the firewall).
+    """
+    connection = {
+        "key": key,
+        "protocol": key[0],
+        "public": f"{key[1]}:{key[2]}" if key[2] else key[1],
+        "remote": f"{key[3]}:{key[4]}" if key[4] else key[3],
+        "inside": None, "remote_started": None, "bytes_in": None, "bytes_out": None, "age": None,
+        "rule": None, "rule_description": None, "interface": None, "state": None, "decision": None,
+        "source": None, "seen": None,
+    }
+    connection.update(fields)
+    return connection
+
+
+PORT_FORWARD = re.compile(
+    r"^rdr (?:pass )?on (?P<iface>\S+) inet proto (?P<proto>\{[^}]*\}|\S+) from .*? to .*? port \{?(?P<ports>[\d:, ]+)\}?"
+    r" -> (?P<target>\S+)(?: port (?P<tport>\d+))?(?:.*?# (?P<descr>.*))?$")
+
+
+def port_forwards(path=RULES_DEBUG, table_lookup=None):
+    """Port forwards from the running ruleset: protocol and public port(s) -> inside host and port."""
+    def lookup(name):
+        try:
+            out = subprocess.run([PFCTL, "-t", name, "-T", "show"], capture_output=True, text=True, timeout=5).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        first = out.split()
+        return first[0] if first else None
+    table_lookup = table_lookup or lookup
+    forwards = []
+    try:
+        with open(path, errors="replace") as handle:
+            for line in handle:
+                if not line.startswith("rdr "):
+                    continue
+                match = PORT_FORWARD.match(line.strip())
+                if not match:
+                    continue
+                target = match["target"]
+                if target.startswith("$"):
+                    target = table_lookup(target[1:])
+                if not target or not private_ipv4(target):
+                    continue  # captive portal and other redirects to the firewall itself
+                ports = []
+                for part in re.split(r"[ ,]+", match["ports"].strip()):
+                    low, _, high = part.partition(":")
+                    if low.isdigit():
+                        ports.append((int(low), int(high) if high.isdigit() else int(low)))
+                forwards.append({
+                    "protocols": set(re.findall(r"tcp|udp", match["proto"])),
+                    "ports": ports, "target": target, "target_port": match["tport"],
+                    "description": (match["descr"] or "").strip(),
+                })
+    except OSError:
+        pass
+    return forwards
+
+
+def forward_target(forwards, protocol, port):
+    """(inside host:port, rule description) a port forward sends this public port to, or (None, None)."""
+    if not port or not str(port).isdigit():
+        return None, None
+    port = int(port)
+    for forward in forwards or []:
+        if protocol in forward["protocols"] and any(low <= port <= high for low, high in forward["ports"]):
+            return f'{forward["target"]}:{forward["target_port"] or port}', forward["description"]
+    return None, None
+
+
 def outside_key(protocol, public_ip, public_port, remote_ip, remote_port):
     """The connection as seen outside NAT, which is what Suricata on WAN observes."""
     return (protocol, public_ip, str(public_port or ""), remote_ip, str(remote_port or ""))
@@ -1407,6 +1482,7 @@ class Correlator:
         self.stats = {"alerts": 0, "current": 0, "recent": 0, "blocked": 0, "unmatched": 0,
                       "ambiguous": 0, "no_ports": 0, "pending": 0}
         self.unmatched_samples = []
+        self.forwards = []
 
     def observe_states(self, records, local_addresses, now, descriptions=None):
         current = {}
@@ -1420,23 +1496,23 @@ class Correlator:
             if key is None:
                 continue
             inside = inside_endpoint(record)
-            connection = {
-                "key": key,
-                "inside": f'{inside["address"]}:{inside["port"]}' if inside and inside["port"] else
-                          (inside["address"] if inside else None),
-                "public": f"{key[1]}:{key[2]}" if key[2] else key[1],
-                "remote": f"{key[3]}:{key[4]}" if key[4] else key[3],
-                "protocol": key[0],
-                "remote_started": orientation(record, pair[1])[0],
-                "bytes_in": record.get("bytes_in", 0),
-                "bytes_out": record.get("bytes_out", 0),
-                "age": record.get("age"),
-                "rule": rule_for(record, pair, lan_rules),
-                "rule_description": (descriptions or {}).get(rule_for(record, pair, lan_rules) or "", ""),
-                "interface": record.get("origif"),
-                "state": record.get("state"),
-                "seen": now,
-            }
+            rule = rule_for(record, pair, lan_rules)
+            connection = make_connection(
+                key,
+                inside=f'{inside["address"]}:{inside["port"]}' if inside and inside["port"] else
+                       (inside["address"] if inside else None),
+                remote_started=orientation(record, pair[1])[0],
+                bytes_in=record.get("bytes_in", 0),
+                bytes_out=record.get("bytes_out", 0),
+                age=record.get("age"),
+                rule=rule,
+                rule_description=(descriptions or {}).get(rule or "", ""),
+                interface=record.get("origif"),
+                state=record.get("state"),
+                decision="pass",
+                source="state",
+                seen=now,
+            )
             previous = current.get(key)
             if previous and previous["inside"] != connection["inside"]:
                 ambiguous.add(key)
@@ -1452,9 +1528,11 @@ class Correlator:
         key = outside_key(event["protocol"], event["destination"], event.get("port"), event["source"],
                           event.get("source_port"))
         self.blocked.pop(key, None)
-        self.blocked[key] = {"key": key, "time": at, "rule": event.get("rule"),
-                             "rule_description": (descriptions or {}).get(event.get("rule") or "", ""),
-                             "interface": event.get("interface")}
+        inside, _ = forward_target(self.forwards, event["protocol"], event.get("port"))
+        self.blocked[key] = make_connection(
+            key, time=at, seen=at, inside=inside, remote_started=True, decision="block", source="firewall log",
+            rule=event.get("rule"), rule_description=(descriptions or {}).get(event.get("rule") or "", ""),
+            interface=event.get("interface"))
 
     def _expire(self, now):
         for store in (self.recent, self.blocked):
@@ -1473,6 +1551,20 @@ class Correlator:
         if src in local_addresses or not public_ipv4(src):
             return outside_key(alert["protocol"], src, alert["src_port"], dst, alert["dst_port"])
         return outside_key(alert["protocol"], dst, alert["dst_port"], src, alert["src_port"])
+
+    def alert_connection(self, key, alert, local_addresses, now):
+        remote_started = alert["src"] == key[3]
+        flow = alert.get("flow") or {}
+        # Suricata counts to_server/to_client; the map counts toward/away from the remote side
+        to_server, to_client = flow.get("bytes_toserver"), flow.get("bytes_toclient")
+        inside, description = forward_target(self.forwards, key[0], key[2]) if remote_started else (None, None)
+        started = flow.get("start")
+        return make_connection(
+            key, inside=inside, remote_started=remote_started,
+            bytes_in=to_server if remote_started else to_client, bytes_out=to_client if remote_started else to_server,
+            age=round(now - started) if started else None,
+            rule_description=f"Port forward: {description}" if description else None,
+            decision=None, source="suricata", seen=now)
 
     def add_alert(self, alert, local_addresses, now):
         self.stats["alerts"] += 1
@@ -1500,11 +1592,14 @@ class Correlator:
                 still.append((received, alert))
                 continue
             else:
+                # no firewall state or log entry: Suricata's own record is the connection (an IPS drop
+                # never reaches the firewall); a port forward still names the inside target
                 self.stats["unmatched"] += 1
                 self.unmatched_samples = (self.unmatched_samples + [{
                     "time": alert["time"], "key": list(key), "signature": alert["signature"]}])[-20:]
-                continue
-            self.stats[kind] += 1
+                kind, connection = "alert", self.alert_connection(key, alert, local_addresses, now)
+            if kind != "alert":
+                self.stats[kind] += 1
             self._attach(key, kind, connection, alert, now)
         self.pending = still
         self.stats["pending"] = len(still)
@@ -1514,8 +1609,9 @@ class Correlator:
         if flow is None:
             flow = self.flows[key] = {"key": key, "kind": kind, "connection": connection, "alerts": {},
                                       "first": now, "last": now}
-        if kind != "blocked" or flow["kind"] == "blocked":
-            # a real connection outranks a blocked attempt with the same tuple
+        # a firewall state outranks a blocked attempt, which outranks Suricata's record alone
+        rank = {"current": 3, "ambiguous": 3, "recent": 2, "blocked": 1, "alert": 0}
+        if rank.get(kind, 0) >= rank.get(flow["kind"], 0):
             flow["kind"], flow["connection"] = kind, connection
         flow["last"] = now
         group = flow["alerts"].setdefault(str(alert.get("flow_id") or "-"), {})
@@ -1527,6 +1623,8 @@ class Correlator:
         signature["count"] += 1
         signature["last"] = max(signature["last"], alert["time"] or now)
         signature["action"] = alert["action"]
+        if alert.get("query"):
+            signature["query"] = alert["query"]
 
     def flags(self, address):
         """Evidence on the connection itself: an allowed connection with a severity 1-2 alert."""
@@ -1601,6 +1699,13 @@ class Correlator:
         return stats
 
 
+def eve_time(value):
+    try:
+        return datetime.strptime(value or "", "%Y-%m-%dT%H:%M:%S.%f%z").timestamp()
+    except ValueError:
+        return None
+
+
 def parse_alert(line):
     """One Suricata EVE alert, or None for any other event (cheap check before JSON parsing)."""
     if '"event_type":"alert"' not in line and '"event_type": "alert"' not in line:
@@ -1627,6 +1732,12 @@ def parse_alert(line):
         "severity": alert.get("severity") or 3,
         "action": alert.get("action") or "allowed",
         "flow_id": event.get("flow_id"),
+        "flow": {**{key: (event.get("flow") or {}).get(key) for key in (
+            "pkts_toserver", "pkts_toclient", "bytes_toserver", "bytes_toclient")},
+            "start": eve_time((event.get("flow") or {}).get("start"))},
+        "app_proto": event.get("app_proto"),
+        # what was asked, for DNS alerts (the name behind "ET DNS Query for .cc TLD")
+        "query": ((event.get("dns") or {}).get("queries") or [{}])[0].get("rrname") or (event.get("dns") or {}).get("rrname"),
     }
 
 
@@ -1875,7 +1986,7 @@ def connection_snapshot(address, correlator, names, interfaces, wall=None):
         if flow:
             for group in flow["alerts"].values():
                 for item in group.values():
-                    signatures.append({field: item[field] for field in ("sid", "signature", "severity", "count", "action")})
+                    signatures.append({field: item.get(field) for field in ("sid", "signature", "severity", "count", "action", "query")})
         age = connection.get("age")
         result.append({
             "key": "|".join(key),
@@ -1893,11 +2004,54 @@ def connection_snapshot(address, correlator, names, interfaces, wall=None):
             "started": round(wall - age) if age is not None else None,
             "seen": round(wall),
             "kind": flow["kind"] if flow else "current",
+            # the firewall's decision and Suricata's are separate facts
+            "decision": connection.get("decision"),
+            "ips_dropped": any(item.get("action") == "blocked" for item in signatures),
+            "source": connection.get("source"),
             "ids": sorted(signatures, key=lambda item: (item["severity"], -item["count"]))[:3],
         })
     # the busiest first, IDS-linked ones always kept
     result.sort(key=lambda item: (not item["ids"], -((item["bytes_in"] or 0) + (item["bytes_out"] or 0))))
     return result[:MAX_SNAPSHOT_CONNECTIONS]
+
+
+def ips_drops(correlator, seen, since, blocklists=None, reputation=None):
+    """Addresses whose traffic Suricata dropped (IPS) since the last recording, as queue entries.
+
+    They carry the same fields as allowed traffic, so the queue shows them the same way, under
+    their own status.
+    """
+    entries = {}
+    for key, flow in correlator.flows.items():
+        remote = key[3]
+        if remote in seen or flow["last"] < since:
+            continue
+        signatures = [item for group in flow["alerts"].values() for item in group.values()]
+        if not any(item.get("action") == "blocked" for item in signatures):
+            continue
+        connection = flow["connection"]
+        inside = connection.get("inside")
+        inside_ip = inside.rsplit(":", 1)[0] if inside else None
+        started_by_remote = bool(connection.get("remote_started"))
+        port = (inside.rsplit(":", 1)[1] if inside and ":" in inside else key[2]) if started_by_remote else key[4]
+        entry = entries.setdefault(remote, {
+            "lists": threat_lists_for(remote, blocklists, reputation) + [IDS_LIST],
+            "inbound": 0, "outbound": 0, "targets": [], "inside": [], "services": [], "bytes": 0,
+            "youngest": None, "service_ports": {}, "status_hint": "dropped",
+        })
+        entry["inbound" if started_by_remote else "outbound"] += 1
+        if started_by_remote:
+            target = f"{key[0]}|{inside_ip or key[1]}|{port}"
+            if target not in entry["targets"]:
+                entry["targets"].append(target)
+        elif inside_ip and inside_ip not in entry["inside"]:
+            entry["inside"].append(inside_ip)
+        service = service_name(key[0], port)
+        if service not in entry["services"]:
+            entry["services"].append(service)
+            entry["service_ports"][service] = f"{port}/{key[0]}"
+        entry["bytes"] += (connection.get("bytes_in") or 0) + (connection.get("bytes_out") or 0)
+    return entries
 
 
 class ThreatRecorder:
@@ -1908,6 +2062,7 @@ class ThreatRecorder:
         self.db = None
         self.recorded = None
         self.pruned = None
+        self.last_wall = 0.0
 
     def update(self, records, local_addresses, blocklists, reputation, now, geo=None, hostnames=None, alerts=None,
                correlator=None, names=None, interfaces=None):
@@ -1938,8 +2093,10 @@ class ThreatRecorder:
                 for address, entry in seen.items():
                     entry["ids"] = alerts.summary(address)
             if correlator is not None:
+                seen.update(ips_drops(correlator, seen, self.last_wall, blocklists, reputation))
                 for address, entry in seen.items():
                     entry["connections"] = connection_snapshot(address, correlator, names or {}, interfaces or {})
+                self.last_wall = time.time()
             threats.record(self.db, seen)
             if self.pruned is None or now - self.pruned >= THREAT_PRUNE_SECONDS:
                 threats.prune(self.db)
@@ -2121,6 +2278,7 @@ def run():
                             correlator.observe_block(event, wall, descriptions)
                 if block_meta_checked is None or started - block_meta_checked >= BLOCK_REFRESH_SECONDS:
                     descriptions, interfaces, leases = rule_descriptions(), interface_names(), lease_names()
+                    correlator.forwards = port_forwards()
                     block_meta_checked = started
                 if blocklists_checked is None or started - blocklists_checked >= BLOCKLIST_REFRESH_SECONDS:
                     blocklists.refresh(chosen_threat_lists(geodb.settings().get("threat_lists")))

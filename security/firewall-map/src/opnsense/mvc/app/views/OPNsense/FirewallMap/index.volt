@@ -184,6 +184,7 @@
     .fwmap-q-badge-new { background: rgb(214, 50, 30); color: #fff; }
     .fwmap-q-badge-reviewed { background: rgba(40, 150, 70, .16); color: rgb(28, 115, 55); }
     .fwmap-q-badge-blocked { background: rgb(80, 80, 80); color: #fff; }
+    .fwmap-q-badge-dropped { background: rgb(120, 40, 160); color: #fff; }
     .fwmap-q-hostname { font-size: 13px; opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
     .fwmap-q-org { margin-top: 3px; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fwmap-q-country { font-size: 15px; margin-top: 2px; }
@@ -497,6 +498,12 @@
         check_now: "{{ lang._('Check now') }}",
         no_key: "{{ lang._('no API key') }}",
         not_listed_short: "{{ lang._('Not listed') }}",
+        status_dropped: "{{ lang._('Dropped by IPS') }}",
+        fw_passed: "{{ lang._('Passed') }}",
+        fw_blocked: "{{ lang._('Blocked') }}",
+        fw_not_seen: "{{ lang._('not seen by the firewall') }}",
+        ips_dropped_short: "{{ lang._('IPS drop') }}",
+        query: "{{ lang._('query') }}",
         more_connection: "{{ lang._('more connection') }}",
         more_connections: "{{ lang._('more connections') }}",
         connection_col: "{{ lang._('Connection') }}",

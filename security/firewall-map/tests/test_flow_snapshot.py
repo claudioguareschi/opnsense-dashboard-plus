@@ -698,7 +698,7 @@ class ThreatQueueTest(unittest.TestCase):
             THREATS.record(db, self.observe(self.INBOUND), now=400.0)
             row = THREATS.listing(db)["rows"][0]
             self.assertEqual((row["status"], row["seen_after_block"]), ("new", True))
-            self.assertEqual(THREATS.listing(db)["counts"], {"new": 1, "reviewed": 0, "dismissed": 0, "blocked": 0})
+            self.assertEqual(THREATS.listing(db)["counts"], {"new": 1, "reviewed": 0, "dismissed": 0, "blocked": 0, "dropped": 0})
             self.assertEqual(THREATS.listing(db, "counts")["rows"], [])
             THREATS.set_status(db, "108.188.77.155", "reviewed")
             self.assertNotIn("seen_after_block", THREATS.listing(db)["rows"][0])
@@ -846,7 +846,8 @@ class CorrelationTest(unittest.TestCase):
         stats = correlator.diagnostics()
         self.assertEqual((stats["recent"], stats["blocked"], stats["unmatched"], stats["pending"]), (1, 1, 1, 0))
         kinds = sorted(flow["kind"] for flow in correlator.flows.values())
-        self.assertEqual(kinds, ["blocked", "recent"])
+        # the unmatched alert is kept as a connection of its own, from Suricata's record
+        self.assertEqual(kinds, ["alert", "blocked", "recent"])
         # connections are forgotten after the correlation window
         correlator.observe_states([], self.LOCAL, 1100.0 + COLLECTOR.CORRELATION_SECONDS + 1)
         self.assertEqual((len(correlator.recent), len(correlator.blocked)), (0, 0))
@@ -912,6 +913,36 @@ class CorrelationTest(unittest.TestCase):
         self.assertEqual(item["ids"][0]["signature"], "ET MALWARE Possible C2 Activity")
         merged = THREATS.merge_connections([item], [{**item, "ids": [], "seen": 2000}])
         self.assertEqual((len(merged), merged[0]["seen"], bool(merged[0]["ids"])), (1, 2000, True))
+
+    def test_ips_drop_to_a_port_forward_is_a_full_record(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rules = os.path.join(directory, "rules.debug")
+            with open(rules, "w") as handle:
+                handle.write("rdr on igb1 inet proto tcp from {any} to {(igb1)} port {443} -> $MailServer port 443 # NAT HTTPS Forward Rule\n"
+                             "rdr on vlan02 inet proto tcp from {!<zone>} to {(self)} port {443} -> 127.0.0.1 port 8000 # portal\n")
+            forwards = COLLECTOR.port_forwards(rules, table_lookup=lambda name: {"MailServer": "192.168.1.2"}.get(name))
+            self.assertEqual(COLLECTOR.forward_target(forwards, "tcp", "443"), ("192.168.1.2:443", "NAT HTTPS Forward Rule"))
+            correlator = COLLECTOR.Correlator()
+            correlator.forwards = forwards
+            alert = self.alert("94.154.43.203", 51234, "198.13.91.163", 443, signature="ET EXPLOIT something")
+            alert.update(action="blocked", flow={"bytes_toserver": 900, "bytes_toclient": 60, "start": 990.0})
+            correlator.add_alert(alert, self.LOCAL, 1000.0)
+            correlator.resolve(self.LOCAL, 1000.0 + COLLECTOR.CORRELATION_RETRY_SECONDS + 1)
+            (flow,) = correlator.flows.values()
+            connection = flow["connection"]
+            self.assertEqual((flow["kind"], connection["inside"], connection["decision"], connection["bytes_in"], connection["source"]),
+                             ("alert", "192.168.1.2:443", None, 900, "suricata"))
+            entries = COLLECTOR.ips_drops(correlator, {}, 0.0)
+            entry = entries["94.154.43.203"]
+            self.assertEqual((entry["status_hint"], entry["targets"], entry["inbound"]), ("dropped", ["tcp|192.168.1.2|443"], 1))
+            (snap,) = COLLECTOR.connection_snapshot("94.154.43.203", correlator, {"192.168.1.2": "mail"}, {})
+            self.assertEqual((snap["inside_name"], snap["ips_dropped"], snap["decision"]), ("mail", True, None))
+            db = THREATS.connect(os.path.join(directory, "cache.db"))
+            THREATS.record(db, entries, now=1000.0)
+            self.assertEqual(THREATS.listing(db)["rows"][0]["status"], "dropped")
+            # the same address later getting through reopens it for review
+            THREATS.record(db, {"94.154.43.203": {**entry, "status_hint": None}}, now=1100.0)
+            self.assertEqual(THREATS.listing(db)["rows"][0]["status"], "new")
 
     def test_rule_label_is_parsed_from_states(self):
         (record,) = COLLECTOR.parse_states(self.OUTBOUND)

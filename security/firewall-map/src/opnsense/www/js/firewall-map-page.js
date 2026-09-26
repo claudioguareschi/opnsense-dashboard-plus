@@ -569,7 +569,7 @@
 
     /* ---------------------------------------------------------------- review queue */
 
-    const STATUSES = ['new', 'reviewed', 'blocked', 'dismissed'];
+    const STATUSES = ['new', 'reviewed', 'blocked', 'dropped', 'dismissed'];
     const QUEUE_PAGE = 100;
 
     // inside host names from the live map, for addresses recorded in the queue
@@ -686,15 +686,22 @@
             localLines = [lead.inside, conns.length > 1 ? `+ ${conns.length - 1} ${conns.length > 2 ? T.more_connections : T.more_connection}` : ''];
         }
         const rule = conns.find((item) => item.rule)?.rule;
-        const connTable = conns.length ? `<table class="fwmap-q-conns"><thead><tr><th>${esc(T.connection_col)}</th><th>${esc(T.rule)}</th>`
+        // the firewall's decision and Suricata's action side by side, whatever the source of the record
+        const decision = (item) => [
+            item.decision === 'pass' ? pill('ok', T.fw_passed) : item.decision === 'block' ? pill('blocked', T.fw_blocked)
+                : `<span class="fwmap-q-muted">${esc(T.fw_not_seen)}</span>`,
+            item.ips_dropped ? pill('danger', T.ips_dropped_short) : '',
+        ].filter(Boolean).join(' ');
+        const connTable = conns.length ? `<table class="fwmap-q-conns"><thead><tr><th>${esc(T.connection_col)}</th><th>${esc(T.decision)}</th><th>${esc(T.rule)}</th>`
             + `<th>${esc(T.interface)}</th><th>${esc(T.transferred)}</th><th>${esc(T.started)}</th><th>IDS</th></tr></thead><tbody>`
             + conns.map((item) => {
                 const insideText = `${item.inside_name ? `${item.inside_name} ` : ''}${item.inside || T.this_firewall}`;
                 const path = item.remote_started ? `${item.remote} → ${insideText}` : `${insideText} → ${item.remote}`;
-                const ids = (item.ids || []).map((sig) => `<div class="${sig.severity <= 2 ? 'fwmap-ids-high' : 'fwmap-ids'}">${ic('flag')} ${esc(sig.signature)} ×${esc(sig.count)}</div>`).join('');
+                const ids = (item.ids || []).map((sig) => `<div class="${sig.severity <= 2 ? 'fwmap-ids-high' : 'fwmap-ids'}">${ic('flag')} ${esc(sig.signature)} ×${esc(sig.count)}</div>`
+                    + (sig.query ? `<div class="fwmap-q-muted">${esc(T.query)}: ${esc(sig.query)}</div>` : '')).join('');
                 return `<tr><td><div>${esc(path)} <span class="fwmap-q-muted">${esc(item.protocol.toUpperCase())}</span></div>`
                     + `<div class="fwmap-q-muted">${esc(T.via)} ${esc(item.public || '')}${item.open ? '' : ` · ${esc(T.closed)}`}</div></td>`
-                    + `<td>${esc(item.rule || '—')}</td><td>${esc(item.interface || '—')}</td>`
+                    + `<td>${decision(item)}</td><td>${esc(item.rule || '—')}</td><td>${esc(item.interface || '—')}</td>`
                     + `<td>↓ ${esc(formatBytes(item.bytes_in || 0))} ↑ ${esc(formatBytes(item.bytes_out || 0))}</td>`
                     + `<td>${item.started ? esc(`${ago(item.started)} ${T.ago}`) : '—'}</td><td>${ids || '<span class="fwmap-q-muted">—</span>'}</td></tr>`;
             }).join('') + '</tbody></table>' : '';
