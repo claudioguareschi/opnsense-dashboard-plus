@@ -39,6 +39,7 @@ HOST_REFRESH_SECONDS = 30.0
 GEO_CACHE_SAVE_SECONDS = 60.0
 GEO_LOOKUPS_PER_SAMPLE = 25
 GEO_CACHE_MAX = 20000
+GEO_CACHE_VERSION = 2
 MAX_SERVICES = 4
 
 SERVICES = {
@@ -205,6 +206,9 @@ def lookup_location(address):
         "lat": round(latitude, 4),
         "lon": round(longitude, 4),
         "city": values.get(("city", "names", "en")),
+        # GeoLite often knows only the state/province (with a coarse accuracy radius)
+        "region": values.get(("subdivisions", "names", "en")),
+        "accuracy_km": int(float(values[("location", "accuracy_radius")])) if ("location", "accuracy_radius") in values else None,
         "country": values.get(("country", "iso_code")) or values.get(("registered_country", "iso_code")),
         "country_name": values.get(("country", "names", "en")) or values.get(("registered_country", "names", "en")),
     }
@@ -244,7 +248,7 @@ class GeoCache:
                 cached = json.load(handle)
         except (OSError, ValueError):
             return
-        if cached.get("database_mtime") == self.database_mtime:
+        if cached.get("database_mtime") == self.database_mtime and cached.get("version") == GEO_CACHE_VERSION:
             self.entries = cached.get("entries", {})
 
     def save(self, force=False):
@@ -252,7 +256,7 @@ class GeoCache:
             return
         if len(self.entries) > GEO_CACHE_MAX:
             self.entries = dict(list(self.entries.items())[-GEO_CACHE_MAX:])
-        write_json(self.path, {"database_mtime": self.database_mtime, "entries": self.entries})
+        write_json(self.path, {"version": GEO_CACHE_VERSION, "database_mtime": self.database_mtime, "entries": self.entries})
         self.dirty = False
         self.saved_at = time.monotonic()
 
@@ -407,8 +411,12 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time):
         location = geo.get(address)
         entry = {
             "id": address,
-            "name": ", ".join(part for part in (location.get("city"), location.get("country")) if part) or address,
+            "name": ", ".join(
+                part for part in (location.get("city") or location.get("region"), location.get("country")) if part
+            ) or address,
             "city": location.get("city"),
+            "region": location.get("region"),
+            "accuracy_km": location.get("accuracy_km"),
             "country": location.get("country_name") or location.get("country"),
             "lat": location["lat"],
             "lon": location["lon"],

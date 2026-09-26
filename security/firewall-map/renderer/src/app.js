@@ -170,9 +170,11 @@ function describe(place, members, locations) {
       return `<div>${escapeHtml(flow.dest)}${asn}</div>`;
     });
   const more = members.length > 6 ? `<div>+${members.length - 6} more</div>` : '';
-  const title = [place.city, place.country].filter(Boolean).join(', ') || place.name || place.id;
+  const title = [place.city || place.region, place.country].filter(Boolean).join(', ') || place.name || place.id;
+  // GeoLite places region- or country-level matches at a representative point; say how rough it is
+  const approximate = !place.city && place.accuracy_km ? ` <span style="opacity:.7">(± ${place.accuracy_km} km)</span>` : '';
   return `
-    <div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}</div>
+    <div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}${approximate}</div>
     ${addresses.join('')}${more}
     <div style="margin-top:4px">↓ ${formatRate(rateIn)} &nbsp; ↑ ${formatRate(rateOut)}</div>
     ${services.length ? `<div>${services.map(escapeHtml).join(', ')}</div>` : ''}
@@ -355,7 +357,7 @@ export function createFirewallMap(container, options = {}) {
     const seen = new Map();
     for (const flow of data.flows || []) {
       const location = locationIndex.get(flow.dest);
-      const text = location?.city || location?.country;
+      const text = location?.city || location?.region || location?.country;
       if (!text) {
         continue;
       }
