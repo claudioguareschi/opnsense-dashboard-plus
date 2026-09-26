@@ -30,6 +30,7 @@
     #fwmap-toolbar select { flex: 1 1 0; width: auto; min-width: 84px; max-width: 200px; height: 32px; padding: 2px 6px;
         text-overflow: ellipsis; }
     #fwmap-toolbar .fwmap-tool-label { margin: 0 0 0 2px; white-space: nowrap; }
+    #fwmap-toolbar #fwmap-color { min-width: 136px; }
     #fwmap-toolbar .fwmap-tool-btn { flex: none; height: 32px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; }
     #fwmap-toolbar .fwmap-tool-btn .fwmap-ic { width: 16px; height: 16px; }
     #fwmap-toolbar #fwmap-filter-asn { flex: none; white-space: nowrap; }
