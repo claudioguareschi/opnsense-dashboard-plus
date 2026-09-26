@@ -29,7 +29,7 @@
     #fwmap-toolbar select { width: auto; min-width: 150px; max-width: 230px; display: inline-block; height: 34px; padding: 2px 8px; }
     #fwmap-toolbar label { margin: 0 2px 0 6px; font-weight: normal; opacity: .8; }
     #fwmap-filter-asn { display: none; }
-    #fwmap-layout { display: flex; height: calc(100vh - 175px); min-height: 560px; }
+    #fwmap-layout { display: flex; height: calc(100vh - 222px); min-height: 540px; }
     #fwmap-main { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid rgba(128, 128, 128, .18);
         border-radius: 6px; padding: 12px 12px 0; }
     #fwmap-zoom { position: absolute; left: 12px; top: 40px; z-index: 3; display: flex; flex-direction: column;
