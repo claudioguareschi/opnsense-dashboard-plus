@@ -7,6 +7,11 @@ export default class FirewallMap extends BaseWidget {
     constructor(config) {
         super(config);
         this.tickTimeout = 2;
+        // the dashboard ticks on a fixed interval: never stack requests or abort-and-retry them,
+        // a slow firewall would otherwise get a burst of cancelled HTTP/2 streams
+        this.timeoutPeriod = 15000;
+        this.retryLimit = 0;
+        this.polling = false;
         this.renderer = null;
         this.loadingRenderer = null;
         this.configurable = true;
@@ -305,9 +310,10 @@ export default class FirewallMap extends BaseWidget {
     }
 
     async onWidgetTick() {
-        if (!this.renderer) {
+        if (!this.renderer || this.polling) {
             return;
         }
+        this.polling = true;
         try {
             const query = this.settings?.hostnames ? '?hostnames=1' : '';
             const snapshot = await this.ajaxCall(`/api/firewallmap/flow/snapshot${query}`);
@@ -344,6 +350,8 @@ export default class FirewallMap extends BaseWidget {
         } catch (error) {
             console.error('Firewall Map+: flow update failed', error);
             this._status(this.translations.data_unavailable);
+        } finally {
+            this.polling = false;
         }
     }
 
