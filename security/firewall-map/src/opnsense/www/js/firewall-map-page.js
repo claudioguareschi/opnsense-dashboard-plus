@@ -572,8 +572,8 @@
     const STATUSES = ['new', 'reviewed', 'blocked', 'dismissed'];
 
     // inside host names from the live map, for addresses recorded in the queue
-    function insideNames() {
-        const names = new Map();
+    function insideNames(extra = {}) {
+        const names = new Map(Object.entries(extra));
         for (const flow of state.snapshot?.flows || []) {
             for (const host of [...(flow.inside || []), ...(flow.targets || [])]) {
                 if (host.name && host.ip) {
@@ -674,7 +674,7 @@
                 localLines.push(`+ ${pseudo.inside.length - 1} ${T.other_hosts}`);
             }
         }
-        const cc = saved.country_code || live.country_code;
+        const cc = saved.country_code || live.country_code || countryCodeOf(remote.country);
         const org = saved.org || live.org;
         const chips = (row.lists || []).map((name) => `<span class="fwmap-q-chip">${esc(listLabel(name))}</span>`).join('');
         const expanded = state.queueExpanded.has(row.address);
@@ -747,6 +747,12 @@
         </div>`;
     }
 
+    /** Country name to code from the live map (older queue entries only stored the name). */
+    function countryCodeOf(name) {
+        const match = (state.snapshot?.locations || []).find((location) => location.country === name && location.country_code);
+        return match ? match.country_code : '';
+    }
+
     /** "FWMAP_Spamhaus_DROP" reads as "Spamhaus DROP". */
     function listLabel(name) {
         return plain(name).replace(/^FWMAP_/, '').replace(/_/g, ' ');
@@ -800,7 +806,7 @@
             $tabs.html([...STATUSES, 'all'].map((status) => `<li class="${status === view.status ? 'active' : ''}">`
                 + `<a href="#" data-status="${status}">${esc(T[`status_${status}`])}`
                 + `${status !== 'all' && view.counts[status] ? ` <span class="badge">${esc(view.counts[status])}</span>` : ''}</a></li>`).join(''));
-            const names = insideNames();
+            const names = insideNames(view.names);
             const needle = String($search.val() || '').trim().toLowerCase();
             const rows = needle ? view.rows.filter((row) => JSON.stringify(row).toLowerCase().includes(needle)) : view.rows;
             $list.html(rows.length ? rows.map((row) => queueItem(row, names)).join('')
@@ -811,6 +817,7 @@
                 const result = await $.getJSON(`/api/firewallmap/threats/list/${view.status}`);
                 view.rows = result.rows || [];
                 view.counts = result.counts || {};
+                view.names = result.names || {};
                 $('.fwmap-q-newcount b').text(view.counts.new || 0);
                 $('#fwmap-review-count').text(view.counts.new || '');
             } catch (error) {

@@ -167,6 +167,16 @@ def service_name(protocol, port):
     return firewallmap_collector.service_name(protocol, port)
 
 
+def inside_names():
+    """DHCP names of inside hosts, so entries read "mail" rather than 192.168.1.2."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import firewallmap_collector  # noqa: E402  (imported lazily: the collector imports this module)
+        return firewallmap_collector.lease_names()
+    except Exception:  # names are a nicety; the queue works without them
+        return {}
+
+
 def listing(db, status=None):
     counts = dict(db.execute("SELECT status, count(*) FROM threats GROUP BY status").fetchall())
     counts = {name: counts.get(name, 0) for name in STATUSES}
@@ -191,7 +201,7 @@ def listing(db, status=None):
             protocol, port = str(target).split("|")[0], str(target).split("|")[-1]
             row["target_services"][target] = service_name(protocol, port or None)
         rows.append(row)
-    return {"status": "ok", "rows": rows, "counts": counts}
+    return {"status": "ok", "rows": rows, "counts": counts, "names": inside_names()}
 
 
 def set_status(db, address, status, note=None, now=None):
