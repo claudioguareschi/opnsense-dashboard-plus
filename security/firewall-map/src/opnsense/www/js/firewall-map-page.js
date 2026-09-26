@@ -13,7 +13,7 @@
     const T = window.FirewallMapPageText || {};
     const POLL_MS = 2000;
     const HISTORY_POINTS = 60;
-    const TALKER_ROWS = 12;
+    const TALKER_ROWS = 20;
 
     // OPNsense HTML-escapes &, < and > in API responses; undo that, then escape for display
     const plain = (text) => String(text ?? '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
@@ -222,33 +222,87 @@
 
     /* ---------------------------------------------------------------- top talkers */
 
-    function talkers(snapshot) {
+    /** "VLAN10_MGMT" reads as "MGMT"; the full name stays in the tooltip. */
+    function shortInterface(name) {
+        const short = plain(name || '').replace(/^VLAN\d+[_ -]+/i, '');
+        return short || plain(name || '');
+    }
+
+    /** Top talkers by host, country and network, plus the addresses Suricata alerted on. */
+    function groupTalkers(snapshot) {
         const locations = locationsById(snapshot);
-        const groups = {hosts: new Map(), countries: new Map(), networks: new Map()};
-        const add = (group, key, label, sub, rate, filter) => {
-            const entry = groups[group].get(key) || {key, label, sub, rate: 0, filter};
+        const groups = {hosts: new Map(), countries: new Map(), networks: new Map(), ids: new Map()};
+        const add = (group, key, fields, rate) => {
+            const entry = groups[group].get(key) || {key, rate: 0, flows: 0, ...fields};
             entry.rate += rate;
+            entry.flows += 1;
             groups[group].set(key, entry);
         };
         for (const flow of snapshot.flows || []) {
             const rate = flow.rate || 0;
-            const inside = (flow.inside || [])[0];
-            if (inside) {
-                add('hosts', inside.ip, inside.name || inside.ip, inside.name ? `${inside.ip} · ${inside.interface || ''}` : inside.interface,
-                    rate, {host: inside.ip});
-            }
             const dest = locations.get(flow.dest) || {};
+            for (const inside of (flow.inside || []).slice(0, 1)) {
+                add('hosts', inside.ip, {label: inside.name || inside.ip, ip: inside.ip, iface: inside.interface,
+                    icon: 'fa-desktop', filter: {host: inside.ip}}, rate);
+            }
             if (dest.country) {
-                add('countries', dest.country, plain(dest.country), '', rate, {country: dest.country});
+                add('countries', dest.country, {label: plain(dest.country), flag: flagOf(dest.country_code),
+                    icon: 'fa-flag-o', filter: {country: dest.country}}, rate);
             }
             if (dest.asn) {
-                add('networks', String(dest.asn), plain(dest.as_org || `AS${dest.asn}`), `AS${dest.asn}`, rate, {asn: String(dest.asn)});
+                add('networks', String(dest.asn), {label: plain(dest.as_org || `AS${dest.asn}`), sub: `AS${dest.asn}`,
+                    icon: 'fa-sitemap', filter: {asn: String(dest.asn)}}, rate);
             }
+        }
+        // IDS: correlated connections first, then addresses with alert history
+        const idsEntry = (address, ids, count, severity, select, connection) => {
+            const current = groups.ids.get(address);
+            if (current && (current.connection || !connection)) {
+                return;
+            }
+            const top = ids?.signatures?.[0] || ids?.groups?.[0]?.signatures?.[0];
+            groups.ids.set(address, {key: address, label: address, sub: top ? plain(top.signature) : '', severity,
+                count, connection, icon: connection ? 'fa-exclamation-circle' : 'fa-flag', rate: 0, select});
+        };
+        for (const flow of snapshot.ids_flows || []) {
+            if (flow.kind !== 'blocked') {
+                idsEntry(flow.dest, flow, flow.count, flow.severity, {kind: 'idsflow', addresses: [flow.dest], idsFlow: flow,
+                    country: flow.country, countryCode: flow.country_code, title: flow.city || flow.country}, true);
+            }
+        }
+        for (const flow of snapshot.flows || []) {
+            if (flow.ids) {
+                const dest = locations.get(flow.dest) || {};
+                idsEntry(flow.dest, flow.ids, flow.ids.count, flow.ids.severity, {kind: 'flow', addresses: [flow.dest], members: [flow],
+                    country: dest.country, countryCode: dest.country_code, title: dest.city || dest.country}, false);
+            }
+        }
+        for (const block of snapshot.blocks || []) {
+            if (block.ids) {
+                idsEntry(block.source, block.ids, block.ids.count, block.ids.severity, {kind: 'blocked', addresses: [block.source],
+                    block, country: block.country, countryCode: block.country_code, title: block.city || block.country}, false);
+            }
+        }
+        for (const alert of snapshot.alerts || []) {
+            idsEntry(alert.source, alert.ids, alert.ids?.count || 0, alert.ids?.severity || 3, {kind: 'alert', addresses: [alert.source],
+                alert, country: alert.country, countryCode: alert.country_code, title: alert.city || alert.country}, false);
         }
         const result = {};
         for (const [group, entries] of Object.entries(groups)) {
-            result[group] = [...entries.values()].sort((a, b) => b.rate - a.rate);
-            for (const entry of result[group]) {
+            result[group] = [...entries.values()].sort(group === 'ids'
+                ? (a, b) => (b.connection - a.connection) || (a.severity - b.severity) || (b.count - a.count)
+                : (a, b) => b.rate - a.rate);
+        }
+        return result;
+    }
+
+    function talkers(snapshot) {
+        const result = groupTalkers(snapshot);
+        for (const [group, entries] of Object.entries(result)) {
+            if (group === 'ids') {
+                continue;
+            }
+            for (const entry of entries) {
                 const key = `${group}:${entry.key}`;
                 const series = state.history.get(key) || [];
                 series.push(entry.rate);
@@ -262,7 +316,7 @@
         // forget series that have gone quiet, so memory stays bounded
         for (const [key, series] of state.history) {
             const [group, id] = key.split(/:(.*)/s);
-            if (!groups[group]?.has(id)) {
+            if (!(result[group] || []).some((entry) => entry.key === id)) {
                 series.push(0);
                 if (series.length > HISTORY_POINTS) {
                     series.shift();
@@ -296,26 +350,38 @@
         context.stroke();
     }
 
+    function talkerActive(row) {
+        return row.filter && Object.entries(row.filter).every(([key, value]) => state.filters[key] === value);
+    }
+
     function renderTalkers(groups) {
         const rows = (groups[state.talkerTab] || []).slice(0, TALKER_ROWS);
         const $list = $('#fwmap-talkers-list');
         if (!rows.length) {
-            $list.html(`<div class="text-muted fwmap-empty">${esc(T.no_talkers)}</div>`);
+            $list.html(`<div class="text-muted fwmap-empty">${esc(state.talkerTab === 'ids' ? T.no_ids_talkers : T.no_talkers)}</div>`);
+            state.talkerRows = [];
             return;
         }
-        $list.html(rows.map((row, index) => `
-            <div class="fwmap-talker" data-index="${index}" title="${esc(T.filter_hint)}">
-                <div class="fwmap-talker-text">
-                    <div class="fwmap-talker-label">${esc(row.label)}</div>
-                    ${row.sub ? `<div class="fwmap-talker-sub">${esc(row.sub)}</div>` : ''}
-                </div>
-                <canvas width="70" height="22"></canvas>
-                <div class="fwmap-talker-rate">${formatRate(row.rate)}</div>
-            </div>`).join(''));
+        $list.html(rows.map((row, index) => {
+            const ids = state.talkerTab === 'ids';
+            const sub = row.ip ? `${esc(row.ip)}${row.iface ? ` · <span title="${esc(row.iface)}">${esc(shortInterface(row.iface))}</span>` : ''}`
+                : esc(row.sub || '');
+            const right = ids
+                ? `<span class="fwmap-talker-count ${row.severity <= 2 ? 'fwmap-ids-high' : 'fwmap-ids'}">${esc(row.count)}</span>`
+                : `<span class="fwmap-talker-rate">${esc(formatRate(row.rate))}</span>`;
+            const detail = ids
+                ? `<span class="fwmap-talker-flows">${esc(T.severity)} ${esc(row.severity)}${row.connection ? ` · ${esc(T.ids_flow)}` : ''}</span>`
+                : `<canvas width="64" height="16"></canvas>`;
+            return `<div class="fwmap-talker${talkerActive(row) ? ' active' : ''}" data-index="${index}" title="${esc(ids ? T.select_hint : T.filter_hint)}">
+                <span class="fwmap-talker-icon">${row.flag || `<i class="fa ${row.icon}"></i>`}</span>
+                <span class="fwmap-talker-label">${esc(row.label)}</span>${right}
+                <span class="fwmap-talker-sub">${sub}${!ids && row.flows ? ` <span class="fwmap-talker-flows">· ${esc(row.flows)} ${esc(row.flows === 1 ? T.flow_one : T.flow_many)}</span>` : ''}</span>${detail}
+            </div>`;
+        }).join(''));
         const accent = getComputedStyle(document.querySelector('#fwmap-talkers a') || document.body).color;
         state.talkerRows = rows;
-        $list.find('.fwmap-talker').each(function () {
-            sparkline($(this).find('canvas')[0], rows[$(this).data('index')].series, accent);
+        $list.find('.fwmap-talker canvas').each(function () {
+            sparkline(this, rows[$(this).closest('.fwmap-talker').data('index')].series, accent);
         });
     }
 
@@ -1201,8 +1267,17 @@
         $('#fwmap-talkers-list').on('mousedown', '.fwmap-talker', function (event) {
             event.preventDefault();
             const row = (state.talkerRows || [])[$(this).data('index')];
-            if (row) {
-                Object.assign(state.filters, row.filter);
+            if (row?.select) {
+                // IDS tab: open the details of that address or connection
+                state.selection = row.select;
+                state.detailsAddress = row.key;
+                renderDetails();
+            } else if (row?.filter) {
+                // a second click on the active row removes its filter
+                const active = talkerActive(row);
+                for (const [key, value] of Object.entries(row.filter)) {
+                    state.filters[key] = active ? '' : value;
+                }
                 refresh();
             }
         });
@@ -1259,25 +1334,13 @@
 
     // re-rank the current tab from the last snapshot without adding a history point
     function talkersFromLast() {
-        const snapshot = state.snapshot;
-        const locations = locationsById(snapshot);
-        const groups = {hosts: new Map(), countries: new Map(), networks: new Map()};
-        for (const flow of snapshot.flows || []) {
-            const dest = locations.get(flow.dest) || {};
-            const inside = (flow.inside || [])[0];
-            const entries = [
-                inside && ['hosts', inside.ip, inside.name || inside.ip, inside.name ? `${inside.ip} · ${inside.interface || ''}` : inside.interface, {host: inside.ip}],
-                dest.country && ['countries', dest.country, plain(dest.country), '', {country: dest.country}],
-                dest.asn && ['networks', String(dest.asn), plain(dest.as_org || `AS${dest.asn}`), `AS${dest.asn}`, {asn: String(dest.asn)}],
-            ].filter(Boolean);
-            for (const [group, key, label, sub, filter] of entries) {
-                const entry = groups[group].get(key) || {key, label, sub, rate: 0, filter, series: state.history.get(`${group}:${key}`)};
-                entry.rate += flow.rate || 0;
-                groups[group].set(key, entry);
+        const groups = groupTalkers(state.snapshot);
+        for (const [group, entries] of Object.entries(groups)) {
+            for (const entry of entries) {
+                entry.series = state.history.get(`${group}:${entry.key}`);
             }
         }
-        return Object.fromEntries(Object.entries(groups).map(([group, entries]) =>
-            [group, [...entries.values()].sort((a, b) => b.rate - a.rate)]));
+        return groups;
     }
 
     /* ---------------------------------------------------------------- resizable panels */

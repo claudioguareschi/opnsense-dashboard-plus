@@ -61,12 +61,18 @@
     body.fwmap-resizing, body.fwmap-resizing * { user-select: none !important; }
     #fwmap-talkers .nav { margin-bottom: 6px; }
     #fwmap-talkers .nav > li > a { padding: 4px 10px; }
-    .fwmap-talker { display: flex; align-items: center; gap: 8px; padding: 3px 2px; cursor: pointer; border-radius: 4px; }
+    .fwmap-talker { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 0;
+        align-items: center; padding: 4px 6px; cursor: pointer; border-radius: 4px; }
     .fwmap-talker:hover { background: rgba(128, 128, 128, .12); }
-    .fwmap-talker-text { flex: 1; min-width: 0; }
+    .fwmap-talker.active { background: rgba(200, 90, 40, .14); box-shadow: inset 3px 0 0 rgb(200, 90, 40); }
+    .fwmap-talker-icon { grid-row: 1 / span 2; text-align: center; opacity: .7; font-size: 1.05em; }
     .fwmap-talker-label, .fwmap-talker-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fwmap-talker-label { font-weight: 600; }
+    .fwmap-talker-rate, .fwmap-talker-count { text-align: right; font-variant-numeric: tabular-nums; font-size: .9em; white-space: nowrap; }
+    .fwmap-talker-count { font-weight: 600; }
     .fwmap-talker-sub { font-size: .8em; opacity: .7; }
-    .fwmap-talker-rate { width: 70px; text-align: right; font-size: .85em; }
+    .fwmap-talker canvas, .fwmap-talker > .fwmap-talker-flows { justify-self: end; }
+    .fwmap-talker-flows { font-size: .8em; opacity: .7; white-space: nowrap; }
     .fwmap-details-head { display: flex; justify-content: space-between; }
     .fwmap-details-head a { font-size: 1.3em; line-height: 1; text-decoration: none; }
     .fwmap-address { margin-top: 6px; }
@@ -317,6 +323,10 @@
         no_connection: "{{ lang._('No connection is open right now.') }}",
         no_ids: "{{ lang._('No IDS alerts for this address') }}",
         no_ids_sub: "{{ lang._('Suricata has not alerted on this address in the last hour.') }}",
+        no_ids_talkers: "{{ lang._('No Suricata alerts in the last hour') }}",
+        select_hint: "{{ lang._('Show the details') }}",
+        flow_one: "{{ lang._('flow') }}",
+        flow_many: "{{ lang._('flows') }}",
         not_checked: "{{ lang._('not checked') }}",
         organization: "{{ lang._('Organization') }}",
         other_ports: "{{ lang._('Other ports') }}",
@@ -409,6 +419,7 @@
                     <li class="active"><a href="#" data-tab="hosts">{{ lang._('Hosts') }}</a></li>
                     <li><a href="#" data-tab="countries">{{ lang._('Countries') }}</a></li>
                     <li><a href="#" data-tab="networks">{{ lang._('Networks') }}</a></li>
+                    <li><a href="#" data-tab="ids">{{ lang._('IDS') }}</a></li>
                 </ul>
                 <div id="fwmap-talkers-list"></div>
             </div>
