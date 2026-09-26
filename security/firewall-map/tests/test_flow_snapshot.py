@@ -24,6 +24,7 @@ COLLECTOR = load("firewallmap_collector")
 INVESTIGATE = load("firewallmap_investigate")
 ABUSEIPDB = load("firewallmap_abuseipdb")
 SNAPSHOT = load("flow_snapshot")
+THREATS = load("firewallmap_threats")
 
 NAT_STATE = """all tcp 198.13.91.163:443 (192.168.1.2:443) <- 45.56.79.53:35799       ESTABLISHED:ESTABLISHED
    [123 + 456] wscale 9  [789 + 101112] wscale 6
@@ -601,7 +602,7 @@ class GeoDatabaseTest(unittest.TestCase):
             with open(path, "w") as handle:
                 handle.write("<opnsense><OPNsense><FirewallMap><general><provider>dbip</provider>"
                              "<license_key/><update_days>7</update_days></general></FirewallMap></OPNsense></opnsense>")
-            self.assertEqual(GEODB.settings(path), {"provider": "dbip", "license_key": "", "update_days": 7, "threat_lists": ""})
+            self.assertEqual(GEODB.settings(path), {"provider": "dbip", "license_key": "", "update_days": 7, "threat_lists": "", "record_threats": "1"})
             self.assertEqual(GEODB.settings(os.path.join(directory, "none.xml"))["provider"], "auto")
 
     def test_automatic_provider_prefers_maxmind_with_a_key(self):
@@ -625,6 +626,74 @@ class SnapshotReaderTest(unittest.TestCase):
                 json.dump({"status": "ok", "flows": []}, handle)
             self.assertEqual(SNAPSHOT.read_snapshot(path)["status"], "ok")
             self.assertIsNone(SNAPSHOT.read_snapshot(path, now=time.time() + 60))
+
+
+class ThreatQueueTest(unittest.TestCase):
+    INBOUND = ("all tcp 192.168.1.2:80 (198.13.91.163:80) <- 108.188.77.155:51234       ESTABLISHED:ESTABLISHED\n"
+               "   age 00:00:01, expires in 23:59:37, 5:9 pkts, 400:9000 bytes\n   id: 0a creatorid: 01\n")
+    OUTBOUND = ("all tcp 192.168.1.50:50000 (198.13.91.163:50000) -> 8.8.8.8:443       ESTABLISHED:ESTABLISHED\n"
+                "   age 00:00:01, expires in 23:59:37, 5:9 pkts, 400:900 bytes\n   id: 0b creatorid: 01\n")
+
+    def observe(self, states):
+        lists = {"108.188.77.155": ["AbuseIPDB blacklist"]}
+        return THREATS.observe(COLLECTOR.parse_states(states), COLLECTOR.flow_endpoints, lambda address: lists.get(address, []),
+                               {"198.13.91.163"}, COLLECTOR.inside_endpoint, COLLECTOR.service_name)
+
+    def test_records_only_flagged_addresses_with_target(self):
+        seen = self.observe(self.INBOUND + self.OUTBOUND)
+        self.assertEqual(list(seen), ["108.188.77.155"])
+        self.assertEqual(seen["108.188.77.155"]["targets"], ["tcp|192.168.1.2|80"])
+        self.assertEqual(seen["108.188.77.155"]["inbound"], 1)
+
+    def test_review_workflow(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = THREATS.connect(os.path.join(directory, "cache.db"))
+            THREATS.record(db, self.observe(self.INBOUND), now=100.0)
+            THREATS.record(db, self.observe(self.INBOUND), now=200.0)
+            rows = THREATS.listing(db)["rows"]
+            self.assertEqual((rows[0]["first_seen"], rows[0]["last_seen"], rows[0]["samples"], rows[0]["status"]),
+                             (100.0, 200.0, 2, "new"))
+            self.assertTrue(rows[0]["inbound"])
+            note = "Port forward probe; checked logs ✓"
+            encoded = __import__("base64").urlsafe_b64encode(note.encode()).decode().rstrip("=")
+            self.assertEqual(THREATS.main(["set", "108.188.77.155", "blocked", encoded], path=os.path.join(directory, "cache.db")),
+                             {"result": "saved"})
+            self.assertEqual(THREATS.listing(db, "blocked")["rows"][0]["note"], note)
+            # a status change alone keeps the note
+            THREATS.set_status(db, "108.188.77.155", "blocked")
+            self.assertEqual(THREATS.listing(db)["rows"][0]["note"], note)
+            # traffic after "blocked" means the block did not hold: back to new, flagged
+            THREATS.record(db, self.observe(self.INBOUND), now=300.0)
+            row = THREATS.listing(db)["rows"][0]
+            self.assertEqual((row["status"], row["seen_after_block"]), ("new", True))
+            self.assertEqual(THREATS.listing(db)["counts"], {"new": 1, "reviewed": 0, "dismissed": 0, "blocked": 0})
+
+    def test_rejects_bad_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = THREATS.connect(os.path.join(directory, "cache.db"))
+            self.assertEqual(THREATS.set_status(db, "1.2.3.4; rm", "new")["result"], "failed")
+            self.assertEqual(THREATS.set_status(db, "1.2.3.4", "deleted")["result"], "failed")
+            self.assertEqual(THREATS.set_status(db, "1.2.3.4", "new")["result"], "failed")
+
+    def test_prune_by_age(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = THREATS.connect(os.path.join(directory, "cache.db"))
+            THREATS.record(db, self.observe(self.INBOUND), now=0.0)
+            THREATS.prune(db, now=THREATS.KEEP_SECONDS + 1)
+            self.assertEqual(THREATS.listing(db)["rows"], [])
+
+    def test_widget_in_use(self):
+        dashboard = __import__("base64").b64encode(json.dumps({"widgets": [{"id": "firewallmap"}]}).encode()).decode()
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "config.xml")
+            with open(path, "w") as handle:
+                handle.write(f"<opnsense><system><user><dashboard>{dashboard}</dashboard></user></system></opnsense>")
+            self.assertTrue(COLLECTOR.widget_in_use(path))
+            self.assertTrue(COLLECTOR.recording_wanted({"record_threats": "1"}, path))
+            self.assertFalse(COLLECTOR.recording_wanted({"record_threats": "0"}, path))
+            with open(path, "w") as handle:
+                handle.write("<opnsense><system><user><dashboard>e30=</dashboard></user></system></opnsense>")
+            self.assertFalse(COLLECTOR.widget_in_use(path))
 
 
 if __name__ == "__main__":

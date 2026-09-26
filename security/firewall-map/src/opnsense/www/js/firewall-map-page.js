@@ -373,6 +373,225 @@
         renderDetails();
     }
 
+    /* ---------------------------------------------------------------- review queue */
+
+    const STATUSES = ['new', 'reviewed', 'blocked', 'dismissed'];
+
+    // inside host names from the live map, for addresses recorded in the queue
+    function insideNames() {
+        const names = new Map();
+        for (const flow of state.snapshot?.flows || []) {
+            for (const host of [...(flow.inside || []), ...(flow.targets || [])]) {
+                if (host.name && host.ip) {
+                    names.set(host.ip, host.name);
+                }
+            }
+        }
+        return names;
+    }
+
+    function ago(seconds) {
+        const age = Math.max(0, Date.now() / 1000 - seconds);
+        if (age < 90) {
+            return `${Math.round(age)} s`;
+        }
+        if (age < 5400) {
+            return `${Math.round(age / 60)} min`;
+        }
+        if (age < 129600) {
+            return `${Math.round(age / 3600)} h`;
+        }
+        return `${Math.round(age / 86400)} d`;
+    }
+
+    function formatBytes(bytes) {
+        return formatRate(bytes).replace('/s', '');
+    }
+
+    function queueItem(row, names) {
+        const host = (ip) => `${names.has(ip) ? `${esc(names.get(ip))} ` : ''}${esc(ip)}`;
+        const targets = (row.targets || []).map((target) => {
+            const [protocol, ip, port] = String(target).split('|');
+            return `${host(ip)}${port ? `:${esc(port)}` : ''} <span class="text-muted">${esc(protocol)}</span>`;
+        });
+        const lines = [];
+        if (row.inbound) {
+            lines.push(`<b>${esc(T.inbound)}</b>${targets.length ? ` ${esc(T.to)} ${targets.join(', ')}` : ''}`);
+        }
+        if (row.outbound) {
+            const inside = (row.inside || []).map(host);
+            lines.push(`<b>${esc(T.outbound)}</b>${inside.length ? ` ${esc(T.from)} ${inside.join(', ')}` : ''}`);
+        }
+        const address = esc(row.address);
+        const status = STATUSES.includes(row.status) ? row.status : 'new';
+        const actions = [
+            status === 'new' ? `<button class="btn btn-xs btn-default fwmap-q-status" data-status="reviewed">${esc(T.mark_reviewed)}</button>` : '',
+            status !== 'dismissed' ? `<button class="btn btn-xs btn-default fwmap-q-status" data-status="dismissed">${esc(T.dismiss)}</button>` : '',
+            status !== 'new' ? `<button class="btn btn-xs btn-default fwmap-q-status" data-status="new">${esc(T.reopen)}</button>` : '',
+            `<button class="btn btn-xs btn-danger fwmap-q-block">${esc(T.block)}</button>`,
+            `<button class="btn btn-xs btn-default fwmap-q-note">${esc(T.edit_note)}</button>`,
+        ].join('');
+        const card = state.investigations.get(row.address);
+        return `<div class="fwmap-queue-item" data-address="${address}" data-status="${status}">
+            <div class="fwmap-queue-head"><b>${address}</b>
+                <span class="label label-default fwmap-status">${esc(T[`status_${status}`])}</span>
+                <span style="font-weight:600;color:rgb(196,18,48)">${(row.lists || []).map(esc).join(', ')}</span></div>
+            ${lines.map((line) => `<div>${line}</div>`).join('')}
+            <div class="text-muted fwmap-queue-meta">${esc(T.first_seen)} ${esc(ago(row.first_seen))} · ${esc(T.last_seen)} ${esc(ago(row.last_seen))}
+                · ${esc(row.samples)} ${esc(T.samples)} · ${esc(T.peak)} ${esc(formatBytes(row.peak_bytes || 0))}
+                ${(row.services || []).length ? ` · ${(row.services || []).map(esc).join(', ')}` : ''}</div>
+            ${row.seen_after_block ? `<div class="text-danger">${esc(T.seen_after_block)}</div>` : ''}
+            ${row.note ? `<div class="fwmap-queue-note">${esc(row.note)}</div>` : ''}
+            <div class="fwmap-links">
+                <a href="#" class="fwmap-q-investigate"><b>${esc(T.investigate)}</b></a> ·
+                <a href="https://bgp.he.net/ip/${encodeURIComponent(row.address)}" target="_blank" rel="noopener noreferrer">${esc(T.whois)}</a> ·
+                <a href="https://www.abuseipdb.com/check/${encodeURIComponent(row.address)}" target="_blank" rel="noopener noreferrer">AbuseIPDB</a> ·
+                <a href="#" class="fwmap-q-states">${esc(T.show_states)}</a> ·
+                <a href="#" class="fwmap-q-kill">${esc(T.kill_states)}</a>
+            </div>
+            ${card ? `<div class="fwmap-investigation">${card}</div>` : ''}
+            <div class="fwmap-queue-actions">${actions}</div>
+        </div>`;
+    }
+
+    async function refreshQueueCount() {
+        try {
+            const result = await $.getJSON('/api/firewallmap/threats/list/new');
+            $('#fwmap-review-count').text(result.counts?.new || '');
+        } catch (_) {
+            $('#fwmap-review-count').text('');
+        }
+    }
+
+    async function setThreat(address, status, note) {
+        const payload = {address, status};
+        if (note !== undefined) {
+            payload.note = note;
+        }
+        const result = await postJSON('/api/firewallmap/threats/set', payload);
+        if (result.result !== 'saved') {
+            throw new Error(result.error || T.action_failed);
+        }
+    }
+
+    async function showQueue() {
+        const view = {status: 'new', rows: [], counts: {}};
+        const $body = $('<div></div>');
+        let settings = {};
+        try {
+            settings = await $.getJSON('/api/firewallmap/settings/get');
+        } catch (_) {
+            settings = {};
+        }
+        const $record = $(`<label style="font-weight:normal"><input type="checkbox"> ${esc(T.record_threats)}</label>`);
+        $record.find('input').prop('checked', settings.record_threats !== '0').on('change', async function () {
+            try {
+                await postJSON('/api/firewallmap/settings/set', {record_threats: this.checked ? '1' : '0'});
+            } catch (error) {
+                notify(`${T.action_failed}: ${error.statusText || error}`, BootstrapDialog.TYPE_DANGER);
+            }
+        });
+        const $tabs = $('<ul class="nav nav-pills fwmap-queue-tabs"></ul>');
+        const $list = $('<div></div>');
+        $body.append(`<div class="text-muted">${esc(T.review_intro)}</div>`, $record, $tabs, $list);
+
+        const render = () => {
+            $tabs.html([...STATUSES, 'all'].map((status) => `<li class="${status === view.status ? 'active' : ''}">`
+                + `<a href="#" data-status="${status}">${esc(T[`status_${status}`])}`
+                + `${status !== 'all' && view.counts[status] ? ` <span class="badge">${esc(view.counts[status])}</span>` : ''}</a></li>`).join(''));
+            const names = insideNames();
+            $list.html(view.rows.length ? view.rows.map((row) => queueItem(row, names)).join('')
+                : `<div class="text-muted fwmap-empty">${esc(T.queue_empty)}</div>`);
+        };
+        const load = async () => {
+            try {
+                const result = await $.getJSON(`/api/firewallmap/threats/list/${view.status}`);
+                view.rows = result.rows || [];
+                view.counts = result.counts || {};
+                $('#fwmap-review-count').text(view.counts.new || '');
+            } catch (error) {
+                notify(`${T.action_failed}: ${error.statusText || error}`, BootstrapDialog.TYPE_DANGER);
+            }
+            render();
+        };
+        const act = async (work) => {
+            try {
+                await work();
+            } catch (error) {
+                notify(`${T.action_failed}: ${error.message || error.statusText || error}`, BootstrapDialog.TYPE_DANGER);
+            }
+            load();
+        };
+        const addressOf = (element) => String($(element).closest('.fwmap-queue-item').data('address'));
+        const rowOf = (address) => view.rows.find((row) => row.address === address) || {};
+
+        $tabs.on('click', 'a', function (event) {
+            event.preventDefault();
+            view.status = String($(this).data('status'));
+            load();
+        });
+        $list
+            .on('click', '.fwmap-q-status', function () {
+                const address = addressOf(this);
+                act(() => setThreat(address, String($(this).data('status'))));
+            })
+            .on('click', '.fwmap-q-note', function () {
+                const address = addressOf(this);
+                const $text = $('<textarea class="form-control" rows="4" maxlength="1000"></textarea>').val(plain(rowOf(address).note || ''));
+                BootstrapDialog.show({
+                    title: esc(`${T.note_title} ${address}`), message: $text,
+                    buttons: [
+                        {label: T.cancel, action: (dialog) => dialog.close()},
+                        {label: T.save, cssClass: 'btn-primary', action: (dialog) => {
+                            dialog.close();
+                            act(() => setThreat(address, rowOf(address).status || 'new', String($text.val())));
+                        }},
+                    ],
+                });
+            })
+            .on('click', '.fwmap-q-block', function () {
+                const address = addressOf(this);
+                chooseAlias(['host', 'hosts', 'network', 'networks'], esc(`${T.block_title}: ${address}`), (name) => {
+                    confirmAction(`${T.add_confirm} ${address} → ${name}? ${T.block_hint}`, () => act(async () => {
+                        const result = await postJSON(`/api/firewall/alias_util/add/${encodeURIComponent(name)}`, {address});
+                        if (result.status !== 'done') {
+                            throw new Error(result.status_msg || result.status);
+                        }
+                        const note = [plain(rowOf(address).note || ''), `→ ${name} (${new Date().toLocaleString()})`].filter(Boolean).join('\n');
+                        await setThreat(address, 'blocked', note);
+                    }));
+                });
+            })
+            .on('click', '.fwmap-q-investigate', async function (event) {
+                event.preventDefault();
+                const address = addressOf(this);
+                state.investigations.set(address, `<div class="text-muted"><i class="fa fa-spinner fa-spin"></i> ${esc(T.looking_up)}</div>`);
+                render();
+                try {
+                    state.investigations.set(address, investigationCard(
+                        await $.getJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`)));
+                } catch (error) {
+                    state.investigations.set(address, `<div class="text-danger">${esc(T.action_failed)}: ${esc(error.statusText || error)}</div>`);
+                }
+                render();
+            })
+            .on('click', '.fwmap-q-states', function (event) {
+                event.preventDefault();
+                showStates(addressOf(this));
+            })
+            .on('click', '.fwmap-q-kill', function (event) {
+                event.preventDefault();
+                killStates(addressOf(this));
+            });
+
+        BootstrapDialog.show({
+            title: T.review_queue, size: BootstrapDialog.SIZE_WIDE, message: $body,
+            buttons: [{label: T.close, action: (dialog) => dialog.close()}],
+            onhidden: () => refreshQueueCount(),
+        });
+        load();
+    }
+
     /* ---------------------------------------------------------------- threat feeds */
 
     function blacklistStatus(settings) {
@@ -755,6 +974,7 @@
                 investigate(String($(this).data('address')));
             });
         $('#fwmap-feeds').on('click', () => showFeeds());
+        $('#fwmap-review').on('click', () => showQueue());
     }
 
     // re-rank the current tab from the last snapshot without adding a history point
@@ -844,6 +1064,11 @@
 
         bindControls();
         $('#fwmap-feeds').toggle(state.isAdmin);
+        $('#fwmap-review').toggle(state.isAdmin);
+        if (state.isAdmin) {
+            refreshQueueCount();
+            setInterval(refreshQueueCount, 60000);
+        }
         renderDetails();
         $(window).on('resize', () => state.renderer.resize());
         poll(`?blocks_min=${state.settings.blockMin}${state.settings.hostnames ? '&hostnames=1' : ''}`);

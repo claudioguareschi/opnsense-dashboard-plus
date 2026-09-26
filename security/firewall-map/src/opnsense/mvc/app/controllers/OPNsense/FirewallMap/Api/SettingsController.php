@@ -53,6 +53,7 @@ class SettingsController extends ApiControllerBase
             // read directly: this runs on every widget and page load
             'abuseipdb_blacklist' => json_decode((string)@file_get_contents('/var/db/firewallmap/abuseipdb.json'), true) ?: [],
             'threat_lists' => (string)$general->threat_lists,
+            'record_threats' => (string)$general->record_threats,
             'database' => $this->status(),
         ];
     }
@@ -68,6 +69,10 @@ class SettingsController extends ApiControllerBase
             if ($this->request->hasPost($field) && $this->request->getPost($field) !== '') {
                 $general->$field = $this->request->getPost($field);
             }
+        }
+        if ($this->request->hasPost('record_threats')) {
+            $general->record_threats = $this->request->getPost('record_threats') === '1' ? '1' : '0';
+            $ensure = $general->record_threats == '1';
         }
         if ($this->request->hasPost('threat_lists')) {
             $general->threat_lists = (string)$this->request->getPost('threat_lists');
@@ -102,6 +107,9 @@ class SettingsController extends ApiControllerBase
         Config::getInstance()->save();
         if (!empty($fetchBlacklist)) {
             (new Backend())->configdRun('firewallmap abuseipdb refresh', true);
+        }
+        if (!empty($ensure)) {
+            (new Backend())->configdRun('firewallmap ensure', true);
         }
         (new Backend())->configdRun('firewallmap geodb update', true);
         return ['result' => 'saved'];

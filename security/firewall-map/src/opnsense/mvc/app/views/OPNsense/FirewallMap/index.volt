@@ -71,6 +71,15 @@
     .fwmap-score { color: #fff; border-radius: 3px; padding: 0 6px; font-weight: 600; }
     .fwmap-feed { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0;
         border-bottom: 1px solid rgba(128, 128, 128, .2); }
+    #fwmap-review-count:empty { display: none; }
+    #fwmap-review-count { background: rgb(196, 18, 48); }
+    .fwmap-queue-tabs { margin-bottom: 8px; }
+    .fwmap-queue-item { padding: 8px 0; border-bottom: 1px solid rgba(128, 128, 128, .2); }
+    .fwmap-queue-item .fwmap-queue-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+    .fwmap-queue-item .fwmap-queue-meta { font-size: .9em; }
+    .fwmap-queue-item .fwmap-queue-actions { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+    .fwmap-queue-note { white-space: pre-wrap; margin-top: 4px; padding: 4px 8px; border-left: 3px solid rgba(128, 128, 128, .35); }
+    .fwmap-status { text-transform: uppercase; font-size: .75em; }
     @media (max-width: 1100px) {
         #fwmap-layout { flex-direction: column; }
         #fwmap-side { width: auto; flex: none; height: auto; }
@@ -167,6 +176,31 @@
         blacklist_pending: "{{ lang._('Not downloaded yet') }}",
         blacklist_error: "{{ lang._('last attempt failed') }}",
         blacklist_no_key: "{{ lang._('Add an AbuseIPDB API key in the Firewall Map widget settings to download it.') }}",
+        review_queue: "{{ lang._('Review queue') }}",
+        review_intro: "{{ lang._('Permitted connections to or from flagged addresses. Setting a status never changes firewall rules.') }}",
+        record_threats: "{{ lang._('Keep recording while the map is closed (while the widget is on a dashboard)') }}",
+        status_new: "{{ lang._('New') }}",
+        status_reviewed: "{{ lang._('Reviewed') }}",
+        status_dismissed: "{{ lang._('Dismissed') }}",
+        status_blocked: "{{ lang._('Blocked') }}",
+        status_all: "{{ lang._('All') }}",
+        mark_reviewed: "{{ lang._('Mark reviewed') }}",
+        dismiss: "{{ lang._('Dismiss') }}",
+        reopen: "{{ lang._('Reopen') }}",
+        block: "{{ lang._('Block…') }}",
+        block_title: "{{ lang._('Add to a blocking alias') }}",
+        block_hint: "{{ lang._('The address is added to the alias you choose. It is blocked only if a firewall rule uses that alias.') }}",
+        edit_note: "{{ lang._('Note') }}",
+        note_title: "{{ lang._('Note for') }}",
+        save: "{{ lang._('Save') }}",
+        first_seen: "{{ lang._('First seen') }}",
+        last_seen: "{{ lang._('last seen') }}",
+        samples: "{{ lang._('samples') }}",
+        peak: "{{ lang._('peak') }}",
+        inside_host: "{{ lang._('inside') }}",
+        from: "{{ lang._('from') }}",
+        seen_after_block: "{{ lang._('Traffic was seen after it was marked blocked: check that a rule uses the alias.') }}",
+        queue_empty: "{{ lang._('Nothing here.') }}",
         feeds_note: "{{ lang._('Each feed becomes a URL table alias refreshed daily. It marks matching traffic on the map only; no firewall rules are added.') }}",
     };
 </script>
@@ -197,7 +231,10 @@
             <span></span> <a href="#" style="color:inherit" title="{{ lang._('Remove') }}">&times;</a>
         </span>
         <button id="fwmap-reset" class="btn btn-default btn-sm" type="button">{{ lang._('Reset filters') }}</button>
-        <button id="fwmap-feeds" class="btn btn-default btn-sm" type="button" style="display:none; margin-left:auto">
+        <button id="fwmap-review" class="btn btn-default btn-sm" type="button" style="display:none; margin-left:auto">
+            <i class="fa fa-list-alt"></i> {{ lang._('Review queue') }} <span class="badge" id="fwmap-review-count"></span>
+        </button>
+        <button id="fwmap-feeds" class="btn btn-default btn-sm" type="button" style="display:none">
             <i class="fa fa-shield"></i> {{ lang._('Threat feeds') }}
         </button>
     </div>

@@ -12,6 +12,8 @@ FADE_SECONDS and a flow is dropped as soon as its last PF state disappears.
 All GeoLite lookups are local (mmdblookup against the installed database).
 """
 
+import base64
+import binascii
 import functools
 import ipaddress
 import json
@@ -31,6 +33,7 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import firewallmap_geodb as geodb  # noqa: E402
+import firewallmap_threats as threats  # noqa: E402
 
 
 PFCTL = "/sbin/pfctl"
@@ -50,6 +53,11 @@ HOSTNAME_LOOKUPS_PER_SAMPLE = 8
 IDLE_SECONDS = 300
 ACTIVE_VIEWER_SECONDS = 10
 IDLE_INTERVAL = 5.0
+# with nobody watching, the review queue is still fed from a slow sample (states outlive this)
+BACKGROUND_INTERVAL = 20.0
+THREAT_RECORD_SECONDS = 20.0
+THREAT_PRUNE_SECONDS = 3600.0
+RC_SCRIPT = "/usr/local/etc/rc.d/firewallmap"
 FILTER_LOG = "/var/log/filter/latest.log"
 RULES_DEBUG = "/tmp/rules.debug"
 CONFIG_XML = "/conf/config.xml"
@@ -1316,6 +1324,55 @@ def sample_states():
     return parse_states(result.stdout)
 
 
+def widget_in_use(path=CONFIG_XML):
+    """True when any user's dashboard contains the Firewall Map widget."""
+    try:
+        root = ElementTree.parse(path).getroot()
+    except (OSError, ElementTree.ParseError):
+        return False
+    for node in root.iterfind("./system/user/dashboard"):
+        try:
+            dashboard = json.loads(base64.b64decode(node.text or "").decode("utf-8", "replace"))
+        except (ValueError, binascii.Error):
+            continue
+        if any(isinstance(widget, dict) and widget.get("id") == "firewallmap" for widget in dashboard.get("widgets") or []):
+            return True
+    return False
+
+
+def recording_wanted(values=None, path=CONFIG_XML):
+    """Record threats for review while the widget is in use, unless switched off."""
+    values = values if values is not None else geodb.settings(path)
+    return values.get("record_threats", "1") != "0" and widget_in_use(path)
+
+
+class ThreatRecorder:
+    """Feeds the review queue; a database problem never stops the collector."""
+
+    def __init__(self, path=threats.DATABASE):
+        self.path = path
+        self.db = None
+        self.recorded = None
+        self.pruned = None
+
+    def update(self, records, local_addresses, blocklists, reputation, now):
+        if self.recorded is not None and now - self.recorded < THREAT_RECORD_SECONDS:
+            return
+        self.recorded = now
+        try:
+            if self.db is None:
+                self.db = threats.connect(self.path)
+            seen = threats.observe(records, flow_endpoints, lambda address: threat_lists_for(address, blocklists, reputation),
+                                   local_addresses, inside_endpoint, service_name)
+            threats.record(self.db, seen)
+            if self.pruned is None or now - self.pruned >= THREAT_PRUNE_SECONDS:
+                threats.prune(self.db)
+                self.pruned = now
+        except sqlite3.Error as error:
+            print(f"firewallmap: threat recording failed: {error}", file=sys.stderr)
+            self.db = None
+
+
 def idle(started, now=None, marker=REQUEST_MARKER, idle_seconds=IDLE_SECONDS):
     """True once no dashboard has read the summary for idle_seconds (with a start-up grace period)."""
     now = time.time() if now is None else now
@@ -1381,6 +1438,8 @@ def run():
     descriptions, interfaces, leases, block_meta_checked = {}, {}, {}, None
     blocklists, blocklists_checked = BlocklistIndex(), None
     reputation = Reputation(store)
+    recorder = ThreatRecorder()
+    recording = False
     geo = None
     problem = None
     local_addresses, role, networks = set(), None, []
@@ -1394,6 +1453,7 @@ def run():
             host_checked = started
         if settings_checked is None or started >= settings_checked + SETTINGS_REFRESH_SECONDS:
             values = geodb.settings()
+            recording = recording_wanted(values)
             provider = geodb.effective_provider(values)
             city, asn, problem = database_state(values)
             # a new provider or a refreshed database invalidates cached locations
@@ -1403,6 +1463,27 @@ def run():
                 geo = GeoCache(store=store, database=city, asn_database=asn)
                 geo.forget_old_databases()
             settings_checked = started
+        background = idle(started_at)
+        if background and not recording:
+            if geo is not None:
+                geo.save(force=True)
+            return
+        if background:
+            # nobody is watching: only feed the review queue, no map summary, no GeoIP work
+            try:
+                records = sample_states()
+            except (OSError, subprocess.TimeoutExpired, RuntimeError) as error:
+                print(f"firewallmap: background sample failed: {error}", file=sys.stderr)
+            else:
+                if blocklists_checked is None or started - blocklists_checked >= BLOCKLIST_REFRESH_SECONDS:
+                    blocklists.refresh(chosen_threat_lists(values.get("threat_lists")))
+                    blocklists_checked = started
+                reputation.refresh(time.monotonic())
+                recorder.update(records, local_addresses, blocklists, reputation, time.monotonic())
+            # wake at once when a viewer opens the map, not at the end of the slow interval
+            while time.monotonic() - started < BACKGROUND_INTERVAL and not requested(REQUEST_MARKER, 2):
+                time.sleep(1.0)
+            continue
         if problem:
             write_json(OUTPUT_FILE, {
                 "status": "no_database",
@@ -1452,6 +1533,8 @@ def run():
                     blocklists.refresh(chosen_threat_lists(geodb.settings().get("threat_lists")))
                     blocklists_checked = started
                 reputation.refresh(now)
+                if recording:
+                    recorder.update(records, local_addresses, blocklists, reputation, now)
                 payload = snapshot(tracker, geo, local_addresses, role, now, time.time(), resolver, {
                     "names": leases, "networks": networks, "interfaces": interfaces, "blocklists": blocklists,
                     "reputation": reputation,
@@ -1471,10 +1554,6 @@ def run():
                 payload["provider"] = provider
                 write_json(OUTPUT_FILE, payload)
                 geo.save()
-        if idle(started_at):
-            if geo is not None:
-                geo.save(force=True)
-            return
         # never run back to back: rest at least as long as a slow sample took, and back off
         # exponentially while sampling keeps failing
         took = time.monotonic() - started
@@ -1490,6 +1569,11 @@ def run():
 if __name__ == "__main__":
     if sys.argv[1:] == ["tables"]:
         print(json.dumps({"tables": threat_list_candidates(), "automatic": sorted(blocklist_tables())}))
+        sys.exit(0)
+    if len(sys.argv) > 1 and sys.argv[1] == "ensure":
+        # periodic (cron) and after boot: keep the review queue fed while the widget is in use
+        if recording_wanted():
+            subprocess.run([RC_SCRIPT, "onestart"], capture_output=True, check=False, timeout=10)
         sys.exit(0)
     try:
         run()

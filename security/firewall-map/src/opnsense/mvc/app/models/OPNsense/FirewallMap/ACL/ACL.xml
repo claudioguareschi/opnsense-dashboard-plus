@@ -12,6 +12,7 @@
         <patterns>
             <pattern>api/firewallmap/settings/*</pattern>
             <pattern>api/firewallmap/investigate/*</pattern>
+            <pattern>api/firewallmap/threats/*</pattern>
         </patterns>
     </page-firewall-map-settings>
 </acl>
