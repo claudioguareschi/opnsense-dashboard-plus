@@ -12,11 +12,13 @@ FADE_SECONDS and a flow is dropped as soon as its last PF state disappears.
 All GeoLite lookups are local (mmdblookup against the installed database).
 """
 
+import functools
 import ipaddress
 import json
 import os
 import re
 import socket
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -46,6 +48,8 @@ HOSTNAME_REQUEST_SECONDS = 30
 HOSTNAME_TTL = 6 * 3600
 HOSTNAME_LOOKUPS_PER_SAMPLE = 8
 IDLE_SECONDS = 300
+ACTIVE_VIEWER_SECONDS = 10
+IDLE_INTERVAL = 5.0
 FILTER_LOG = "/var/log/filter/latest.log"
 RULES_DEBUG = "/tmp/rules.debug"
 CONFIG_XML = "/conf/config.xml"
@@ -77,7 +81,7 @@ BLOCKLIST_MAX_ENTRIES = 500000
 BLOCKLIST_MAX_TOTAL = 1000000
 CGNAT = ipaddress.ip_network("100.64.0.0/10")
 SETTINGS_REFRESH_SECONDS = 30
-GEO_CACHE_FILE = "/var/db/firewallmap/geo.json"
+CACHE_DB = "/var/db/firewallmap/cache.db"
 
 INTERVAL = 1.0
 FADE_SECONDS = 20.0
@@ -145,6 +149,11 @@ def parse_states(output):
             direction = "out" if parts[arrow] == "->" else "in"
             left = endpoint(parts[2])
             right = endpoint(parts[arrow + 1])
+            translated = arrow > 3 and parts[3].startswith("(")
+            if not translated and not public_ipv4(left["address"]) and not public_ipv4(right["address"]):
+                # LAN-internal state (or the LAN side of a NAT pair): never drawn, skip its details
+                header = None
+                continue
             header = {
                 "interface": parts[0],
                 "protocol": parts[1],
@@ -155,16 +164,20 @@ def parse_states(output):
                 "nat": endpoint(parts[3]) if arrow > 3 and parts[3].startswith("(") else None,
             }
             continue
-        state_id = STATE_ID.search(line)
-        if state_id and records and records[-1].get("id") is None:
-            records[-1]["id"] = f"{state_id.group('id')}/{state_id.group('creator')}"
+        # dispatch on the detail line's first word: running every pattern over every line was
+        # the collector's largest CPU cost
+        stripped = line.lstrip()
+        if stripped.startswith("id:"):
+            state_id = STATE_ID.search(stripped)
+            if state_id and records and records[-1].get("id") is None:
+                records[-1]["id"] = f"{state_id.group('id')}/{state_id.group('creator')}"
             continue
-        origif = ORIGIF.search(line)
-        if origif and records and records[-1].get("origif") is None:
-            # the interface the state was created on: for NAT states, the egress (WAN, VPN, ...)
-            records[-1]["origif"] = origif.group("ifname")
+        if stripped.startswith("origif:"):
+            if records and records[-1].get("origif") is None:
+                # the interface the state was created on: for NAT states, the egress (WAN, VPN, ...)
+                records[-1]["origif"] = stripped.split()[1]
             continue
-        if header is None:
+        if header is None or not stripped.startswith("age "):
             continue
         counters = COUNTERS.search(line)
         if not counters:
@@ -184,6 +197,7 @@ def parse_states(output):
     return records
 
 
+@functools.lru_cache(maxsize=65536)
 def public_ipv4(value):
     try:
         address = ipaddress.ip_address(value)
@@ -220,6 +234,7 @@ def flow_endpoints(record, local_addresses):
     return local, remote
 
 
+@functools.lru_cache(maxsize=65536)
 def private_ipv4(value):
     try:
         address = ipaddress.ip_address(value)
@@ -308,19 +323,79 @@ def lookup_location(address, city_database=CITY_DATABASE, asn_database=ASN_DATAB
     return location
 
 
-class GeoCache:
-    """IP -> location cache persisted across restarts and invalidated when the MMDB changes."""
+class CacheStore:
+    """Small SQLite key/value store with expiry, shared by the collector's caches.
 
-    def __init__(self, path=GEO_CACHE_FILE, database=CITY_DATABASE, asn_database=ASN_DATABASE, lookup=None):
+    One file, no service: GeoIP results, reverse DNS names and investigation lookups survive
+    restarts, are written incrementally and are pruned by age and count.
+    """
+
+    def __init__(self, path=CACHE_DB):
         self.path = path
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        self.db = sqlite3.connect(path, timeout=5, isolation_level=None, check_same_thread=False)
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA synchronous=NORMAL")
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS cache (kind TEXT, key TEXT, value TEXT, stored REAL, PRIMARY KEY (kind, key))"
+        )
+        self.lock = threading.Lock()
+
+    def get_all(self, kind, max_age=None, now=None):
+        now = time.time() if now is None else now
+        with self.lock:
+            rows = self.db.execute("SELECT key, value, stored FROM cache WHERE kind = ?", (kind,)).fetchall()
+        return {key: json.loads(value) for key, value, stored in rows if max_age is None or now - stored < max_age}
+
+    def get(self, kind, key, max_age=None, now=None):
+        now = time.time() if now is None else now
+        with self.lock:
+            row = self.db.execute("SELECT value, stored FROM cache WHERE kind = ? AND key = ?", (kind, key)).fetchone()
+        if row is None or (max_age is not None and now - row[1] >= max_age):
+            return None
+        return json.loads(row[0])
+
+    def put_many(self, kind, items, now=None):
+        now = time.time() if now is None else now
+        with self.lock:
+            self.db.execute("BEGIN")
+            self.db.executemany(
+                "INSERT OR REPLACE INTO cache (kind, key, value, stored) VALUES (?, ?, ?, ?)",
+                [(kind, key, json.dumps(value), now) for key, value in items],
+            )
+            self.db.execute("COMMIT")
+
+    def prune(self, kind, max_age=None, keep=None, now=None):
+        now = time.time() if now is None else now
+        with self.lock:
+            if max_age is not None:
+                self.db.execute("DELETE FROM cache WHERE kind = ? AND stored < ?", (kind, now - max_age))
+            if keep is not None:
+                self.db.execute(
+                    "DELETE FROM cache WHERE kind = ? AND key NOT IN "
+                    "(SELECT key FROM cache WHERE kind = ? ORDER BY stored DESC LIMIT ?)", (kind, kind, keep),
+                )
+
+    def clear(self, kind):
+        with self.lock:
+            self.db.execute("DELETE FROM cache WHERE kind = ?", (kind,))
+
+
+class GeoCache:
+    """IP -> location cache persisted in SQLite and invalidated when the databases change."""
+
+    def __init__(self, store=None, database=CITY_DATABASE, asn_database=ASN_DATABASE, lookup=None, path=None):
+        self.store = store if store is not None else CacheStore(path or CACHE_DB)
         self.database = database
         self.asn_database = asn_database
         self.lookup = lookup or (lambda address: lookup_location(address, database, asn_database))
-        self.entries = {}
-        self.dirty = False
-        self.saved_at = time.monotonic()
         self.database_mtime = self._database_mtime()
-        self._load()
+        self.kind = f"geo:{GEO_CACHE_VERSION}:{database}:{self.database_mtime}"
+        self.pending = {}
+        self.saved_at = time.monotonic()
+        self.entries = self.store.get_all(self.kind)
 
     def _database_mtime(self):
         mtimes = []
@@ -331,27 +406,18 @@ class GeoCache:
                 mtimes.append(None)
         return mtimes
 
-    def _load(self):
-        try:
-            with open(self.path) as handle:
-                cached = json.load(handle)
-        except (OSError, ValueError):
-            return
-        if (cached.get("database_mtime") == self.database_mtime and cached.get("version") == GEO_CACHE_VERSION
-                and cached.get("database") == self.database):
-            self.entries = cached.get("entries", {})
-
     def save(self, force=False):
-        if not self.dirty or (not force and time.monotonic() - self.saved_at < GEO_CACHE_SAVE_SECONDS):
+        if not self.pending or (not force and time.monotonic() - self.saved_at < GEO_CACHE_SAVE_SECONDS):
             return
-        if len(self.entries) > GEO_CACHE_MAX:
-            self.entries = dict(list(self.entries.items())[-GEO_CACHE_MAX:])
-        write_json(self.path, {
-            "version": GEO_CACHE_VERSION, "database": self.database,
-            "database_mtime": self.database_mtime, "entries": self.entries,
-        })
-        self.dirty = False
+        self.store.put_many(self.kind, self.pending.items())
+        self.store.prune(self.kind, keep=GEO_CACHE_MAX)
+        self.pending = {}
         self.saved_at = time.monotonic()
+
+    def forget_old_databases(self):
+        """Drop cached locations from previous database files."""
+        with self.store.lock:
+            self.store.db.execute("DELETE FROM cache WHERE kind LIKE 'geo:%' AND kind != ?", (self.kind,))
 
     def resolve(self, addresses, budget=GEO_LOOKUPS_PER_SAMPLE):
         """Look up at most `budget` unknown addresses; unresolvable ones are cached as null."""
@@ -361,10 +427,13 @@ class GeoCache:
             if address not in self.entries:
                 budget -= 1
                 try:
-                    self.entries[address] = self.lookup(address)
+                    self.entries[address] = self.pending[address] = self.lookup(address)
                 except LookupError:
                     continue  # try again on a later sample
-                self.dirty = True
+        if len(self.entries) > GEO_CACHE_MAX * 2:
+            # keep memory bounded: the store keeps the most recent entries
+            self.save(force=True)
+            self.entries = self.store.get_all(self.kind)
 
     def get(self, address):
         return self.entries.get(address)
@@ -692,10 +761,17 @@ def describe_inside(address, names, networks, interfaces):
 class HostnameResolver:
     """Reverse DNS for visible endpoints, only while a viewer asked for it; results are cached."""
 
-    def __init__(self, ttl=HOSTNAME_TTL, per_sample=HOSTNAME_LOOKUPS_PER_SAMPLE):
+    def __init__(self, ttl=HOSTNAME_TTL, per_sample=HOSTNAME_LOOKUPS_PER_SAMPLE, store=None):
         self.ttl = ttl
         self.per_sample = per_sample
+        self.store = store
+        # (name, monotonic time looked up); names cached in the store survive restarts
+        now = time.monotonic()
+        wall = time.time()
         self.names = {}
+        if store is not None:
+            for address, (name, stamp) in store.get_all("hostname", max_age=ttl).items():
+                self.names[address] = (name, now - (wall - stamp))
         self.pending = {}
         self.pool = ThreadPoolExecutor(max_workers=4)
 
@@ -707,10 +783,14 @@ class HostnameResolver:
             return None
 
     def update(self, addresses, now):
+        resolved = []
         for address, future in list(self.pending.items()):
             if future.done():
                 self.names[address] = (future.result(), now)
+                resolved.append((address, (future.result(), time.time())))
                 del self.pending[address]
+        if resolved and self.store is not None:
+            self.store.put_many("hostname", resolved)
         for address in [address for address, (_, stamp) in self.names.items() if now - stamp >= self.ttl]:
             del self.names[address]
         while len(self.names) > MAX_HOSTNAMES:
@@ -1092,8 +1172,13 @@ def run():
         return
     started_at = time.time()
     failures = 0
+    store = CacheStore()
+    try:
+        os.remove("/var/db/firewallmap/geo.json")  # the JSON cache used before the SQLite store
+    except OSError:
+        pass
     tracker = FlowTracker()
-    hostnames = HostnameResolver()
+    hostnames = HostnameResolver(store=store)
     blocks = BlockTracker()
     log = FilterLogTail()
     backlog_loaded = False
@@ -1118,7 +1203,8 @@ def run():
             if geo is None or geo.database != city or geo.database_mtime != geo._database_mtime():
                 if geo is not None:
                     geo.save(force=True)
-                geo = GeoCache(database=city, asn_database=asn)
+                geo = GeoCache(store=store, database=city, asn_database=asn)
+                geo.forget_old_databases()
             settings_checked = started
         if problem:
             write_json(OUTPUT_FILE, {
@@ -1193,7 +1279,10 @@ def run():
         # never run back to back: rest at least as long as a slow sample took, and back off
         # exponentially while sampling keeps failing
         took = time.monotonic() - started
-        rest = max(INTERVAL - took, took, 0.05)
+        # a viewer polls every 2 s; when polls stop (background tab, closed page) sample slowly
+        # until the collector's idle timeout ends it
+        interval = INTERVAL if requested(REQUEST_MARKER, ACTIVE_VIEWER_SECONDS) else IDLE_INTERVAL
+        rest = max(interval - took, took, 0.05)
         if failures:
             rest = max(rest, min(MAX_FAILURE_BACKOFF, 2.0 ** failures))
         time.sleep(rest)

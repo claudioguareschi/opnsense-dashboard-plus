@@ -377,7 +377,7 @@ class RobustnessTest(unittest.TestCase):
                 raise LookupError("timeout")
             return {"lat": 1.0, "lon": 2.0}
         with tempfile.TemporaryDirectory() as directory:
-            geo = COLLECTOR.GeoCache(path=os.path.join(directory, "geo.json"), lookup=flaky)
+            geo = COLLECTOR.GeoCache(path=os.path.join(directory, "cache.db"), lookup=flaky)
             geo.resolve(["8.8.8.8"])
             self.assertNotIn("8.8.8.8", geo.entries)
             geo.resolve(["8.8.8.8"])
@@ -390,6 +390,31 @@ class RobustnessTest(unittest.TestCase):
             self.assertIsNotNone(first)
             self.assertIsNone(COLLECTOR.acquire_lock(path))
             first.close()
+
+
+class CacheStoreTest(unittest.TestCase):
+    def test_persists_expires_and_prunes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "cache.db")
+            store = COLLECTOR.CacheStore(path)
+            store.put_many("hostname", [("8.8.8.8", ["dns.google", 1.0]), ("1.1.1.1", ["one.one.one.one", 1.0])], now=100.0)
+            store.put_many("hostname", [("9.9.9.9", ["dns9.quad9.net", 1.0])], now=200.0)
+            reopened = COLLECTOR.CacheStore(path)
+            self.assertEqual(sorted(reopened.get_all("hostname")), ["1.1.1.1", "8.8.8.8", "9.9.9.9"])
+            self.assertEqual(sorted(reopened.get_all("hostname", max_age=50, now=220.0)), ["9.9.9.9"])
+            self.assertIsNone(reopened.get("hostname", "8.8.8.8", max_age=50, now=220.0))
+            reopened.prune("hostname", keep=1)
+            self.assertEqual(list(reopened.get_all("hostname")), ["9.9.9.9"])
+
+    def test_geo_cache_survives_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "cache.db")
+            store = COLLECTOR.CacheStore(path)
+            geo = COLLECTOR.GeoCache(store=store, lookup=lambda address: {"lat": 1.0, "lon": 2.0})
+            geo.resolve(["8.8.8.8"])
+            geo.save(force=True)
+            again = COLLECTOR.GeoCache(store=COLLECTOR.CacheStore(path), lookup=lambda address: None)
+            self.assertEqual(again.get("8.8.8.8"), {"lat": 1.0, "lon": 2.0})
 
 
 class GeoDatabaseTest(unittest.TestCase):
