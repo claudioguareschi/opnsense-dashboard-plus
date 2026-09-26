@@ -311,6 +311,34 @@ def inside_endpoint(record):
     return None
 
 
+def lan_rule_index(records):
+    """Rules of the inside-facing states, keyed by (protocol, inside address:port, remote address:port).
+
+    A NATed connection has two states: the one on the inside interface was created by the rule the
+    operator wrote (e.g. "IoT to Internet"), the one on WAN by the automatic outbound rule. The map
+    reports the first.
+    """
+    index = {}
+    for record in records:
+        rule = record.get("rule")
+        if not rule or record["nat"]:
+            continue
+        src, dst = record["src"], record["dst"]
+        if private_ipv4(src["address"]) and public_ipv4(dst["address"]):
+            index[(record["protocol"], src["address"], src["port"], dst["address"], dst["port"])] = rule
+    return index
+
+
+def rule_for(record, pair, lan_rules):
+    inside = inside_endpoint(record)
+    if inside and lan_rules:
+        far = record["src"] if record["src"]["address"] == pair[1] else record["dst"]
+        rule = lan_rules.get((record["protocol"], inside["address"], inside["port"], far["address"], far["port"]))
+        if rule:
+            return rule
+    return record.get("rule")
+
+
 def orientation(record, remote):
     """(remote started it, the service's port) for one state.
 
@@ -616,6 +644,7 @@ class FlowTracker:
         first_sample = elapsed is None
         counters = {}
         totals = {}
+        lan_rules = lan_rule_index(records)
         for record in records:
             pair = flow_endpoints(record, local_addresses)
             if pair is None or record.get("id") is None:
@@ -672,8 +701,9 @@ class FlowTracker:
             # bytes moved so far by the connections open now, and the rules that let them through
             total["bytes_toward"] += current[0]
             total["bytes_away"] += current[1]
-            if record.get("rule"):
-                total["rules"][record["rule"]] = total["rules"].get(record["rule"], 0) + 1
+            rule = rule_for(record, pair, lan_rules)
+            if rule:
+                total["rules"][rule] = total["rules"].get(rule, 0) + 1
             total["toward"] += delta[0]
             total["away"] += delta[1]
             total["packets"] += delta[2]
@@ -1381,6 +1411,7 @@ class Correlator:
     def observe_states(self, records, local_addresses, now, descriptions=None):
         current = {}
         ambiguous = set()
+        lan_rules = lan_rule_index(records)
         for record in records:
             pair = flow_endpoints(record, local_addresses)
             if pair is None:
@@ -1400,8 +1431,8 @@ class Correlator:
                 "bytes_in": record.get("bytes_in", 0),
                 "bytes_out": record.get("bytes_out", 0),
                 "age": record.get("age"),
-                "rule": record.get("rule"),
-                "rule_description": (descriptions or {}).get(record.get("rule") or "", ""),
+                "rule": rule_for(record, pair, lan_rules),
+                "rule_description": (descriptions or {}).get(rule_for(record, pair, lan_rules) or "", ""),
                 "interface": record.get("origif"),
                 "state": record.get("state"),
                 "seen": now,

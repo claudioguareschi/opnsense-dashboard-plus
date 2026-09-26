@@ -871,6 +871,16 @@ class CorrelationTest(unittest.TestCase):
         # history on the address alone no longer turns aggregate arcs red
         self.assertEqual(COLLECTOR.threat_lists_for("162.217.103.70", None, None), [])
 
+    def test_rule_comes_from_the_inside_state(self):
+        lan = ("all tcp 162.217.103.70:443 <- 192.168.30.52:52114       ESTABLISHED:ESTABLISHED\n"
+               "   age 00:04:00, expires in 23:59:37, 5:9 pkts, 400:9000 bytes, rule 12, rlabel iot1\n"
+               "   id: 0d creatorid: 01\n   origif: vlan03\n")
+        records = COLLECTOR.parse_states(self.OUTBOUND + lan)
+        correlator = COLLECTOR.Correlator()
+        correlator.observe_states(records, self.LOCAL, 1000.0, {"iot1": "IoT to Internet", "abc123": "let out anything"})
+        (connection,) = correlator.current.values()
+        self.assertEqual(connection["rule_description"], "IoT to Internet")
+
     def test_rule_label_is_parsed_from_states(self):
         (record,) = COLLECTOR.parse_states(self.OUTBOUND)
         self.assertEqual(record["rule"], "abc123")
