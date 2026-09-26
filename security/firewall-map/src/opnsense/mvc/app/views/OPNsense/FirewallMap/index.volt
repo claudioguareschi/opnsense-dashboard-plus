@@ -80,15 +80,15 @@
     .fwmap-talker-search { position: relative; flex: 1; }
     .fwmap-talker-search .fa { position: absolute; left: 10px; top: 9px; opacity: .45; }
     .fwmap-talker-search input { width: 100%; height: 32px; padding: 4px 8px 4px 30px; }
-    .fwmap-talker-tools select { width: auto; height: 32px; padding: 2px 8px; }
+    .fwmap-talker-tools select { width: auto; min-width: 136px; height: 32px; padding: 2px 8px; }
     .fwmap-talker { display: grid; grid-template-columns: 30px minmax(0, 1fr) 64px 78px auto 12px; column-gap: 10px;
         align-items: center; padding: 7px 6px; cursor: pointer; border-radius: 5px; }
     .fwmap-talker + .fwmap-talker { border-top: 1px solid rgba(128, 128, 128, .08); }
     .fwmap-talker:hover { background: rgba(128, 128, 128, .08); }
     .fwmap-talker.active { background: rgba(232, 93, 40, .09); box-shadow: inset 3px 0 0 rgb(232, 93, 40); }
     .fwmap-talker-icon { text-align: center; font-size: 1.25em; opacity: .55; }
-    .fwmap-talker-text { min-width: 0; }
-    .fwmap-talker-label, .fwmap-talker-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fwmap-talker-text { display: block; min-width: 0; line-height: 1.3; }
+    .fwmap-talker-label, .fwmap-talker-sub { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .fwmap-talker-label { font-size: 1.02em; font-weight: 500; }
     .fwmap-talker-sub { font-size: .82em; opacity: .65; }
     .fwmap-talker canvas { width: 64px; height: 22px; }
