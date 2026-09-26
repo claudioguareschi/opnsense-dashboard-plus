@@ -692,6 +692,16 @@ class ThreatQueueTest(unittest.TestCase):
         self.assertFalse(COLLECTOR.public_ipv4("224.0.0.18"))
         self.assertTrue(COLLECTOR.public_ipv4("9.9.9.9"))
 
+    def test_remote_identity_is_kept(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = THREATS.connect(os.path.join(directory, "cache.db"))
+            seen = self.observe(self.INBOUND)
+            seen["108.188.77.155"]["remote"] = {"org": "Example ISP", "country": "United States", "asn": 64500}
+            THREATS.record(db, seen, now=100.0)
+            THREATS.record(db, self.observe(self.INBOUND), now=200.0)  # a sample without the facts
+            self.assertEqual(THREATS.listing(db)["rows"][0]["remote"],
+                             {"org": "Example ISP", "country": "United States", "asn": 64500})
+
     def test_rejects_bad_input(self):
         with tempfile.TemporaryDirectory() as directory:
             db = THREATS.connect(os.path.join(directory, "cache.db"))

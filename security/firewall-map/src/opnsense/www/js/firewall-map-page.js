@@ -437,7 +437,16 @@
             services: row.services || [],
             service_ports: ports,
         };
-        const lines = FirewallMapRenderer.flowSummary(pseudo, remoteOf(row.address)).map(esc);
+        // what was recorded with the entry, completed by the live map
+        const live = remoteOf(row.address);
+        const saved = row.remote || {};
+        const remote = {
+            ip: row.address,
+            hostname: saved.hostname || live.hostname,
+            org: state.settings.asn ? (saved.org || live.org) : null,
+            country: saved.country || live.country,
+        };
+        const lines = FirewallMapRenderer.flowSummary(pseudo, remote).map(esc);
         const address = esc(row.address);
         const status = STATUSES.includes(row.status) ? row.status : 'new';
         const actions = [

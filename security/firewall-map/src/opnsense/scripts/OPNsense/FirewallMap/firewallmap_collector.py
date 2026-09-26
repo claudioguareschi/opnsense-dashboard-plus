@@ -1399,7 +1399,7 @@ class ThreatRecorder:
         self.recorded = None
         self.pruned = None
 
-    def update(self, records, local_addresses, blocklists, reputation, now):
+    def update(self, records, local_addresses, blocklists, reputation, now, geo=None, hostnames=None):
         if self.recorded is not None and now - self.recorded < THREAT_RECORD_SECONDS:
             return
         self.recorded = now
@@ -1408,6 +1408,19 @@ class ThreatRecorder:
                 self.db = threats.connect(self.path)
             seen = threats.observe(records, flow_endpoints, lambda address: threat_lists_for(address, blocklists, reputation),
                                    local_addresses, inside_endpoint, service_name, orientation)
+            # who the address belongs to is kept with the entry: the map forgets it once the flow ends
+            if geo is not None and seen:
+                geo.resolve(list(seen))
+            for address, entry in seen.items():
+                location = geo.get(address) if geo is not None else None
+                name = hostnames.names.get(address) if hostnames is not None else None
+                entry["remote"] = {key: value for key, value in {
+                    "hostname": name[0] if name else None,
+                    "asn": (location or {}).get("asn"),
+                    "org": (location or {}).get("as_org"),
+                    "country": (location or {}).get("country"),
+                    "city": (location or {}).get("city"),
+                }.items() if value}
             threats.record(self.db, seen)
             if self.pruned is None or now - self.pruned >= THREAT_PRUNE_SECONDS:
                 threats.prune(self.db)
@@ -1523,7 +1536,7 @@ def run():
                     blocklists.refresh(chosen_threat_lists(values.get("threat_lists")))
                     blocklists_checked = started
                 reputation.refresh(time.monotonic())
-                recorder.update(records, local_addresses, blocklists, reputation, time.monotonic())
+                recorder.update(records, local_addresses, blocklists, reputation, time.monotonic(), geo, hostnames)
             # wake at once when a viewer opens the map, not at the end of the slow interval
             while time.monotonic() - started < BACKGROUND_INTERVAL and not requested(REQUEST_MARKER, 2):
                 time.sleep(1.0)
@@ -1579,7 +1592,7 @@ def run():
                 reputation.refresh(now)
                 # while the map is open the queue is always fed; the setting and the widget only
                 # decide whether recording continues in the background
-                recorder.update(records, local_addresses, blocklists, reputation, now)
+                recorder.update(records, local_addresses, blocklists, reputation, now, geo, hostnames)
                 payload = snapshot(tracker, geo, local_addresses, role, now, time.time(), resolver, {
                     "names": leases, "networks": networks, "interfaces": interfaces, "blocklists": blocklists,
                     "reputation": reputation,

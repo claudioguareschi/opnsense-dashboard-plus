@@ -118,6 +118,7 @@ def _record(db, seen, now):
                     "peak_bytes": entry["bytes"]}
             data.pop("bytes")
             data.pop("youngest")
+            data["remote"] = entry.get("remote") or {}
             db.execute(
                 "INSERT INTO threats (address, first_seen, last_seen, samples, data, status, note, status_changed) "
                 "VALUES (?, ?, ?, 1, ?, 'new', '', NULL)", (address, now, now, json.dumps(data)))
@@ -135,6 +136,8 @@ def _record(db, seen, now):
         data["inbound"] = bool(data.get("inbound")) or entry["inbound"] > 0
         data["outbound"] = bool(data.get("outbound")) or entry["outbound"] > 0
         data["peak_bytes"] = max(data.get("peak_bytes", 0), entry["bytes"])
+        # newer facts win, but a sample without them never erases what was recorded
+        data["remote"] = {**data.get("remote", {}), **(entry.get("remote") or {})}
         status = row[1]
         # only a connection opened after the block reopens it; existing and closing states
         # (TIME_WAIT lingers for a minute or more) are not new traffic
