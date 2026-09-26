@@ -359,30 +359,18 @@
 
     /* ---------------------------------------------------------------- threat feeds */
 
-    const FEEDS = [
-        {name: 'FWMAP_Spamhaus_DROP', label: 'Spamhaus DROP', url: 'https://www.spamhaus.org/drop/drop.txt',
-            about: 'Hijacked and criminal netblocks'},
-        {name: 'FWMAP_Feodo', label: 'abuse.ch Feodo Tracker', url: 'https://feodotracker.abuse.ch/downloads/ipblocklist.txt',
-            about: 'Botnet command-and-control servers'},
-        {name: 'FWMAP_ET_Compromised', label: 'Emerging Threats compromised', url: 'https://rules.emergingthreats.net/blockrules/compromised-ips.txt',
-            about: 'Hosts known to be compromised'},
-        {name: 'FWMAP_FireHOL_L1', label: 'FireHOL level 1', url: 'https://iplists.firehol.org/files/firehol_level1.netset',
-            about: 'Combined attack sources (DROP, Feodo, DShield…). Also lists private and bogon ranges: do not use it to block LAN traffic.'},
-    ];
-
     async function showFeeds() {
-        let existing = [];
+        let feeds = [];
         try {
-            existing = (await postJSON('/api/firewall/alias/search_item', {current: 1, rowCount: -1})).rows || [];
+            feeds = ((await $.getJSON('/api/firewallmap/settings/tables')).tables || []).filter((table) => table.curated);
         } catch (error) {
             notify(`${T.action_failed}: ${error.statusText || error}`, BootstrapDialog.TYPE_DANGER);
             return;
         }
-        const names = new Set(existing.map((row) => plain(row.name)));
         const $list = $('<div></div>');
-        for (const feed of FEEDS) {
-            const added = names.has(feed.name);
-            const $row = $(`<div class="fwmap-feed"><div><b>${esc(feed.label)}</b><div class="text-muted">${esc(feed.about)}</div>`
+        for (const feed of feeds) {
+            const added = feed.installed;
+            const $row = $(`<div class="fwmap-feed"><div><b>${esc(feed.label)}</b><div class="text-muted">${esc(feed.description)}</div>`
                 + `<div class="text-muted" style="font-size:.85em">${esc(feed.url)}</div></div></div>`);
             const $button = $(`<button type="button" class="btn btn-sm ${added ? 'btn-default' : 'btn-primary'}"></button>`)
                 .text(added ? T.feed_added : T.add_feed).prop('disabled', added);

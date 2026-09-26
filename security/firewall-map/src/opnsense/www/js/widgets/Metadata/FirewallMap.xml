@@ -37,6 +37,7 @@
             <key_set_abuse>Key saved (enter a new one to replace it, "-" to remove it)</key_set_abuse>
             <abuseipdb_none>Optional: enables abuse reports when investigating an address</abuseipdb_none>
             <threat_lists>Threat lists (none selected: automatic, ★)</threat_lists>
+            <feed_will_install>(feed, added when saved)</feed_will_install>
             <days>days</days>
             <key_set>Key saved (enter a new one to replace it, "-" to use the GeoIP alias key)</key_set>
             <key_from_alias>Using the key from the GeoIP alias (enter one to override)</key_from_alias>

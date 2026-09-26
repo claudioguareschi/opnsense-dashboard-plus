@@ -675,7 +675,22 @@ def is_feed_table(table, aliases):
     return lowered.startswith(BLOCKLIST_TABLE_PREFIXES)
 
 
-THREAT_CANDIDATE_TYPES = BLOCKLIST_ALIAS_TYPES | {"host", "network"}
+# only list-type aliases are sensible threat lists (not LAN host/network aliases)
+THREAT_CANDIDATE_TYPES = BLOCKLIST_ALIAS_TYPES
+
+# curated public feeds this plugin can add as daily URL table aliases
+FEEDS = [
+    {"name": "FWMAP_Spamhaus_DROP", "label": "Spamhaus DROP", "url": "https://www.spamhaus.org/drop/drop.txt",
+     "about": "Hijacked and criminal netblocks"},
+    {"name": "FWMAP_Feodo", "label": "abuse.ch Feodo Tracker",
+     "url": "https://feodotracker.abuse.ch/downloads/ipblocklist.txt", "about": "Botnet command-and-control servers"},
+    {"name": "FWMAP_ET_Compromised", "label": "Emerging Threats compromised",
+     "url": "https://rules.emergingthreats.net/blockrules/compromised-ips.txt", "about": "Hosts known to be compromised"},
+    {"name": "FWMAP_FireHOL_L1", "label": "FireHOL level 1",
+     "url": "https://iplists.firehol.org/files/firehol_level1.netset",
+     "about": "Combined attack sources (DROP, Feodo, DShield...). Also lists private and bogon ranges: "
+              "do not use it to block LAN traffic."},
+]
 
 
 def pf_tables():
@@ -702,7 +717,11 @@ def threat_list_candidates(config=CONFIG_XML, tables=None):
     for table in tables:
         if is_feed_table(table, aliases) and table not in candidates:
             candidates[table] = {"name": table, "type": "feed", "description": ""}
-    return sorted(candidates.values(), key=lambda item: item["name"].lower())
+    for feed in FEEDS:
+        entry = candidates.setdefault(feed["name"], {"name": feed["name"], "type": "urltable"})
+        entry.update({"label": feed["label"], "description": feed["about"], "url": feed["url"],
+                      "curated": True, "installed": feed["name"] in aliases})
+    return sorted(candidates.values(), key=lambda item: (not item.get("curated"), item["name"].lower()))
 
 
 def chosen_threat_lists(setting, config=CONFIG_XML):

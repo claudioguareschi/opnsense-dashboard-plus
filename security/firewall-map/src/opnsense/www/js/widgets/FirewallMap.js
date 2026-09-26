@@ -94,7 +94,8 @@ export default class FirewallMap extends BaseWidget {
                 type: 'select_multiple',
                 // nothing selected means automatic (feed tables and URL aliases used by block rules)
                 options: choices((this.threatTables?.tables || []).map((table) => [table.name,
-                    `${table.name}${(this.threatTables.automatic || []).includes(table.name) ? ' ★' : ''}`])),
+                    `${table.label || table.name}${table.curated && !table.installed ? ` ${this.translations.feed_will_install}` : ''}`
+                    + `${(this.threatTables.automatic || []).includes(table.name) ? ' ★' : ''}`])),
                 default: (geo.threat_lists || '').split(',').filter(Boolean),
             },
         };
@@ -265,7 +266,8 @@ export default class FirewallMap extends BaseWidget {
             if ((values.abuseipdb_key || '').trim()) {
                 update.abuseipdb_key = values.abuseipdb_key.trim();
             }
-            const lists = (values.threat_lists || []).join(',');
+            const values_lists = values.threat_lists || [];
+            const lists = values_lists.join(',');
             // without the table list (lookup failed) the selection cannot be trusted
             if ((this.threatTables?.tables || []).length && lists !== (geo.threat_lists || '')) {
                 update.threat_lists = lists;
@@ -273,6 +275,29 @@ export default class FirewallMap extends BaseWidget {
             // firewall-wide values are saved to the plugin, never into this user's dashboard layout
             for (const key of FirewallMap.FIREWALL_WIDE) {
                 delete values[key];
+            }
+            // curated feeds picked here are created as URL table aliases before they are used
+            const install = (this.threatTables?.tables || []).filter((table) =>
+                table.curated && !table.installed && (values_lists || []).includes(table.name));
+            for (const feed of install) {
+                try {
+                    const saved = await this.ajaxCall('/api/firewall/alias/add_item', JSON.stringify({alias: {
+                        enabled: '1', name: feed.name, type: 'urltable', content: feed.url, updatefreq: '1',
+                        description: `Firewall Map+ threat feed: ${feed.label}`,
+                    }}), 'POST');
+                    if (saved.result !== 'saved') {
+                        throw new Error(JSON.stringify(saved.validations || saved));
+                    }
+                } catch (error) {
+                    this._settingsError(`${feed.label}: ${error?.message || error?.statusText || error}`);
+                }
+            }
+            if (install.length) {
+                try {
+                    await this.ajaxCall('/api/firewall/alias/reconfigure', JSON.stringify({}), 'POST');
+                } catch (error) {
+                    this._settingsError(error?.statusText || String(error));
+                }
             }
             if (!Object.keys(update).length) {
                 this.settings = await this._settings();
