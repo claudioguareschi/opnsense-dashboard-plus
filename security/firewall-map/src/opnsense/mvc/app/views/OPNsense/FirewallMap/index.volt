@@ -72,6 +72,10 @@
     .fwmap-address { margin-top: 6px; }
     .fwmap-summary { font-weight: 600; }
     .fwmap-ids { margin-top: 2px; color: rgb(200, 110, 0); }
+    .fwmap-sec { margin-top: 8px; }
+    .fwmap-sec-title { font-size: .75em; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; opacity: .7;
+        border-bottom: 1px solid rgba(128, 128, 128, .25); margin-bottom: 3px; padding-bottom: 1px; }
+    .fwmap-sig { margin-bottom: 4px; }
     .fwmap-ids-high { color: rgb(196, 18, 48); font-weight: 600; }
     .fwmap-verdict { margin: 4px 0; padding: 3px 8px; border-radius: 3px; font-weight: 600; }
     .fwmap-verdict-allowed { background: rgba(46, 139, 87, .14); color: rgb(30, 110, 65); }
@@ -161,7 +165,28 @@
         verdict_allowed: "{{ lang._('Allowed: the firewall let this traffic through') }}",
         verdict_allowed_flagged: "{{ lang._('Allowed: flagged traffic got through the firewall') }}",
         verdict_ids: "{{ lang._('Seen by Suricata: no connection is open right now') }}",
-        ids_alerting: "{{ lang._('addresses with IDS alerts') }}",
+        ids_flow: "{{ lang._('IDS flow') }}",
+        ids_flows: "{{ lang._('IDS flows') }}",
+        ids_address: "{{ lang._('IDS address') }}",
+        ids_addresses: "{{ lang._('IDS addresses') }}",
+        sec_connection: "{{ lang._('Connection') }}",
+        sec_firewall: "{{ lang._('Firewall') }}",
+        sec_ids: "{{ lang._('IDS') }}",
+        sec_reputation: "{{ lang._('Reputation') }}",
+        path: "{{ lang._('Path') }}",
+        started_by: "{{ lang._('Started') }}",
+        started_inside: "{{ lang._('inside') }}",
+        started_outside: "{{ lang._('outside') }}",
+        via: "{{ lang._('Public side') }}",
+        open_for: "{{ lang._('open, started') }}",
+        closed: "{{ lang._('closed') }}",
+        transferred: "{{ lang._('Transferred') }}",
+        decision: "{{ lang._('Decision') }}",
+        allowed: "{{ lang._('Allowed') }}",
+        rule: "{{ lang._('Rule') }}",
+        severity: "{{ lang._('Severity') }}",
+        ips_dropped: "{{ lang._('dropped by IPS') }}",
+        not_listed: "{{ lang._('Not on any configured list') }}",
         verdict_blocked: "{{ lang._('Blocked: the firewall dropped this traffic') }}",
         remote_addresses: "{{ lang._('remote addresses') }}",
         inside_hosts: "{{ lang._('Inside hosts') }}",

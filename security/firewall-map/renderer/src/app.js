@@ -62,7 +62,8 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
     if (!origin || !dest) {
       continue;
     }
-    const key = `${item.origin}>${dest.lat},${dest.lon}`;
+    // a connection Suricata alerted on is never merged: it gets an arc of its own
+    const key = item.ids_flow ? `${item.origin}>ids:${item.ids_flow.key}` : `${item.origin}>${dest.lat},${dest.lon}`;
     const rate = item.rate ?? item.count ?? 0;
     const rateIn = item.rate_in ?? rate;
     const rateOut = item.rate_out ?? 0;
@@ -83,7 +84,10 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
       });
     }
   }
-  const flows = [...merged.values()].sort((a, b) => b.flow.rate - a.flow.rate).slice(0, options.maxArcs);
+  // IDS connections first so the arc limit never hides them
+  const flows = [...merged.values()]
+    .sort((a, b) => (b.members[0].ids_flow ? 1 : 0) - (a.members[0].ids_flow ? 1 : 0) || b.flow.rate - a.flow.rate)
+    .slice(0, options.maxArcs);
   // lanes stay put across refreshes: an arch keeps its bend while it lives, new arches take the
   // first free lane of their cell, so nothing jumps when rankings change
   const cellOf = ({flow, dest}) => `${flow.origin}|${Math.round(dest.lat * 2)}|${Math.round(dest.lon * 2)}`;
@@ -169,6 +173,7 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
       service: serviceCategory(members.slice().sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))[0]?.services?.[0]),
       egress: members.slice().sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))[0]?.egress || 'Unknown',
       threat: members.some((member) => member.threat),
+      ids: members[0].ids_flow || null,
       initiated: initiatedBy(members),
       direction,
       activity,
@@ -536,6 +541,53 @@ function idsHtml(ids) {
     `<div style="margin-top:2px;${serious ? 'color:rgb(196,18,48);font-weight:600' : 'color:rgb(200,110,0)'}">⚑ ${escapeHtml(line)}</div>`).join('');
 }
 
+/** The arc and map entries for connections Suricata alerted on (see the collector's Correlator). */
+export function idsArcData(data) {
+  const flows = (data.ids_flows || []).filter((flow) => flow.kind !== 'blocked').map((flow) => ({
+    origin: flow.origin,
+    dest: flow.dest,
+    rate: flow.active ? 1 : 0,
+    rate_in: flow.remote_started ? 1 : 0,
+    rate_out: flow.remote_started ? 0 : 1,
+    activity: flow.active ? 1 : 0.45,
+    initiated: flow.remote_started ? 'remote' : 'local',
+    threat: flow.severity <= 2 || (flow.lists || []).length > 0,
+    ids_flow: flow,
+  }));
+  const known = new Set((data.locations || []).map((location) => location.id));
+  const locations = (data.ids_flows || []).filter((flow) => !known.has(flow.dest)).map((flow) => ({
+    id: flow.dest, name: flow.city || flow.country || flow.dest, city: flow.city, country: flow.country,
+    country_code: flow.country_code, lat: flow.lat, lon: flow.lon, asn: flow.asn, as_org: flow.as_org,
+  }));
+  return {flows, locations};
+}
+
+function bytesText(bytes) {
+  return formatRate(bytes || 0).replace('/s', '');
+}
+
+/** One-line description of a correlated connection for the hover card. */
+export function idsFlowSummary(flow) {
+  const inside = flow.inside_host?.name ? `${plain(flow.inside_host.name)} (${flow.inside})` : (flow.inside || 'this firewall');
+  const who = flow.remote_started ? `${flow.remote} → ${inside}` : `${inside} → ${flow.remote}`;
+  const state = flow.active ? `open for ${duration(flow.age) || 'moments'}` : 'closed';
+  return `${who} ${flow.protocol.toUpperCase()} · ${state} · ↓ ${bytesText(flow.bytes_in)} ↑ ${bytesText(flow.bytes_out)}`;
+}
+
+function describeIdsFlow(flow, showAsn) {
+  const title = [flow.city, flow.country].filter(Boolean).join(', ') || flow.dest;
+  const signatures = flow.groups.flatMap((group) => group.signatures);
+  const serious = flow.severity <= 2;
+  return `
+    <div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}</div>
+    ${verdictLine(false, serious)}
+    <div style="font-weight:600;${serious ? 'color:rgb(196,18,48)' : 'color:rgb(200,110,0)'}">⚑ Suricata alerted on this connection${flow.ips_dropped ? ' · dropped by IPS' : ''}</div>
+    <div style="margin-top:3px">${escapeHtml(idsFlowSummary(flow))}</div>
+    ${showAsn && flow.asn ? `<div style="opacity:.7">AS${flow.asn} ${escapeHtml(flow.as_org || '')}</div>` : ''}
+    ${signatures.slice(0, 3).map((item) => `<div style="margin-top:2px">${escapeHtml(plain(item.signature))} <span style="opacity:.7">(severity ${item.severity}, ${item.count}×)</span></div>`).join('')}
+  `;
+}
+
 /** Hover card for an address Suricata alerted on that has no arc right now. */
 function describeAlert(alert, showAsn) {
   const title = [alert.city, alert.country].filter(Boolean).join(', ') || alert.source;
@@ -582,6 +634,9 @@ function pulsePosition(arc, seconds, reverse) {
 function pulses(arcs) {
   const items = [];
   for (const arc of arcs) {
+    if (arc.ids && !arc.ids.active) {
+      continue;  // a closed connection carries no traffic
+    }
     if (arc.direction !== 'in') {
       items.push({arc, reverse: false, toward: false});
     }
@@ -739,6 +794,11 @@ export function createFirewallMap(container, options = {}) {
       return {kind: 'alert', addresses: [object.source], country: object.country, countryCode: object.country_code,
         title: object.city || object.country, alert: object};
     }
+    if ((layerId === 'firewall-map-arcs' || layerId === 'firewall-map-ids-markers') && (object.ids || object.arc?.ids)) {
+      const flow = object.ids || object.arc.ids;
+      return {kind: 'idsflow', addresses: [flow.dest], country: flow.country, countryCode: flow.country_code,
+        title: flow.city || flow.country, idsFlow: flow, members: object.members || object.arc.members};
+    }
     if (layerId === 'firewall-map-arcs') {
       return {kind: 'flow', addresses: object.members.map((member) => member.dest), country: object.dest.country,
         countryCode: object.dest.country_code, title: object.dest.city || object.dest.region || object.dest.country,
@@ -772,6 +832,9 @@ export function createFirewallMap(container, options = {}) {
     }
     if (layer.id === 'firewall-map-alerts') {
       return describeAlert(object, settings.asn);
+    }
+    if ((layer.id === 'firewall-map-arcs' || layer.id === 'firewall-map-ids-markers') && (object.ids || object.arc?.ids)) {
+      return describeIdsFlow(object.ids || object.arc.ids, settings.asn);
     }
     if (layer.id === 'firewall-map-arcs') {
       return describe(object.dest, object.members, locationIndex, lastData.hostnames, settings.asn);
@@ -826,6 +889,7 @@ export function createFirewallMap(container, options = {}) {
   const blockFader = new Fader((block) => block.source);
   const endpointFader = new Fader((location) => location.id);
   const alertFader = new Fader((alert) => alert.source);
+  let idsHistory = new Set();
   let alertPoints = [];
   let frameNow = performance.now();
   let fadeKey = 'steady';
@@ -1080,6 +1144,48 @@ export function createFirewallMap(container, options = {}) {
         updateTriggers: {getFillColor: [colors.block, fadeKey]},
       }),
       new ScatterplotLayer({
+        id: 'firewall-map-ids-rings',
+        data: locationsShown.filter((location) => idsHistory.has(location.id)),
+        getPosition: (location) => [location.lon, location.lat],
+        getRadius: 6,
+        radiusUnits: 'pixels',
+        stroked: true,
+        filled: false,
+        lineWidthUnits: 'pixels',
+        getLineWidth: 1.5,
+        getLineColor: (location) => faded([230, 140, 0, 230], endpointFader.opacity(location, frameNow)),
+        pickable: false,
+        updateTriggers: {getLineColor: fadeKey},
+      }),
+      new ScatterplotLayer({
+        // detection marker at the middle of an IDS connection's own arc
+        id: 'firewall-map-ids-markers',
+        data: arcs.filter((arc) => arc.ids).map((arc) => ({arc, position: arc.path[Math.floor(arc.path.length / 2)]})),
+        getPosition: (item) => item.position,
+        getRadius: 5,
+        radiusUnits: 'pixels',
+        stroked: true,
+        filled: true,
+        getFillColor: (item) => faded(rgb(colors.background.slice(0, 3), 240), arcFader.opacity(item.arc, frameNow)),
+        getLineColor: (item) => faded(item.arc.ids.severity <= 2 ? rgb(colors.block) : [230, 140, 0, 255], arcFader.opacity(item.arc, frameNow)),
+        lineWidthUnits: 'pixels',
+        getLineWidth: 2.5,
+        pickable: true,
+        updateTriggers: {getFillColor: [colors.background, fadeKey], getLineColor: [colors.block, fadeKey]},
+      }),
+      new TextLayer({
+        id: 'firewall-map-ids-marks',
+        data: arcs.filter((arc) => arc.ids).map((arc) => ({arc, position: arc.path[Math.floor(arc.path.length / 2)]})),
+        getPosition: (item) => item.position,
+        getText: () => '!',
+        getSize: 10,
+        getColor: (item) => faded(item.arc.ids.severity <= 2 ? rgb(colors.block) : [230, 140, 0, 255], arcFader.opacity(item.arc, frameNow)),
+        fontWeight: 700,
+        characterSet: ['!'],
+        pickable: false,
+        updateTriggers: {getColor: [colors.block, fadeKey]},
+      }),
+      new ScatterplotLayer({
         // addresses Suricata alerted on with no arc right now: a hollow marker in the alert colour
         id: 'firewall-map-alerts',
         data: alertPoints,
@@ -1129,10 +1235,17 @@ export function createFirewallMap(container, options = {}) {
   function layers(data) {
     const now = performance.now();
     const previousLanes = new Map([...arcFader.entries.values()].map((entry) => [entry.item.key, entry.item.lane]));
-    arcs = arcFader.update(buildArcs(data, {...settings, previousLanes}), now);
+    const ids = idsArcData(data);
+    const arcData = {...data, flows: [...(data.flows || []), ...ids.flows], locations: [...(data.locations || []), ...ids.locations]};
+    arcs = arcFader.update(buildArcs(arcData, {...settings, previousLanes}), now);
+    // endpoints with recent Suricata history get a ring (history, not proof about the current traffic)
+    idsHistory = new Set([
+      ...(data.flows || []).filter((flow) => flow.ids).map((flow) => flow.dest),
+      ...(data.ids_flows || []).map((flow) => flow.dest),
+    ]);
     pulseItems = pulses(arcs);
     blockArcs = blockFader.update(settings.blocks ? buildBlocks(data) : [], now);
-    locationsShown = endpointFader.update(data.locations || [], now);
+    locationsShown = endpointFader.update(arcData.locations, now);
     alertPoints = alertFader.update(data.alerts || [], now);
     locationIndex = new Map((data.locations || []).map((location) => [location.id, location]));
     flowsByDest = new Map();

@@ -117,6 +117,23 @@
         return true;
     }
 
+    function idsFlowMatches(flow) {
+        const f = state.filters;
+        if (f.traffic === 'blocked' || (f.traffic === 'threats' && flow.severity > 2 && !(flow.lists || []).length)) {
+            return false;
+        }
+        if (f.host && !(flow.inside || '').startsWith(`${f.host}:`) && flow.inside !== f.host) {
+            return false;
+        }
+        if (f.service || f.iface) {
+            return false;
+        }
+        if (f.country && flow.country !== f.country) {
+            return false;
+        }
+        return !(f.asn && String(flow.asn || '') !== f.asn);
+    }
+
     function alertMatches(alert) {
         const f = state.filters;
         if (f.service || f.iface || f.host) {
@@ -140,6 +157,7 @@
             flows,
             blocks,
             alerts,
+            ids_flows: (snapshot.ids_flows || []).filter(idsFlowMatches),
             locations: (snapshot.locations || []).filter((location) => location.local || used.has(location.id)),
         };
     }
@@ -321,7 +339,8 @@
         const block = state.selection?.block?.source === address ? state.selection.block : null;
         const alert = state.selection?.alert?.source === address ? state.selection.alert : null;
         const ids = flow?.ids || block?.ids || alert?.ids;
-        const summary = (flow ? connection(flow) : block ? blocked(block) : '') + idsLines(ids);
+        const summary = state.selection?.kind === 'idsflow' ? ''
+            : (flow ? connection(flow) : block ? blocked(block) : '') + idsLines(ids);
         return `<div class="fwmap-address"><b>${esc(address)}</b>${summary}<div class="fwmap-links">${links.concat(admin).join(' · ')}</div>`
             + (card ? `<div class="fwmap-investigation">${card}</div>` : '') + '</div>';
     }
@@ -727,6 +746,37 @@
         return `<div class="fwmap-verdict fwmap-verdict-${kind}">${esc(text)}</div>`;
     }
 
+    /** A connection Suricata alerted on: the connection, the firewall's decision, IDS, reputation. */
+    function idsFlowDetails(flow) {
+        const row = (label, value) => value === null || value === undefined || value === ''
+            ? '' : `<tr><th>${esc(label)}</th><td>${value}</td></tr>`;
+        const inside = flow.inside_host?.name ? `${esc(flow.inside_host.name)} (${esc(flow.inside)})` : esc(flow.inside || T.this_firewall);
+        const path = flow.remote_started ? `${esc(flow.remote)} → ${inside}` : `${inside} → ${esc(flow.remote)}`;
+        const section = (title, body, extra = '') => `<div class="fwmap-sec"><div class="fwmap-sec-title">${esc(title)}${extra}</div>${body}</div>`;
+        const connectionSection = section(T.sec_connection, `<table class="fwmap-inv-table">
+            ${row(T.path, `${path} <span class="text-muted">${esc(flow.protocol.toUpperCase())}</span>`)}
+            ${row(T.started_by, esc(flow.remote_started ? T.started_outside : T.started_inside))}
+            ${row(T.via, esc(flow.public))}
+            ${row(T.state, esc(flow.active ? `${T.open_for} ${ago(Date.now() / 1000 - (flow.age || 0))} ${T.ago}` : T.closed))}
+            ${row(T.transferred, `↓ ${esc(formatBytes(flow.bytes_in || 0))} ↑ ${esc(formatBytes(flow.bytes_out || 0))}`)}
+        </table>`);
+        const firewallSection = section(T.sec_firewall, `<table class="fwmap-inv-table">
+            ${row(T.decision, esc(T.allowed))}
+            ${row(T.interface, esc(flow.interface))}
+            ${row(T.rule, esc(flow.rule))}
+        </table>`);
+        const signatures = flow.groups.flatMap((group) => group.signatures.map((item) => ({...item, flow_id: group.flow_id})));
+        const idsSection = section(T.sec_ids, signatures.map((item) => `<div class="fwmap-sig">
+                <div class="${item.severity <= 2 ? 'fwmap-ids-high' : 'fwmap-ids'}"><i class="fa fa-flag"></i> ${esc(item.signature)}</div>
+                <div class="text-muted">${esc(T.severity)} ${esc(item.severity)}${item.category ? ` · ${esc(item.category)}` : ''} · SID ${esc(item.sid)}
+                    · ${esc(item.count)}× · ${esc(new Date(item.last * 1000).toLocaleTimeString())}${item.action === 'blocked' ? ` · <b>${esc(T.ips_dropped)}</b>` : ''}</div>
+            </div>`).join(''), ` <span class="badge">${esc(flow.count)}</span>`);
+        const reputationSection = section(T.sec_reputation, (flow.lists || []).length
+            ? `<div style="font-weight:600;color:rgb(196,18,48)">${esc(T.listed_in)} ${flow.lists.map(esc).join(', ')}</div>`
+            : `<div class="text-muted">${esc(T.not_listed)}</div>`);
+        return connectionSection + firewallSection + idsSection + reputationSection;
+    }
+
     function renderDetails() {
         const selection = state.selection;
         const $details = $('#fwmap-details');
@@ -736,6 +786,7 @@
         }
         const addresses = [...new Set(selection.addresses)].slice(0, 8);
         const lists = [...new Set([...(selection.block?.lists || []), ...(selection.alert?.lists || []),
+            ...(selection.idsFlow?.lists || []),
             ...(selection.members || []).flatMap((member) => member.lists || [])])];
         const country = state.isAdmin && selection.countryCode
             ? `<div class="fwmap-links"><a href="#" class="fwmap-country" data-code="${esc(selection.countryCode)}">`
@@ -745,8 +796,10 @@
                 <b>${esc(selection.title || '')}</b>
                 <a href="#" id="fwmap-details-close" title="${esc(T.close)}">&times;</a>
             </div>
-            ${verdict(selection.kind === 'blocked', lists.length > 0, addresses.length, selection.kind === 'alert')}
+            ${verdict(selection.kind === 'blocked', lists.length > 0 || (selection.kind === 'idsflow' && selection.idsFlow.severity <= 2),
+                addresses.length, selection.kind === 'alert')}
             ${lists.length ? `<div style="font-weight:600;color:rgb(196,18,48)">${esc(T.listed_in)} ${lists.map(esc).join(', ')}</div>` : ''}
+            ${selection.kind === 'idsflow' ? idsFlowDetails(selection.idsFlow) : ''}
             ${addresses.map(addressRow).join('')}
             ${country}
         `);
@@ -912,10 +965,16 @@
                 }
             }
         }
-        const alerting = (shown.alerts || []).length + shown.flows.filter((flow) => flow.ids).length
-            + shown.blocks.filter((block) => block.ids).length;
-        if (alerting) {
-            message += ` · ${alerting} ${T.ids_alerting}`;
+        // connection evidence and address history are counted separately
+        const idsFlows = (shown.ids_flows || []).filter((flow) => flow.kind !== 'blocked').length;
+        const idsAddresses = new Set([...(shown.alerts || []).map((alert) => alert.source),
+            ...shown.flows.filter((flow) => flow.ids).map((flow) => flow.dest),
+            ...shown.blocks.filter((block) => block.ids).map((block) => block.source)]).size;
+        if (idsFlows) {
+            message += ` · ${idsFlows} ${idsFlows === 1 ? T.ids_flow : T.ids_flows}`;
+        }
+        if (idsAddresses) {
+            message += ` · ${idsAddresses} ${idsAddresses === 1 ? T.ids_address : T.ids_addresses}`;
         }
         const threats = shown.flows.filter((flow) => flow.threat).length;
         if (threats) {

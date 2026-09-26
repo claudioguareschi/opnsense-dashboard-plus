@@ -851,6 +851,26 @@ class CorrelationTest(unittest.TestCase):
         correlator.resolve(self.LOCAL, 1000.0)
         self.assertEqual(correlator.stats["current"], 1)
 
+    def test_ids_flow_snapshot_and_evidence_flag(self):
+        class Geo:
+            def resolve(self, addresses):
+                pass
+
+            def get(self, address):
+                return {"lat": 1.0, "lon": 2.0, "country": "US", "country_name": "United States"}
+        correlator = COLLECTOR.Correlator()
+        correlator.observe_states(COLLECTOR.parse_states(self.OUTBOUND), self.LOCAL, 1000.0, {"abc123": "IoT to Internet"})
+        correlator.add_alert(self.alert("198.13.91.163", 13526, "162.217.103.70", 443), self.LOCAL, 1000.0)
+        correlator.resolve(self.LOCAL, 1000.0)
+        self.assertTrue(correlator.flags("162.217.103.70"))
+        self.assertFalse(correlator.flags("8.8.8.8"))
+        (flow,) = correlator.snapshot(Geo(), "198.13.91.163", {"192.168.30.52": "seachartly"}, [], {"igb1": "WAN"}, now=1000.0)
+        self.assertEqual((flow["inside"], flow["inside_host"]["name"], flow["rule"], flow["interface"], flow["active"]),
+                         ("192.168.30.52:52114", "seachartly", "IoT to Internet", "WAN", True))
+        self.assertEqual((flow["severity"], flow["count"], flow["kind"]), (1, 1, "current"))
+        # history on the address alone no longer turns aggregate arcs red
+        self.assertEqual(COLLECTOR.threat_lists_for("162.217.103.70", None, None), [])
+
     def test_rule_label_is_parsed_from_states(self):
         (record,) = COLLECTOR.parse_states(self.OUTBOUND)
         self.assertEqual(record["rule"], "abc123")

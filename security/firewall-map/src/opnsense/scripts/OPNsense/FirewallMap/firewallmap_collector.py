@@ -1263,7 +1263,7 @@ def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, inte
             "accuracy_km": location.get("accuracy_km"),
             "asn": location.get("asn"),
             "as_org": location.get("as_org"),
-            "lists": threat_lists_for(address, blocklists, reputation, alerts),
+            "lists": threat_lists_for(address, blocklists, reputation),
             "ids": alerts.summary(address) if alerts is not None else None,
         })
     return result
@@ -1290,7 +1290,7 @@ def alert_snapshot(alerts, geo, origin, shown, blocklists=None, reputation=None,
             "country_code": location.get("country"),
             "asn": location.get("asn"),
             "as_org": location.get("as_org"),
-            "lists": threat_lists_for(address, blocklists, reputation, alerts),
+            "lists": threat_lists_for(address, blocklists, reputation),
             "ids": alerts.summary(address, now),
         })
     return result
@@ -1488,6 +1488,67 @@ class Correlator:
         signature["last"] = max(signature["last"], alert["time"] or now)
         signature["action"] = alert["action"]
 
+    def flags(self, address):
+        """Evidence on the connection itself: an allowed connection with a severity 1-2 alert."""
+        for key, flow in self.flows.items():
+            if key[3] == address and flow["kind"] != "blocked" and self._severity(flow) <= ALERT_FLAG_SEVERITY:
+                return True
+        return False
+
+    @staticmethod
+    def _severity(flow):
+        return min((item["severity"] for group in flow["alerts"].values() for item in group.values()), default=3)
+
+    def snapshot(self, geo, origin, names, networks, interfaces, blocklists=None, reputation=None, now=None):
+        """Correlated connections for the map: each is drawn as its own arc."""
+        now = time.time() if now is None else now
+        geo.resolve([key[3] for key in self.flows])
+        result = []
+        for key, flow in sorted(self.flows.items(), key=lambda item: -item[1]["last"]):
+            location = geo.get(key[3])
+            if location is None:
+                continue
+            active = key in self.current
+            connection = self.current.get(key) or flow["connection"]
+            inside = (connection.get("inside") or "").rsplit(":", 1)[0] if flow["kind"] != "blocked" else ""
+            groups = []
+            for flow_id, signatures in flow["alerts"].items():
+                groups.append({"flow_id": flow_id, "signatures": sorted(
+                    signatures.values(), key=lambda item: (item["severity"], -item["count"]))[:5]})
+            actions = {item["action"] for group in flow["alerts"].values() for item in group.values()}
+            result.append({
+                "key": "|".join(key),
+                "kind": flow["kind"],
+                "active": active,
+                "origin": origin,
+                "dest": key[3],
+                "protocol": key[0],
+                "public": f"{key[1]}:{key[2]}" if key[2] else key[1],
+                "remote": f"{key[3]}:{key[4]}" if key[4] else key[3],
+                "inside": connection.get("inside"),
+                "inside_host": describe_inside(inside, names, networks, interfaces) if inside else None,
+                "remote_started": connection.get("remote_started"),
+                "bytes_in": connection.get("bytes_in"),
+                "bytes_out": connection.get("bytes_out"),
+                "age": connection.get("age"),
+                "rule": connection.get("rule_description") or connection.get("rule"),
+                "interface": interfaces.get(connection.get("interface"), connection.get("interface")),
+                "severity": self._severity(flow),
+                "count": sum(item["count"] for group in flow["alerts"].values() for item in group.values()),
+                "last_seconds": round(max(0, now - flow["last"])),
+                "groups": groups,
+                "ips_dropped": "blocked" in actions,
+                "lat": location["lat"],
+                "lon": location["lon"],
+                "city": location.get("city") or location.get("region"),
+                "country": location.get("country_name") or location.get("country"),
+                "country_code": location.get("country"),
+                "asn": location.get("asn"),
+                "as_org": location.get("as_org"),
+                "lists": threat_lists_for(key[3], blocklists, reputation),
+            })
+        return result
+
     def diagnostics(self):
         stats = dict(self.stats)
         matched = stats["current"] + stats["recent"] + stats["blocked"]
@@ -1664,7 +1725,7 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None
             "services": flow.get("services", []),
             "inside": [describe_inside(address, names, networks, interfaces) for address in flow.get("inside", [])],
             "egress": interfaces.get(flow.get("egress"), flow.get("egress")),
-            "lists": threat_lists_for(remote, blocklists, reputation, alerts),
+            "lists": threat_lists_for(remote, blocklists, reputation),
             "ids": alerts.summary(remote, wall_time) if alerts is not None else None,
             "initiated": flow.get("initiated", "local"),
             "targets": [describe_target(target, names, networks, interfaces, local_addresses)
@@ -1754,7 +1815,8 @@ class ThreatRecorder:
         self.recorded = None
         self.pruned = None
 
-    def update(self, records, local_addresses, blocklists, reputation, now, geo=None, hostnames=None, alerts=None):
+    def update(self, records, local_addresses, blocklists, reputation, now, geo=None, hostnames=None, alerts=None,
+               correlator=None):
         if self.recorded is not None and now - self.recorded < THREAT_RECORD_SECONDS:
             return
         self.recorded = now
@@ -1762,7 +1824,7 @@ class ThreatRecorder:
             if self.db is None:
                 self.db = threats.connect(self.path)
             seen = threats.observe(records, flow_endpoints,
-                                   lambda address: threat_lists_for(address, blocklists, reputation, alerts),
+                                   lambda address: threat_lists_for(address, blocklists, reputation, correlator),
                                    local_addresses, inside_endpoint, service_name, orientation)
             # who the address belongs to is kept with the entry: the map forgets it once the flow ends
             if geo is not None and seen:
@@ -1910,7 +1972,8 @@ def run():
                 correlator.resolve(local_addresses, wall)
                 alerts.expire(wall)
                 write_json(IDS_STATS_FILE, correlator.diagnostics())
-                recorder.update(records, local_addresses, blocklists, reputation, time.monotonic(), geo, hostnames, alerts)
+                recorder.update(records, local_addresses, blocklists, reputation, time.monotonic(), geo, hostnames, alerts,
+                                correlator)
             # wake at once when a viewer opens the map, not at the end of the slow interval
             while time.monotonic() - started < BACKGROUND_INTERVAL and not requested(REQUEST_MARKER, 2):
                 time.sleep(1.0)
@@ -1976,7 +2039,7 @@ def run():
                 correlator.resolve(local_addresses, wall)
                 alerts.expire(wall)
                 write_json(IDS_STATS_FILE, correlator.diagnostics())
-                recorder.update(records, local_addresses, blocklists, reputation, now, geo, hostnames, alerts)
+                recorder.update(records, local_addresses, blocklists, reputation, now, geo, hostnames, alerts, correlator)
                 payload = snapshot(tracker, geo, local_addresses, role, now, time.time(), resolver, {
                     "names": leases, "networks": networks, "interfaces": interfaces, "blocklists": blocklists,
                     "reputation": reputation, "alerts": alerts,
@@ -1991,6 +2054,7 @@ def run():
                 )
                 shown = {flow["dest"] for flow in payload["flows"]} | {block["source"] for block in payload["blocks"]}
                 payload["alerts"] = alert_snapshot(alerts, geo, origin, shown, blocklists, reputation)
+                payload["ids_flows"] = correlator.snapshot(geo, origin, leases, networks, interfaces, blocklists, reputation)
                 if origin and geo.get(origin) and not any(location["id"] == origin for location in payload["locations"]):
                     location = geo.get(origin)
                     payload["locations"].append({
