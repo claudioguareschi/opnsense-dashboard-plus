@@ -11,11 +11,14 @@ when no dashboard has asked for a while).
 import json
 import os
 import subprocess
+import sys
 import time
 
 
 OUTPUT_FILE = "/var/run/firewallmap/flows.json"
 REQUEST_MARKER = "/var/run/firewallmap/last_request"
+HOSTNAME_MARKER = "/var/run/firewallmap/hostnames_request"
+GEODB = "/usr/local/opnsense/scripts/OPNsense/FirewallMap/firewallmap_geodb.py"
 RC_SCRIPT = "/usr/local/etc/rc.d/firewallmap"
 STALE_SECONDS = 10
 
@@ -50,14 +53,31 @@ def mark_request(path=REQUEST_MARKER):
         pass
 
 
-def main():
+def fetch_database():
+    """A missing database is downloaded in the background (the updater serialises itself)."""
+    try:
+        subprocess.Popen(
+            ["/usr/local/bin/python3", GEODB, "update"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+        )
+    except OSError:
+        pass
+
+
+def main(want_hostnames=False):
     mark_request()
+    if want_hostnames:
+        mark_request(HOSTNAME_MARKER)
     payload = read_snapshot()
     if payload is None:
         start_collector()
         payload = {"status": "starting", "flows": [], "locations": []}
+    if payload.get("status") == "no_database" and payload.get("reason") == "database_missing":
+        fetch_database()
+    if not want_hostnames:
+        payload.pop("hostnames", None)
     return payload
 
 
 if __name__ == "__main__":
-    print(json.dumps(main(), separators=(",", ":")))
+    print(json.dumps(main(want_hostnames="hostnames" in sys.argv[1:]), separators=(",", ":")))

@@ -19,6 +19,7 @@ def load(name):
     return module
 
 
+GEODB = load("firewallmap_geodb")
 COLLECTOR = load("firewallmap_collector")
 SNAPSHOT = load("flow_snapshot")
 
@@ -171,6 +172,29 @@ class IdleTest(unittest.TestCase):
             now = os.stat(marker).st_mtime
             self.assertFalse(COLLECTOR.idle(started=now - 1000, now=now + 10, marker=marker, idle_seconds=300))
             self.assertTrue(COLLECTOR.idle(started=now - 1000, now=now + 301, marker=marker, idle_seconds=300))
+
+
+class GeoDatabaseTest(unittest.TestCase):
+    def test_reads_key_from_maxmind_alias_url_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "filter_geoip.conf")
+            with open(path, "w") as handle:
+                handle.write("[settings]\nurl=https://download.maxmind.com/app/geoip_download"
+                             "?edition_id=GeoLite2-Country-CSV&license_key=abc_123&suffix=zip\n")
+            self.assertEqual(GEODB.alias_license_key(path), "abc_123")
+            with open(path, "w") as handle:
+                handle.write("[settings]\nurl=https://ipinfo.io/data/free/country.csv.gz?token=xyz\n")
+            self.assertIsNone(GEODB.alias_license_key(path))
+            self.assertIsNone(GEODB.alias_license_key(os.path.join(directory, "missing.conf")))
+
+    def test_reads_plugin_settings_from_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "config.xml")
+            with open(path, "w") as handle:
+                handle.write("<opnsense><OPNsense><FirewallMap><general><provider>dbip</provider>"
+                             "<license_key/><update_days>7</update_days></general></FirewallMap></OPNsense></opnsense>")
+            self.assertEqual(GEODB.settings(path), {"provider": "dbip", "license_key": "", "update_days": 7})
+            self.assertEqual(GEODB.settings(os.path.join(directory, "none.xml"))["provider"], "maxmind")
 
 
 class SnapshotReaderTest(unittest.TestCase):

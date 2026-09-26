@@ -10,10 +10,58 @@ export default class FirewallMap extends BaseWidget {
         this.renderer = null;
         this.loadingRenderer = null;
         this.configurable = true;
+        this.geoSettings = null;
+    }
+
+    async _loadGeoSettings() {
+        // only administrators may read (and change) the firewall-wide database settings
+        try {
+            this.geoSettings = await this.ajaxCall('/api/firewallmap/settings/get');
+        } catch (_) {
+            this.geoSettings = null;
+        }
+        return this.geoSettings;
+    }
+
+    _geoOptions(choices) {
+        const geo = this.geoSettings;
+        if (!geo?.provider) {
+            return {};
+        }
+        const keySource = geo.database?.key_source;
+        const keyHint = keySource === 'plugin' ? this.translations.key_set
+            : keySource === 'alias' ? this.translations.key_from_alias : this.translations.key_none;
+        return {
+            geo_provider: {
+                id: `${this.id}-option-geo-provider`,
+                title: this.translations.geo_provider,
+                type: 'select',
+                options: choices([['maxmind', 'MaxMind GeoLite2'], ['dbip', 'DB-IP Lite']]),
+                default: geo.provider,
+            },
+            geo_key: {
+                id: `${this.id}-option-geo-key`,
+                title: this.translations.geo_key,
+                type: 'text',
+                placeholder: keyHint,
+                default: '',
+            },
+            geo_update_days: {
+                id: `${this.id}-option-geo-update`,
+                title: this.translations.geo_update,
+                type: 'select',
+                options: choices([['1', '1'], ['3', '3'], ['7', '7'], ['14', '14'], ['30', '30']].map(
+                    ([value]) => [value, `${value} ${this.translations.days}`])),
+                default: geo.update_days,
+            },
+        };
     }
 
     async getWidgetOptions() {
         const choices = (values) => values.map(([value, label]) => ({value, label}));
+        if (this.geoSettings === null) {
+            await this._loadGeoSettings();
+        }
         return {
             heavy_top: {
                 id: `${this.id}-option-heavy-top`,
@@ -46,6 +94,14 @@ export default class FirewallMap extends BaseWidget {
                 options: choices([['1', this.translations.labels_zoomed], ['0', this.translations.labels_off]]),
                 default: '1',
             },
+            hostnames: {
+                id: `${this.id}-option-hostnames`,
+                title: this.translations.hostnames,
+                type: 'select',
+                options: choices([['0', this.translations.labels_off], ['1', this.translations.hostnames_on]]),
+                default: '0',
+            },
+            ...this._geoOptions(choices),
         };
     }
 
@@ -56,11 +112,33 @@ export default class FirewallMap extends BaseWidget {
             heavyRate: parseInt(config.heavy_rate, 10),
             maxArcs: parseInt(config.max_arcs, 10),
             labels: config.labels !== '0',
+            hostnames: config.hostnames === '1',
         };
     }
 
-    async onWidgetOptionsChanged() {
-        this.renderer?.setSettings(await this._settings());
+    async onWidgetOptionsChanged(values) {
+        if (this.geoSettings?.provider && values && 'geo_provider' in values) {
+            const update = {
+                provider: values.geo_provider,
+                update_days: values.geo_update_days,
+                license_key: (values.geo_key || '').trim(),
+            };
+            // firewall-wide values are saved to the plugin, never into this user's dashboard layout
+            for (const key of ['geo_provider', 'geo_key', 'geo_update_days']) {
+                delete values[key];
+            }
+            try {
+                const result = await this.ajaxCall('/api/firewallmap/settings/set', JSON.stringify(update), 'POST');
+                if (result.result !== 'saved') {
+                    console.error('Firewall Map+: settings not saved', result);
+                }
+            } catch (error) {
+                console.error('Firewall Map+: settings not saved', error);
+            }
+            await this._loadGeoSettings();
+        }
+        this.settings = await this._settings();
+        this.renderer?.setSettings(this.settings);
     }
 
     getGridOptions() {
@@ -74,6 +152,7 @@ export default class FirewallMap extends BaseWidget {
                 <div id="${this.id}-firewall-map-grid" aria-hidden="true" style="pointer-events: none; position: absolute; inset: 0; z-index: 0; background-size: 36px 36px;"></div>
                 <div id="${this.id}-firewall-map-canvas" style="position: absolute; inset: 0; z-index: 1; text-align: left;"></div>
                 <div id="${this.id}-firewall-map-status" style="position: absolute; left: 12px; bottom: 9px; z-index: 2; font-size: .82em; letter-spacing: .02em; pointer-events: none;"></div>
+                <div id="${this.id}-firewall-map-credit" style="position: absolute; right: 10px; bottom: 9px; z-index: 2; font-size: .75em; opacity: .7;"></div>
             </div>
         `);
     }
@@ -170,7 +249,8 @@ export default class FirewallMap extends BaseWidget {
             const container = $(`#${this.id}-firewall-map-canvas`)[0];
             const theme = this._readTheme();
             this._applyTheme(theme);
-            this.renderer = renderer.create(container, {theme, settings: await this._settings()});
+            this.settings = await this._settings();
+            this.renderer = renderer.create(container, {theme, settings: this.settings});
             // deck.gl positions its canvas absolutely without left/top, so pin it explicitly
             // rather than relying on the static position (the dashboard centres widget text).
             $(container).children('canvas').css({left: 0, top: 0});
@@ -187,9 +267,17 @@ export default class FirewallMap extends BaseWidget {
             return;
         }
         try {
-            const snapshot = await this.ajaxCall('/api/firewallmap/flow/snapshot');
+            const query = this.settings?.hostnames ? '?hostnames=1' : '';
+            const snapshot = await this.ajaxCall(`/api/firewallmap/flow/snapshot${query}`);
             if (snapshot.status === 'starting') {
                 this._status(this.translations.collector_starting);
+                return;
+            }
+            if (snapshot.status === 'no_database') {
+                // no locations without a geolocation database: keep the map empty and say why
+                this.renderer.render({flows: [], locations: []});
+                this._status(snapshot.reason === 'maxmind_key_missing'
+                    ? this.translations.key_missing : this.translations.database_downloading);
                 return;
             }
             if (snapshot.status !== 'ok') {
@@ -198,6 +286,9 @@ export default class FirewallMap extends BaseWidget {
                 return;
             }
             this.renderer.render(snapshot);
+            // DB-IP Lite is CC BY 4.0: credit it while it is the source
+            $(`#${this.id}-firewall-map-credit`).html(snapshot.provider === 'dbip'
+                ? '<a href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a>' : '');
             const count = snapshot.flows?.length || 0;
             let status = count ? `${count} ${this.translations.active_flows}` : this.translations.no_flows;
             if (snapshot.carp === 'backup') {

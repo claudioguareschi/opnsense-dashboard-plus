@@ -1,3 +1,8 @@
 Firewall Map+ bundles deck.gl, luma.gl and their dependencies (MIT License,
 https://github.com/visgl/deck.gl). The bundled world-boundary dataset is
 derived from the Natural Earth public-domain dataset.
+
+When DB-IP Lite is selected as geolocation source, the downloaded databases
+are "IP Geolocation by DB-IP" (https://db-ip.com), licensed under CC BY 4.0.
+MaxMind GeoLite2 databases are downloaded with your own license key and are
+subject to the MaxMind GeoLite2 End User License Agreement.

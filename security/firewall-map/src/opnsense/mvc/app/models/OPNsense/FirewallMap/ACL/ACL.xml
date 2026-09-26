@@ -5,4 +5,10 @@
             <pattern>api/firewallmap/flow/snapshot</pattern>
         </patterns>
     </page-dashboard-widget-firewall-map>
+    <page-firewall-map-settings>
+        <name>Firewall Map+: firewall-wide settings</name>
+        <patterns>
+            <pattern>api/firewallmap/settings/*</pattern>
+        </patterns>
+    </page-firewall-map-settings>
 </acl>

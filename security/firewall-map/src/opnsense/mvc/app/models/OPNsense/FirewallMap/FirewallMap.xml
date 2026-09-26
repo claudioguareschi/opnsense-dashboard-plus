@@ -1,0 +1,28 @@
+<model>
+    <mount>//OPNsense/FirewallMap</mount>
+    <version>1.0.0</version>
+    <description>Firewall Map+ firewall-wide settings</description>
+    <items>
+        <general>
+            <provider type="OptionField">
+                <Required>Y</Required>
+                <Default>maxmind</Default>
+                <OptionValues>
+                    <maxmind>MaxMind GeoLite2</maxmind>
+                    <dbip>DB-IP Lite</dbip>
+                </OptionValues>
+            </provider>
+            <!-- empty: reuse the key of a MaxMind GeoIP alias URL, when one is configured -->
+            <license_key type="TextField">
+                <Mask>/^[A-Za-z0-9_]{0,64}$/</Mask>
+                <ValidationMessage>A MaxMind license key contains only letters, digits and underscores.</ValidationMessage>
+            </license_key>
+            <update_days type="IntegerField">
+                <Required>Y</Required>
+                <Default>3</Default>
+                <MinimumValue>1</MinimumValue>
+                <MaximumValue>31</MaximumValue>
+            </update_days>
+        </general>
+    </items>
+</model>

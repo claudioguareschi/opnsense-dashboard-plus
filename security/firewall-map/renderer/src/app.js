@@ -156,7 +156,7 @@ function escapeHtml(text) {
 }
 
 /** Hover card for an endpoint (all flows to that place) or a single arch. */
-function describe(place, members, locations) {
+function describe(place, members, locations, hostnames = {}) {
   const rateIn = members.reduce((sum, flow) => sum + (flow.rate_in ?? 0), 0);
   const rateOut = members.reduce((sum, flow) => sum + (flow.rate_out ?? 0), 0);
   const services = [...new Set(members.flatMap((flow) => flow.services || []))].slice(0, 5);
@@ -167,7 +167,8 @@ function describe(place, members, locations) {
     .map((flow) => {
       const location = locations.get(flow.dest);
       const asn = location?.asn ? ` · AS${location.asn} ${escapeHtml(location.as_org || '')}` : '';
-      return `<div>${escapeHtml(flow.dest)}${asn}</div>`;
+      const hostname = hostnames[flow.dest] ? `<div style="opacity:.75">${escapeHtml(hostnames[flow.dest])}</div>` : '';
+      return `<div>${escapeHtml(flow.dest)}${asn}</div>${hostname}`;
     });
   const more = members.length > 6 ? `<div>+${members.length - 6} more</div>` : '';
   const title = [place.city || place.region, place.country].filter(Boolean).join(', ') || place.name || place.id;
@@ -294,9 +295,9 @@ export function createFirewallMap(container, options = {}) {
           <div>${own.length} active links</div>
           <div style="margin-top:4px">↓ ${formatRate(rateIn)} &nbsp; ↑ ${formatRate(rateOut)}</div>`;
       } else if (layer.id === 'firewall-map-endpoints') {
-        html = describe(object, flowsByDest.get(`${object.lat},${object.lon}`) || [], locationIndex);
+        html = describe(object, flowsByDest.get(`${object.lat},${object.lon}`) || [], locationIndex, lastData.hostnames);
       } else if (layer.id === 'firewall-map-arcs') {
-        html = describe(object.dest, object.members, locationIndex);
+        html = describe(object.dest, object.members, locationIndex, lastData.hostnames);
       }
       return html && {
         html,

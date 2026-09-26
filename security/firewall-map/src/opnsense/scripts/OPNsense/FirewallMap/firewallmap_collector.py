@@ -16,22 +16,33 @@ import ipaddress
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import firewallmap_geodb as geodb  # noqa: E402
 
 
 PFCTL = "/sbin/pfctl"
 IFCONFIG = "/sbin/ifconfig"
 MMDBLOOKUP = "/usr/local/bin/mmdblookup"
-CITY_DATABASE = "/usr/local/share/GeoIP/GeoLite2-City.mmdb"
-# optional: used for AS number/organisation when the administrator installs it
-ASN_DATABASE = "/usr/local/share/GeoIP/GeoLite2-ASN.mmdb"
+# database paths follow the provider chosen in the firewall-wide settings (see firewallmap_geodb)
+CITY_DATABASE = geodb.DATABASES["maxmind"]["city"]
+ASN_DATABASE = geodb.DATABASES["maxmind"]["asn"]
 OUTPUT_FILE = "/var/run/firewallmap/flows.json"
 # touched by the dashboard API on every read; the collector stops once nobody is watching
 REQUEST_MARKER = "/var/run/firewallmap/last_request"
+# touched only when a viewer has hostname lookups enabled; reverse DNS runs while it is fresh
+HOSTNAME_MARKER = "/var/run/firewallmap/hostnames_request"
+HOSTNAME_REQUEST_SECONDS = 30
+HOSTNAME_TTL = 6 * 3600
+HOSTNAME_LOOKUPS_PER_SAMPLE = 8
 IDLE_SECONDS = 300
+SETTINGS_REFRESH_SECONDS = 30
 GEO_CACHE_FILE = "/var/db/firewallmap/geo.json"
 
 INTERVAL = 1.0
@@ -197,9 +208,9 @@ def mmdb_lookup(database, address):
     return parse_mmdb(result.stdout)
 
 
-def lookup_location(address):
-    """Resolve one address against the local GeoLite databases (never a remote service)."""
-    values = mmdb_lookup(CITY_DATABASE, address)
+def lookup_location(address, city_database=CITY_DATABASE, asn_database=ASN_DATABASE):
+    """Resolve one address against the local geolocation databases (never a remote service)."""
+    values = mmdb_lookup(city_database, address)
     try:
         latitude = float(values[("location", "latitude")])
         longitude = float(values[("location", "longitude")])
@@ -215,8 +226,8 @@ def lookup_location(address):
         "country": values.get(("country", "iso_code")) or values.get(("registered_country", "iso_code")),
         "country_name": values.get(("country", "names", "en")) or values.get(("registered_country", "names", "en")),
     }
-    if os.path.exists(ASN_DATABASE):
-        asn = mmdb_lookup(ASN_DATABASE, address)
+    if os.path.exists(asn_database):
+        asn = mmdb_lookup(asn_database, address)
         if ("autonomous_system_number",) in asn:
             location["asn"] = int(asn[("autonomous_system_number",)])
             location["as_org"] = asn.get(("autonomous_system_organization",))
@@ -226,10 +237,11 @@ def lookup_location(address):
 class GeoCache:
     """IP -> location cache persisted across restarts and invalidated when the MMDB changes."""
 
-    def __init__(self, path=GEO_CACHE_FILE, database=CITY_DATABASE, lookup=lookup_location):
+    def __init__(self, path=GEO_CACHE_FILE, database=CITY_DATABASE, asn_database=ASN_DATABASE, lookup=None):
         self.path = path
         self.database = database
-        self.lookup = lookup
+        self.asn_database = asn_database
+        self.lookup = lookup or (lambda address: lookup_location(address, database, asn_database))
         self.entries = {}
         self.dirty = False
         self.saved_at = time.monotonic()
@@ -238,7 +250,7 @@ class GeoCache:
 
     def _database_mtime(self):
         mtimes = []
-        for database in (self.database, ASN_DATABASE):
+        for database in (self.database, self.asn_database):
             try:
                 mtimes.append(int(os.stat(database).st_mtime))
             except OSError:
@@ -251,7 +263,8 @@ class GeoCache:
                 cached = json.load(handle)
         except (OSError, ValueError):
             return
-        if cached.get("database_mtime") == self.database_mtime and cached.get("version") == GEO_CACHE_VERSION:
+        if (cached.get("database_mtime") == self.database_mtime and cached.get("version") == GEO_CACHE_VERSION
+                and cached.get("database") == self.database):
             self.entries = cached.get("entries", {})
 
     def save(self, force=False):
@@ -259,7 +272,10 @@ class GeoCache:
             return
         if len(self.entries) > GEO_CACHE_MAX:
             self.entries = dict(list(self.entries.items())[-GEO_CACHE_MAX:])
-        write_json(self.path, {"version": GEO_CACHE_VERSION, "database_mtime": self.database_mtime, "entries": self.entries})
+        write_json(self.path, {
+            "version": GEO_CACHE_VERSION, "database": self.database,
+            "database_mtime": self.database_mtime, "entries": self.entries,
+        })
         self.dirty = False
         self.saved_at = time.monotonic()
 
@@ -387,7 +403,51 @@ class FlowTracker:
         return ranked[:limit]
 
 
-def snapshot(tracker, geo, local_addresses, role, now, wall_time):
+class HostnameResolver:
+    """Reverse DNS for visible endpoints, only while a viewer asked for it; results are cached."""
+
+    def __init__(self, ttl=HOSTNAME_TTL, per_sample=HOSTNAME_LOOKUPS_PER_SAMPLE):
+        self.ttl = ttl
+        self.per_sample = per_sample
+        self.names = {}
+        self.pending = {}
+        self.pool = ThreadPoolExecutor(max_workers=4)
+
+    @staticmethod
+    def _reverse(address):
+        try:
+            return socket.gethostbyaddr(address)[0]
+        except (OSError, UnicodeError):
+            return None
+
+    def update(self, addresses, now):
+        for address, future in list(self.pending.items()):
+            if future.done():
+                self.names[address] = (future.result(), now)
+                del self.pending[address]
+        budget = self.per_sample - len(self.pending)
+        for address in addresses:
+            if budget <= 0:
+                break
+            cached = self.names.get(address)
+            if address in self.pending or (cached and now - cached[1] < self.ttl):
+                continue
+            self.pending[address] = self.pool.submit(self._reverse, address)
+            budget -= 1
+
+    def get(self, address):
+        cached = self.names.get(address)
+        return cached[0] if cached else None
+
+
+def requested(marker, seconds, now=None):
+    try:
+        return (time.time() if now is None else now) - os.stat(marker).st_mtime < seconds
+    except OSError:
+        return False
+
+
+def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None):
     visible = tracker.visible(now)
     geo.resolve([address for _, local, remote, _, _ in visible for address in (local, remote)])
     flows = []
@@ -429,6 +489,11 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time):
             entry["asn"] = location["asn"]
             entry["as_org"] = location.get("as_org")
         locations.append(entry)
+    names = {}
+    if hostnames is not None:
+        remotes = [flow["dest"] for flow in flows]
+        hostnames.update(remotes, now)
+        names = {address: hostnames.get(address) for address in remotes if hostnames.get(address)}
     return {
         "status": "ok",
         "sampled_at": datetime.fromtimestamp(wall_time, timezone.utc).isoformat(),
@@ -437,6 +502,7 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time):
         "tracked_flows": len(tracker.flows),
         "flows": flows,
         "locations": locations,
+        "hostnames": names,
     }
 
 
@@ -460,34 +526,70 @@ def idle(started, now=None, marker=REQUEST_MARKER, idle_seconds=IDLE_SECONDS):
         return True
 
 
+def database_state(values):
+    """Return (city path, asn path, problem) for the configured provider."""
+    paths = geodb.DATABASES[values["provider"]]
+    if os.path.exists(paths["city"]):
+        return paths["city"], paths["asn"], None
+    if values["provider"] == "maxmind" and geodb.license_key(values)[0] is None:
+        return paths["city"], paths["asn"], "maxmind_key_missing"
+    return paths["city"], paths["asn"], "database_missing"
+
+
 def run():
     started_at = time.time()
     tracker = FlowTracker()
-    geo = GeoCache()
+    hostnames = HostnameResolver()
+    geo = None
+    problem = None
     local_addresses, role = set(), None
     host_checked = None
+    settings_checked = None
+    provider = "maxmind"
     while True:
         started = time.monotonic()
         if host_checked is None or started - host_checked >= HOST_REFRESH_SECONDS:
             local_addresses, role = host_info()
             host_checked = started
-        try:
-            records = sample_states()
-        except (OSError, subprocess.TimeoutExpired, RuntimeError) as error:
+        if settings_checked is None or started - settings_checked >= SETTINGS_REFRESH_SECONDS:
+            values = geodb.settings()
+            provider = values["provider"]
+            city, asn, problem = database_state(values)
+            if geo is None or geo.database != city:
+                geo = GeoCache(database=city, asn_database=asn)
+            settings_checked = started
+        if problem:
             write_json(OUTPUT_FILE, {
-                "status": "failed",
-                "error": str(error),
+                "status": "no_database",
+                "reason": problem,
                 "sampled_at": datetime.now(timezone.utc).isoformat(),
                 "flows": [],
                 "locations": [],
             })
+            # re-check soon, the database may be downloading
+            settings_checked = started - SETTINGS_REFRESH_SECONDS + 5
         else:
-            now = time.monotonic()
-            tracker.update(records, local_addresses, now)
-            write_json(OUTPUT_FILE, snapshot(tracker, geo, local_addresses, role, now, time.time()))
-            geo.save()
+            try:
+                records = sample_states()
+            except (OSError, subprocess.TimeoutExpired, RuntimeError) as error:
+                write_json(OUTPUT_FILE, {
+                    "status": "failed",
+                    "error": str(error),
+                    "sampled_at": datetime.now(timezone.utc).isoformat(),
+                    "flows": [],
+                    "locations": [],
+                })
+            else:
+                now = time.monotonic()
+                tracker.update(records, local_addresses, now)
+                resolver = hostnames if requested(HOSTNAME_MARKER, HOSTNAME_REQUEST_SECONDS) else None
+                payload = snapshot(tracker, geo, local_addresses, role, now, time.time(), resolver)
+                payload["provider"] = provider
+                write_json(OUTPUT_FILE, payload)
+                geo.save()
         if idle(started_at):
-            geo.save(force=True)
+            if geo is not None:
+                geo.save(force=True)
             return
         time.sleep(max(0.05, INTERVAL - (time.monotonic() - started)))
 
