@@ -888,7 +888,8 @@
     function serviceParts(name, port) {
         const raw = /^(TCP|UDP)\/(\d+)$/.exec(name || '');
         if (raw) {
-            return {name: `${raw[1]} ${raw[2]}`, port: `${raw[1]}/${raw[2]}`};
+            // an unnamed port: say so once instead of "TCP 10512 · TCP/10512"
+            return {name: `${T.port_word} ${raw[2]}`, port: `${raw[1]}/${raw[2]}`};
         }
         const [number, protocol] = String(port || '').split('/');
         return {name: plain(name || '—'), port: number ? `${(protocol || '').toUpperCase()}/${number}` : ''};
@@ -1026,7 +1027,10 @@
                 sub: T.blocked_attempts,
                 diagram: [remoteBox, service, `${esc(block.hits)}× ${esc(T.in_minutes.replace('%s', block.window_minutes))}`, endBox('fa-shield', firewallName, [block.target, block.interface]), true],
                 connection: rows([
-                    [T.tried, (block.services || []).map((entry) => `${esc(entry.name)}${entry.port ? ` (${esc(entry.port)})` : ''} ×${esc(entry.hits)}`).join('<br>')],
+                    [T.tried, (block.services || []).map((entry) => {
+                        const parts = serviceParts(entry.name, entry.port);
+                        return `${esc(parts.name)} <span class="fwmap-muted">${esc(parts.port)}</span> ×${esc(entry.hits)}`;
+                    }).join('<br>')],
                     [T.other_ports, block.port_count > (block.services || []).length ? esc(block.port_count - block.services.length) : ''],
                     [T.attempts, esc(`${block.hits} · ${block.hits_per_minute}/min`)],
                     [T.first_seen, block.seconds ? esc(`${ago(Date.now() / 1000 - block.seconds)} ${T.ago}`) : ''],
