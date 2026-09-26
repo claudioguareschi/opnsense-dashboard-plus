@@ -42,6 +42,7 @@ export default class FirewallMap extends BaseWidget {
                 title: this.translations.geo_provider,
                 type: 'select',
                 options: choices([
+                    ['auto', this.translations.provider_auto],
                     ['maxmind', this.translations.provider_maxmind],
                     ['maxmind_paid', this.translations.provider_maxmind_paid],
                     ['dbip', this.translations.provider_dbip],
@@ -108,7 +109,7 @@ export default class FirewallMap extends BaseWidget {
             }
             const $provider = $(`#${this.id}-option-geo-provider`);
             const $key = $(`#${this.id}-option-geo-key`).closest('.widget-option-container');
-            const toggleKey = () => $key.toggle(($provider.val() || '').startsWith('maxmind'));
+            const toggleKey = () => $key.toggle(($provider.val() || '') !== 'dbip');
             $provider.on('change', toggleKey);
             toggleKey();
         };

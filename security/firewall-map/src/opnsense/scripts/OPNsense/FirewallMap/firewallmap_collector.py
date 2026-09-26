@@ -740,11 +740,12 @@ def idle(started, now=None, marker=REQUEST_MARKER, idle_seconds=IDLE_SECONDS):
 
 
 def database_state(values):
-    """Return (city path, asn path, problem) for the configured provider."""
-    paths = geodb.DATABASES[values["provider"]]
+    """Return (city path, asn path, problem) for the provider in effect."""
+    provider = geodb.effective_provider(values)
+    paths = geodb.DATABASES[provider]
     if os.path.exists(paths["city"]):
         return paths["city"], paths["asn"], None
-    if values["provider"].startswith("maxmind") and geodb.license_key(values)[0] is None:
+    if provider.startswith("maxmind") and geodb.license_key(values)[0] is None:
         return paths["city"], paths["asn"], "maxmind_key_missing"
     return paths["city"], paths["asn"], "database_missing"
 
@@ -768,9 +769,9 @@ def run():
         if host_checked is None or started - host_checked >= HOST_REFRESH_SECONDS:
             local_addresses, role = host_info()
             host_checked = started
-        if settings_checked is None or started - settings_checked >= SETTINGS_REFRESH_SECONDS:
+        if settings_checked is None or started >= settings_checked + SETTINGS_REFRESH_SECONDS:
             values = geodb.settings()
-            provider = values["provider"]
+            provider = geodb.effective_provider(values)
             city, asn, problem = database_state(values)
             # a new provider or a refreshed database invalidates cached locations
             if geo is None or geo.database != city or geo.database_mtime != geo._database_mtime():
@@ -786,8 +787,9 @@ def run():
                 "flows": [],
                 "locations": [],
             })
-            # re-check soon, the database may be downloading
-            settings_checked = started - SETTINGS_REFRESH_SECONDS + 5
+            # re-check within a few seconds, the database may be downloading; only move the
+            # next check earlier, never later, or repeated passes would postpone it forever
+            settings_checked = min(settings_checked, started - SETTINGS_REFRESH_SECONDS + 5)
         else:
             try:
                 records = sample_states()

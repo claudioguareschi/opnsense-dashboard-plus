@@ -236,7 +236,19 @@ class GeoDatabaseTest(unittest.TestCase):
                 handle.write("<opnsense><OPNsense><FirewallMap><general><provider>dbip</provider>"
                              "<license_key/><update_days>7</update_days></general></FirewallMap></OPNsense></opnsense>")
             self.assertEqual(GEODB.settings(path), {"provider": "dbip", "license_key": "", "update_days": 7})
-            self.assertEqual(GEODB.settings(os.path.join(directory, "none.xml"))["provider"], "maxmind")
+            self.assertEqual(GEODB.settings(os.path.join(directory, "none.xml"))["provider"], "auto")
+
+    def test_automatic_provider_prefers_maxmind_with_a_key(self):
+        original = GEODB.alias_license_key
+        try:
+            GEODB.alias_license_key = lambda path=None: None
+            self.assertEqual(GEODB.effective_provider({"provider": "auto", "license_key": ""}), "dbip")
+            self.assertEqual(GEODB.effective_provider({"provider": "auto", "license_key": "k"}), "maxmind")
+            GEODB.alias_license_key = lambda path=None: "alias"
+            self.assertEqual(GEODB.effective_provider({"provider": "auto", "license_key": ""}), "maxmind")
+            self.assertEqual(GEODB.effective_provider({"provider": "dbip", "license_key": "k"}), "dbip")
+        finally:
+            GEODB.alias_license_key = original
 
 
 class SnapshotReaderTest(unittest.TestCase):

@@ -62,7 +62,7 @@ DATABASES = {
 
 def settings(path=CONFIG_XML):
     """Read the plugin's firewall-wide settings straight from config.xml."""
-    values = {"provider": "maxmind", "license_key": "", "update_days": 3}
+    values = {"provider": "auto", "license_key": "", "update_days": 3}
     try:
         general = ElementTree.parse(path).getroot().find("./OPNsense/FirewallMap/general")
     except (OSError, ElementTree.ParseError):
@@ -76,9 +76,16 @@ def settings(path=CONFIG_XML):
         values["update_days"] = max(1, int(values["update_days"]))
     except ValueError:
         values["update_days"] = 3
-    if values["provider"] not in DATABASES:
-        values["provider"] = "maxmind"
+    if values["provider"] not in DATABASES and values["provider"] != "auto":
+        values["provider"] = "auto"
     return values
+
+
+def effective_provider(values):
+    """'auto' uses MaxMind GeoLite2 when a key is available, otherwise the keyless DB-IP Lite."""
+    if values["provider"] != "auto":
+        return values["provider"]
+    return "maxmind" if license_key(values)[0] else "dbip"
 
 
 def alias_license_key(path=GEOIP_ALIAS_CONF):
@@ -131,10 +138,12 @@ def write_status(payload):
 def status():
     values = settings()
     _, key_source = license_key(values)
-    paths = DATABASES[values["provider"]]
+    provider = effective_provider(values)
+    paths = DATABASES[provider]
     last = read_status()
     return {
         "provider": values["provider"],
+        "active_provider": provider,
         "update_days": values["update_days"],
         "key_source": key_source,
         "key_required": values["provider"].startswith("maxmind"),
@@ -204,7 +213,7 @@ def needs_update(path, update_days, force):
 
 def update(force=False):
     values = settings()
-    provider = values["provider"]
+    provider = effective_provider(values)
     paths = DATABASES[provider]
     key = None
     if provider.startswith("maxmind"):

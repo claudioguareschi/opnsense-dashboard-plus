@@ -26,6 +26,7 @@
             <attempts>attempts in 10 minutes</attempts>
             <hostnames>Lookup hostnames</hostnames>
             <asn>Show ASN</asn>
+            <provider_auto>Automatic (MaxMind with a key, otherwise DB-IP Lite)</provider_auto>
             <provider_maxmind>MaxMind GeoLite2 (free)</provider_maxmind>
             <provider_maxmind_paid>MaxMind GeoIP2 City (paid subscription)</provider_maxmind_paid>
             <provider_dbip>DB-IP Lite (no key)</provider_dbip>
