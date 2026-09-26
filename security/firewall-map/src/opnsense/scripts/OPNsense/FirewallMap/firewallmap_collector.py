@@ -609,11 +609,13 @@ def blocklist_tables(config=CONFIG_XML, tables=None, blocked=None):
     (CrowdSec, Q-Feeds, Spamhaus...) always count.
     """
     names = set()
+    aliases = set()
     blocked = blocked_rule_tables() if blocked is None else blocked
     try:
         root = ElementTree.parse(config).getroot()
         for alias in root.iterfind(".//OPNsense/Firewall/Alias/aliases/alias"):
             name = alias.findtext("name")
+            aliases.add(name)
             if alias.findtext("type") in BLOCKLIST_ALIAS_TYPES and alias.findtext("enabled") != "0" and name in blocked:
                 names.add(name)
     except (OSError, ElementTree.ParseError):
@@ -623,8 +625,17 @@ def blocklist_tables(config=CONFIG_XML, tables=None, blocked=None):
             tables = subprocess.run([PFCTL, "-sT"], capture_output=True, check=False, text=True, timeout=10).stdout.split()
         except (OSError, subprocess.TimeoutExpired):
             tables = []
-    names.update(table for table in tables if table.lower().startswith(BLOCKLIST_TABLE_PREFIXES))
+    names.update(table for table in tables if is_feed_table(table, aliases))
     return {name for name in names if name and name in tables}
+
+
+def is_feed_table(table, aliases):
+    """Well-known feed tables; this plugin's FWMAP_ feeds only while their alias still exists
+    (pf keeps the table of a deleted alias until the next filter reload)."""
+    lowered = table.lower()
+    if lowered.startswith("fwmap_"):
+        return table in aliases
+    return lowered.startswith(BLOCKLIST_TABLE_PREFIXES)
 
 
 THREAT_CANDIDATE_TYPES = BLOCKLIST_ALIAS_TYPES | {"host", "network"}
@@ -641,16 +652,18 @@ def threat_list_candidates(config=CONFIG_XML, tables=None):
     """Tables an administrator may choose as threat lists, with their alias type."""
     tables = pf_tables() if tables is None else tables
     candidates = {}
+    aliases = set()
     try:
         root = ElementTree.parse(config).getroot()
         for alias in root.iterfind(".//OPNsense/Firewall/Alias/aliases/alias"):
             name, kind = alias.findtext("name"), alias.findtext("type")
+            aliases.add(name)
             if name in tables and kind in THREAT_CANDIDATE_TYPES:
                 candidates[name] = {"name": name, "type": kind, "description": alias.findtext("description") or ""}
     except (OSError, ElementTree.ParseError):
         pass
     for table in tables:
-        if table.lower().startswith(BLOCKLIST_TABLE_PREFIXES) and table not in candidates:
+        if is_feed_table(table, aliases) and table not in candidates:
             candidates[table] = {"name": table, "type": "feed", "description": ""}
     return sorted(candidates.values(), key=lambda item: item["name"].lower())
 

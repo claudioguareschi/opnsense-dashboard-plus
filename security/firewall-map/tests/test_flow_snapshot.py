@@ -260,6 +260,9 @@ class BlocklistTest(unittest.TestCase):
             tables = ["Drop", "Office", "Off", "crowdsec_blacklists", "bogons"]
             self.assertEqual(COLLECTOR.blocklist_tables(config, tables, blocked={"Drop", "Off"}),
                              {"Drop", "crowdsec_blacklists"})
+            # a leftover FWMAP_ table whose alias was deleted is ignored
+            self.assertEqual(COLLECTOR.blocklist_tables(config, tables + ["FWMAP_Old"], blocked=set()),
+                             {"crowdsec_blacklists"})
             # a URL alias used only by pass rules (an allowlist) is not a threat list
             self.assertEqual(COLLECTOR.blocklist_tables(config, tables, blocked=set()), {"crowdsec_blacklists"})
 
