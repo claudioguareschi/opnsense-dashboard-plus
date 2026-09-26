@@ -43,12 +43,22 @@
         position: absolute; left: 12px; top: 10px; z-index: 2; font-size: .8em; pointer-events: none;
         display: flex; flex-wrap: wrap; gap: 4px 12px; max-width: 70%;
     }
-    .fwmap-legend-item i { display: inline-block; width: 18px; height: 3px; margin-right: 5px; vertical-align: middle; border-radius: 2px; }
+    .fwmap-legend-item i { display: inline-block; width: 22px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
+    .fwmap-legend-item i.fwmap-legend-ring { width: 11px; height: 11px; border-radius: 50%; border: 2px solid rgb(196, 18, 48); background: transparent; }
+    .fwmap-status-ids { pointer-events: auto; color: rgb(232, 93, 40); }
+    .fwmap-status-ids.active { font-weight: 600; text-decoration: underline; }
+    #fwmap-updated { position: absolute; right: 12px; bottom: 28px; z-index: 2; font-size: .85em; opacity: .75; pointer-events: none; }
+    .fwmap-live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: rgb(40, 150, 70); margin-left: 4px; }
+    .fwmap-live.stale { background: rgb(200, 140, 0); }
     #fwmap-side { width: clamp(380px, 36vw, 640px); flex: 0 0 clamp(380px, 36vw, 640px); display: flex; flex-direction: column;
         height: calc(100vh - 280px); min-height: 420px; }
-    #fwmap-talkers, #fwmap-details-box { border: 1px solid rgba(128, 128, 128, .25); border-radius: 6px; padding: 8px; }
-    #fwmap-talkers { flex: 1 1 60%; overflow-y: auto; min-height: 0; }
-    #fwmap-details-box { flex: 1 1 40%; overflow-y: auto; overflow-x: hidden; min-height: 0; }
+    #fwmap-talkers, #fwmap-details-box { border: 1px solid rgba(128, 128, 128, .22); border-radius: 6px;
+        background: var(--fwmap-panel, transparent); box-shadow: 0 1px 3px rgba(0, 0, 0, .06); }
+    #fwmap-talkers { flex: 1 1 60%; min-height: 0; display: flex; flex-direction: column; padding: 10px 12px 6px; }
+    #fwmap-talkers-list { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+    #fwmap-details-box { flex: 1 1 40%; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+    #fwmap-details { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    #fwmap-details > .fwmap-empty { padding: 14px 16px; }
     /* drag handles: between map and side panel, and between the two side boxes; double-click resets */
     .fwmap-splitter { flex: 0 0 12px; position: relative; touch-action: none; user-select: none; }
     .fwmap-splitter::after { content: ""; position: absolute; border-radius: 2px; background: rgba(128, 128, 128, .35);
@@ -59,20 +69,34 @@
     .fwmap-splitter-h { cursor: row-resize; }
     .fwmap-splitter-h::after { top: 5px; left: 50%; height: 3px; width: 40px; margin-left: -20px; }
     body.fwmap-resizing, body.fwmap-resizing * { user-select: none !important; }
-    #fwmap-talkers .nav { margin-bottom: 6px; }
-    #fwmap-talkers .nav > li > a { padding: 4px 10px; }
-    .fwmap-talker { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 0;
-        align-items: center; padding: 4px 6px; cursor: pointer; border-radius: 4px; }
-    .fwmap-talker:hover { background: rgba(128, 128, 128, .12); }
-    .fwmap-talker.active { background: rgba(200, 90, 40, .14); box-shadow: inset 3px 0 0 rgb(200, 90, 40); }
-    .fwmap-talker-icon { grid-row: 1 / span 2; text-align: center; opacity: .7; font-size: 1.05em; }
+    /* top talkers: bordered tabs, search and sort, rows with icon, sparkline, rate, flows */
+    #fwmap-talkers .nav-tabs { border-bottom: 1px solid rgba(128, 128, 128, .25); margin-bottom: 8px; display: flex; gap: 4px; }
+    #fwmap-talkers .nav-tabs > li { float: none; margin-bottom: -1px; }
+    #fwmap-talkers .nav-tabs > li > a { padding: 7px 16px; margin: 0; border: 1px solid rgba(128, 128, 128, .22); border-bottom-color: transparent;
+        border-radius: 5px 5px 0 0; background: rgba(128, 128, 128, .05); font-weight: 500; }
+    #fwmap-talkers .nav-tabs > li.active > a { background: var(--fwmap-panel, #fff); color: inherit; border-color: rgba(128, 128, 128, .3);
+        border-bottom-color: var(--fwmap-panel, #fff); }
+    .fwmap-talker-tools { display: flex; gap: 8px; margin-bottom: 6px; }
+    .fwmap-talker-search { position: relative; flex: 1; }
+    .fwmap-talker-search .fa { position: absolute; left: 10px; top: 9px; opacity: .45; }
+    .fwmap-talker-search input { width: 100%; height: 32px; padding: 4px 8px 4px 30px; }
+    .fwmap-talker-tools select { width: auto; height: 32px; padding: 2px 8px; }
+    .fwmap-talker { display: grid; grid-template-columns: 30px minmax(0, 1fr) 64px 78px auto 12px; column-gap: 10px;
+        align-items: center; padding: 7px 6px; cursor: pointer; border-radius: 5px; }
+    .fwmap-talker + .fwmap-talker { border-top: 1px solid rgba(128, 128, 128, .08); }
+    .fwmap-talker:hover { background: rgba(128, 128, 128, .08); }
+    .fwmap-talker.active { background: rgba(232, 93, 40, .09); box-shadow: inset 3px 0 0 rgb(232, 93, 40); }
+    .fwmap-talker-icon { text-align: center; font-size: 1.25em; opacity: .55; }
+    .fwmap-talker-text { min-width: 0; }
     .fwmap-talker-label, .fwmap-talker-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .fwmap-talker-label { font-weight: 600; }
-    .fwmap-talker-rate, .fwmap-talker-count { text-align: right; font-variant-numeric: tabular-nums; font-size: .9em; white-space: nowrap; }
-    .fwmap-talker-count { font-weight: 600; }
-    .fwmap-talker-sub { font-size: .8em; opacity: .7; }
-    .fwmap-talker canvas, .fwmap-talker > .fwmap-talker-flows { justify-self: end; }
-    .fwmap-talker-flows { font-size: .8em; opacity: .7; white-space: nowrap; }
+    .fwmap-talker-label { font-size: 1.02em; font-weight: 500; }
+    .fwmap-talker-sub { font-size: .82em; opacity: .65; }
+    .fwmap-talker canvas { width: 64px; height: 22px; }
+    .fwmap-talker-rate, .fwmap-talker-count { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 500; }
+    .fwmap-talker-flows { font-size: .85em; opacity: .6; white-space: nowrap; text-align: right; }
+    .fwmap-talker-chevron { opacity: .4; font-size: .85em; }
+    #fwmap-side.fwmap-narrow .fwmap-talker { grid-template-columns: 26px minmax(0, 1fr) 56px 70px 12px; }
+    #fwmap-side.fwmap-narrow .fwmap-talker-flows { display: none; }
     .fwmap-details-head { display: flex; justify-content: space-between; }
     .fwmap-details-head a { font-size: 1.3em; line-height: 1; text-decoration: none; }
     .fwmap-address { margin-top: 6px; }
@@ -139,50 +163,63 @@
     .fwmap-q-record { font-weight: normal; margin: 0; }
     .fwmap-q-source { opacity: .75; }
 
-    /* details panel: header, connection diagram, four cards, action bar */
-    .fwmap-d-head { display: flex; align-items: flex-start; gap: 10px; }
-    .fwmap-d-icon { font-size: 1.9em; opacity: .75; margin-top: 2px; }
+    /* details panel, as in the design mockup: header, verdict pill, diagram, stacked sections, action bar */
+    .fwmap-d-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 18px 8px; }
+    .fwmap-d-head { display: flex; align-items: flex-start; gap: 12px; }
     .fwmap-d-title { flex: 1; min-width: 0; }
-    .fwmap-d-name { font-size: 1.25em; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
-    .fwmap-d-sub { font-size: .85em; opacity: .75; }
-    .fwmap-d-verdict { text-align: right; max-width: 45%; }
-    .fwmap-d-verdict .fwmap-d-sub { white-space: normal; }
-    #fwmap-details-close { font-size: 1.4em; line-height: 1; text-decoration: none; margin-left: 4px; }
-    .fwmap-pill { display: inline-block; font-size: .8em; font-weight: 600; padding: 2px 9px; border-radius: 10px; white-space: nowrap; }
-    .fwmap-pill-ok { background: rgba(46, 139, 87, .15); color: rgb(30, 110, 65); }
+    .fwmap-d-name { font-size: 1.45em; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; letter-spacing: -.01em; }
+    .fwmap-d-line { font-size: .92em; margin-top: 3px; display: flex; flex-wrap: wrap; gap: 2px 12px; opacity: .85; }
+    .fwmap-d-line b { font-weight: 600; opacity: 1; }
+    .fwmap-d-verdict { text-align: center; margin-top: 18px; }
+    .fwmap-d-verdict-sub { font-size: .85em; opacity: .65; margin-top: 8px; }
+    #fwmap-details-close { font-size: 1.2em; line-height: 1; margin-left: 2px; color: rgb(232, 93, 40); }
+    .fwmap-vpill { display: inline-block; font-weight: 600; font-size: 1.02em; padding: 5px 18px; border-radius: 18px; white-space: nowrap; }
+    .fwmap-vpill-ok { background: rgb(40, 150, 70); color: #fff; box-shadow: 0 0 0 6px rgba(40, 150, 70, .14); }
+    .fwmap-vpill-danger { background: rgb(196, 18, 48); color: #fff; box-shadow: 0 0 0 6px rgba(196, 18, 48, .14); }
+    .fwmap-vpill-blocked { background: rgb(80, 80, 80); color: #fff; box-shadow: 0 0 0 6px rgba(80, 80, 80, .14); }
+    .fwmap-vpill-muted { background: rgba(128, 128, 128, .2); box-shadow: 0 0 0 6px rgba(128, 128, 128, .08); }
+    .fwmap-pill { display: inline-block; font-size: .85em; font-weight: 600; padding: 1px 9px; border-radius: 10px; white-space: nowrap; }
+    .fwmap-pill-ok { background: rgba(40, 150, 70, .16); color: rgb(28, 115, 55); }
     .fwmap-pill-danger { background: rgb(196, 18, 48); color: #fff; }
     .fwmap-pill-warning { background: rgba(230, 140, 0, .18); color: rgb(170, 95, 0); }
-    .fwmap-pill-blocked { background: rgba(90, 90, 90, .85); color: #fff; }
+    .fwmap-pill-blocked { background: rgba(80, 80, 80, .85); color: #fff; }
     .fwmap-pill-muted { background: rgba(128, 128, 128, .18); }
-    .fwmap-picker { margin: 6px 0 0; font-size: .85em; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+    .fwmap-picker { margin: 10px 0 0; font-size: .85em; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
     .fwmap-pick { padding: 0 6px; border-radius: 8px; }
     .fwmap-pick.active { background: rgba(128, 128, 128, .2); font-weight: 600; }
-    .fwmap-diagram { display: flex; align-items: stretch; gap: 8px; margin: 10px 0 4px; }
-    .fwmap-end { flex: 1 1 0; min-width: 0; text-align: center; padding: 8px 6px; border-radius: 6px;
-        background: rgba(128, 128, 128, .09); border: 1px solid rgba(128, 128, 128, .18); }
-    .fwmap-end .fa { font-size: 1.5em; opacity: .7; }
+    .fwmap-diagram { display: flex; align-items: stretch; gap: 10px; margin: 18px 0 14px; }
+    .fwmap-end { flex: 1 1 0; min-width: 0; text-align: center; padding: 12px 8px; border-radius: 6px; background: rgba(128, 128, 128, .09); }
+    .fwmap-end .fa { font-size: 1.6em; color: rgb(30, 110, 215); margin-bottom: 4px; }
     .fwmap-end-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .fwmap-end-sub { font-size: .8em; opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .fwmap-link { flex: 0 0 34%; display: flex; flex-direction: column; justify-content: center; text-align: center; font-size: .85em; }
+    .fwmap-end-sub { font-size: .88em; opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fwmap-end-sub + .fwmap-end-sub { font-size: .82em; }
+    .fwmap-link { flex: 0 0 30%; display: flex; flex-direction: column; justify-content: center; text-align: center; font-size: .9em; }
     .fwmap-link-service { font-weight: 600; }
     .fwmap-link-port { opacity: .75; }
-    .fwmap-link-arrow { position: relative; height: 12px; margin: 2px 6px; }
-    .fwmap-link-arrow::before { content: ""; position: absolute; left: 0; right: 6px; top: 5px; border-top: 1.5px solid currentColor; opacity: .7; }
-    .fwmap-link-arrow::after { content: ""; position: absolute; right: 0; top: 1px; border: 5px solid transparent; border-left: 7px solid currentColor; opacity: .7; }
-    .fwmap-link-blocked .fwmap-link-arrow .fa { position: relative; z-index: 1; color: rgb(196, 18, 48); background: inherit; }
-    .fwmap-link-rate { opacity: .75; }
-    .fwmap-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; margin-top: 8px; }
-    .fwmap-card { border: 1px solid rgba(128, 128, 128, .22); border-radius: 6px; padding: 6px 8px; min-width: 0; }
-    .fwmap-card-title { font-weight: 600; margin-bottom: 4px; }
-    .fwmap-card-title .fa { width: 1.2em; text-align: center; color: rgb(200, 90, 40); }
-    .fwmap-card-note { font-size: .8em; margin-bottom: 3px; }
-    .fwmap-kv { width: 100%; font-size: .88em; }
-    .fwmap-kv th { font-weight: normal; opacity: .7; padding: 1px 8px 1px 0; vertical-align: top; white-space: nowrap; width: 1%; }
-    .fwmap-kv td { padding: 1px 0; overflow-wrap: anywhere; }
-    .fwmap-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 2px 10px; }
-    .fwmap-empty-note { font-size: .88em; padding: 4px 6px; border-radius: 4px; background: rgba(128, 128, 128, .07); }
-    .fwmap-empty-note .fa-check { color: rgb(46, 139, 87); }
-    .fwmap-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .fwmap-link-arrow { position: relative; height: 14px; margin: 4px 2px 6px; }
+    .fwmap-link-arrow::before { content: ""; position: absolute; left: 0; right: 7px; top: 6px; border-top: 1.5px solid currentColor; opacity: .55; }
+    .fwmap-link-arrow::after { content: ""; position: absolute; right: 0; top: 2px; border: 5px solid transparent; border-left: 8px solid currentColor; opacity: .55; }
+    .fwmap-link-blocked .fwmap-link-arrow .fa { position: relative; z-index: 1; color: rgb(196, 18, 48); }
+    .fwmap-link-rate { opacity: .7; font-size: .92em; }
+    .fwmap-sec { padding: 12px 0 10px; border-top: 1px solid rgba(128, 128, 128, .18); }
+    .fwmap-sec-head { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 1.02em; margin-bottom: 8px; }
+    .fwmap-sec-head .fa { width: 22px; text-align: center; font-size: 1.1em; color: rgb(232, 93, 40); }
+    .fwmap-sec-body { margin-left: 10px; padding-left: 21px; border-left: 1px solid rgba(128, 128, 128, .18); }
+    .fwmap-kv { width: 100%; font-size: .92em; border-collapse: collapse; }
+    .fwmap-kv th { font-weight: normal; opacity: .65; padding: 3px 10px 3px 0; vertical-align: top; white-space: nowrap; width: 42%; }
+    .fwmap-kv td { padding: 3px 0; overflow-wrap: anywhere; }
+    .fwmap-kv tr + tr th, .fwmap-kv tr + tr td { border-top: 1px solid rgba(128, 128, 128, .07); }
+    .fwmap-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0 18px; }
+    .fwmap-two .fwmap-kv th { width: 50%; }
+    .fwmap-card-note { font-size: .82em; opacity: .7; margin-bottom: 4px; }
+    .fwmap-empty-note { display: flex; gap: 12px; align-items: center; font-size: .92em; padding: 10px 14px; border-radius: 6px;
+        background: rgba(128, 128, 128, .07); }
+    .fwmap-empty-note .fa-check { color: rgb(40, 150, 70); font-size: 1.3em; }
+    .fwmap-muted { opacity: .65; font-size: .92em; }
+    .fwmap-sig { margin-bottom: 6px; }
+    .fwmap-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 18px; border-top: 1px solid rgba(128, 128, 128, .18); }
+    .fwmap-actions .btn { padding: 7px 16px; font-size: 1em; }
+    .fwmap-actions .btn .fa { margin-right: 4px; }
     .fwmap-actions .btn-group { margin-left: auto; }
     @media (max-width: 1100px) {
         #fwmap-layout { flex-direction: column; }
@@ -327,6 +364,9 @@
         no_ids_sub: "{{ lang._('Suricata has not alerted on this address in the last hour.') }}",
         no_ids_talkers: "{{ lang._('No Suricata alerts in the last hour') }}",
         select_hint: "{{ lang._('Show the details') }}",
+        last_updated: "{{ lang._('Last updated:') }}",
+        ids_alert: "{{ lang._('IDS alert') }}",
+        alerts_short: "{{ lang._('alerts') }}",
         flow_one: "{{ lang._('flow') }}",
         flow_many: "{{ lang._('flows') }}",
         not_checked: "{{ lang._('not checked') }}",
@@ -393,6 +433,8 @@
             <option value="blocked">{{ lang._('Blocked') }}</option>
             <option value="threats">{{ lang._('Threats that got through') }}</option>
             <option value="ids">{{ lang._('IDS alerts') }}</option>
+            <option value="ids_flows">{{ lang._('IDS flows') }}</option>
+            <option value="ids_addresses">{{ lang._('IDS addresses') }}</option>
         </select>
         <select id="fwmap-filter-service" class="form-control"></select>
         <select id="fwmap-filter-iface" class="form-control"></select>
@@ -413,6 +455,7 @@
             <div id="fwmap-legend"></div>
             <div id="fwmap-status"></div>
             <div id="fwmap-credit"></div>
+            <div id="fwmap-updated"></div>
         </div>
         <div class="fwmap-splitter fwmap-splitter-v" id="fwmap-split-side" title="{{ lang._('Drag to resize, double-click to reset') }}"></div>
         <div id="fwmap-side">
@@ -423,6 +466,15 @@
                     <li><a href="#" data-tab="networks">{{ lang._('Networks') }}</a></li>
                     <li><a href="#" data-tab="ids">{{ lang._('IDS') }}</a></li>
                 </ul>
+                <div class="fwmap-talker-tools">
+                    <div class="fwmap-talker-search"><i class="fa fa-search"></i>
+                        <input type="search" class="form-control" id="fwmap-talker-search" placeholder="{{ lang._('Search…') }}"></div>
+                    <select class="form-control" id="fwmap-talker-sort">
+                        <option value="rate">{{ lang._('Top talkers') }}</option>
+                        <option value="flows">{{ lang._('Most flows') }}</option>
+                        <option value="name">{{ lang._('Name') }}</option>
+                    </select>
+                </div>
                 <div id="fwmap-talkers-list"></div>
             </div>
             <div class="fwmap-splitter fwmap-splitter-h" id="fwmap-split-details" title="{{ lang._('Drag to resize, double-click to reset') }}"></div>

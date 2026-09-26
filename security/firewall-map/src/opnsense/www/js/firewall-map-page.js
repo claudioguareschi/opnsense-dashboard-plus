@@ -74,6 +74,9 @@
         if (f.traffic === 'ids' && !flow.ids) {
             return false;
         }
+        if (f.traffic === 'ids_flows' || (f.traffic === 'ids_addresses' && !flow.ids)) {
+            return false;
+        }
         if (f.service && flowService(flow) !== f.service) {
             return false;
         }
@@ -102,6 +105,9 @@
             return false;
         }
         if (f.traffic === 'ids' && !block.ids) {
+            return false;
+        }
+        if (f.traffic === 'ids_flows' || (f.traffic === 'ids_addresses' && !block.ids)) {
             return false;
         }
         // blocked sources have no service category or inside host
@@ -150,7 +156,7 @@
         const flows = (snapshot.flows || []).filter((flow) => flowMatches(flow, locations));
         const blocks = state.settings.blocks ? (snapshot.blocks || []).filter(blockMatches) : [];
         // alerting addresses without an arc: shown with everything, or when looking at IDS alerts
-        const alerts = ['', 'all', 'ids'].includes(state.filters.traffic || '') ? (snapshot.alerts || []).filter(alertMatches) : [];
+        const alerts = ['', 'all', 'ids', 'ids_addresses'].includes(state.filters.traffic || '') ? (snapshot.alerts || []).filter(alertMatches) : [];
         const used = new Set(flows.flatMap((flow) => [flow.origin, flow.dest]));
         return {
             ...snapshot,
@@ -217,7 +223,8 @@
         const items = state.renderer.legend();
         $('#fwmap-legend').html(items.map((item) =>
             `<span class="fwmap-legend-item"><i style="background:rgb(${item.color.slice(0, 3).join(',')})"></i>`
-            + `${esc(item.label)}</span>`).join(''));
+            + `${esc(item.label)}</span>`).join('')
+            + `<span class="fwmap-legend-item"><i class="fwmap-legend-ring"></i>${esc(T.ids_alert)}</span>`);
     }
 
     /* ---------------------------------------------------------------- top talkers */
@@ -329,24 +336,36 @@
         return result;
     }
 
-    function sparkline(canvas, series, color) {
+    const SPARK_COLOR = [232, 93, 40];
+
+    /** A small filled area chart; the newest point sits at the right edge. */
+    function sparkline(canvas, series) {
+        const ratio = window.devicePixelRatio || 1;
+        const width = canvas.clientWidth || 64;
+        const height = canvas.clientHeight || 22;
+        canvas.width = Math.round(width * ratio);
+        canvas.height = Math.round(height * ratio);
         const context = canvas.getContext('2d');
-        const {width, height} = canvas;
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
         context.clearRect(0, 0, width, height);
         if (!series || series.length < 2) {
             return;
         }
         const max = Math.max(...series, 1);
-        context.strokeStyle = color;
-        context.lineWidth = 1.2;
-        context.beginPath();
-        // newest point at the right edge, so a short history grows from the right
         const offset = HISTORY_POINTS - series.length;
-        series.forEach((value, index) => {
-            const x = ((offset + index) / (HISTORY_POINTS - 1)) * width;
-            const y = height - 1 - (value / max) * (height - 2);
-            index ? context.lineTo(x, y) : context.moveTo(x, y);
-        });
+        const points = series.map((value, index) => [((offset + index) / (HISTORY_POINTS - 1)) * width,
+            height - 1 - (value / max) * (height - 3)]);
+        context.beginPath();
+        points.forEach(([x, y], index) => (index ? context.lineTo(x, y) : context.moveTo(x, y)));
+        context.lineTo(points[points.length - 1][0], height);
+        context.lineTo(points[0][0], height);
+        context.closePath();
+        context.fillStyle = `rgba(${SPARK_COLOR.join(',')}, .18)`;
+        context.fill();
+        context.beginPath();
+        points.forEach(([x, y], index) => (index ? context.lineTo(x, y) : context.moveTo(x, y)));
+        context.strokeStyle = `rgb(${SPARK_COLOR.join(',')})`;
+        context.lineWidth = 1.2;
         context.stroke();
     }
 
@@ -355,33 +374,46 @@
     }
 
     function renderTalkers(groups) {
-        const rows = (groups[state.talkerTab] || []).slice(0, TALKER_ROWS);
+        const ids = state.talkerTab === 'ids';
+        const needle = String($('#fwmap-talker-search').val() || '').trim().toLowerCase();
+        const sort = $('#fwmap-talker-sort').val() || 'rate';
+        let rows = (groups[state.talkerTab] || []).slice();
+        if (needle) {
+            rows = rows.filter((row) => [row.label, row.ip, row.iface, row.sub, row.key].filter(Boolean)
+                .some((text) => String(text).toLowerCase().includes(needle)));
+        }
+        if (!ids && sort === 'flows') {
+            rows.sort((a, b) => b.flows - a.flows || b.rate - a.rate);
+        } else if (sort === 'name') {
+            rows.sort((a, b) => String(a.label).localeCompare(String(b.label)));
+        }
+        rows = rows.slice(0, TALKER_ROWS);
         const $list = $('#fwmap-talkers-list');
         if (!rows.length) {
-            $list.html(`<div class="text-muted fwmap-empty">${esc(state.talkerTab === 'ids' ? T.no_ids_talkers : T.no_talkers)}</div>`);
+            $list.html(`<div class="text-muted fwmap-empty">${esc(ids ? T.no_ids_talkers : T.no_talkers)}</div>`);
             state.talkerRows = [];
             return;
         }
         $list.html(rows.map((row, index) => {
-            const ids = state.talkerTab === 'ids';
             const sub = row.ip ? `${esc(row.ip)}${row.iface ? ` · <span title="${esc(row.iface)}">${esc(shortInterface(row.iface))}</span>` : ''}`
                 : esc(row.sub || '');
-            const right = ids
-                ? `<span class="fwmap-talker-count ${row.severity <= 2 ? 'fwmap-ids-high' : 'fwmap-ids'}">${esc(row.count)}</span>`
+            const chart = ids ? '<span></span>' : '<canvas></canvas>';
+            const value = ids
+                ? `<span class="fwmap-talker-count ${row.severity <= 2 ? 'fwmap-ids-high' : 'fwmap-ids'}">${esc(row.count)} ${esc(T.alerts_short)}</span>`
                 : `<span class="fwmap-talker-rate">${esc(formatRate(row.rate))}</span>`;
-            const detail = ids
-                ? `<span class="fwmap-talker-flows">${esc(T.severity)} ${esc(row.severity)}${row.connection ? ` · ${esc(T.ids_flow)}` : ''}</span>`
-                : `<canvas width="64" height="16"></canvas>`;
+            const extra = ids
+                ? `<span class="fwmap-talker-flows">${esc(T.severity)} ${esc(row.severity)}</span>`
+                : `<span class="fwmap-talker-flows">${esc(row.flows)} ${esc(row.flows === 1 ? T.flow_one : T.flow_many)}</span>`;
             return `<div class="fwmap-talker${talkerActive(row) ? ' active' : ''}" data-index="${index}" title="${esc(ids ? T.select_hint : T.filter_hint)}">
                 <span class="fwmap-talker-icon">${row.flag || `<i class="fa ${row.icon}"></i>`}</span>
-                <span class="fwmap-talker-label">${esc(row.label)}</span>${right}
-                <span class="fwmap-talker-sub">${sub}${!ids && row.flows ? ` <span class="fwmap-talker-flows">· ${esc(row.flows)} ${esc(row.flows === 1 ? T.flow_one : T.flow_many)}</span>` : ''}</span>${detail}
+                <span class="fwmap-talker-text"><span class="fwmap-talker-label">${esc(row.label)}</span>
+                    <span class="fwmap-talker-sub">${sub}</span></span>
+                ${chart}${value}${extra}<i class="fa fa-chevron-right fwmap-talker-chevron"></i>
             </div>`;
         }).join(''));
-        const accent = getComputedStyle(document.querySelector('#fwmap-talkers a') || document.body).color;
         state.talkerRows = rows;
         $list.find('.fwmap-talker canvas').each(function () {
-            sparkline(this, rows[$(this).closest('.fwmap-talker').data('index')].series, accent);
+            sparkline(this, rows[$(this).closest('.fwmap-talker').data('index')].series);
         });
     }
 
@@ -762,6 +794,10 @@
             ? String.fromCodePoint(...[...code.toUpperCase()].map((char) => 127397 + char.charCodeAt(0))) : '';
     }
 
+    function bigPill(kind, text, icon) {
+        return `<span class="fwmap-vpill fwmap-vpill-${kind}">${icon ? `<i class="fa ${icon}"></i> ` : ''}${esc(text)}</span>`;
+    }
+
     function pill(kind, text, icon) {
         return `<span class="fwmap-pill fwmap-pill-${kind}">${icon ? `<i class="fa ${icon}"></i> ` : ''}${esc(text)}</span>`;
     }
@@ -776,8 +812,10 @@
             + lines.filter(Boolean).map((line) => `<div class="fwmap-end-sub">${esc(line)}</div>`).join('') + '</div>';
     }
 
+    /** A titled section of the details panel (icon and title, a guide line, key/value rows). */
     function card(icon, title, body) {
-        return `<div class="fwmap-card"><div class="fwmap-card-title"><i class="fa ${icon}"></i> ${esc(title)}</div>${body}</div>`;
+        return `<section class="fwmap-sec"><div class="fwmap-sec-head"><i class="fa ${icon}"></i><span>${esc(title)}</span></div>`
+            + `<div class="fwmap-sec-body">${body}</div></section>`;
     }
 
     function rows(items) {
@@ -807,15 +845,15 @@
             [T.organization, esc(plain(item.as_org || ''))],
             [T.country, item.country ? `${flagOf(item.country_code)} ${esc(plain(item.country))}` : ''],
         ]);
-        return card('fa-shield', T.sec_reputation, `<div class="fwmap-two">${left}${right}</div>`);
+        return card('fa-database', T.sec_reputation, `<div class="fwmap-two">${left}${right}</div>`);
     }
 
     function idsCard(ids, groups) {
         const signatures = groups ? groups.flatMap((group) => group.signatures)
             : (ids?.signatures || []).map((item) => ({...item, last: null}));
         if (!signatures.length) {
-            return card('fa-search', T.sec_ids_long, `<div class="fwmap-empty-note"><i class="fa fa-check"></i> ${esc(T.no_ids)}
-                <div class="text-muted">${esc(T.no_ids_sub)}</div></div>`);
+            return card('fa-search', T.sec_ids_long, `<div class="fwmap-empty-note"><i class="fa fa-check"></i>
+                <div><div>${esc(T.no_ids)}</div><div class="fwmap-muted">${esc(T.no_ids_sub)}</div></div></div>`);
         }
         const scope = groups ? T.ids_on_connection : T.ids_on_address;
         return card('fa-search', T.sec_ids_long, `<div class="text-muted fwmap-card-note">${esc(scope)}</div>`
@@ -858,7 +896,7 @@
             const transferred = flow.transferred ? `↓ ${esc(formatBytes(flow.transferred[0]))} ↑ ${esc(formatBytes(flow.transferred[1]))}` : '';
             return {
                 remote, address,
-                verdict: flagged ? pill('danger', T.allowed_flagged, 'fa-exclamation-triangle') : pill('ok', T.allowed, 'fa-check'),
+                verdict: flagged ? bigPill('danger', T.allowed_flagged, 'fa-exclamation-triangle') : bigPill('ok', T.allowed, 'fa-check'),
                 sub: outbound ? T.started_inside_long : T.started_outside_long,
                 diagram: [outbound ? localBox : remoteBox, service, `↓ ${esc(formatRate(flow.rate_in || 0))} ↑ ${esc(formatRate(flow.rate_out || 0))}`, outbound ? remoteBox : localBox, false],
                 connection: rows([
@@ -891,7 +929,7 @@
             const serious = ids.severity <= 2 || (ids.lists || []).length > 0;
             return {
                 remote, address,
-                verdict: serious ? pill('danger', T.allowed_flagged, 'fa-exclamation-triangle') : pill('ok', T.allowed, 'fa-check'),
+                verdict: serious ? bigPill('danger', T.allowed_flagged, 'fa-exclamation-triangle') : bigPill('ok', T.allowed, 'fa-check'),
                 sub: ids.remote_started ? T.started_outside_long : T.started_inside_long,
                 diagram: [ids.remote_started ? remoteBox : insideBox, service, `↓ ${esc(formatBytes(ids.bytes_in || 0))} ↑ ${esc(formatBytes(ids.bytes_out || 0))}`, ids.remote_started ? insideBox : remoteBox, false],
                 connection: rows([
@@ -918,7 +956,7 @@
             const service = serviceParts(block.services?.[0]?.name, block.services?.[0]?.port);
             return {
                 remote, address,
-                verdict: pill('blocked', T.blocked, 'fa-ban'),
+                verdict: bigPill('blocked', T.blocked, 'fa-ban'),
                 sub: T.blocked_attempts,
                 diagram: [remoteBox, service, `${esc(block.hits)}× ${esc(T.in_minutes.replace('%s', block.window_minutes))}`, endBox('fa-shield', firewallName, [block.target, block.interface]), true],
                 connection: rows([
@@ -939,7 +977,7 @@
         }
         return {
             remote, address,
-            verdict: pill('muted', T.ids_only, 'fa-flag'),
+            verdict: bigPill('muted', T.ids_only, 'fa-flag'),
             sub: T.ids_only_sub,
             diagram: null,
             connection: `<div class="text-muted">${esc(T.no_connection)}</div>`,
@@ -964,9 +1002,9 @@
             }
         }
         const admin = state.isAdmin ? `
-            <button type="button" class="btn btn-primary fwmap-investigate" data-address="${esc(address)}"><i class="fa fa-search"></i> ${esc(T.investigate)}</button>
+            <button type="button" class="btn btn-primary fwmap-investigate" data-address="${esc(address)}"><i class="fa fa-external-link"></i> ${esc(T.investigate)}</button>
             <button type="button" class="btn btn-default fwmap-states" data-address="${esc(address)}"><i class="fa fa-list"></i> ${esc(T.show_states)}</button>
-            <button type="button" class="btn btn-default fwmap-kill" data-address="${esc(address)}"><i class="fa fa-times-circle"></i> ${esc(T.kill_states)}</button>` : '';
+            <button type="button" class="btn btn-default fwmap-kill" data-address="${esc(address)}"><i class="fa fa-trash-o"></i> ${esc(T.kill_states)}</button>` : '';
         return `<div class="fwmap-actions">${admin}
             <div class="btn-group dropup"><button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown">${esc(T.more)} <span class="caret"></span></button>
             <ul class="dropdown-menu dropdown-menu-right">${more.join('')}</ul></div></div>`;
@@ -996,25 +1034,25 @@
             ${model.diagram[3]}</div>` : '';
         const investigation = state.investigations.get(address);
         $details.html(`
-            <div class="fwmap-d-head">
-                <i class="fa fa-globe fwmap-d-icon"></i>
-                <div class="fwmap-d-title">
-                    <div class="fwmap-d-name">${esc(model.remote.title)}</div>
-                    <div class="fwmap-d-sub">${model.remote.hostname ? `${esc(address)} · ` : ''}${model.remote.cc ? `${flagOf(model.remote.cc)} ` : ''}${esc(model.remote.place)}</div>
-                    ${model.remote.org ? `<div class="fwmap-d-sub">${esc(model.remote.org)}</div>` : ''}
+            <div class="fwmap-d-scroll">
+                <div class="fwmap-d-head">
+                    <div class="fwmap-d-title">
+                        <div class="fwmap-d-name">${esc(model.remote.title)}</div>
+                        <div class="fwmap-d-line">${model.remote.hostname ? `<b>${esc(address)}</b>` : ''}
+                            ${model.remote.place ? `<span>${model.remote.cc ? `${flagOf(model.remote.cc)} ` : ''}${esc(model.remote.place)}</span>` : ''}</div>
+                        ${model.remote.org ? `<div class="fwmap-d-line">${esc(model.remote.org)}</div>` : ''}
+                    </div>
+                    <div class="fwmap-d-verdict">${model.verdict}<div class="fwmap-d-verdict-sub">${esc(model.sub)}</div></div>
+                    <a href="#" id="fwmap-details-close" title="${esc(T.close)}"><i class="fa fa-times"></i></a>
                 </div>
-                <div class="fwmap-d-verdict">${model.verdict}<div class="fwmap-d-sub">${esc(model.sub)}</div></div>
-                <a href="#" id="fwmap-details-close" title="${esc(T.close)}">&times;</a>
-            </div>
-            ${picker}
-            ${diagram}
-            <div class="fwmap-cards">
-                ${card('fa-bar-chart', T.sec_connection, model.connection)}
-                ${card('fa-fire', T.sec_firewall, model.firewall)}
+                ${picker}
+                ${diagram}
+                ${card('fa-plug', T.sec_connection, model.connection)}
+                ${card('fa-shield', T.sec_firewall, model.firewall)}
                 ${model.ids}
                 ${model.reputation}
+                ${investigation ? `<div class="fwmap-investigation">${investigation}</div>` : ''}
             </div>
-            ${investigation ? `<div class="fwmap-investigation">${investigation}</div>` : ''}
             ${actionBar(address, selection.countryCode)}
         `);
     }
@@ -1167,37 +1205,50 @@
     /* ---------------------------------------------------------------- main loop */
 
     function statusLine(snapshot, shown) {
+        const parts = [];
         const count = shown.flows.length;
-        let message = count ? `${count} ${T.active_flows}` : T.no_flows;
+        parts.push(esc(count ? `${count} ${T.active_flows}` : T.no_flows));
         if (state.settings.blocks) {
             const blocked = shown.blocks.length;
             const below = snapshot.blocks_below || 0;
             if (blocked || below) {
-                message += ` · ${blocked} ${T.blocked_sources}`;
+                parts.push(esc(`${blocked} ${T.blocked_sources}`));
                 if (below) {
-                    message += ` · ${below} ${T.below_threshold}`;
+                    parts.push(esc(`${below} ${T.below_threshold}`));
                 }
             }
         }
-        // connection evidence and address history are counted separately
-        const idsFlows = (shown.ids_flows || []).filter((flow) => flow.kind !== 'blocked').length;
-        const idsAddresses = new Set([...(shown.alerts || []).map((alert) => alert.source),
-            ...shown.flows.filter((flow) => flow.ids).map((flow) => flow.dest),
-            ...shown.blocks.filter((block) => block.ids).map((block) => block.source)]).size;
+        // connection evidence and address history are counted separately, each a one-click filter
+        const all = snapshot;
+        const idsFlows = (all.ids_flows || []).filter((flow) => flow.kind !== 'blocked').length;
+        const idsAddresses = new Set([...(all.alerts || []).map((alert) => alert.source),
+            ...(all.flows || []).filter((flow) => flow.ids).map((flow) => flow.dest),
+            ...(all.blocks || []).filter((block) => block.ids).map((block) => block.source)]).size;
+        const link = (filter, text) => `<a href="#" class="fwmap-status-ids${state.filters.traffic === filter ? ' active' : ''}" data-filter="${filter}">${esc(text)}</a>`;
         if (idsFlows) {
-            message += ` · ${idsFlows} ${idsFlows === 1 ? T.ids_flow : T.ids_flows}`;
+            parts.push(link('ids_flows', `${idsFlows} ${idsFlows === 1 ? T.ids_flow : T.ids_flows}`));
         }
         if (idsAddresses) {
-            message += ` · ${idsAddresses} ${idsAddresses === 1 ? T.ids_address : T.ids_addresses}`;
+            parts.push(link('ids_addresses', `${idsAddresses} ${idsAddresses === 1 ? T.ids_address : T.ids_addresses}`));
         }
         const threats = shown.flows.filter((flow) => flow.threat).length;
         if (threats) {
-            message += ` · ${threats} ${T.listed_flows}`;
+            parts.push(esc(`${threats} ${T.listed_flows}`));
         }
         if (snapshot.carp === 'backup') {
-            message += ` · ${T.carp_backup}`;
+            parts.push(esc(T.carp_backup));
         }
-        $('#fwmap-status').text(message);
+        $('#fwmap-status').html(parts.join(' · '));
+        state.updatedAt = Date.now();
+        updatedLine();
+    }
+
+    function updatedLine() {
+        if (!state.updatedAt) {
+            return;
+        }
+        const seconds = Math.max(0, Math.round((Date.now() - state.updatedAt) / 1000));
+        $('#fwmap-updated').html(`${esc(T.last_updated)} ${esc(seconds)} s ${esc(T.ago)} <i class="fwmap-live${seconds > 10 ? ' stale' : ''}"></i>`);
     }
 
     function refresh() {
@@ -1281,6 +1332,11 @@
                 refresh();
             }
         });
+        $('#fwmap-talker-search, #fwmap-talker-sort').on('input change', () => {
+            if (state.snapshot) {
+                renderTalkers(talkersFromLast());
+            }
+        });
         $('#fwmap-talkers .nav a').on('click', function (event) {
             event.preventDefault();
             state.talkerTab = $(this).data('tab');
@@ -1330,6 +1386,14 @@
                 investigate(String($(this).data('address')));
             });
         $('#fwmap-review').on('click', () => showQueue());
+        // the IDS counters in the status line filter the map; a second click shows everything again
+        $('#fwmap-status').on('click', '.fwmap-status-ids', function (event) {
+            event.preventDefault();
+            const filter = String($(this).data('filter'));
+            const next = state.filters.traffic === filter ? 'all' : filter;
+            $('#fwmap-filter-traffic').val(next).trigger('change');
+        });
+        setInterval(updatedLine, 1000);
     }
 
     // re-rank the current tab from the last snapshot without adding a history point
@@ -1412,6 +1476,16 @@
         });
     }
 
+    /** Drop the least important talker column when the side panel is narrow. */
+    function watchSideWidth() {
+        const side = document.getElementById('fwmap-side');
+        const update = () => side.classList.toggle('fwmap-narrow', side.clientWidth < 470);
+        if (window.ResizeObserver) {
+            new ResizeObserver(update).observe(side);
+        }
+        update();
+    }
+
     function bindSplitters() {
         state.layout = readLayout();
         applyLayout(state.layout);
@@ -1480,6 +1554,8 @@
             $('#fwmap-grid').css('background-image',
                 `linear-gradient(${line} 1px, transparent 1px), linear-gradient(90deg, ${line} 1px, transparent 1px)`);
             $('#fwmap-status, #fwmap-legend').css('color', rgba(theme.text, 0.8));
+            // the side panel boxes sit on the page's own background colour
+            document.getElementById('fwmap-side').style.setProperty('--fwmap-panel', `rgb(${theme.background.join(', ')})`);
             const container = document.getElementById('fwmap-canvas');
             state.renderer = FirewallMapRenderer.create(container, {
                 theme,
@@ -1498,6 +1574,7 @@
 
         bindControls();
         bindSplitters();
+        watchSideWidth();
         $('#fwmap-review').toggle(state.isAdmin);
         if (state.isAdmin) {
             refreshQueueCount();
