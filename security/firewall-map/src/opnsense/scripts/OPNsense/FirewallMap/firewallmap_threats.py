@@ -50,7 +50,7 @@ def merge(old, new):
     return result[:MAX_ITEMS]
 
 
-def observe(records, flow_endpoints, lists_for, local_addresses, inside_endpoint, service_name):
+def observe(records, flow_endpoints, lists_for, local_addresses, inside_endpoint, service_name, orientation):
     """Group the current states that touch a flagged address: {remote: summary}."""
     seen = {}
     for record in records:
@@ -65,10 +65,15 @@ def observe(records, flow_endpoints, lists_for, local_addresses, inside_endpoint
             "lists": lists, "inbound": 0, "outbound": 0, "targets": [], "inside": [], "services": [], "bytes": 0,
         })
         inside = inside_endpoint(record)
-        if record["src"]["address"] == remote:
+        remote_started, service_port = orientation(record, remote)
+        if remote_started:
             entry["inbound"] += 1
-            aimed = inside or record["dst"]
-            port = "" if record["protocol"] in ("icmp", "ipv6-icmp") else aimed["port"] or ""
+            if record["src"]["address"] != remote:
+                port = service_port or ""  # a reply state: the server's own port
+            elif record["protocol"] in ("icmp", "ipv6-icmp"):
+                port = ""
+            else:
+                port = (inside or record["dst"])["port"] or ""
             target = f'{record["protocol"]}|{inside["address"] if inside else pair[0]}|{port}'
             if target not in entry["targets"]:
                 entry["targets"].append(target)
@@ -76,7 +81,7 @@ def observe(records, flow_endpoints, lists_for, local_addresses, inside_endpoint
             entry["outbound"] += 1
         if inside and inside["address"] not in entry["inside"]:
             entry["inside"].append(inside["address"])
-        service = service_name(record["protocol"], record["dst"]["port"])
+        service = service_name(record["protocol"], service_port)
         if service not in entry["services"]:
             entry["services"].append(service)
         entry["bytes"] += record.get("bytes_in", 0) + record.get("bytes_out", 0)

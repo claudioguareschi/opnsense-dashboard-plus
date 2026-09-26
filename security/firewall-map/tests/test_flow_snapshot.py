@@ -637,13 +637,23 @@ class ThreatQueueTest(unittest.TestCase):
     def observe(self, states):
         lists = {"108.188.77.155": ["AbuseIPDB blacklist"]}
         return THREATS.observe(COLLECTOR.parse_states(states), COLLECTOR.flow_endpoints, lambda address: lists.get(address, []),
-                               {"198.13.91.163"}, COLLECTOR.inside_endpoint, COLLECTOR.service_name)
+                               {"198.13.91.163"}, COLLECTOR.inside_endpoint, COLLECTOR.service_name,
+                               COLLECTOR.orientation)
 
     def test_records_only_flagged_addresses_with_target(self):
         seen = self.observe(self.INBOUND + self.OUTBOUND)
         self.assertEqual(list(seen), ["108.188.77.155"])
         self.assertEqual(seen["108.188.77.155"]["targets"], ["tcp|192.168.1.2|80"])
         self.assertEqual(seen["108.188.77.155"]["inbound"], 1)
+
+    def test_reply_state_from_a_server_counts_as_inbound(self):
+        # the SYN passed the other CARP node; the mail server's reply created an outbound NAT state
+        reply = ("all tcp 198.13.91.163:13526 (192.168.1.2:443) -> 108.188.77.155:48824       TIME_WAIT:TIME_WAIT\n"
+                 "   age 00:01:01, expires in 00:00:29, 2:1 pkts, 100:40 bytes\n   id: c6 creatorid: a9\n")
+        entry = self.observe(reply)["108.188.77.155"]
+        self.assertEqual((entry["inbound"], entry["outbound"], entry["targets"], entry["services"]),
+                         (1, 0, ["tcp|192.168.1.2|443"], ["HTTPS"]))
+        self.assertEqual(COLLECTOR.orientation(COLLECTOR.parse_states(InsideTest.NAT_OUT)[0], "34.209.15.107")[0], False)
 
     def test_review_workflow(self):
         with tempfile.TemporaryDirectory() as directory:

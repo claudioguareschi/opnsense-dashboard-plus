@@ -283,6 +283,23 @@ def inside_endpoint(record):
     return None
 
 
+def orientation(record, remote):
+    """(remote started it, the service's port) for one state.
+
+    A state normally starts at its initiator. When the opening packet passed the other CARP
+    node (asymmetric paths), the reply from an inside server creates an "outbound" state from a
+    well-known port to an ephemeral one: that connection was really started by the remote side.
+    """
+    if record["src"]["address"] == remote:
+        return True, record["dst"]["port"]
+    # behind outbound NAT the source port that matters is the inside host's, not the translated one
+    source, target = (inside_endpoint(record) or record["src"])["port"], record["dst"]["port"]
+    if (record["protocol"] in ("tcp", "udp") and source and target and source.isdigit() and target.isdigit()
+            and int(source) < 1024 <= int(target)):
+        return True, source
+    return False, target
+
+
 def inside_address(record):
     side = inside_endpoint(record)
     return side["address"] if side else None
@@ -575,9 +592,10 @@ class FlowTracker:
             if pair is None or record.get("id") is None:
                 continue
             # PF counts initiator->responder first; src is the initiator in parse_states()
-            remote_initiated = record["src"]["address"] == pair[1]
+            src_is_remote = record["src"]["address"] == pair[1]
+            remote_initiated, service_port = orientation(record, pair[1])
             toward, away = (
-                (record["bytes_in"], record["bytes_out"]) if remote_initiated
+                (record["bytes_in"], record["bytes_out"]) if src_is_remote
                 else (record["bytes_out"], record["bytes_in"])
             )
             current = (toward, away, record["packets_in"] + record["packets_out"])
@@ -602,7 +620,12 @@ class FlowTracker:
                 # what the remote side connected to: a port-forward target (its inside port) or
                 # the firewall itself; ICMP ids are not ports
                 aimed = inside_side or record["dst"]
-                port = "" if record["protocol"] in ("icmp", "ipv6-icmp") else aimed["port"] or ""
+                if not src_is_remote:
+                    port = service_port or ""  # a reply state: the server's own port
+                elif record["protocol"] in ("icmp", "ipv6-icmp"):
+                    port = ""
+                else:
+                    port = aimed["port"] or ""
                 target = f'{record["protocol"]}|{inside or pair[0]}|{port}'
                 total["targets"][target] = total["targets"].get(target, 0) + weight
             else:
@@ -611,7 +634,7 @@ class FlowTracker:
                 total["inside"][inside] = total["inside"].get(inside, 0) + weight
             if record.get("origif"):
                 total["egress"][record["origif"]] = total["egress"].get(record["origif"], 0) + weight
-            service = service_name(record["protocol"], record["dst"]["port"])
+            service = service_name(record["protocol"], service_port)
             total["services"][service] = total["services"].get(service, 0) + delta[0] + delta[1] + 1
             total["toward"] += delta[0]
             total["away"] += delta[1]
@@ -1363,7 +1386,7 @@ class ThreatRecorder:
             if self.db is None:
                 self.db = threats.connect(self.path)
             seen = threats.observe(records, flow_endpoints, lambda address: threat_lists_for(address, blocklists, reputation),
-                                   local_addresses, inside_endpoint, service_name)
+                                   local_addresses, inside_endpoint, service_name, orientation)
             threats.record(self.db, seen)
             if self.pruned is None or now - self.pruned >= THREAT_PRUNE_SECONDS:
                 threats.prune(self.db)
