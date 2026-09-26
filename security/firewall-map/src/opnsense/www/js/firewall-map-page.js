@@ -1144,6 +1144,11 @@
                 <div class="fwmap-link-rate">${model.diagram[2]}</div></div>
             ${model.diagram[3]}</div>` : '';
         const investigation = state.investigations.get(address);
+        // re-rendering the same address (a lookup finishing, a check) keeps the reader's scroll position
+        const same = state.renderedSelection === selection && state.renderedAddress === address;
+        const scrollTop = same ? ($details.find('.fwmap-d-scroll').scrollTop() || 0) : 0;
+        state.renderedSelection = selection;
+        state.renderedAddress = address;
         $details.html(`
             <div class="fwmap-d-scroll">
                 <div class="fwmap-d-head">
@@ -1169,6 +1174,9 @@
             </div>
             ${actionBar(address, selection.countryCode)}
         `);
+        if (scrollTop) {
+            $details.find('.fwmap-d-scroll').scrollTop(scrollTop);
+        }
     }
 
     function notify(message, type) {
