@@ -92,8 +92,6 @@ export default class FirewallMap extends BaseWidget {
             $container.children('div').first().empty().append(
                 $('<label style="font-weight: bold; cursor: pointer;"></label>')
                     .append($checkbox, document.createTextNode(this.translations.hostnames)),
-                $('<div class="text-muted" style="font-size: .9em; margin: 0 0 4px 20px;"></div>')
-                    .text(this.translations.hostnames_hint),
             );
             const $provider = $(`#${this.id}-option-geo-provider`);
             const $key = $(`#${this.id}-option-geo-key`).closest('.widget-option-container');

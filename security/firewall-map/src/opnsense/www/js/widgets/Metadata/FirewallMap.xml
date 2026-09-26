@@ -19,13 +19,12 @@
             <labels_off>Off</labels_off>
             <none>None</none>
             <hostnames>Lookup hostnames</hostnames>
-            <hostnames_hint>Reverse DNS: endpoint addresses are sent to their DNS servers.</hostnames_hint>
             <provider_maxmind>MaxMind GeoLite2 (free)</provider_maxmind>
             <provider_maxmind_paid>MaxMind GeoIP2 City (paid subscription)</provider_maxmind_paid>
             <provider_dbip>DB-IP Lite (no key)</provider_dbip>
-            <geo_provider>Firewall-wide (admin): geolocation database</geo_provider>
-            <geo_key>Firewall-wide (admin): MaxMind license key</geo_key>
-            <geo_update>Firewall-wide (admin): update every</geo_update>
+            <geo_provider>Geolocation service</geo_provider>
+            <geo_key>MaxMind license key</geo_key>
+            <geo_update>Update frequency</geo_update>
             <days>days</days>
             <key_set>Key saved (enter a new one to replace it, "-" to use the GeoIP alias key)</key_set>
             <key_from_alias>Using the key from the GeoIP alias (enter one to override)</key_from_alias>
