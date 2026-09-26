@@ -75,6 +75,7 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
       entry.members.push(item);
     } else {
       merged.set(key, {
+        key,
         flow: {origin: item.origin, dest: item.dest, rate, rateIn, rateOut, activity: item.activity ?? 1},
         origin,
         dest,
@@ -83,9 +84,35 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
     }
   }
   const flows = [...merged.values()].sort((a, b) => b.flow.rate - a.flow.rate).slice(0, options.maxArcs);
-  const lanes = new Map();
+  // lanes stay put across refreshes: an arch keeps its bend while it lives, new arches take the
+  // first free lane of their cell, so nothing jumps when rankings change
+  const cellOf = ({flow, dest}) => `${flow.origin}|${Math.round(dest.lat * 2)}|${Math.round(dest.lon * 2)}`;
+  const previous = options.previousLanes || new Map();
+  const taken = new Map();
+  const laneOf = new Map();
+  for (const entry of flows) {
+    const lane = previous.get(entry.key);
+    const used = taken.get(cellOf(entry)) || new Set();
+    if (lane !== undefined && !used.has(lane)) {
+      used.add(lane);
+      taken.set(cellOf(entry), used);
+      laneOf.set(entry.key, lane);
+    }
+  }
+  for (const entry of flows) {
+    if (!laneOf.has(entry.key)) {
+      const used = taken.get(cellOf(entry)) || new Set();
+      let lane = 0;
+      while (used.has(lane)) {
+        lane++;
+      }
+      used.add(lane);
+      taken.set(cellOf(entry), used);
+      laneOf.set(entry.key, lane);
+    }
+  }
   const arcs = [];
-  flows.forEach(({flow, origin, dest, members}, index) => {
+  flows.forEach(({key, flow, origin, dest, members}, index) => {
     const x0 = origin.lon;
     const y0 = mercatorY(origin.lat);
     const x1 = dest.lon;
@@ -96,9 +123,7 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
     if (length < 0.3) {
       return;
     }
-    const cell = `${flow.origin}|${Math.round(dest.lat * 2)}|${Math.round(dest.lon * 2)}`;
-    const lane = lanes.get(cell) || 0;
-    lanes.set(cell, lane + 1);
+    const lane = laneOf.get(key);
     // unit normal, oriented so the first lane bows towards the pole side of the map
     let nx = -dy / length;
     let ny = dx / length;
@@ -130,7 +155,8 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
     }
     const strength = Math.min(1, Math.log10(1 + rate) / FASTEST_LOG_RATE);
     arcs.push({
-      key: `${flow.origin}>${flow.dest}`,
+      key,
+      lane,
       path,
       heavy: (index < options.heavyTop && rate >= HEAVY_TOP_MIN_RATE) || rate >= options.heavyRate,
       rate,
@@ -179,6 +205,78 @@ function connectionLine(flow) {
     return `<div style="font-weight:600">${label}${targets ? ` to ${targets}` : ''}</div>`;
   }
   return '<div style="opacity:.75">Outbound</div>';
+}
+
+// arches, blocked sources and endpoints fade in and out instead of popping
+const FADE_IN_MS = 800;
+
+/** A colour with its alpha scaled by a fade opacity. */
+function faded(color, opacity) {
+  return opacity >= 1 ? color : [color[0], color[1], color[2], Math.round((color[3] ?? 255) * opacity)];
+}
+const FADE_OUT_MS = 1600;
+
+/** Tracks when each keyed item appeared or vanished; vanished items linger while fading out. */
+class Fader {
+  constructor(keyOf) {
+    this.keyOf = keyOf;
+    this.entries = new Map();
+  }
+
+  opacityOf(entry, now) {
+    const fadeIn = Math.min(1, (now - entry.born) / FADE_IN_MS);
+    const fadeOut = entry.gone === null ? 1 : Math.max(0, 1 - (now - entry.gone) / FADE_OUT_MS);
+    return Math.max(0, fadeIn * fadeOut);
+  }
+
+  update(items, now) {
+    const next = new Map();
+    const result = [];
+    for (const item of items) {
+      const key = this.keyOf(item);
+      if (next.has(key)) {
+        continue;
+      }
+      const previous = this.entries.get(key);
+      let born = now;
+      if (previous) {
+        // coming back while fading out resumes from the current opacity
+        born = previous.gone === null ? previous.born : now - this.opacityOf(previous, now) * FADE_IN_MS;
+      }
+      const entry = {item, born, gone: null};
+      item.fade = entry;
+      next.set(key, entry);
+      result.push(item);
+    }
+    for (const [key, entry] of this.entries) {
+      if (next.has(key)) {
+        continue;
+      }
+      if (entry.gone === null) {
+        entry.gone = now;
+      }
+      if (this.opacityOf(entry, now) > 0) {
+        entry.item.fading = true;
+        next.set(key, entry);
+        result.push(entry.item);
+      }
+    }
+    this.entries = next;
+    return result;
+  }
+
+  opacity(item, now) {
+    return item.fade ? this.opacityOf(item.fade, now) : 1;
+  }
+
+  animating(now) {
+    for (const entry of this.entries.values()) {
+      if (entry.gone !== null || now - entry.born < FADE_IN_MS) {
+        return true;
+      }
+    }
+    return false;
+  }
 }
 
 function formatRate(bytes) {
@@ -582,6 +680,12 @@ export function createFirewallMap(container, options = {}) {
 
   let pulseItems = [];
   let blockArcs = [];
+  let locationsShown = [];
+  const arcFader = new Fader((arc) => arc.key);
+  const blockFader = new Fader((block) => block.source);
+  const endpointFader = new Fader((location) => location.id);
+  let frameNow = performance.now();
+  let fadeKey = 'steady';
   // stable colour per category across refreshes (first seen keeps its colour)
   const categoryColors = new Map();
   let categoryKey = '';
@@ -603,6 +707,10 @@ export function createFirewallMap(container, options = {}) {
   }
 
   function arcColor(arc) {
+    return faded(arcBaseColor(arc), arcFader.opacity(arc, frameNow));
+  }
+
+  function arcBaseColor(arc) {
     const alpha = Math.round((arc.heavy ? 150 : 70) + 105 * arc.activity);
     if (arc.threat) {
       // a permitted flow to a listed address
@@ -617,6 +725,10 @@ export function createFirewallMap(container, options = {}) {
   }
 
   function pulseColor(item) {
+    return faded(pulseBaseColor(item), arcFader.opacity(item.arc, frameNow));
+  }
+
+  function pulseBaseColor(item) {
     const alpha = Math.round(110 + 145 * item.arc.activity);
     if (item.arc.threat) {
       return rgb(colors.block, alpha);
@@ -641,7 +753,7 @@ export function createFirewallMap(container, options = {}) {
   function legend() {
     if (settings.colorMode === 'initiator') {
       // always show inside and outside, so the meaning of green and orange is never a guess
-      const present = new Set(['local', 'remote', ...arcs.map((arc) => arc.initiated)]);
+      const present = new Set(['local', 'remote', ...arcs.filter((arc) => !arc.fading).map((arc) => arc.initiated)]);
       return [
         ...['local', 'remote', 'both'].filter((side) => present.has(side))
           .map((side) => ({label: INITIATOR_LABELS[side], color: initiatorScheme(side).heavy})),
@@ -655,7 +767,7 @@ export function createFirewallMap(container, options = {}) {
         {label: 'Blocked / listed', color: colors.block},
       ];
     }
-    const present = [...new Set(arcs.map(categoryOf))];
+    const present = [...new Set(arcs.filter((arc) => !arc.fading).map(categoryOf))];
     present.sort((a, b) => (a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b)));
     return [
       ...present.map((label) => ({label, color: categoryColor(label)})),
@@ -684,7 +796,7 @@ export function createFirewallMap(container, options = {}) {
         getPosition: (block) => pulsePosition(block, seconds, false),
         getRadius: (block) => block.threat ? 3.6 : 2.6,
         radiusUnits: 'pixels',
-        getFillColor: (block) => rgb(colors.block, Math.round(80 + 175 * block.activity)),
+        getFillColor: (block) => rgb(colors.block, Math.round((80 + 175 * block.activity) * blockFader.opacity(block, frameNow))),
         updateTriggers: {getPosition: seconds, getFillColor: colors.block},
       }),
       new ScatterplotLayer({
@@ -713,7 +825,7 @@ export function createFirewallMap(container, options = {}) {
       lastFrame = now;
       deck.setProps({layers: compose(now)});
     }
-    if (arcs.length || blockArcs.length) {
+    if (arcs.length || blockArcs.length || animating(now)) {
       frame = requestAnimationFrame(draw);
     }
   }
@@ -786,15 +898,82 @@ export function createFirewallMap(container, options = {}) {
     });
   }
 
+  function fadingLayers() {
+    return [
+      new PathLayer({
+        id: 'firewall-map-arcs',
+        data: arcs,
+        getPath: (arc) => arc.path,
+        getWidth: (arc) => arc.heavy ? HEAVY_WIDTH : LINK_WIDTH,
+        widthUnits: 'pixels',
+        capRounded: true,
+        jointRounded: true,
+        pickable: true,
+        widthMinPixels: 1,
+        getColor: (arc) => arcColor(arc),
+        updateTriggers: {getColor: [colors.toward.link, colors.away.link, colors.inbound.link, settings.colorMode, categoryKey, fadeKey]},
+      }),
+      new PathLayer({
+        id: 'firewall-map-blocks',
+        data: blockArcs,
+        getPath: (block) => block.path,
+        getWidth: (block) => block.threat ? 2.4 : 1.4,
+        widthUnits: 'pixels',
+        capRounded: true,
+        jointRounded: true,
+        pickable: true,
+        // bright while hits arrive, then a faint trace that can still be hovered
+        getColor: (block) => rgb(colors.block, Math.round((35 + 185 * block.activity) * blockFader.opacity(block, frameNow))),
+        updateTriggers: {getColor: [colors.block, fadeKey]},
+      }),
+      new ScatterplotLayer({
+        id: 'firewall-map-block-sources',
+        data: blockArcs,
+        getPosition: (block) => [block.lon, block.lat],
+        getRadius: (block) => block.threat ? 3.5 : 2.5,
+        radiusUnits: 'pixels',
+        pickable: true,
+        getFillColor: (block) => rgb(colors.block, Math.round((90 + 165 * block.activity) * blockFader.opacity(block, frameNow))),
+        updateTriggers: {getFillColor: [colors.block, fadeKey]},
+      }),
+      new ScatterplotLayer({
+        id: 'firewall-map-endpoints',
+        data: locationsShown,
+        getPosition: (location) => [location.lon, location.lat],
+        getRadius: (location) => location.local ? 5 : 2.5,
+        radiusUnits: 'pixels',
+        stroked: true,
+        filled: true,
+        getFillColor: (location) => faded(location.local ? colors.background : colors.endpoint, endpointFader.opacity(location, frameNow)),
+        getLineColor: (location) => faded(colors.endpoint, endpointFader.opacity(location, frameNow)),
+        lineWidthUnits: 'pixels',
+        getLineWidth: (location) => location.local ? 2 : 0,
+        pickable: true,
+        radiusMinPixels: 2.5,
+        updateTriggers: {getFillColor: [colors.endpoint, fadeKey], getLineColor: [colors.endpoint, fadeKey]},
+      }),
+    ];
+  }
+
+  function animating(now) {
+    return arcFader.animating(now) || blockFader.animating(now) || endpointFader.animating(now);
+  }
+
   function compose(now = performance.now()) {
     const seconds = (now - started) / 1000;
-    return [...baseLayers, pulseLayer(seconds), ...blockPulseLayers(seconds), labelLayer].filter(Boolean);
+    frameNow = now;
+    // colours are recomputed every frame only while something is fading
+    fadeKey = animating(now) ? now : 'steady';
+    return [...baseLayers, ...fadingLayers(), pulseLayer(seconds), ...blockPulseLayers(seconds), labelLayer].filter(Boolean);
   }
 
   function layers(data) {
-    arcs = buildArcs(data, settings);
+    const now = performance.now();
+    const previousLanes = new Map([...arcFader.entries.values()].map((entry) => [entry.item.key, entry.item.lane]));
+    arcs = arcFader.update(buildArcs(data, {...settings, previousLanes}), now);
     pulseItems = pulses(arcs);
-    blockArcs = settings.blocks ? buildBlocks(data) : [];
+    blockArcs = blockFader.update(settings.blocks ? buildBlocks(data) : [], now);
+    locationsShown = endpointFader.update(data.locations || [], now);
     locationIndex = new Map((data.locations || []).map((location) => [location.id, location]));
     flowsByDest = new Map();
     for (const flow of data.flows || []) {
@@ -816,63 +995,11 @@ export function createFirewallMap(container, options = {}) {
         pickable: false,
         updateTriggers: {getFillColor: colors.land, getLineColor: colors.border},
       }),
-      new PathLayer({
-        id: 'firewall-map-arcs',
-        data: arcs,
-        getPath: (arc) => arc.path,
-        getWidth: (arc) => arc.heavy ? HEAVY_WIDTH : LINK_WIDTH,
-        widthUnits: 'pixels',
-        capRounded: true,
-        jointRounded: true,
-        pickable: true,
-        widthMinPixels: 1,
-        getColor: (arc) => arcColor(arc),
-        updateTriggers: {getColor: [colors.toward.link, colors.away.link, colors.inbound.link, settings.colorMode, categoryKey]},
-      }),
-      new PathLayer({
-        id: 'firewall-map-blocks',
-        data: blockArcs,
-        getPath: (block) => block.path,
-        getWidth: (block) => block.threat ? 2.4 : 1.4,
-        widthUnits: 'pixels',
-        capRounded: true,
-        jointRounded: true,
-        pickable: true,
-        // bright while hits arrive, then a faint trace that can still be hovered
-        getColor: (block) => rgb(colors.block, Math.round(35 + 185 * block.activity)),
-        updateTriggers: {getColor: colors.block},
-      }),
-      new ScatterplotLayer({
-        id: 'firewall-map-block-sources',
-        data: blockArcs,
-        getPosition: (block) => [block.lon, block.lat],
-        getRadius: (block) => block.threat ? 3.5 : 2.5,
-        radiusUnits: 'pixels',
-        pickable: true,
-        getFillColor: (block) => rgb(colors.block, Math.round(90 + 165 * block.activity)),
-        updateTriggers: {getFillColor: colors.block},
-      }),
-      new ScatterplotLayer({
-        id: 'firewall-map-endpoints',
-        data: data.locations || [],
-        getPosition: (location) => [location.lon, location.lat],
-        getRadius: (location) => location.local ? 5 : 2.5,
-        radiusUnits: 'pixels',
-        stroked: true,
-        filled: true,
-        getFillColor: (location) => location.local ? colors.background : colors.endpoint,
-        getLineColor: colors.endpoint,
-        lineWidthUnits: 'pixels',
-        getLineWidth: (location) => location.local ? 2 : 0,
-        pickable: true,
-        radiusMinPixels: 2.5,
-        updateTriggers: {getFillColor: colors.endpoint, getLineColor: colors.endpoint},
-      }),
     ];
     labelCandidates = labels(data);
     labelLayer = buildLabelLayer();
     const layerList = compose();
-    if ((arcs.length || blockArcs.length) && frame === null) {
+    if ((arcs.length || blockArcs.length || animating(performance.now())) && frame === null) {
       frame = requestAnimationFrame(draw);
     }
     return layerList;

@@ -94,7 +94,8 @@
         if (f.traffic === 'permitted') {
             return false;
         }
-        if (f.traffic === 'threats' && !(block.threat || (block.lists || []).length)) {
+        // "threats" means flagged traffic that got through; blocked sources have their own view
+        if (f.traffic === 'threats') {
             return false;
         }
         // blocked sources have no service category or inside host

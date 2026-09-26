@@ -217,7 +217,7 @@
             <option value="all">{{ lang._('All traffic') }}</option>
             <option value="permitted">{{ lang._('Permitted') }}</option>
             <option value="blocked">{{ lang._('Blocked') }}</option>
-            <option value="threats">{{ lang._('Threats') }}</option>
+            <option value="threats">{{ lang._('Threats that got through') }}</option>
         </select>
         <select id="fwmap-filter-service" class="form-control"></select>
         <select id="fwmap-filter-iface" class="form-control"></select>
