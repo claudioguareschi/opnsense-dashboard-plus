@@ -86,6 +86,8 @@ ABUSEIPDB_LIST = "AbuseIPDB blacklist"
 REPUTATION_LIST = "AbuseIPDB (looked up)"
 REPUTATION_THRESHOLD = 75
 REPUTATION_MAX_AGE = 30 * 86400
+# verdicts from AbuseIPDB lookups, kept longer than the full lookup results
+REPUTATION_KIND = "reputation"
 REPUTATION_REFRESH_SECONDS = 60
 CGNAT = ipaddress.ip_network("100.64.0.0/10")
 SETTINGS_REFRESH_SECONDS = 30
@@ -265,12 +267,17 @@ def private_ipv4(value):
     return address.version == 4 and (address.is_private or address in CGNAT) and not address.is_loopback
 
 
-def inside_address(record):
-    """The LAN host behind a NAT state (the private address among source, destination and NAT)."""
+def inside_endpoint(record):
+    """The LAN endpoint behind a NAT state (the private one among source, destination and NAT)."""
     for side in (record["nat"], record["src"], record["dst"]):
         if side and private_ipv4(side["address"]):
-            return side["address"]
+            return side
     return None
+
+
+def inside_address(record):
+    side = inside_endpoint(record)
+    return side["address"] if side else None
 
 
 def parse_mmdb(output):
@@ -580,11 +587,15 @@ class FlowTracker:
                 "inside": {}, "egress": {}, "remote_started": 0, "local_started": 0, "targets": {},
             })
             weight = delta[0] + delta[1] + 1
-            inside = inside_address(record)
+            inside_side = inside_endpoint(record)
+            inside = inside_side["address"] if inside_side else None
             if remote_initiated:
                 total["remote_started"] += weight
-                # what the remote side connected to: a port-forward target or the firewall itself
-                target = f'{inside or pair[0]}:{record["dst"]["port"] or record["protocol"]}'
+                # what the remote side connected to: a port-forward target (its inside port) or
+                # the firewall itself; ICMP ids are not ports
+                aimed = inside_side or record["dst"]
+                port = "" if record["protocol"] in ("icmp", "ipv6-icmp") else aimed["port"] or ""
+                target = f'{record["protocol"]}|{inside or pair[0]}|{port}'
                 total["targets"][target] = total["targets"].get(target, 0) + weight
             else:
                 total["local_started"] += weight
@@ -1183,13 +1194,13 @@ def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, inte
 
 
 def describe_target(target, names, networks, interfaces, local_addresses):
-    """'192.168.1.2:443' -> the inside host (or this firewall) a remote connection was aimed at."""
-    address, _, port = target.rpartition(":")
+    """'tcp|192.168.1.2|443' -> the inside host (or this firewall) a remote connection was aimed at."""
+    protocol, address, port = target.split("|")
+    service = service_name(protocol, port or None)
     if address in local_addresses:
-        return {"ip": address, "port": port, "name": "firewall", "interface": None,
-                "service": service_name("tcp", port) if port.isdigit() else port.upper()}
+        return {"ip": address, "port": port, "name": "firewall", "interface": None, "service": service}
     described = describe_inside(address, names, networks, interfaces)
-    described.update({"port": port, "service": service_name("tcp", port) if port.isdigit() else port.upper()})
+    described.update({"port": port, "service": service})
     return described
 
 
@@ -1213,7 +1224,11 @@ class Reputation:
         if self.checked is not None and now - self.checked < REPUTATION_REFRESH_SECONDS:
             return
         self.checked = now
-        rows = self.store.get_all("abuseipdb", max_age=REPUTATION_MAX_AGE) if self.store is not None else {}
+        rows = {}
+        if self.store is not None:
+            # full lookups cached before verdicts were kept separately still count
+            rows.update(self.store.get_all("abuseipdb", max_age=REPUTATION_MAX_AGE))
+            rows.update(self.store.get_all(REPUTATION_KIND, max_age=REPUTATION_MAX_AGE))
         self.flagged = {address for address, data in rows.items()
                         if isinstance(data, dict) and (data.get("score") or 0) >= self.threshold}
 

@@ -73,7 +73,8 @@ def update(force=False, key=None, fetch=download, now=None):
         return {"result": "skipped", "reason": "no key"}
     status = read_status()
     attempted = status.get("attempted")
-    if not force and attempted is not None and now - attempted < MIN_AGE_SECONDS:
+    # a timestamp from the future (clock fixed after boot) must not block updates
+    if not force and attempted is not None and 0 <= now - attempted < MIN_AGE_SECONDS:
         return {"result": "skipped", "reason": "recent"}
     status["attempted"] = now
     try:

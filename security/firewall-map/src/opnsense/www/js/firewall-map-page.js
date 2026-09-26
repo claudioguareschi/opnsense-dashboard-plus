@@ -383,7 +383,7 @@
                 ? `${status.count} ${T.blacklist_addresses}, ${T.updated} ${new Date(status.updated * 1000).toLocaleString()}`
                 : T.blacklist_pending;
             if (status.error) {
-                text += ` (${T.blacklist_error}: ${status.error})`;
+                text += ` (${T.blacklist_error}: ${plain(status.error)})`;
             }
         }
         return $('<div class="fwmap-feed"></div>').append($('<div></div>')

@@ -50,7 +50,8 @@ class SettingsController extends ApiControllerBase
             'provider' => (string)$general->provider,
             'update_days' => (string)$general->update_days,
             'abuseipdb_configured' => (string)$general->abuseipdb_key !== '',
-            'abuseipdb_blacklist' => json_decode((new Backend())->configdRun('firewallmap abuseipdb status'), true) ?: [],
+            // read directly: this runs on every widget and page load
+            'abuseipdb_blacklist' => json_decode((string)@file_get_contents('/var/db/firewallmap/abuseipdb.json'), true) ?: [],
             'threat_lists' => (string)$general->threat_lists,
             'database' => $this->status(),
         ];

@@ -247,11 +247,22 @@ class InitiatorTest(unittest.TestCase):
         tracker.update(COLLECTOR.parse_states(self.INBOUND), {"198.13.91.163"}, now=2.0)
         flow = tracker.flows[("198.13.91.163", "94.154.43.203")]
         self.assertEqual(flow["initiated"], "remote")
-        self.assertEqual(flow["targets"], ["192.168.1.2:443"])
+        self.assertEqual(flow["targets"], ["tcp|192.168.1.2|443"])
         # the server's replies dominate: the bytes go away from the firewall although the remote started it
         self.assertGreater(flow["rate_out"], flow["rate_in"])
-        target = COLLECTOR.describe_target("192.168.1.2:443", {"192.168.1.2": "mail"}, [], {}, {"198.13.91.163"})
+        target = COLLECTOR.describe_target("tcp|192.168.1.2|443", {"192.168.1.2": "mail"}, [], {}, {"198.13.91.163"})
         self.assertEqual((target["name"], target["service"]), ("mail", "HTTPS"))
+
+    def test_inbound_udp_to_the_firewall_keeps_its_protocol(self):
+        states = ("all udp 198.13.91.163:51820 <- 94.154.43.203:51234       MULTIPLE:MULTIPLE\n"
+                  "   age 00:00:01, expires in 00:00:59, 5:9 pkts, 400:900 bytes\n   id: 0b creatorid: 01\n")
+        tracker = COLLECTOR.FlowTracker(smoothing=1.0)
+        tracker.update([], {"198.13.91.163"}, now=0.0)
+        tracker.update(COLLECTOR.parse_states(states), {"198.13.91.163"}, now=2.0)
+        flow = tracker.flows[("198.13.91.163", "94.154.43.203")]
+        self.assertEqual(flow["targets"], ["udp|198.13.91.163|51820"])
+        target = COLLECTOR.describe_target(flow["targets"][0], {}, [], {}, {"198.13.91.163"})
+        self.assertEqual((target["name"], target["service"]), ("firewall", "WireGuard"))
 
     def test_outbound_flows_are_local(self):
         tracker = COLLECTOR.FlowTracker(smoothing=1.0)
@@ -261,7 +272,7 @@ class InitiatorTest(unittest.TestCase):
     def test_reputation_from_cached_lookups(self):
         with tempfile.TemporaryDirectory() as directory:
             store = COLLECTOR.CacheStore(os.path.join(directory, "cache.db"))
-            store.put_many("abuseipdb", [("94.154.43.203", {"score": 100}), ("8.8.8.8", {"score": 0})])
+            store.put_many(COLLECTOR.REPUTATION_KIND, [("94.154.43.203", {"score": 100}), ("8.8.8.8", {"score": 0})])
             reputation = COLLECTOR.Reputation(store)
             reputation.refresh(now=0.0)
             index = COLLECTOR.BlocklistIndex()
@@ -531,6 +542,10 @@ class InvestigateTest(unittest.TestCase):
                                              fetchers={"rdap": rdap, "abuseipdb": broken}, now=1000.0)
             self.assertEqual(result["rdap"], {"name": "GOGL"})
             self.assertEqual(result["abuseipdb"], {"error": "boom <key>"})
+            good = INVESTIGATE.investigate("8.8.8.8", store=store, fetchers={"abuseipdb": lambda: {"score": 90}}, now=1000.5)
+            self.assertEqual(good["abuseipdb"], {"score": 90})
+            # the verdict outlives the 6-hour lookup cache
+            self.assertEqual(store.get_all(COLLECTOR.REPUTATION_KIND, now=1000.0 + 7 * 86400), {"8.8.8.8": {"score": 90}})
             again = INVESTIGATE.investigate("8.8.8.8", store=store, fetchers={"rdap": rdap}, now=1001.0)
             self.assertTrue(again["rdap"]["cached"])
             self.assertEqual(calls, ["rdap"])

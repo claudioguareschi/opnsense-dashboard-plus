@@ -165,6 +165,10 @@ def investigate(address, store=None, key=None, fetchers=None, now=None):
             continue
         store.put_many(source, [(address, data)], now=now)
         store.prune(source, max_age=MAX_AGE[source], keep=MAX_ENTRIES[source], now=now)
+        if source == "abuseipdb":
+            # the verdict flags the address on the map for 30 days; a newer lookup replaces it
+            store.put_many(collector.REPUTATION_KIND, [(address, {"score": data.get("score")})], now=now)
+            store.prune(collector.REPUTATION_KIND, max_age=collector.REPUTATION_MAX_AGE, keep=20000, now=now)
         result[source] = data
     return result
 
