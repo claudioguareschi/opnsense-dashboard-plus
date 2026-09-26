@@ -78,13 +78,43 @@
         border-bottom: 1px solid rgba(128, 128, 128, .2); }
     #fwmap-review-count:empty { display: none; }
     #fwmap-review-count { background: rgb(196, 18, 48); }
-    .fwmap-queue-tabs { margin-bottom: 8px; }
-    .fwmap-queue-item { padding: 8px 0; border-bottom: 1px solid rgba(128, 128, 128, .2); }
-    .fwmap-queue-item .fwmap-queue-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
-    .fwmap-queue-item .fwmap-queue-meta { font-size: .9em; }
-    .fwmap-queue-item .fwmap-queue-actions { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
-    .fwmap-queue-note { white-space: pre-wrap; margin-top: 4px; padding: 4px 8px; border-left: 3px solid rgba(128, 128, 128, .35); }
-    .fwmap-status { text-transform: uppercase; font-size: .75em; }
+    .fwmap-q-dialog .modal-title .fwmap-q-subtitle { font-size: .75em; font-weight: normal; opacity: .85; margin-left: 10px; }
+    .fwmap-q-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .fwmap-q-tabs { flex: 1 1 auto; margin: 0; }
+    .fwmap-q-tabs > li > a { padding: 5px 12px; }
+    .fwmap-q-tabs .badge { margin-left: 4px; }
+    .fwmap-q-search { width: 260px; max-width: 100%; }
+    .fwmap-q-list { max-height: 62vh; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+    .fwmap-q-item { padding: 10px 12px; margin: 8px 0; border: 1px solid rgba(128, 128, 128, .22);
+        border-left: 4px solid rgb(196, 18, 48); border-radius: 4px; }
+    .fwmap-q-item.fwmap-q-reviewed { border-left-color: rgb(46, 139, 87); }
+    .fwmap-q-item.fwmap-q-dismissed { border-left-color: rgba(128, 128, 128, .6); opacity: .85; }
+    .fwmap-q-item.fwmap-q-blocked { border-left-color: rgb(70, 70, 70); }
+    .fwmap-q-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+    .fwmap-q-ip { font-family: SFMono-Regular, Menlo, Consolas, monospace; font-weight: 600; font-size: 1.05em; }
+    .fwmap-q-status-pill { font-size: .7em; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+        padding: 1px 7px; border-radius: 9px; background: rgba(128, 128, 128, .18); }
+    .fwmap-q-new .fwmap-q-status-pill { background: rgb(196, 18, 48); color: #fff; }
+    .fwmap-q-dir { font-size: .85em; font-weight: 600; }
+    .fwmap-q-in { color: rgb(200, 110, 0); }
+    .fwmap-q-out { color: rgb(46, 139, 87); }
+    .fwmap-q-seen { margin-left: auto; font-size: .85em; opacity: .7; white-space: nowrap; }
+    .fwmap-q-summary { margin-top: 4px; line-height: 1.4; }
+    .fwmap-q-chips { margin-top: 5px; }
+    .fwmap-q-chip { display: inline-block; font-size: .75em; font-weight: 600; margin: 0 4px 3px 0; padding: 1px 7px;
+        border-radius: 3px; color: rgb(196, 18, 48); border: 1px solid rgba(196, 18, 48, .45); }
+    .fwmap-q-meta { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: .85em; opacity: .7; margin-top: 2px; }
+    .fwmap-q-meta .fa, .fwmap-q-tools .fa { width: 1.1em; text-align: center; }
+    .fwmap-q-warning { margin-top: 5px; color: rgb(196, 18, 48); font-weight: 600; }
+    .fwmap-q-note { white-space: pre-wrap; margin-top: 6px; padding: 4px 8px; border-left: 3px solid rgba(128, 128, 128, .35);
+        background: rgba(128, 128, 128, .07); }
+    .fwmap-q-actions { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; margin-top: 8px; }
+    .fwmap-q-tools { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: .9em; }
+    .fwmap-q-decisions { display: flex; flex-wrap: wrap; gap: 4px; }
+    .fwmap-q-footer { float: left; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; text-align: left;
+        font-size: .9em; padding-top: 6px; }
+    .fwmap-q-record { font-weight: normal; margin: 0; }
+    .fwmap-q-source { opacity: .75; }
     @media (max-width: 1100px) {
         #fwmap-layout { flex-direction: column; }
         #fwmap-side { width: auto; flex: none; height: auto; }
@@ -182,8 +212,12 @@
         blacklist_error: "{{ lang._('last attempt failed') }}",
         blacklist_no_key: "{{ lang._('Add an AbuseIPDB API key in the Firewall Map widget settings to download it.') }}",
         review_queue: "{{ lang._('Review queue') }}",
-        review_intro: "{{ lang._('Permitted connections to or from flagged addresses. Setting a status never changes firewall rules.') }}",
-        record_threats: "{{ lang._('Keep recording while the map is closed (while the widget is on a dashboard)') }}",
+        review_intro: "{{ lang._('Allowed traffic to or from flagged addresses') }}",
+        record_threats: "{{ lang._('Record in the background') }}",
+        record_threats_hint: "{{ lang._('Keep recording while the map is closed, as long as the widget is on a dashboard. Setting a status never changes firewall rules.') }}",
+        queue_search: "{{ lang._('Filter by address, network, list, host…') }}",
+        ago: "{{ lang._('ago') }}",
+        blacklist_short: "{{ lang._('AbuseIPDB blacklist') }}",
         status_new: "{{ lang._('New') }}",
         status_reviewed: "{{ lang._('Reviewed') }}",
         status_dismissed: "{{ lang._('Dismissed') }}",
@@ -199,7 +233,7 @@
         note_title: "{{ lang._('Note for') }}",
         save: "{{ lang._('Save') }}",
         first_seen: "{{ lang._('First seen') }}",
-        last_seen: "{{ lang._('last seen') }}",
+        last_seen: "{{ lang._('Last seen') }}",
         samples: "{{ lang._('samples') }}",
         peak: "{{ lang._('peak') }}",
         inside_host: "{{ lang._('inside') }}",

@@ -460,34 +460,59 @@
         const lines = FirewallMapRenderer.flowSummary(pseudo, remote).map(esc);
         const address = esc(row.address);
         const status = STATUSES.includes(row.status) ? row.status : 'new';
-        const actions = [
-            status === 'new' ? `<button class="btn btn-xs btn-default fwmap-q-status" data-status="reviewed">${esc(T.mark_reviewed)}</button>` : '',
-            status !== 'dismissed' ? `<button class="btn btn-xs btn-default fwmap-q-status" data-status="dismissed">${esc(T.dismiss)}</button>` : '',
-            status !== 'new' ? `<button class="btn btn-xs btn-default fwmap-q-status" data-status="new">${esc(T.reopen)}</button>` : '',
-            `<button class="btn btn-xs btn-danger fwmap-q-block">${esc(T.block)}</button>`,
-            `<button class="btn btn-xs btn-default fwmap-q-note">${esc(T.edit_note)}</button>`,
+        const direction = pseudo.initiated === 'local'
+            ? `<span class="fwmap-q-dir fwmap-q-out" title="${esc(T.outbound)}"><i class="fa fa-sign-out"></i> ${esc(T.outbound)}</span>`
+            : `<span class="fwmap-q-dir fwmap-q-in" title="${esc(T.inbound)}"><i class="fa fa-sign-in"></i> ${esc(T.inbound)}</span>`;
+        const button = (cls, icon, label, extra = '') =>
+            `<button type="button" class="btn btn-xs ${cls}" ${extra}><i class="fa ${icon}"></i> ${esc(label)}</button>`;
+        const decisions = [
+            status === 'new' ? button('btn-default fwmap-q-status', 'fa-check', T.mark_reviewed, 'data-status="reviewed"') : '',
+            status !== 'dismissed' ? button('btn-default fwmap-q-status', 'fa-eye-slash', T.dismiss, 'data-status="dismissed"') : '',
+            status !== 'new' ? button('btn-default fwmap-q-status', 'fa-undo', T.reopen, 'data-status="new"') : '',
+            button('btn-default fwmap-q-note', 'fa-pencil', T.edit_note),
+            button('btn-danger fwmap-q-block', 'fa-ban', T.block),
         ].join('');
+        const tool = (cls, icon, label, href) => href
+            ? `<a href="${href}" target="_blank" rel="noopener noreferrer" title="${esc(label)}"><i class="fa ${icon}"></i> ${esc(label)}</a>`
+            : `<a href="#" class="${cls}" title="${esc(label)}"><i class="fa ${icon}"></i> ${esc(label)}</a>`;
+        const tools = [
+            tool('fwmap-q-investigate', 'fa-search', T.investigate),
+            tool('', 'fa-globe', T.whois, `https://bgp.he.net/ip/${encodeURIComponent(row.address)}`),
+            tool('', 'fa-external-link', 'AbuseIPDB', `https://www.abuseipdb.com/check/${encodeURIComponent(row.address)}`),
+            tool('fwmap-q-states', 'fa-list', T.show_states),
+            tool('fwmap-q-kill', 'fa-times-circle', T.kill_states),
+        ].join('');
+        const chips = (row.lists || []).map((name) => `<span class="fwmap-q-chip">${esc(listLabel(name))}</span>`).join('');
         const card = state.investigations.get(row.address);
-        return `<div class="fwmap-queue-item" data-address="${address}" data-status="${status}">
-            <div class="fwmap-queue-head"><b>${address}</b>
-                <span class="label label-default fwmap-status">${esc(T[`status_${status}`])}</span>
-                <span style="font-weight:600;color:rgb(196,18,48)">${(row.lists || []).map(esc).join(', ')}</span></div>
-            ${lines.map((line) => `<div class="fwmap-summary">${line}</div>`).join('')}
-            <div class="text-muted fwmap-queue-meta">${esc(T.first_seen)} ${esc(ago(row.first_seen))} · ${esc(T.last_seen)} ${esc(ago(row.last_seen))}
-                · ${esc(row.samples)} ${esc(T.samples)} · ${esc(T.peak)} ${esc(formatBytes(row.peak_bytes || 0))}
-                ${(row.services || []).length ? ` · ${(row.services || []).map(esc).join(', ')}` : ''}</div>
-            ${row.seen_after_block ? `<div class="text-danger">${esc(T.seen_after_block)}</div>` : ''}
-            ${row.note ? `<div class="fwmap-queue-note">${esc(row.note)}</div>` : ''}
-            <div class="fwmap-links">
-                <a href="#" class="fwmap-q-investigate"><b>${esc(T.investigate)}</b></a> ·
-                <a href="https://bgp.he.net/ip/${encodeURIComponent(row.address)}" target="_blank" rel="noopener noreferrer">${esc(T.whois)}</a> ·
-                <a href="https://www.abuseipdb.com/check/${encodeURIComponent(row.address)}" target="_blank" rel="noopener noreferrer">AbuseIPDB</a> ·
-                <a href="#" class="fwmap-q-states">${esc(T.show_states)}</a> ·
-                <a href="#" class="fwmap-q-kill">${esc(T.kill_states)}</a>
+        return `<div class="fwmap-q-item fwmap-q-${status}" data-address="${address}" data-status="${status}">
+            <div class="fwmap-q-head">
+                <span class="fwmap-q-ip">${address}</span>
+                <span class="fwmap-q-status-pill">${esc(T[`status_${status}`])}</span>
+                ${direction}
+                <span class="fwmap-q-seen" title="${esc(new Date(row.last_seen * 1000).toLocaleString())}">
+                    <i class="fa fa-clock-o"></i> ${esc(ago(row.last_seen))} ${esc(T.ago)}</span>
             </div>
+            ${lines.map((line) => `<div class="fwmap-q-summary">${line}</div>`).join('')}
+            <div class="fwmap-q-chips">${chips}</div>
+            <div class="fwmap-q-meta">
+                <span title="${esc(T.first_seen)}"><i class="fa fa-calendar"></i> ${esc(T.first_seen)} ${esc(ago(row.first_seen))} ${esc(T.ago)}</span>
+                <span title="${esc(T.samples)}"><i class="fa fa-bar-chart"></i> ${esc(row.samples)} ${esc(T.samples)}</span>
+                <span title="${esc(T.peak)}"><i class="fa fa-exchange"></i> ${esc(T.peak)} ${esc(formatBytes(row.peak_bytes || 0))}</span>
+                ${(row.services || []).length ? `<span><i class="fa fa-plug"></i> ${(row.services || []).map(esc).join(', ')}</span>` : ''}
+            </div>
+            ${row.seen_after_block ? `<div class="fwmap-q-warning"><i class="fa fa-exclamation-triangle"></i> ${esc(T.seen_after_block)}</div>` : ''}
+            ${row.note ? `<div class="fwmap-q-note"><i class="fa fa-sticky-note-o"></i> ${esc(row.note)}</div>` : ''}
             ${card ? `<div class="fwmap-investigation">${card}</div>` : ''}
-            <div class="fwmap-queue-actions">${actions}</div>
+            <div class="fwmap-q-actions">
+                <div class="fwmap-q-tools">${tools}</div>
+                <div class="fwmap-q-decisions">${decisions}</div>
+            </div>
         </div>`;
+    }
+
+    /** "FWMAP_Spamhaus_DROP" reads as "Spamhaus DROP". */
+    function listLabel(name) {
+        return plain(name).replace(/^FWMAP_/, '').replace(/_/g, ' ');
     }
 
     async function refreshQueueCount() {
@@ -519,7 +544,7 @@
         } catch (_) {
             settings = {};
         }
-        const $record = $(`<label style="font-weight:normal"><input type="checkbox"> ${esc(T.record_threats)}</label>`);
+        const $record = $(`<label class="fwmap-q-record" title="${esc(T.record_threats_hint)}"><input type="checkbox"> ${esc(T.record_threats)}</label>`);
         $record.find('input').prop('checked', settings.record_threats !== '0').on('change', async function () {
             try {
                 await postJSON('/api/firewallmap/settings/set', {record_threats: this.checked ? '1' : '0'});
@@ -527,17 +552,21 @@
                 notify(`${T.action_failed}: ${error.statusText || error}`, BootstrapDialog.TYPE_DANGER);
             }
         });
-        const $tabs = $('<ul class="nav nav-pills fwmap-queue-tabs"></ul>');
-        const $list = $('<div></div>');
-        $body.append(`<div class="text-muted">${esc(T.review_intro)}</div>`, blacklistStatus(settings), $record, $tabs, $list);
+        const $tabs = $('<ul class="nav nav-pills fwmap-q-tabs"></ul>');
+        const $search = $(`<input type="search" class="form-control input-sm fwmap-q-search" placeholder="${esc(T.queue_search)}">`);
+        const $list = $('<div class="fwmap-q-list"></div>');
+        $body.append($('<div class="fwmap-q-toolbar"></div>').append($tabs, $search), $list);
+        $search.on('input', () => render());
 
         const render = () => {
             $tabs.html([...STATUSES, 'all'].map((status) => `<li class="${status === view.status ? 'active' : ''}">`
                 + `<a href="#" data-status="${status}">${esc(T[`status_${status}`])}`
                 + `${status !== 'all' && view.counts[status] ? ` <span class="badge">${esc(view.counts[status])}</span>` : ''}</a></li>`).join(''));
             const names = insideNames();
-            $list.html(view.rows.length ? view.rows.map((row) => queueItem(row, names)).join('')
-                : `<div class="text-muted fwmap-empty">${esc(T.queue_empty)}</div>`);
+            const needle = String($search.val() || '').trim().toLowerCase();
+            const rows = needle ? view.rows.filter((row) => JSON.stringify(row).toLowerCase().includes(needle)) : view.rows;
+            $list.html(rows.length ? rows.map((row) => queueItem(row, names)).join('')
+                : `<div class="text-muted fwmap-empty"><i class="fa fa-check-circle"></i> ${esc(T.queue_empty)}</div>`);
         };
         const load = async () => {
             try {
@@ -558,7 +587,7 @@
             }
             load();
         };
-        const addressOf = (element) => String($(element).closest('.fwmap-queue-item').data('address'));
+        const addressOf = (element) => String($(element).closest('.fwmap-q-item').data('address'));
         const rowOf = (address) => view.rows.find((row) => row.address === address) || {};
 
         $tabs.on('click', 'a', function (event) {
@@ -620,9 +649,15 @@
                 killStates(addressOf(this));
             });
 
+        // what the queue is and where its data comes from, out of the way of the entries
+        const $footer = $('<div class="fwmap-q-footer"></div>')
+            .append($record)
+            .append(blacklistStatus(settings));
         BootstrapDialog.show({
-            title: T.review_queue, size: BootstrapDialog.SIZE_WIDE, message: $body,
+            title: `<i class="fa fa-list-alt"></i> ${esc(T.review_queue)} <span class="fwmap-q-subtitle">${esc(T.review_intro)}</span>`,
+            size: BootstrapDialog.SIZE_WIDE, message: $body, cssClass: 'fwmap-q-dialog',
             buttons: [{label: T.close, action: (dialog) => dialog.close()}],
+            onshown: (dialog) => dialog.getModalFooter().prepend($footer),
             onhidden: () => refreshQueueCount(),
         });
         load();
@@ -635,15 +670,15 @@
         let text = T.blacklist_no_key;
         if (settings.abuseipdb_configured) {
             text = status.updated
-                ? `${status.count} ${T.blacklist_addresses}, ${T.updated} ${new Date(status.updated * 1000).toLocaleString()}`
+                ? `${Number(status.count).toLocaleString()} ${T.blacklist_addresses}, ${T.updated} ${new Date(status.updated * 1000).toLocaleString([], {dateStyle: 'medium', timeStyle: 'short'})}`
                 : T.blacklist_pending;
             if (status.error) {
                 text += ` (${T.blacklist_error}: ${plain(status.error)})`;
             }
         }
-        return $('<div class="fwmap-feed"></div>').append($('<div></div>')
-            .append($('<b></b>').text(T.blacklist))
-            .append($('<div class="text-muted"></div>').text(text)));
+        return $('<div class="fwmap-q-source"></div>').attr('title', T.blacklist)
+            .append('<i class="fa fa-database"></i> ')
+            .append($('<span></span>').text(`${T.blacklist_short}: ${text}`));
     }
 
     /** First thing to read: did the firewall let it through, and does that matter. */
