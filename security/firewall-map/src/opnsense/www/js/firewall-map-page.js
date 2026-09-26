@@ -912,8 +912,10 @@
                 }
             }
         }
-        if ((shown.alerts || []).length || shown.flows.some((flow) => flow.ids)) {
-            message += ` · ${(shown.alerts || []).length + shown.flows.filter((flow) => flow.ids).length} ${T.ids_alerting}`;
+        const alerting = (shown.alerts || []).length + shown.flows.filter((flow) => flow.ids).length
+            + shown.blocks.filter((block) => block.ids).length;
+        if (alerting) {
+            message += ` · ${alerting} ${T.ids_alerting}`;
         }
         const threats = shown.flows.filter((flow) => flow.threat).length;
         if (threats) {
