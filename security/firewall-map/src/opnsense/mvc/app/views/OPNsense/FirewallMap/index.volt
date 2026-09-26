@@ -227,7 +227,8 @@
     .fwmap-kv th { font-weight: normal; opacity: .7; padding: 1px 8px 1px 0; vertical-align: top; white-space: nowrap; width: 40%; }
     .fwmap-kv td { padding: 1px 0; overflow-wrap: anywhere; }
     .fwmap-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0 10px; }
-    .fwmap-two .fwmap-kv th { width: 45%; }
+    .fwmap-two .fwmap-kv th { width: auto; }
+    .fwmap-two .fwmap-kv td { white-space: nowrap; }
     .fwmap-card-note { font-size: .78em; opacity: .7; margin-bottom: 3px; }
     .fwmap-empty-note { display: flex; gap: 10px; align-items: center; font-size: .82em; padding: 7px 10px; border-radius: 4px;
         background: rgba(128, 128, 128, .07); }

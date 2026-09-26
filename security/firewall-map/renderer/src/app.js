@@ -804,6 +804,17 @@ export function createFirewallMap(container, options = {}) {
         countryCode: object.dest.country_code, title: object.dest.city || object.dest.region || object.dest.country,
         members: object.members};
     }
+    if (layerId === 'firewall-map-endpoints' && !object.local && !(flowsByDest.get(`${object.lat},${object.lon}`) || []).length) {
+      // an endpoint that only exists because of Suricata: its own connection, or its alert history
+      const flow = (lastData.ids_flows || []).find((item) => item.dest === object.id);
+      if (flow) {
+        return {kind: 'idsflow', addresses: [flow.dest], country: flow.country, countryCode: flow.country_code,
+          title: flow.city || flow.country, idsFlow: flow, members: []};
+      }
+      const alert = (lastData.alerts || []).find((item) => item.source === object.id);
+      return {kind: 'alert', addresses: [object.id], country: object.country, countryCode: object.country_code,
+        title: object.city || object.country, alert: alert || {source: object.id, lists: []}};
+    }
     if (layerId === 'firewall-map-endpoints' && !object.local) {
       const members = flowsByDest.get(`${object.lat},${object.lon}`) || [];
       return {kind: 'flow', addresses: members.map((member) => member.dest), country: object.country,

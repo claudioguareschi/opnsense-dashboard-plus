@@ -1067,7 +1067,11 @@
             $details.html(`<div class="text-muted fwmap-empty">${esc(T.click_hint)}</div>`);
             return;
         }
-        const addresses = [...new Set(selection.addresses)];
+        const addresses = [...new Set(selection.addresses)].filter(Boolean);
+        if (!addresses.length) {
+            $details.html(`<div class="text-muted fwmap-empty">${esc(T.click_hint)}</div>`);
+            return;
+        }
         if (!addresses.includes(state.detailsAddress)) {
             state.detailsAddress = addresses[0];
         }
