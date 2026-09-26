@@ -84,15 +84,19 @@ export default class FirewallMap extends BaseWidget {
                 return;
             }
             this.enhancingDialog = false;
-            const $container = $hostnames.closest('.widget-option-container');
-            $container.find('.bootstrap-select').hide();
-            const $checkbox = $('<input type="checkbox" style="margin: 0 6px 0 0;">')
-                .prop('checked', $hostnames.val() === '1')
-                .on('change', (event) => $hostnames.val(event.target.checked ? '1' : '0'));
-            $container.children('div').first().empty().append(
-                $('<label style="font-weight: bold; cursor: pointer;"></label>')
-                    .append($checkbox, document.createTextNode(this.translations.hostnames)),
-            );
+            // yes/no options render as checkboxes backed by their (hidden) selects
+            for (const [option, label] of [['hostnames', this.translations.hostnames], ['asn', this.translations.asn]]) {
+                const $select = $(`#${this.id}-option-${option}`);
+                const $container = $select.closest('.widget-option-container');
+                $container.find('.bootstrap-select').hide();
+                const $checkbox = $('<input type="checkbox" style="margin: 0 6px 0 0;">')
+                    .prop('checked', $select.val() === '1')
+                    .on('change', (event) => $select.val(event.target.checked ? '1' : '0'));
+                $container.children('div').first().empty().append(
+                    $('<label style="font-weight: bold; cursor: pointer;"></label>')
+                        .append($checkbox, document.createTextNode(label)),
+                );
+            }
             const $provider = $(`#${this.id}-option-geo-provider`);
             const $key = $(`#${this.id}-option-geo-key`).closest('.widget-option-container');
             const toggleKey = () => $key.toggle(($provider.val() || '').startsWith('maxmind'));
@@ -147,6 +151,13 @@ export default class FirewallMap extends BaseWidget {
                 options: choices([['0', this.translations.labels_off], ['1', this.translations.hostnames]]),
                 default: '0',
             },
+            asn: {
+                id: `${this.id}-option-asn`,
+                title: this.translations.asn,
+                type: 'select',
+                options: choices([['1', this.translations.asn], ['0', this.translations.labels_off]]),
+                default: '1',
+            },
             ...this._geoOptions(choices),
         };
     }
@@ -159,6 +170,7 @@ export default class FirewallMap extends BaseWidget {
             maxArcs: parseInt(config.max_arcs, 10),
             labels: config.labels !== '0',
             hostnames: config.hostnames === '1',
+            asn: config.asn !== '0',
         };
     }
 

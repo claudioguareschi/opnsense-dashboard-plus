@@ -10,7 +10,7 @@ const ARC_SAMPLES = 32;
 const LINK_WIDTH = 1.5;
 const HEAVY_WIDTH = 3;
 // heavy talkers: the busiest few links (if above a floor), or anything above a byte rate
-const DEFAULT_OPTIONS = {heavyTop: 5, heavyRate: 1000000, maxArcs: 120, labels: true};
+const DEFAULT_OPTIONS = {heavyTop: 5, heavyRate: 1000000, maxArcs: 120, labels: true, asn: true};
 const HEAVY_TOP_MIN_RATE = 10000;
 // city labels appear once the map is zoomed this far past the fitted world view
 const LABEL_ZOOM_STEP = 1.2;
@@ -156,7 +156,7 @@ function escapeHtml(text) {
 }
 
 /** Hover card for an endpoint (all flows to that place) or a single arch. */
-function describe(place, members, locations, hostnames = {}) {
+function describe(place, members, locations, hostnames = {}, showAsn = true) {
   const rateIn = members.reduce((sum, flow) => sum + (flow.rate_in ?? 0), 0);
   const rateOut = members.reduce((sum, flow) => sum + (flow.rate_out ?? 0), 0);
   const services = [...new Set(members.flatMap((flow) => flow.services || []))].slice(0, 5);
@@ -165,10 +165,12 @@ function describe(place, members, locations, hostnames = {}) {
     .sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))
     .slice(0, 6)
     .map((flow) => {
+      // per address: hostname (when looked up), then the IP, then its network (ASN)
       const location = locations.get(flow.dest);
-      const asn = location?.asn ? ` · AS${location.asn} ${escapeHtml(location.as_org || '')}` : '';
-      const hostname = hostnames[flow.dest] ? `<div style="opacity:.75">${escapeHtml(hostnames[flow.dest])}</div>` : '';
-      return `<div>${escapeHtml(flow.dest)}${asn}</div>${hostname}`;
+      const hostname = hostnames?.[flow.dest] ? `<div>${escapeHtml(hostnames[flow.dest])}</div>` : '';
+      const asn = showAsn && location?.asn
+        ? `<div style="opacity:.7">AS${location.asn} ${escapeHtml(location.as_org || '')}</div>` : '';
+      return `<div style="margin-top:3px">${hostname}<div>${escapeHtml(flow.dest)}</div>${asn}</div>`;
     });
   const more = members.length > 6 ? `<div>+${members.length - 6} more</div>` : '';
   const title = [place.city || place.region, place.country].filter(Boolean).join(', ') || place.name || place.id;
@@ -295,9 +297,9 @@ export function createFirewallMap(container, options = {}) {
           <div>${own.length} active links</div>
           <div style="margin-top:4px">↓ ${formatRate(rateIn)} &nbsp; ↑ ${formatRate(rateOut)}</div>`;
       } else if (layer.id === 'firewall-map-endpoints') {
-        html = describe(object, flowsByDest.get(`${object.lat},${object.lon}`) || [], locationIndex, lastData.hostnames);
+        html = describe(object, flowsByDest.get(`${object.lat},${object.lon}`) || [], locationIndex, lastData.hostnames, settings.asn);
       } else if (layer.id === 'firewall-map-arcs') {
-        html = describe(object.dest, object.members, locationIndex, lastData.hostnames);
+        html = describe(object.dest, object.members, locationIndex, lastData.hostnames, settings.asn);
       }
       return html && {
         html,
