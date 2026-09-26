@@ -453,7 +453,7 @@
                 <span class="fwmap-talker-icon">${row.flag || `${ic(row.icon)}`}</span>
                 <span class="fwmap-talker-text"><span class="fwmap-talker-label">${esc(row.label)}</span>
                     <span class="fwmap-talker-sub">${sub}</span></span>
-                ${chart}${value}${extra}${ic('chevron', 'fwmap-talker-chevron')}
+                ${chart}${value}${extra}
             </div>`;
         }).join(''));
         state.talkerRows = rows;

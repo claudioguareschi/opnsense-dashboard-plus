@@ -92,7 +92,7 @@
     .fwmap-talker-search .fa { position: absolute; left: 10px; top: 9px; opacity: .45; }
     .fwmap-talker-search input { width: 100%; height: 32px; padding: 4px 8px 4px 30px; }
     .fwmap-talker-tools select { width: auto; min-width: 136px; height: 32px; padding: 2px 8px; }
-    .fwmap-talker { display: grid; grid-template-columns: 30px minmax(0, 1fr) 64px 78px auto 12px; column-gap: 10px;
+    .fwmap-talker { display: grid; grid-template-columns: 30px minmax(0, 1fr) 64px 80px 62px; column-gap: 10px;
         align-items: center; padding: 7px 6px; cursor: pointer; border-radius: 5px; }
     .fwmap-talker + .fwmap-talker { border-top: 1px solid rgba(128, 128, 128, .08); }
     .fwmap-talker:hover { background: rgba(128, 128, 128, .08); }
@@ -106,7 +106,7 @@
     .fwmap-talker-rate, .fwmap-talker-count { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 500; }
     .fwmap-talker-flows { font-size: .85em; opacity: .6; white-space: nowrap; text-align: right; }
     .fwmap-talker-chevron { opacity: .4; font-size: .85em; }
-    #fwmap-side.fwmap-narrow .fwmap-talker { grid-template-columns: 26px minmax(0, 1fr) 56px 70px 12px; }
+    #fwmap-side.fwmap-narrow .fwmap-talker { grid-template-columns: 26px minmax(0, 1fr) 56px 72px; }
     #fwmap-side.fwmap-narrow .fwmap-talker-flows { display: none; }
     .fwmap-details-head { display: flex; justify-content: space-between; }
     .fwmap-details-head a { font-size: 1.3em; line-height: 1; text-decoration: none; }
