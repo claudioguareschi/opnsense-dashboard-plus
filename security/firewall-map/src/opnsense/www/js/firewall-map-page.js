@@ -469,7 +469,7 @@
             status === 'new' ? button('btn-default fwmap-q-status', 'fa-check', T.mark_reviewed, 'data-status="reviewed"') : '',
             status !== 'dismissed' ? button('btn-default fwmap-q-status', 'fa-eye-slash', T.dismiss, 'data-status="dismissed"') : '',
             status !== 'new' ? button('btn-default fwmap-q-status', 'fa-undo', T.reopen, 'data-status="new"') : '',
-            button('btn-default fwmap-q-note', 'fa-pencil', T.edit_note),
+            button('btn-default fwmap-q-edit-note', 'fa-pencil', T.edit_note),
             button('btn-danger fwmap-q-block', 'fa-ban', T.block),
         ].join('');
         const tool = (cls, icon, label, href) => href
@@ -600,7 +600,7 @@
                 const address = addressOf(this);
                 act(() => setThreat(address, String($(this).data('status'))));
             })
-            .on('click', '.fwmap-q-note', function () {
+            .on('click', '.fwmap-q-edit-note', function () {
                 const address = addressOf(this);
                 const $text = $('<textarea class="form-control" rows="4" maxlength="1000"></textarea>').val(plain(rowOf(address).note || ''));
                 BootstrapDialog.show({
