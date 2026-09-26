@@ -51,6 +51,7 @@
         selection: null,
         investigations: new Map(),
         abuseScores: new Map(),
+        queueExpanded: new Set(),
         abuseChecking: new Set(),
         abuseConfigured: false,
     };
@@ -79,6 +80,13 @@
         'network': '<rect x="9" y="2" width="6" height="6" rx="1"/><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3M12 12V8"/>',
         'plus': '<path d="M12 5v14M5 12h14"/>',
         'minus': '<path d="M5 12h14"/>',
+        'calendar': '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+        'clock': '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+        'swap': '<path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/>',
+        'eye-off': '<path d="M9.9 4.2A10 10 0 0 1 12 4c7 0 10 8 10 8a13 13 0 0 1-1.7 2.7"/><path d="M6.6 6.6A13.5 13.5 0 0 0 2 12s3 8 10 8a9.7 9.7 0 0 0 5.4-1.6"/><path d="M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="m2 2 20 20"/>',
+        'undo': '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>',
+        'chevron-down': '<path d="m6 9 6 6 6-6"/>',
+        'list-box': '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/>',
         'expand': '<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>',
     };
     // the Font Awesome names used across the page, mapped to the outline set
@@ -638,53 +646,103 @@
         const lines = FirewallMapRenderer.flowSummary(pseudo, remote).map(esc);
         const address = esc(row.address);
         const status = STATUSES.includes(row.status) ? row.status : 'new';
-        const direction = pseudo.initiated === 'local'
-            ? `<span class="fwmap-q-dir fwmap-q-out" title="${esc(T.outbound)}"><i class="fa fa-sign-out"></i> ${esc(T.outbound)}</span>`
-            : `<span class="fwmap-q-dir fwmap-q-in" title="${esc(T.inbound)}"><i class="fa fa-sign-in"></i> ${esc(T.inbound)}</span>`;
-        const button = (cls, icon, label, extra = '') =>
-            `<button type="button" class="btn btn-xs ${cls}" ${extra}><i class="fa ${icon}"></i> ${esc(label)}</button>`;
-        const decisions = [
-            status === 'new' ? button('btn-default fwmap-q-status', 'fa-check', T.mark_reviewed, 'data-status="reviewed"') : '',
-            status !== 'dismissed' ? button('btn-default fwmap-q-status', 'fa-eye-slash', T.dismiss, 'data-status="dismissed"') : '',
-            status !== 'new' ? button('btn-default fwmap-q-status', 'fa-undo', T.reopen, 'data-status="new"') : '',
-            button('btn-default fwmap-q-edit-note', 'fa-pencil', T.edit_note),
-            button('btn-danger fwmap-q-block', 'fa-ban', T.block),
-        ].join('');
-        const tool = (cls, icon, label, href) => href
-            ? `<a href="${href}" target="_blank" rel="noopener noreferrer" title="${esc(label)}"><i class="fa ${icon}"></i> ${esc(label)}</a>`
-            : `<a href="#" class="${cls}" title="${esc(label)}"><i class="fa ${icon}"></i> ${esc(label)}</a>`;
-        const tools = [
-            tool('fwmap-q-investigate', 'fa-search', T.investigate),
-            tool('', 'fa-globe', T.whois, `https://bgp.he.net/ip/${encodeURIComponent(row.address)}`),
-            tool('', 'fa-external-link', 'AbuseIPDB', `https://www.abuseipdb.com/check/${encodeURIComponent(row.address)}`),
-            tool('fwmap-q-states', 'fa-list', T.show_states),
-            tool('fwmap-q-kill', 'fa-times-circle', T.kill_states),
-        ].join('');
+        const inbound = pseudo.initiated !== 'local';
+        // the local side: the port-forward target, the inside host, or the firewall itself
+        const target = targets[0];
+        const inside = pseudo.inside[0];
+        let localIcon = 'shield';
+        let localName = T.this_firewall_title;
+        let localLines = [];
+        let service = row.services?.[0] ? `${row.services[0]}${ports[row.services[0]] ? ` · ${ports[row.services[0]].split('/').reverse().join('/').toUpperCase()}` : ''}` : '';
+        if (inbound && target) {
+            service = `${target.service}${target.port ? ` · ${target.protocol.toUpperCase()}/${target.port}` : ''}`;
+            if (!target.firewall) {
+                localIcon = 'server';
+                localName = target.name || target.ip;
+                localLines = [target.name ? target.ip : '', T.port_forward];
+            } else {
+                localLines = [target.ip];
+            }
+            if (targets.length > 1) {
+                localLines.push(`+ ${targets.length - 1} ${targets.length > 2 ? T.other_targets : T.other_target}`);
+            }
+        } else if (!inbound && inside) {
+            localIcon = 'laptop';
+            localName = inside.name || inside.ip;
+            localLines = [inside.name ? inside.ip : ''];
+            if (pseudo.inside.length > 1) {
+                localLines.push(`+ ${pseudo.inside.length - 1} ${T.other_hosts}`);
+            }
+        }
+        const cc = saved.country_code || live.country_code;
+        const org = saved.org || live.org;
         const chips = (row.lists || []).map((name) => `<span class="fwmap-q-chip">${esc(listLabel(name))}</span>`).join('');
+        const expanded = state.queueExpanded.has(row.address);
         const card = state.investigations.get(row.address);
-        return `<div class="fwmap-q-item fwmap-q-${status}" data-address="${address}" data-status="${status}">
-            <div class="fwmap-q-head">
-                <span class="fwmap-q-ip">${address}</span>
-                <span class="fwmap-q-status-pill">${esc(T[`status_${status}`])}</span>
-                ${direction}
-                <span class="fwmap-q-seen" title="${esc(new Date(row.last_seen * 1000).toLocaleString())}">
-                    <i class="fa fa-clock-o"></i> ${esc(ago(row.last_seen))} ${esc(T.ago)}</span>
+        const btn = (cls, icon, label, extra = '') =>
+            `<button type="button" class="btn btn-default ${cls}" ${extra}>${ic(icon)}<span>${esc(label)}</span></button>`;
+        const link = (href, icon, label) =>
+            `<a class="btn btn-default" href="${href}" target="_blank" rel="noopener noreferrer">${ic(icon)}<span>${esc(label)}</span></a>`;
+        const review = status === 'new'
+            ? btn('fwmap-q-status', 'check', T.mark_reviewed, 'data-status="reviewed"')
+            : btn('fwmap-q-status', 'undo', T.reopen, 'data-status="new"');
+        return `<div class="fwmap-q-item fwmap-q-${status}${expanded ? ' fwmap-q-open' : ''}" data-address="${address}" data-status="${status}">
+            <div class="fwmap-q-top">
+                <div class="fwmap-q-who">
+                    <div class="fwmap-q-ipline"><span class="fwmap-q-ip">${address}</span>
+                        <span class="fwmap-q-badge fwmap-q-badge-${status}">${esc(T[`status_${status}`])}</span></div>
+                    ${org ? `<div class="fwmap-q-org">${esc(org)}</div>` : ''}
+                    ${remote.country ? `<div class="fwmap-q-country">${flagOf(cc)}${esc(remote.country)}</div>` : ''}
+                    ${chips ? `<div class="fwmap-q-chips">${chips}</div>` : ''}
+                </div>
+                <div class="fwmap-q-flow">
+                    <div class="fwmap-q-diagram">
+                        ${ic('globe', 'fwmap-q-end')}
+                        <div class="fwmap-q-link">
+                            <div class="fwmap-q-svc">${esc(service)}</div>
+                            <div class="fwmap-q-arrow ${inbound ? 'fwmap-q-arrow-in' : 'fwmap-q-arrow-out'}"></div>
+                            <span class="fwmap-q-dirpill">${esc(inbound ? `↘ ${T.inbound}` : `↖ ${T.outbound}`)}</span>
+                        </div>
+                        ${ic(localIcon, 'fwmap-q-end')}
+                        <div class="fwmap-q-local"><div class="fwmap-q-local-name">${esc(localName)}</div>
+                            ${localLines.filter(Boolean).map((line, index) => `<div class="${index ? 'fwmap-q-muted' : ''}">${esc(line)}</div>`).join('')}</div>
+                    </div>
+                    <div class="fwmap-q-meta">
+                        <span>${ic('calendar')} ${esc(T.first_seen)} ${esc(ago(row.first_seen))} ${esc(T.ago)}</span>
+                        <span>${ic('chart')} ${esc(row.samples)} ${esc(T.samples)}</span>
+                        <span>${ic('swap')} ${esc(T.peak)} ${esc(formatBytes(row.peak_bytes || 0))}</span>
+                    </div>
+                    ${idsLines(row.ids)}
+                </div>
+                <div class="fwmap-q-when">
+                    <span title="${esc(new Date(row.last_seen * 1000).toLocaleString())}">${ic('clock')} ${esc(ago(row.last_seen))} ${esc(T.ago)}</span>
+                    <a href="#" class="fwmap-q-expand" title="${esc(T.more_details)}">${ic(expanded ? 'chevron-down' : 'chevron')}</a>
+                </div>
             </div>
-            ${lines.map((line) => `<div class="fwmap-q-summary">${line}</div>`).join('')}
-            ${idsLines(row.ids)}
-            <div class="fwmap-q-chips">${chips}</div>
-            <div class="fwmap-q-meta">
-                <span title="${esc(T.first_seen)}"><i class="fa fa-calendar"></i> ${esc(T.first_seen)} ${esc(ago(row.first_seen))} ${esc(T.ago)}</span>
-                <span title="${esc(T.samples)}"><i class="fa fa-bar-chart"></i> ${esc(row.samples)} ${esc(T.samples)}</span>
-                <span title="${esc(T.peak)}"><i class="fa fa-exchange"></i> ${esc(T.peak)} ${esc(formatBytes(row.peak_bytes || 0))}</span>
-                ${(row.services || []).length ? `<span><i class="fa fa-plug"></i> ${(row.services || []).map(esc).join(', ')}</span>` : ''}
-            </div>
-            ${row.seen_after_block ? `<div class="fwmap-q-warning"><i class="fa fa-exclamation-triangle"></i> ${esc(T.seen_after_block)}</div>` : ''}
-            ${row.note ? `<div class="fwmap-q-note"><i class="fa fa-sticky-note-o"></i> ${esc(row.note)}</div>` : ''}
+            ${row.seen_after_block ? `<div class="fwmap-q-warning">${ic('alert')} ${esc(T.seen_after_block)}</div>` : ''}
+            ${expanded ? `<div class="fwmap-q-more">${lines.map((line) => `<div>${line}</div>`).join('')}
+                ${(row.services || []).length ? `<div class="fwmap-q-muted">${esc(T.services_seen)}: ${(row.services || []).map(esc).join(', ')}</div>` : ''}</div>` : ''}
+            ${row.note ? `<div class="fwmap-q-note">${esc(row.note)}</div>` : ''}
             ${card ? `<div class="fwmap-investigation">${card}</div>` : ''}
-            <div class="fwmap-q-actions">
-                <div class="fwmap-q-tools">${tools}</div>
-                <div class="fwmap-q-decisions">${decisions}</div>
+            <div class="fwmap-q-bar">
+                <div class="fwmap-q-left">
+                    <button type="button" class="btn btn-primary fwmap-q-investigate">${ic('search')}<span>${esc(T.investigate)}</span></button>
+                    ${btn('fwmap-q-states', 'list', T.show_states)}
+                    ${link(`https://bgp.he.net/ip/${encodeURIComponent(row.address)}`, 'globe', T.whois)}
+                    ${link(`https://www.abuseipdb.com/check/${encodeURIComponent(row.address)}`, 'external', 'AbuseIPDB')}
+                </div>
+                <div class="fwmap-q-right">
+                    ${review}
+                    ${status !== 'dismissed' ? btn('fwmap-q-status', 'eye-off', T.dismiss, 'data-status="dismissed"') : ''}
+                    <button type="button" class="btn btn-danger fwmap-q-block">${ic('ban')}<span>${esc(T.block)}</span></button>
+                    <div class="btn-group">
+                        <button type="button" class="btn btn-default dropdown-toggle fwmap-q-menu" data-toggle="dropdown">${ic('chevron-down')}</button>
+                        <ul class="dropdown-menu dropdown-menu-right">
+                            <li><a href="#" class="fwmap-q-edit-note">${esc(T.edit_note)}</a></li>
+                            <li><a href="#" class="fwmap-q-kill">${esc(T.kill_states)}</a></li>
+                        </ul>
+                    </div>
+                </div>
             </div>
         </div>`;
     }
@@ -734,7 +792,8 @@
         const $tabs = $('<ul class="nav nav-pills fwmap-q-tabs"></ul>');
         const $search = $(`<input type="search" class="form-control input-sm fwmap-q-search" placeholder="${esc(T.queue_search)}">`);
         const $list = $('<div class="fwmap-q-list"></div>');
-        $body.append($('<div class="fwmap-q-toolbar"></div>').append($tabs, $search), $list);
+        const $searchBox = $(`<div class="fwmap-q-searchbox">${ic('search')}</div>`).append($search);
+        $body.append($('<div class="fwmap-q-toolbar"></div>').append($tabs, $searchBox), $list);
         $search.on('input', () => render());
 
         const render = () => {
@@ -752,6 +811,7 @@
                 const result = await $.getJSON(`/api/firewallmap/threats/list/${view.status}`);
                 view.rows = result.rows || [];
                 view.counts = result.counts || {};
+                $('.fwmap-q-newcount b').text(view.counts.new || 0);
                 $('#fwmap-review-count').text(view.counts.new || '');
             } catch (error) {
                 notify(`${T.action_failed}: ${error.statusText || error}`, BootstrapDialog.TYPE_DANGER);
@@ -779,7 +839,18 @@
                 const address = addressOf(this);
                 act(() => setThreat(address, String($(this).data('status'))));
             })
-            .on('click', '.fwmap-q-edit-note', function () {
+            .on('click', '.fwmap-q-expand', function (event) {
+                event.preventDefault();
+                const address = addressOf(this);
+                if (state.queueExpanded.has(address)) {
+                    state.queueExpanded.delete(address);
+                } else {
+                    state.queueExpanded.add(address);
+                }
+                render();
+            })
+            .on('click', '.fwmap-q-edit-note', function (event) {
+                event.preventDefault();
                 const address = addressOf(this);
                 const $text = $('<textarea class="form-control" rows="4" maxlength="1000"></textarea>').val(plain(rowOf(address).note || ''));
                 BootstrapDialog.show({
@@ -825,6 +896,7 @@
             })
             .on('click', '.fwmap-q-kill', function (event) {
                 event.preventDefault();
+                event.preventDefault();
                 killStates(addressOf(this));
             });
 
@@ -833,7 +905,9 @@
             .append($record)
             .append(blacklistStatus(settings));
         BootstrapDialog.show({
-            title: `<i class="fa fa-list-alt"></i> ${esc(T.review_queue)} <span class="fwmap-q-subtitle">· ${esc(T.review_intro)}</span>`,
+            title: `<div class="fwmap-q-titlebar">${ic('list-box', 'fwmap-q-title-ic')}<div><div class="fwmap-q-title">${esc(T.review_queue)}</div>`
+                + `<div class="fwmap-q-subtitle">${esc(T.review_intro)}</div></div>`
+                + `<span class="fwmap-q-newcount"><b></b> ${esc(T.new_short)}</span></div>`,
             size: BootstrapDialog.SIZE_WIDE, message: $body, cssClass: 'fwmap-q-dialog',
             buttons: [{label: T.close, action: (dialog) => dialog.close()}],
             onshown: (dialog) => dialog.getModalFooter().prepend($footer),

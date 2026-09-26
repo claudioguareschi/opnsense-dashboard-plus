@@ -1885,6 +1885,7 @@ class ThreatRecorder:
                     "asn": (location or {}).get("asn"),
                     "org": (location or {}).get("as_org"),
                     "country": (location or {}).get("country_name") or (location or {}).get("country"),
+                    "country_code": (location or {}).get("country"),
                     "city": (location or {}).get("city"),
                 }.items() if value}
             if alerts is not None:
