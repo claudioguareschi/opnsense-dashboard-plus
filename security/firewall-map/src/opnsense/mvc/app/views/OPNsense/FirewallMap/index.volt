@@ -52,8 +52,8 @@
     #fwmap-statusbar #fwmap-status { flex: 1; min-width: 0; }
     #fwmap-map {
         position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; border-radius: 6px;
-        /* header, page title, toolbar, content padding and the fixed footer */
-        
+        /* the map's own layers (canvas, legend, zoom buttons) stack inside it, never above OPNsense's menus */
+        isolation: isolate;
     }
     #fwmap-grid { pointer-events: none; position: absolute; inset: 0; z-index: 0; background-size: 48px 48px; }
     #fwmap-canvas { position: absolute; inset: 0; z-index: 1; text-align: left; }
