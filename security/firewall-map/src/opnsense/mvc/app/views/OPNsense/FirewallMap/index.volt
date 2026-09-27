@@ -63,7 +63,7 @@
         display: flex; flex-wrap: wrap; gap: 4px 12px; max-width: 70%;
     }
     .fwmap-legend-item i { display: inline-block; width: 22px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
-    .fwmap-legend-item i.fwmap-legend-ring { width: 11px; height: 11px; border-radius: 50%; border: 2px solid rgb(196, 18, 48); background: transparent; }
+    .fwmap-legend-item i.fwmap-legend-ring { width: 11px; height: 11px; border-radius: 50%; border: 2px solid currentColor; opacity: .7; background: transparent; }
     .fwmap-status-ids { color: rgb(220, 50, 40); }
     .fwmap-status-ids.active { font-weight: 600; text-decoration: underline; }
     #fwmap-updated { white-space: nowrap; opacity: .8; }
@@ -120,12 +120,12 @@
     .fwmap-details-head a { font-size: 1.3em; line-height: 1; text-decoration: none; }
     .fwmap-address { margin-top: 6px; }
     .fwmap-summary { font-weight: 600; }
-    .fwmap-ids { margin-top: 2px; color: rgb(200, 110, 0); }
+    .fwmap-ids { margin-top: 2px; opacity: .85; }
     .fwmap-sec { margin-top: 8px; }
     .fwmap-sec-title { font-size: .75em; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; opacity: .7;
         border-bottom: 1px solid rgba(128, 128, 128, .25); margin-bottom: 3px; padding-bottom: 1px; }
     .fwmap-sig { margin-bottom: 4px; }
-    .fwmap-ids-high { color: rgb(196, 18, 48); font-weight: 600; }
+    .fwmap-ids-high { font-weight: 600; opacity: 1; }
     .fwmap-verdict { margin: 4px 0; padding: 3px 8px; border-radius: 3px; font-weight: 600; }
     .fwmap-verdict-allowed { background: rgba(46, 139, 87, .14); color: rgb(30, 110, 65); }
     .fwmap-verdict-danger { background: rgb(196, 18, 48); color: #fff; }
@@ -181,17 +181,17 @@
     .fwmap-q-ip { font-size: 21px; font-weight: 600; letter-spacing: -.01em; }
     .fwmap-q-badge { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 1px 9px; border-radius: 10px;
         background: rgba(128, 128, 128, .2); }
-    .fwmap-q-badge-new { background: rgb(214, 50, 30); color: #fff; }
-    .fwmap-q-badge-reviewed { background: rgba(40, 150, 70, .16); color: rgb(28, 115, 55); }
-    .fwmap-q-badge-blocked { background: rgb(80, 80, 80); color: #fff; }
-    .fwmap-q-badge-dropped { background: rgb(120, 40, 160); color: #fff; }
+    .fwmap-q-badge-new { background: rgb(196, 18, 48); color: #fff; }
+    .fwmap-q-badge-blocked, .fwmap-q-badge-dropped { background: rgb(232, 176, 0); color: rgb(55, 38, 0); }
     .fwmap-q-hostname { font-size: 13px; opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
     .fwmap-q-org { margin-top: 3px; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fwmap-q-country { font-size: 15px; margin-top: 2px; }
     .fwmap-q-country .fwmap-flag.flag-icon { width: 20px; height: 15px; margin-right: 8px; vertical-align: -2px; }
     .fwmap-q-chips { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
-    .fwmap-q-chip { font-size: 12.5px; font-weight: 600; padding: 2px 10px; border-radius: 4px; color: rgb(214, 50, 30);
-        border: 1px solid rgba(214, 50, 30, .45); background: rgba(214, 50, 30, .05); }
+    .fwmap-q-chip { font-size: 12.5px; font-weight: 600; padding: 2px 10px; border-radius: 4px; color: rgb(196, 18, 48);
+        border: 1px solid rgba(196, 18, 48, .45); background: rgba(196, 18, 48, .05); }
+    .fwmap-q-blocked .fwmap-q-chip, .fwmap-q-dropped .fwmap-q-chip { color: rgb(150, 105, 0); border-color: rgba(200, 150, 0, .6); background: rgba(232, 176, 0, .08); }
+    .fwmap-q-reviewed .fwmap-q-chip, .fwmap-q-dismissed .fwmap-q-chip { color: inherit; border-color: rgba(128, 128, 128, .4); background: transparent; }
     .fwmap-q-flow { min-width: 0; }
     .fwmap-q-diagram { display: flex; align-items: flex-start; gap: 12px; }
     .fwmap-q-diagram .fwmap-q-end { width: 34px; height: 34px; flex: none; margin-top: 6px; opacity: .8; stroke-width: 1.5; }
@@ -244,13 +244,15 @@
     .fwmap-vpill { display: inline-block; font-weight: 600; font-size: .92em; padding: 3px 14px; border-radius: 14px; white-space: nowrap; }
     .fwmap-vpill-ok { background: rgb(40, 150, 70); color: #fff; box-shadow: 0 0 0 4px rgba(40, 150, 70, .14); }
     .fwmap-vpill-danger { background: rgb(196, 18, 48); color: #fff; box-shadow: 0 0 0 4px rgba(196, 18, 48, .14); }
-    .fwmap-vpill-blocked { background: rgb(80, 80, 80); color: #fff; box-shadow: 0 0 0 4px rgba(80, 80, 80, .14); }
+    .fwmap-vpill-blocked { background: rgb(110, 110, 110); color: #fff; box-shadow: 0 0 0 4px rgba(110, 110, 110, .14); }
+    .fwmap-vpill-contained { background: rgb(232, 176, 0); color: rgb(55, 38, 0); box-shadow: 0 0 0 4px rgba(232, 176, 0, .18); }
     .fwmap-vpill-muted { background: rgba(128, 128, 128, .2); box-shadow: 0 0 0 4px rgba(128, 128, 128, .08); }
     .fwmap-pill { display: inline-block; font-size: .92em; font-weight: 500; padding: 0 8px; border-radius: 9px; white-space: nowrap; }
     .fwmap-pill-ok { background: rgba(40, 150, 70, .16); color: rgb(28, 115, 55); }
     .fwmap-pill-danger { background: rgb(196, 18, 48); color: #fff; }
     .fwmap-pill-warning { background: rgba(230, 140, 0, .18); color: rgb(170, 95, 0); }
-    .fwmap-pill-blocked { background: rgba(80, 80, 80, .85); color: #fff; }
+    .fwmap-pill-blocked { background: rgba(110, 110, 110, .9); color: #fff; }
+    .fwmap-pill-contained { background: rgb(232, 176, 0); color: rgb(55, 38, 0); }
     .fwmap-pill-muted { background: rgba(128, 128, 128, .18); }
     .fwmap-picker { margin: 8px 0 0; font-size: .85em; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
     .fwmap-pick { padding: 0 6px; border-radius: 8px; }
@@ -471,6 +473,9 @@
         attempts: "{{ lang._('Attempts') }}",
         blocked: "{{ lang._('Blocked') }}",
         blocked_attempts: "{{ lang._('Blocked attempts') }}",
+        blocked_flagged: "{{ lang._('Blocked · flagged') }}",
+        ips_dropped_flagged: "{{ lang._('Dropped by IPS · flagged') }}",
+        ips_dropped_title: "{{ lang._('Dropped by IPS') }}",
         clean: "{{ lang._('Clean') }}",
         connections: "{{ lang._('Connections') }}",
         current_rate: "{{ lang._('Current rate') }}",

@@ -690,7 +690,7 @@
         const decision = (item) => [
             item.decision === 'pass' ? pill('ok', T.fw_passed) : item.decision === 'block' ? pill('blocked', T.fw_blocked)
                 : `<span class="fwmap-q-muted">${esc(T.fw_not_seen)}</span>`,
-            item.ips_dropped ? pill('danger', T.ips_dropped_short) : '',
+            item.ips_dropped ? pill('contained', T.ips_dropped_short) : '',
         ].filter(Boolean).join(' ');
         const connTable = conns.length ? `<table class="fwmap-q-conns"><thead><tr><th>${esc(T.connection_col)}</th><th>${esc(T.decision)}</th><th>${esc(T.rule)}</th>`
             + `<th>${esc(T.interface)}</th><th>${esc(T.transferred)}</th><th>${esc(T.started)}</th><th>IDS</th></tr></thead><tbody>`
@@ -1188,9 +1188,16 @@
             const [, port] = ids.remote.split(':');
             const service = {name: ids.protocol.toUpperCase(), port: port ? `${ids.protocol.toUpperCase()}/${port}` : ''};
             const serious = ids.severity <= 2 || (ids.lists || []).length > 0;
+            const tone = FirewallMapRenderer.idsOutcome(ids);
+            const verdicts = {
+                ok: bigPill('ok', T.allowed, 'fa-check'),
+                danger: bigPill('danger', T.allowed_flagged, 'fa-exclamation-triangle'),
+                blocked: bigPill('blocked', ids.ips_dropped ? T.ips_dropped_title : T.blocked, 'fa-ban'),
+                contained: bigPill('contained', ids.ips_dropped ? T.ips_dropped_flagged : T.blocked_flagged, 'fa-ban'),
+            };
             return {
                 remote, address,
-                verdict: serious ? bigPill('danger', T.allowed_flagged, 'fa-exclamation-triangle') : bigPill('ok', T.allowed, 'fa-check'),
+                verdict: verdicts[tone],
                 sub: ids.remote_started ? T.started_outside_long : T.started_inside_long,
                 diagram: [ids.remote_started ? remoteBox : insideBox, service, `↓ ${esc(formatBytes(ids.bytes_in || 0))} ↑ ${esc(formatBytes(ids.bytes_out || 0))}`, ids.remote_started ? insideBox : remoteBox, false],
                 connection: rows([
@@ -1207,7 +1214,7 @@
                     [T.interface, esc(ids.interface || '')],
                     [T.rule, esc(ids.rule || '')],
                     ['NAT', ids.inside && !String(ids.inside).startsWith(ids.public.split(':')[0]) ? esc(`${T.yes} (${ids.inside} → ${ids.public})`) : esc(T.no)],
-                    ['IPS', ids.ips_dropped ? pill('danger', T.ips_dropped) : ''],
+                    ['IPS', ids.ips_dropped ? pill(serious ? 'contained' : 'blocked', T.ips_dropped) : ''],
                 ]),
                 ids: idsCard(null, ids.groups),
                 reputation: reputationCard({...item, address}),
@@ -1215,9 +1222,10 @@
         }
         if (block) {
             const service = serviceParts(block.services?.[0]?.name, block.services?.[0]?.port);
+            const flaggedBlock = (block.lists || []).length > 0;
             return {
                 remote, address,
-                verdict: bigPill('blocked', T.blocked, 'fa-ban'),
+                verdict: flaggedBlock ? bigPill('contained', T.blocked_flagged, 'fa-ban') : bigPill('blocked', T.blocked, 'fa-ban'),
                 sub: T.blocked_attempts,
                 diagram: [remoteBox, service, `${esc(block.hits)}× ${esc(T.in_minutes.replace('%s', block.window_minutes))}`, endBox('fa-shield', firewallName, [block.target, block.interface]), true],
                 connection: rows([

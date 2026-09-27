@@ -173,6 +173,7 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
       service: serviceCategory(members.slice().sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))[0]?.services?.[0]),
       egress: members.slice().sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))[0]?.egress || 'Unknown',
       threat: members.some((member) => member.threat),
+      contained: !members.some((member) => member.threat) && members.some((member) => member.contained),
       ids: members[0].ids_flow || null,
       initiated: initiatedBy(members),
       direction,
@@ -490,17 +491,22 @@ const TT_STYLE = `
 .fmt-sub{opacity:.7;font-size:11.5px;margin-top:1px}
 .fmt-pill{display:inline-flex;align-items:center;gap:3px;white-space:nowrap;font-weight:600;font-size:11px;padding:1px 8px;border-radius:10px}
 .fmt-ok{background:rgb(40,150,70);color:#fff}.fmt-danger{background:rgb(196,18,48);color:#fff}
-.fmt-blocked{background:rgb(80,80,80);color:#fff}.fmt-muted{background:rgba(128,128,128,.22)}
+.fmt-blocked{background:rgb(110,110,110);color:#fff}.fmt-muted{background:rgba(128,128,128,.22)}
+.fmt-contained{background:rgb(232,176,0);color:rgb(55,38,0)}
 .fmt-lists{margin-top:6px;display:flex;flex-wrap:wrap;gap:3px}
 .fmt-chip{font-size:10.5px;font-weight:600;padding:0 6px;border-radius:3px;color:rgb(196,18,48);border:1px solid rgba(196,18,48,.45)}
+.fmt-tone-contained .fmt-chip{color:rgb(150,105,0);border-color:rgba(200,150,0,.6)}
+.fmt-tone-blocked .fmt-chip,.fmt-tone-ok .fmt-chip{color:inherit;border-color:rgba(128,128,128,.4)}
 .fmt-addr{margin-top:8px;padding-top:7px;border-top:1px solid rgba(128,128,128,.2)}
 .fmt-host{display:flex;align-items:center;gap:6px;font-weight:600}
 .fmt-host .fmt-ic{color:rgb(30,110,215);width:14px;height:14px}
 .fmt-meta{opacity:.7;font-size:11.5px;margin-left:20px}
 .fmt-say{margin:3px 0 0 20px}
-.fmt-say.fmt-bad{color:rgb(196,18,48);font-weight:600}
-.fmt-ids{margin:3px 0 0 20px;font-size:11.5px;color:rgb(200,110,0);display:flex;gap:5px}
-.fmt-ids.fmt-bad{color:rgb(196,18,48);font-weight:600}
+.fmt-say.fmt-bad{font-weight:600}
+.fmt-tone-danger .fmt-bad{color:rgb(196,18,48)}
+.fmt-tone-contained .fmt-bad{color:rgb(160,112,0)}
+.fmt-ids{margin:3px 0 0 20px;font-size:11.5px;opacity:.85;display:flex;gap:5px}
+.fmt-ids.fmt-bad{font-weight:600;opacity:1}
 .fmt-ids .fmt-ic{margin-top:2px}
 .fmt-more{margin:6px 0 0 20px;opacity:.7;font-size:11.5px}
 .fmt-foot{margin-top:8px;padding-top:6px;border-top:1px solid rgba(128,128,128,.2);opacity:.75;font-size:11.5px;display:flex;flex-wrap:wrap;gap:2px 12px}
@@ -576,9 +582,46 @@ function describe(place, members, locations, hostnames = {}, showAsn = true) {
   const more = members.length > 4 ? `<div class="fmt-more">+${members.length - 4} more address${members.length - 4 > 1 ? 'es' : ''} here</div>` : '';
   const foot = [`↓ ${formatRate(rateIn)}  ↑ ${formatRate(rateOut)}`, egress.length ? `via ${egress.map(plain).join(', ')}` : '',
     services.join(', ')].filter(Boolean).map((part) => `<span>${escapeHtml(part)}</span>`).join('');
-  return `<div class="fmt">${ttHead(title, members.length > 1 ? escapeHtml(`${members.length} addresses`) : ttPlace(place),
-      flagged ? ttPill('danger', 'Allowed · flagged', 'alert') : ttPill('ok', 'Allowed', 'check'))}
+  const tone = outcome({flagged, stopped: false});
+  return `<div class="fmt fmt-tone-${tone}">${ttHead(title, members.length > 1 ? escapeHtml(`${members.length} addresses`) : ttPlace(place),
+      ttOutcome(tone))}
     ${ttLists(lists)}${addresses.join('')}${more}<div class="fmt-foot">${foot}</div></div>`;
+}
+
+/**
+ * One colour legend everywhere (badges, arcs, markers): green allowed and not flagged, grey
+ * blocked and not flagged, amber flagged but stopped (firewall or IPS), red flagged and let
+ * through. Flagged means a blocklist, an AbuseIPDB report or a Suricata severity 1-2 alert; the
+ * collector already folds all three into an address's lists.
+ */
+export function outcome({flagged, stopped}) {
+  if (flagged) {
+    return stopped ? 'contained' : 'danger';
+  }
+  return stopped ? 'blocked' : 'ok';
+}
+
+/** Outcome of a connection Suricata alerted on. */
+export function idsOutcome(flow) {
+  const flagged = flow.severity <= 2 || (flow.lists || []).length > 0;
+  return outcome({flagged, stopped: flow.kind === 'blocked' || Boolean(flow.ips_dropped)});
+}
+
+/** Outcome of an address Suricata alerted on with no connection known to have got through. */
+function alertOutcome(alert) {
+  return alert.ids?.severity <= 2 || (alert.lists || []).length > 0 ? 'contained' : 'blocked';
+}
+
+const OUTCOME_PILLS = {
+  ok: ['Allowed', 'check'],
+  blocked: ['Blocked', 'ban'],
+  contained: ['Blocked · flagged', 'ban'],
+  danger: ['Allowed · flagged', 'alert'],
+};
+
+function ttOutcome(kind, text) {
+  const [label, icon] = OUTCOME_PILLS[kind];
+  return ttPill(kind, text || label, icon);
 }
 
 /** The arc and map entries for connections Suricata alerted on (see the collector's Correlator). */
@@ -623,7 +666,8 @@ export function idsArcData(data) {
     rate_out: flow.remote_started ? 0 : 1,
     activity: idsArcActivity(flow),
     initiated: flow.remote_started ? 'remote' : 'local',
-    threat: flow.severity <= 2 || (flow.lists || []).length > 0,
+    threat: idsOutcome(flow) === 'danger',
+    contained: idsOutcome(flow) === 'contained',
     ids_flow: flow,
   }));
   const known = new Set((data.locations || []).map((location) => location.id));
@@ -651,8 +695,9 @@ function describeIdsFlow(flow, showAsn) {
   const signatures = flow.groups.flatMap((group) => group.signatures);
   const ids = {count: flow.count, severity: flow.severity, signatures, minutes: 60, last_seconds: flow.last_seconds};
   const org = showAsn && flow.asn ? `AS${flow.asn} ${plain(flow.as_org || '')}` : '';
-  return `<div class="fmt">${ttHead(flow.city || flow.country || flow.dest, ttPlace(flow),
-      serious ? ttPill('danger', 'Allowed · flagged', 'alert') : ttPill('ok', 'Allowed', 'check'))}
+  const tone = idsOutcome(flow);
+  return `<div class="fmt fmt-tone-${tone}">${ttHead(flow.city || flow.country || flow.dest, ttPlace(flow),
+      ttOutcome(tone, flow.ips_dropped ? (serious ? 'Dropped by IPS · flagged' : 'Dropped by IPS') : null))}
     ${ttLists(flow.lists)}
     ${ttAddress('server', flow.remote, org, [idsFlowSummary(flow)], serious, ids)}
     <div class="fmt-foot"><span>${escapeHtml(`Suricata alerted on this connection${flow.ips_dropped ? ' · dropped by IPS' : ''}`)}</span>
@@ -662,17 +707,20 @@ function describeIdsFlow(flow, showAsn) {
 /** Hover card for an address Suricata alerted on that has no arc right now. */
 function describeAlert(alert, showAsn) {
   const org = showAsn && alert.asn ? `AS${alert.asn} ${plain(alert.as_org || '')}` : '';
-  return `<div class="fmt">${ttHead(alert.city || alert.country || alert.source, ttPlace(alert), ttPill('muted', 'Seen by Suricata', 'flag'))}
+  const tone = alertOutcome(alert);
+  return `<div class="fmt fmt-tone-${tone}">${ttHead(alert.city || alert.country || alert.source, ttPlace(alert),
+      ttPill(tone === 'contained' ? 'contained' : 'muted', tone === 'contained' ? 'Seen by Suricata · flagged' : 'Seen by Suricata', 'flag'))}
     ${ttLists(alert.lists)}
-    ${ttAddress('server', alert.source, org, [], false, alert.ids)}
+    ${ttAddress('server', alert.source, org, [], tone === 'contained', alert.ids)}
     <div class="fmt-foot"><span>No connection is open right now</span></div></div>`;
 }
 
 /** Hover card for a blocked source. */
 function describeBlock(block, showAsn) {
   const org = showAsn && block.asn ? `AS${block.asn} ${plain(block.as_org || '')}` : '';
-  const bad = block.threat || (block.lists || []).length > 0;
-  return `<div class="fmt">${ttHead(block.city || block.country || block.source, ttPlace(block), ttPill('blocked', 'Blocked', 'ban'))}
+  const bad = (block.lists || []).length > 0;
+  const tone = outcome({flagged: bad, stopped: true});
+  return `<div class="fmt fmt-tone-${tone}">${ttHead(block.city || block.country || block.source, ttPlace(block), ttOutcome(tone))}
     ${ttLists(block.lists)}
     ${ttAddress('server', block.source, org, [blockSummary(block, showAsn)], bad, block.ids)}
     <div class="fmt-foot"><span>${escapeHtml(`${block.hits_per_minute} in the last minute${block.threat ? ' · hammering' : ''}`)}</span></div></div>`;
@@ -746,8 +794,11 @@ export function palette(theme = DEFAULT_THEME) {
     inbound: {link: mix(background, ORANGE, 0.75), heavy: mix(ORANGE, dark ? [255, 255, 255] : [0, 0, 0], 0.08), pulse: ORANGE},
     neutral: {link: mix(background, [150, 150, 150], 0.7), heavy: [128, 128, 128], pulse: [120, 120, 120]},
     endpoint: rgb(mix(accent, text, 0.2), 220),
-    // a crimson distinct from the theme accent, reserved for blocked traffic and threats
-    block: dark ? [255, 77, 109] : [196, 18, 48],
+    // the outcome legend: crimson for flagged traffic that got through, amber for flagged traffic
+    // that was stopped, grey for ordinary blocks (see outcome())
+    danger: dark ? [255, 77, 109] : [196, 18, 48],
+    contained: dark ? [245, 200, 60] : [222, 168, 0],
+    blocked: dark ? [165, 165, 165] : [125, 125, 125],
     label: rgb(mix(text, background, 0.15), 230),
     tooltip: {
       background: `rgb(${background.join(',')})`,
@@ -960,7 +1011,7 @@ export function createFirewallMap(container, options = {}) {
   const blockFader = new Fader((block) => block.source);
   const endpointFader = new Fader((location) => location.id);
   const alertFader = new Fader((alert) => alert.source);
-  let idsHistory = new Set();
+  let idsHistory = new Map();
   let alertPoints = [];
   let frameNow = performance.now();
   let dataTime = performance.now();
@@ -1005,8 +1056,11 @@ export function createFirewallMap(container, options = {}) {
   function arcBaseColor(arc) {
     const alpha = Math.round((arc.heavy ? 150 : 70) + 105 * arc.activity);
     if (arc.threat) {
-      // a permitted flow to a listed address
-      return rgb(colors.block, Math.max(alpha, 170));
+      // flagged traffic the firewall let through
+      return rgb(colors.danger, Math.max(alpha, 170));
+    }
+    if (arc.contained) {
+      return rgb(colors.contained, Math.max(alpha, 170));
     }
     if (categorical()) {
       const base = baseColor(arc);
@@ -1023,7 +1077,10 @@ export function createFirewallMap(container, options = {}) {
   function pulseBaseColor(item) {
     const alpha = Math.round(110 + 145 * item.arc.activity);
     if (item.arc.threat) {
-      return rgb(colors.block, alpha);
+      return rgb(colors.danger, alpha);
+    }
+    if (item.arc.contained) {
+      return rgb(colors.contained, alpha);
     }
     if (categorical()) {
       return rgb(baseColor(item.arc), alpha);
@@ -1049,22 +1106,38 @@ export function createFirewallMap(container, options = {}) {
       return [
         ...['local', 'remote', 'both'].filter((side) => present.has(side))
           .map((side) => ({label: INITIATOR_LABELS[side], color: initiatorScheme(side).heavy})),
-        {label: 'Blocked / listed', color: colors.block},
+        ...outcomeLegend(),
       ];
     }
     if (!categorical()) {
       return [
         {label: 'Toward the firewall', color: colors.toward.heavy},
         {label: 'Away from the firewall', color: colors.away.heavy},
-        {label: 'Blocked / listed', color: colors.block},
+        ...outcomeLegend(),
       ];
     }
     const present = [...new Set(arcs.filter((arc) => !arc.fading).map(categoryOf))];
     present.sort((a, b) => (a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b)));
     return [
       ...present.map((label) => ({label, color: categoryColor(label)})),
-      {label: 'Blocked / listed', color: colors.block},
+      ...outcomeLegend(),
     ];
+  }
+
+  function outcomeLegend() {
+    return [
+      {label: 'Blocked', color: colors.blocked},
+      {label: 'Flagged · blocked', color: colors.contained},
+      {label: 'Flagged · allowed', color: colors.danger},
+    ];
+  }
+
+  function blockColor(block) {
+    return (block.lists || []).length ? colors.contained : colors.blocked;
+  }
+
+  function outcomeColor(kind) {
+    return {danger: colors.danger, contained: colors.contained, blocked: colors.blocked, ok: colors.blocked}[kind];
   }
 
   function pulseLayer(seconds) {
@@ -1088,8 +1161,8 @@ export function createFirewallMap(container, options = {}) {
         getPosition: (block) => pulsePosition(block, seconds, false),
         getRadius: (block) => block.threat ? 3.6 : 2.6,
         radiusUnits: 'pixels',
-        getFillColor: (block) => rgb(colors.block, Math.round((80 + 175 * block.activity) * blockFader.opacity(block, frameNow))),
-        updateTriggers: {getPosition: seconds, getFillColor: colors.block},
+        getFillColor: (block) => rgb(blockColor(block), Math.round((80 + 175 * block.activity) * blockFader.opacity(block, frameNow))),
+        updateTriggers: {getPosition: seconds, getFillColor: [colors.blocked, colors.contained]},
       }),
       new ScatterplotLayer({
         id: 'firewall-map-threats',
@@ -1102,8 +1175,8 @@ export function createFirewallMap(container, options = {}) {
         filled: false,
         lineWidthUnits: 'pixels',
         getLineWidth: 1.5,
-        getLineColor: () => rgb(colors.block, Math.round(220 * (1 - (seconds / THREAT_THROB_PERIOD) % 1))),
-        updateTriggers: {getRadius: seconds, getLineColor: [seconds, colors.block]},
+        getLineColor: (block) => rgb(blockColor(block), Math.round(220 * (1 - (seconds / THREAT_THROB_PERIOD) % 1))),
+        updateTriggers: {getRadius: seconds, getLineColor: [seconds, colors.blocked, colors.contained]},
       }),
     ];
   }
@@ -1215,8 +1288,8 @@ export function createFirewallMap(container, options = {}) {
         jointRounded: true,
         pickable: true,
         // bright while hits arrive, then a faint trace that can still be hovered
-        getColor: (block) => rgb(colors.block, Math.round((35 + 185 * block.activity) * blockFader.opacity(block, frameNow))),
-        updateTriggers: {getColor: [colors.block, fadeKey]},
+        getColor: (block) => rgb(blockColor(block), Math.round((35 + 185 * block.activity) * blockFader.opacity(block, frameNow))),
+        updateTriggers: {getColor: [colors.blocked, colors.contained, fadeKey]},
       }),
       new ScatterplotLayer({
         id: 'firewall-map-block-sources',
@@ -1225,8 +1298,8 @@ export function createFirewallMap(container, options = {}) {
         getRadius: (block) => block.threat ? 3.5 : 2.5,
         radiusUnits: 'pixels',
         pickable: true,
-        getFillColor: (block) => rgb(colors.block, Math.round((90 + 165 * block.activity) * blockFader.opacity(block, frameNow))),
-        updateTriggers: {getFillColor: [colors.block, fadeKey]},
+        getFillColor: (block) => rgb(blockColor(block), Math.round((90 + 165 * block.activity) * blockFader.opacity(block, frameNow))),
+        updateTriggers: {getFillColor: [colors.blocked, colors.contained, fadeKey]},
       }),
       new ScatterplotLayer({
         id: 'firewall-map-ids-rings',
@@ -1238,9 +1311,9 @@ export function createFirewallMap(container, options = {}) {
         filled: false,
         lineWidthUnits: 'pixels',
         getLineWidth: 1.5,
-        getLineColor: (location) => faded([230, 140, 0, 230], endpointFader.opacity(location, frameNow)),
+        getLineColor: (location) => faded(rgb(outcomeColor(idsHistory.get(location.id)), 230), endpointFader.opacity(location, frameNow)),
         pickable: false,
-        updateTriggers: {getLineColor: fadeKey},
+        updateTriggers: {getLineColor: [colors.danger, colors.contained, fadeKey]},
       }),
       new ScatterplotLayer({
         // detection marker at the middle of an IDS connection's own arc
@@ -1252,11 +1325,11 @@ export function createFirewallMap(container, options = {}) {
         stroked: true,
         filled: true,
         getFillColor: (item) => faded(rgb(colors.background.slice(0, 3), 240), arcOpacity(item.arc)),
-        getLineColor: (item) => faded(item.arc.ids.severity <= 2 ? rgb(colors.block) : [230, 140, 0, 255], arcOpacity(item.arc)),
+        getLineColor: (item) => faded(rgb(outcomeColor(idsOutcome(item.arc.ids))), arcOpacity(item.arc)),
         lineWidthUnits: 'pixels',
         getLineWidth: 2.5,
         pickable: true,
-        updateTriggers: {getFillColor: [colors.background, fadeKey], getLineColor: [colors.block, fadeKey]},
+        updateTriggers: {getFillColor: [colors.background, fadeKey], getLineColor: [colors.danger, colors.contained, fadeKey]},
       }),
       new TextLayer({
         id: 'firewall-map-ids-marks',
@@ -1264,11 +1337,11 @@ export function createFirewallMap(container, options = {}) {
         getPosition: (item) => item.position,
         getText: () => '!',
         getSize: 10,
-        getColor: (item) => faded(item.arc.ids.severity <= 2 ? rgb(colors.block) : [230, 140, 0, 255], arcOpacity(item.arc)),
+        getColor: (item) => faded(rgb(outcomeColor(idsOutcome(item.arc.ids))), arcOpacity(item.arc)),
         fontWeight: 700,
         characterSet: ['!'],
         pickable: false,
-        updateTriggers: {getColor: [colors.block, fadeKey]},
+        updateTriggers: {getColor: [colors.danger, colors.contained, fadeKey]},
       }),
       new ScatterplotLayer({
         // addresses Suricata alerted on with no arc right now: a hollow marker in the alert colour
@@ -1280,11 +1353,11 @@ export function createFirewallMap(container, options = {}) {
         stroked: true,
         filled: true,
         getFillColor: (alert) => faded(rgb(colors.background.slice(0, 3), 220), alertFader.opacity(alert, frameNow)),
-        getLineColor: (alert) => faded(alert.ids?.severity <= 2 ? rgb(colors.block) : [230, 140, 0, 255], alertFader.opacity(alert, frameNow)),
+        getLineColor: (alert) => faded(rgb(outcomeColor(alertOutcome(alert))), alertFader.opacity(alert, frameNow)),
         lineWidthUnits: 'pixels',
         getLineWidth: 2,
         pickable: true,
-        updateTriggers: {getFillColor: [colors.background, fadeKey], getLineColor: [colors.block, fadeKey]},
+        updateTriggers: {getFillColor: [colors.background, fadeKey], getLineColor: [colors.contained, fadeKey]},
       }),
       new ScatterplotLayer({
         id: 'firewall-map-endpoints',
@@ -1337,10 +1410,16 @@ export function createFirewallMap(container, options = {}) {
     const arcData = {...data, flows: [...(data.flows || []), ...ids.flows], locations: [...(data.locations || []), ...ids.locations]};
     arcs = arcFader.update(buildArcs(arcData, {...settings, previousLanes}), now);
     // endpoints with recent Suricata history get a ring (history, not proof about the current traffic)
-    idsHistory = new Set([
-      ...(data.flows || []).filter((flow) => flow.ids).map((flow) => flow.dest),
-      ...(data.ids_flows || []).map((flow) => flow.dest),
-    ]);
+    // coloured by the worst outcome there: red if flagged traffic got through, amber if it was stopped
+    const rank = {blocked: 0, ok: 0, contained: 1, danger: 2};
+    idsHistory = new Map();
+    const note = (dest, kind) => {
+      if (!idsHistory.has(dest) || rank[kind] > rank[idsHistory.get(dest)]) {
+        idsHistory.set(dest, kind);
+      }
+    };
+    (data.flows || []).filter((flow) => flow.ids).forEach((flow) => note(flow.dest, outcome({flagged: flow.ids.severity <= 2, stopped: false})));
+    (data.ids_flows || []).forEach((flow) => note(flow.dest, idsOutcome(flow)));
     pulseItems = pulses(arcs);
     blockArcs = blockFader.update(settings.blocks ? buildBlocks(data) : [], now);
     locationsShown = endpointFader.update(arcData.locations, now);
