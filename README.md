@@ -173,6 +173,12 @@ signed; `publish.sh` replaces older versions and signs the whole catalogue.
 
 ## Changelog
 
+- **os-firewall-map 0.1_4**: one outcome colour legend across badges and map (green allowed,
+  grey blocked, amber flagged but stopped, red flagged and let through), "Follow traffic" (off by
+  default; frames the live arcs with proportional padding and smooth fly-to, also a widget
+  setting), IDS arcs fade out a minute after their connection closes, the firewall drawn as a
+  house icon, zoom buttons that follow the theme and stay below the OPNsense menus, and no
+  AbuseIPDB lookup offered for addresses already on the AbuseIPDB blacklist.
 - **os-firewall-map 0.1_3**: Suricata alerts correlated with the exact connection (own arc with a
   detection marker, history rings, IDS flows vs IDS addresses), a uniform record per flagged
   connection (both sides, NAT and port-forward target, firewall decision and rule, Suricata action
