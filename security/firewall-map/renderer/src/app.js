@@ -18,9 +18,13 @@ const DEFAULT_OPTIONS = {
 // less of the view for a while (it widens at once when something falls outside)
 const FOLLOW_PADDING = 0.12;
 const FOLLOW_MAX_ZOOM_STEPS = 3.5;
-const FOLLOW_TIGHTEN_ZOOM = 0.8;
-const FOLLOW_TIGHTEN_AFTER_MS = 30000;
-const FOLLOW_FLY_SPEED = 1.4;
+const FOLLOW_TIGHTEN_ZOOM = 0.3;
+const FOLLOW_TIGHTEN_AFTER_MS = 20000;
+// a slow, gently eased flight (deck's default fly-to starts and stops abruptly)
+const FOLLOW_FLY = {speed: 0.7, curve: 1.2};
+const FOLLOW_MIN_FLY_MS = 1400;
+const FOLLOW_MAX_FLY_MS = 3200;
+const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 // blocked traffic: pulses race into the firewall; threats also throb at their source
 const BLOCK_PULSE_PERIOD = 1.1;
 const THREAT_THROB_PERIOD = 0.9;
@@ -864,6 +868,8 @@ export function createFirewallMap(container, options = {}) {
   let flowsByDest = new Map();
   let lastData = {locations: [], flows: []};
   const initialZoom = fitZoom(container.clientWidth);
+  // a follow-traffic flight is under way (see followTraffic)
+  let flying = false;
   let viewState = {longitude: VIEW_LONGITUDE, latitude: VIEW_LATITUDE, zoom: initialZoom, minZoom: initialZoom, maxZoom: 6};
 
   const deck = new Deck({
@@ -877,7 +883,7 @@ export function createFirewallMap(container, options = {}) {
       const labelsWereVisible = viewState.zoom >= viewState.minZoom + LABEL_ZOOM_STEP;
       viewState = {...next, minZoom: viewState.minZoom, maxZoom: viewState.maxZoom};
       deck.setProps({viewState});
-      if (labelsWereVisible || viewState.zoom >= viewState.minZoom + LABEL_ZOOM_STEP) {
+      if (!flying && (labelsWereVisible || viewState.zoom >= viewState.minZoom + LABEL_ZOOM_STEP)) {
         // labels are placed in screen space, so re-place them as the map moves
         labelLayer = buildLabelLayer();
         deck.setProps({layers: compose()});
@@ -1473,7 +1479,6 @@ export function createFirewallMap(container, options = {}) {
   let pointerInside = false;
   let tightenSince = null;
   let resumeTimer = null;
-  let flying = false;
   // a re-frame asked for (toggle, filter, resize) that could not run yet: done on the next chance
   let pendingFit = false;
   container.addEventListener('pointerenter', () => { pointerInside = true; });
@@ -1504,7 +1509,8 @@ export function createFirewallMap(container, options = {}) {
   function followTarget(width, height) {
     let west = Infinity; let east = -Infinity; let south = Infinity; let north = -Infinity;
     for (const arc of arcs) {
-      if (arc.fading) {
+      // only live arcs: not ones fading out, nor an IDS connection that has already closed
+      if (arc.fading || (arc.ids && !arc.ids.active)) {
         continue;
       }
       for (const [lon, lat] of arc.path) {
@@ -1566,8 +1572,11 @@ export function createFirewallMap(container, options = {}) {
     tightenSince = null;
     pendingFit = false;
     flying = true;
+    const interpolator = new FlyToInterpolator(FOLLOW_FLY);
+    const duration = Math.max(FOLLOW_MIN_FLY_MS, Math.min(FOLLOW_MAX_FLY_MS,
+      interpolator.getDuration({...viewState, width, height}, {...viewState, ...target, width, height})));
     viewState = {...viewState, longitude: target.longitude, latitude: target.latitude, zoom: target.zoom,
-      transitionDuration: 'auto', transitionInterpolator: new FlyToInterpolator({speed: FOLLOW_FLY_SPEED}),
+      transitionDuration: duration, transitionInterpolator: interpolator, transitionEasing: easeInOutCubic,
       onTransitionEnd: settle, onTransitionInterrupt: settle};
     deck.setProps({viewState});
   }
@@ -1575,7 +1584,7 @@ export function createFirewallMap(container, options = {}) {
   function settle() {
     // drop the transition so the next change (or the next follow check) starts from rest
     flying = false;
-    const {transitionDuration, transitionInterpolator, onTransitionEnd, onTransitionInterrupt, ...rest} = viewState;
+    const {transitionDuration, transitionInterpolator, transitionEasing, onTransitionEnd, onTransitionInterrupt, ...rest} = viewState;
     viewState = rest;
     labelLayer = buildLabelLayer();
     deck.setProps({layers: compose()});
