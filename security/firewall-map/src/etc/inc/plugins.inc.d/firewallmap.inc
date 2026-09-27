@@ -37,3 +37,17 @@ function firewallmap_cron()
         ['autocron' => ['/usr/local/sbin/configctl -d firewallmap ensure', '*/10']],
     ];
 }
+
+function firewallmap_xmlrpc_sync()
+{
+    /*
+     * System > High Availability: the plugin settings, including the MaxMind and AbuseIPDB
+     * keys, copy to the peer like any other service. The review queue, caches and downloaded
+     * databases stay local to each firewall.
+     */
+    return [[
+        'description' => gettext('Firewall Map+'),
+        'id' => 'firewallmap',
+        'section' => 'OPNsense.FirewallMap',
+    ]];
+}
