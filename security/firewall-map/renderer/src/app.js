@@ -1474,6 +1474,8 @@ export function createFirewallMap(container, options = {}) {
   let tightenSince = null;
   let resumeTimer = null;
   let flying = false;
+  // a re-frame asked for (toggle, filter, resize) that could not run yet: done on the next chance
+  let pendingFit = false;
   container.addEventListener('pointerenter', () => { pointerInside = true; });
   container.addEventListener('pointerleave', () => { pointerInside = false; });
 
@@ -1527,9 +1529,11 @@ export function createFirewallMap(container, options = {}) {
   }
 
   function followTraffic(immediately = false) {
+    pendingFit = pendingFit || immediately;
     if (!follow || followHeld || pointerInside || flying) {
       return;
     }
+    immediately = pendingFit;
     const width = container.clientWidth;
     const height = container.clientHeight;
     const target = width > 50 && height > 50 ? followTarget(width, height) : null;
@@ -1552,11 +1556,15 @@ export function createFirewallMap(container, options = {}) {
     } else if (!go) {
       tightenSince = null;
     }
+    if (go && immediately) {
+      pendingFit = false;
+    }
     if (!go || (Math.abs(target.zoom - viewState.zoom) < 0.05
         && Math.abs(target.longitude - viewState.longitude) < 0.5 && Math.abs(target.latitude - viewState.latitude) < 0.5)) {
       return;
     }
     tightenSince = null;
+    pendingFit = false;
     flying = true;
     viewState = {...viewState, longitude: target.longitude, latitude: target.latitude, zoom: target.zoom,
       transitionDuration: 'auto', transitionInterpolator: new FlyToInterpolator({speed: FOLLOW_FLY_SPEED}),
@@ -1582,6 +1590,11 @@ export function createFirewallMap(container, options = {}) {
     /** Keep the view on the traffic (see followTraffic); turning it on flies there at once. */
     setFollow(on) {
       follow = Boolean(on);
+      tightenSince = null;
+      followTraffic(true);
+    },
+    /** Re-frame now (after a filter change) rather than waiting for the traffic to settle. */
+    refit() {
       tightenSince = null;
       followTraffic(true);
     },

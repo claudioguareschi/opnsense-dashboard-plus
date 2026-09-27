@@ -1610,6 +1610,8 @@
         const bind = (selector, key) => $(selector).on('change', function () {
             state.filters[key] = $(this).val();
             refresh();
+            // a new filter is a new question: frame its answer straight away when following
+            state.renderer.refit();
         });
         bind('#fwmap-filter-traffic', 'traffic');
         bind('#fwmap-filter-service', 'service');
