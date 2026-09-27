@@ -173,6 +173,9 @@ signed; `publish.sh` replaces older versions and signs the whole catalogue.
 
 ## Changelog
 
+- **os-firewall-map 0.1_5**: a "Firewall Map+" item in System > High Availability > Settings,
+  so the plugin settings (MaxMind and AbuseIPDB keys included) sync to the backup; the review
+  queue, caches and downloaded databases stay local to each firewall.
 - **os-firewall-map 0.1_4**: one outcome colour legend across badges and map (green allowed,
   grey blocked, amber flagged but stopped, red flagged and let through), "Follow traffic" (off by
   default; frames the live arcs with proportional padding and smooth fly-to, also a widget
