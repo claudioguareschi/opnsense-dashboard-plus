@@ -1249,7 +1249,9 @@
         }
         return {
             remote, address,
-            verdict: bigPill('muted', T.ids_only, 'fa-flag'),
+            // flagged but with no connection known to have got through: amber, as on the map
+            verdict: alert?.ids?.severity <= 2 || (alert?.lists || []).length
+                ? bigPill('contained', `${T.ids_only} · ${T.flagged}`, 'fa-flag') : bigPill('muted', T.ids_only, 'fa-flag'),
             sub: T.ids_only_sub,
             diagram: null,
             connection: `<div class="text-muted">${esc(T.no_connection)}</div>`,

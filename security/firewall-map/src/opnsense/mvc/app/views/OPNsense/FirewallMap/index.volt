@@ -474,6 +474,7 @@
         blocked: "{{ lang._('Blocked') }}",
         blocked_attempts: "{{ lang._('Blocked attempts') }}",
         blocked_flagged: "{{ lang._('Blocked · flagged') }}",
+        flagged: "{{ lang._('flagged') }}",
         ips_dropped_flagged: "{{ lang._('Dropped by IPS · flagged') }}",
         ips_dropped_title: "{{ lang._('Dropped by IPS') }}",
         clean: "{{ lang._('Clean') }}",
