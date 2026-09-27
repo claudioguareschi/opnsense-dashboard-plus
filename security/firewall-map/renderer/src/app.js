@@ -870,6 +870,7 @@ export function createFirewallMap(container, options = {}) {
   const initialZoom = fitZoom(container.clientWidth);
   // a follow-traffic flight is under way (see followTraffic)
   let flying = false;
+  let flightTimer = null;
   let viewState = {longitude: VIEW_LONGITUDE, latitude: VIEW_LATITUDE, zoom: initialZoom, minZoom: initialZoom, maxZoom: 6};
 
   const deck = new Deck({
@@ -1485,6 +1486,9 @@ export function createFirewallMap(container, options = {}) {
   container.addEventListener('pointerleave', () => { pointerInside = false; });
 
   function userMoved() {
+    if (flying) {
+      settle();
+    }
     if (!follow) {
       return;
     }
@@ -1576,12 +1580,16 @@ export function createFirewallMap(container, options = {}) {
     const duration = Math.max(FOLLOW_MIN_FLY_MS, Math.min(FOLLOW_MAX_FLY_MS,
       interpolator.getDuration({...viewState, width, height}, {...viewState, ...target, width, height})));
     viewState = {...viewState, longitude: target.longitude, latitude: target.latitude, zoom: target.zoom,
-      transitionDuration: duration, transitionInterpolator: interpolator, transitionEasing: easeInOutCubic,
-      onTransitionEnd: settle, onTransitionInterrupt: settle};
+      transitionDuration: duration, transitionInterpolator: interpolator, transitionEasing: easeInOutCubic};
     deck.setProps({viewState});
+    // deck reads onTransitionEnd from the current props, which the interim view states replace:
+    // end the flight on a timer instead, or it never ends and following stops after the first one
+    clearTimeout(flightTimer);
+    flightTimer = setTimeout(settle, duration + 100);
   }
 
   function settle() {
+    clearTimeout(flightTimer);
     // drop the transition so the next change (or the next follow check) starts from rest
     flying = false;
     const {transitionDuration, transitionInterpolator, transitionEasing, onTransitionEnd, onTransitionInterrupt, ...rest} = viewState;
@@ -1662,6 +1670,7 @@ export function createFirewallMap(container, options = {}) {
         frame = null;
       }
       clearTimeout(resumeTimer);
+      clearTimeout(flightTimer);
       container.removeEventListener('mouseleave', hideTooltip);
       tooltip.remove();
       deck.finalize();
