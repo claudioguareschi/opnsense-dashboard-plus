@@ -19,7 +19,7 @@ const DEFAULT_OPTIONS = {
 const FOLLOW_PADDING = 0.12;
 const FOLLOW_MAX_ZOOM_STEPS = 3.5;
 const FOLLOW_TIGHTEN_ZOOM = 0.3;
-const FOLLOW_TIGHTEN_AFTER_MS = 20000;
+const FOLLOW_TIGHTEN_AFTER_MS = 10000;
 // a slow, gently eased flight (deck's default fly-to starts and stops abruptly)
 const FOLLOW_FLY = {speed: 0.7, curve: 1.2};
 const FOLLOW_MIN_FLY_MS = 1400;
@@ -870,6 +870,7 @@ export function createFirewallMap(container, options = {}) {
   const initialZoom = fitZoom(container.clientWidth);
   // a follow-traffic flight is under way (see followTraffic)
   let flying = false;
+  let hovering = false;
   let flightTimer = null;
   let viewState = {longitude: VIEW_LONGITUDE, latitude: VIEW_LATITUDE, zoom: initialZoom, minZoom: initialZoom, maxZoom: 6};
 
@@ -896,7 +897,12 @@ export function createFirewallMap(container, options = {}) {
     pickingRadius: 6,
     // arrow pointer so endpoints and arches can be hovered; the hand only while dragging
     getCursor: ({isDragging, isHovering}) => isDragging ? 'grabbing' : (isHovering ? 'pointer' : 'default'),
-    onHover: (info) => showTooltip(info),
+    onHover: (info) => {
+      // follow traffic holds still only while something is under the pointer, not whenever
+      // the mouse happens to rest on the map
+      hovering = Boolean(info.object);
+      showTooltip(info);
+    },
     onClick: (info) => {
       if (options.onSelect && info.object && info.layer) {
         options.onSelect(selection(info.object, info.layer.id));
@@ -1477,13 +1483,14 @@ export function createFirewallMap(container, options = {}) {
 
   let follow = Boolean(settings.follow);
   let followHeld = false;
-  let pointerInside = false;
   let tightenSince = null;
   let resumeTimer = null;
   // a re-frame asked for (toggle, filter, resize) that could not run yet: done on the next chance
   let pendingFit = false;
-  container.addEventListener('pointerenter', () => { pointerInside = true; });
-  container.addEventListener('pointerleave', () => { pointerInside = false; });
+  // Exposed for in-browser diagnostics, like firewallMapDeck.
+  container.firewallMapFollow = () => ({follow, followHeld, hovering, flying, pendingFit, tightenSince, zoom: viewState.zoom,
+    target: followTarget(container.clientWidth, container.clientHeight), size: [container.clientWidth, container.clientHeight]});
+  container.addEventListener('pointerleave', () => { hovering = false; });
 
   function userMoved() {
     if (flying) {
@@ -1540,7 +1547,7 @@ export function createFirewallMap(container, options = {}) {
 
   function followTraffic(immediately = false) {
     pendingFit = pendingFit || immediately;
-    if (!follow || followHeld || pointerInside || flying) {
+    if (!follow || followHeld || hovering || flying) {
       return;
     }
     immediately = pendingFit;
