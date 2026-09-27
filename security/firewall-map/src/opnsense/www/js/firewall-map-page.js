@@ -1082,6 +1082,8 @@
         const address = item.address;
         const known = state.abuseScores.get(address);
         const score = item.abuseipdb ?? known;
+        // already on the downloaded AbuseIPDB blacklist: that row says it all, no lookup to offer
+        const blacklisted = listed.has('AbuseIPDB blacklist');
         let abuse;
         if (state.abuseChecking.has(address)) {
             abuse = `<span class="fwmap-muted">${esc(T.checking)}</span>`;
@@ -1095,7 +1097,7 @@
         }
         // listed stands out in red; everything else reads as a quiet green "not listed"
         const notListed = `<span class="fwmap-not-listed">${ic('check')} ${esc(T.not_listed_short)}</span>`;
-        const left = rows([['AbuseIPDB', abuse], ...lists.filter((name) => name !== 'AbuseIPDB (looked up)').map((name) =>
+        const left = rows([['AbuseIPDB', blacklisted && (score === null || score === undefined) ? '' : abuse], ...lists.filter((name) => name !== 'AbuseIPDB (looked up)').map((name) =>
             [listLabel(name), listed.has(name) ? pill('danger', T.listed, 'fa-ban') : notListed])]);
         const right = rows([
             ['ASN', item.asn ? esc(`AS${item.asn}`) : ''],
@@ -1859,6 +1861,8 @@
             $('#fwmap-status, #fwmap-legend').css('color', rgba(theme.text, 0.8));
             // the side panel boxes sit on the page's own background colour
             document.getElementById('fwmap-side').style.setProperty('--fwmap-panel', `rgb(${theme.background.join(', ')})`);
+            // the zoom buttons float on the map: same surface and text colour as the theme
+            $('#fwmap-zoom').css({background: `rgb(${theme.background.join(', ')})`, color: `rgb(${theme.text.join(', ')})`});
             const container = document.getElementById('fwmap-canvas');
             state.renderer = FirewallMapRenderer.create(container, {
                 theme,
