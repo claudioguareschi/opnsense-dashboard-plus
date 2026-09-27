@@ -18,8 +18,12 @@ const DEFAULT_OPTIONS = {
 // less of the view for a while (it widens at once when something falls outside)
 const FOLLOW_PADDING = 0.12;
 const FOLLOW_MAX_ZOOM_STEPS = 3.5;
-const FOLLOW_TIGHTEN_ZOOM = 0.3;
-const FOLLOW_TIGHTEN_AFTER_MS = 10000;
+// the view frames every arc seen over this window: a flow that comes and goes keeps its room
+// for a while instead of pulling the map in and out
+const FOLLOW_WINDOW_MS = 10000;
+// re-frame only for a real change: this much zoom, or the centre moving this share of the view
+const FOLLOW_MIN_ZOOM_CHANGE = 0.25;
+const FOLLOW_MIN_SHIFT = 0.15;
 // a slow, gently eased flight (deck's default fly-to starts and stops abruptly)
 const FOLLOW_FLY = {speed: 0.7, curve: 1.2};
 const FOLLOW_MIN_FLY_MS = 1400;
@@ -871,7 +875,7 @@ export function createFirewallMap(container, options = {}) {
   // a follow-traffic flight is under way (see followTraffic)
   let flying = false;
   let hovering = false;
-  let flightTimer = null;
+  let flightFrame = null;
   let viewState = {longitude: VIEW_LONGITUDE, latitude: VIEW_LATITUDE, zoom: initialZoom, minZoom: initialZoom, maxZoom: 6};
 
   const deck = new Deck({
@@ -1481,21 +1485,25 @@ export function createFirewallMap(container, options = {}) {
 
   /* ---------------------------------------------------------------- follow traffic */
 
+  // The flight is animated here, frame by frame, rather than with a deck.gl view transition:
+  // those end through callbacks read from props that every interim view state replaces, and a
+  // transition started before deck has laid out its first frame can be dropped, which left
+  // this code believing the map had moved when it had not.
   let follow = Boolean(settings.follow);
   let followHeld = false;
-  let tightenSince = null;
   let resumeTimer = null;
-  // a re-frame asked for (toggle, filter, resize) that could not run yet: done on the next chance
+  // what live arcs covered at each check over the last FOLLOW_WINDOW_MS
+  let seen = [];
+  // a re-frame asked for (toggle, filter, first data) that runs at the next chance
   let pendingFit = false;
   // Exposed for in-browser diagnostics, like firewallMapDeck.
-  container.firewallMapFollow = () => ({follow, followHeld, hovering, flying, pendingFit, tightenSince, zoom: viewState.zoom,
-    target: followTarget(container.clientWidth, container.clientHeight), size: [container.clientWidth, container.clientHeight]});
+  container.firewallMapFollow = () => ({follow, followHeld, hovering, flying, pendingFit, window: seen.length,
+    view: {longitude: viewState.longitude, latitude: viewState.latitude, zoom: viewState.zoom},
+    target: followTarget(container.clientWidth, container.clientHeight, liveBounds())});
   container.addEventListener('pointerleave', () => { hovering = false; });
 
   function userMoved() {
-    if (flying) {
-      settle();
-    }
+    cancelFlight();
     if (!follow) {
       return;
     }
@@ -1516,11 +1524,11 @@ export function createFirewallMap(container, options = {}) {
     return {top: Math.round(pad * 1.3), bottom: pad, left: Math.round(pad * 1.3), right: pad};
   }
 
-  /** The view that shows every allowed and IDS arc (their whole curve, not only the ends). */
-  function followTarget(width, height) {
+  /** [west, south, east, north] of every live allowed or IDS arc (the whole curve), or null. */
+  function liveBounds() {
     let west = Infinity; let east = -Infinity; let south = Infinity; let north = -Infinity;
     for (const arc of arcs) {
-      // only live arcs: not ones fading out, nor an IDS connection that has already closed
+      // not arcs fading out, nor an IDS connection that has already closed
       if (arc.fading || (arc.ids && !arc.ids.active)) {
         continue;
       }
@@ -1529,76 +1537,105 @@ export function createFirewallMap(container, options = {}) {
         south = Math.min(south, lat); north = Math.max(north, lat);
       }
     }
-    if (west === Infinity) {
+    return west === Infinity ? null : [west, Math.max(south, -75), east, Math.min(north, 80)];
+  }
+
+  function union(boxes) {
+    return boxes.reduce((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])]);
+  }
+
+  function followTarget(width, height, bounds) {
+    if (!bounds || width < 50 || height < 50) {
       return null;
     }
-    south = Math.max(south, -75);
-    north = Math.min(north, 80);
     const maxZoom = Math.min(viewState.maxZoom, viewState.minZoom + FOLLOW_MAX_ZOOM_STEPS);
     try {
-      const fitted = new WebMercatorViewport({width, height}).fitBounds([[west, south], [east, north]],
+      const fitted = new WebMercatorViewport({width, height}).fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]],
         {padding: followPadding(width, height), maxZoom});
-      return {bounds: [west, south, east, north], longitude: fitted.longitude, latitude: fitted.latitude,
+      return {longitude: fitted.longitude, latitude: fitted.latitude,
         zoom: Math.max(viewState.minZoom, Math.min(maxZoom, fitted.zoom))};
     } catch (_) {
-      return null;  // padding larger than a tiny, not yet laid out map
+      return null;  // padding larger than a tiny map
     }
   }
 
+  /**
+   * Called on every data refresh (and on toggle, filter change, resize). The target frames the
+   * union of what live arcs covered over the last FOLLOW_WINDOW_MS, so it widens the moment a
+   * new arc appears and tightens once a departed one has been gone for the window.
+   */
   function followTraffic(immediately = false) {
+    const now = performance.now();
+    const bounds = liveBounds();
+    if (immediately) {
+      // a new question (toggle, filter): frame what is there now, forget the old window
+      seen = [];
+    }
+    if (bounds) {
+      seen.push({time: now, bounds});
+    }
+    seen = seen.filter((entry) => now - entry.time <= FOLLOW_WINDOW_MS);
     pendingFit = pendingFit || immediately;
-    if (!follow || followHeld || hovering || flying) {
+    if (!follow || followHeld || hovering || flying || !seen.length) {
       return;
     }
-    immediately = pendingFit;
     const width = container.clientWidth;
     const height = container.clientHeight;
-    const target = width > 50 && height > 50 ? followTarget(width, height) : null;
+    const target = followTarget(width, height, union(seen.map((entry) => entry.bounds)));
     if (!target) {
       return;
     }
     const current = new WebMercatorViewport({...viewState, width, height});
-    const pad = followPadding(width, height);
-    const [west, south, east, north] = target.bounds;
-    // everything still inside the view, allowing half the padding before it counts as the edge
-    const inside = [[west, south], [east, north], [west, north], [east, south]].every((corner) => {
-      const [x, y] = current.project(corner);
-      return x >= pad.left / 2 && x <= width - pad.right / 2 && y >= pad.top / 2 && y <= height - pad.bottom / 2;
-    });
-    const now = performance.now();
-    let go = immediately || !inside;
-    if (!go && target.zoom - viewState.zoom > FOLLOW_TIGHTEN_ZOOM) {
-      tightenSince = tightenSince ?? now;
-      go = now - tightenSince >= FOLLOW_TIGHTEN_AFTER_MS;
-    } else if (!go) {
-      tightenSince = null;
-    }
-    if (go && immediately) {
+    const [tx, ty] = current.project([target.longitude, target.latitude]);
+    const shifted = Math.abs(tx - width / 2) > width * FOLLOW_MIN_SHIFT || Math.abs(ty - height / 2) > height * FOLLOW_MIN_SHIFT;
+    const rezoom = Math.abs(target.zoom - viewState.zoom) > FOLLOW_MIN_ZOOM_CHANGE;
+    if (pendingFit || shifted || rezoom) {
       pendingFit = false;
+      flyTo(target, width, height);
     }
-    if (!go || (Math.abs(target.zoom - viewState.zoom) < 0.05
-        && Math.abs(target.longitude - viewState.longitude) < 0.5 && Math.abs(target.latitude - viewState.latitude) < 0.5)) {
-      return;
-    }
-    tightenSince = null;
-    pendingFit = false;
-    flying = true;
+  }
+
+  function flyTo(target, width, height) {
+    cancelFlight();
     const interpolator = new FlyToInterpolator(FOLLOW_FLY);
-    const duration = Math.max(FOLLOW_MIN_FLY_MS, Math.min(FOLLOW_MAX_FLY_MS,
-      interpolator.getDuration({...viewState, width, height}, {...viewState, ...target, width, height})));
-    viewState = {...viewState, longitude: target.longitude, latitude: target.latitude, zoom: target.zoom,
-      transitionDuration: duration, transitionInterpolator: interpolator, transitionEasing: easeInOutCubic};
-    deck.setProps({viewState});
-    // deck reads onTransitionEnd from the current props, which the interim view states replace:
-    // end the flight on a timer instead, or it never ends and following stops after the first one
-    clearTimeout(flightTimer);
-    flightTimer = setTimeout(settle, duration + 100);
+    const start = {longitude: viewState.longitude, latitude: viewState.latitude, zoom: viewState.zoom, width, height};
+    const end = {...target, width, height};
+    // getDuration only computes a duration when asked for 'auto'; otherwise it returns the end
+    // props' transitionDuration, which was undefined and made every flight NaN
+    const natural = interpolator.getDuration(start, {...end, transitionDuration: 'auto'});
+    const duration = Number.isFinite(natural) ? Math.max(FOLLOW_MIN_FLY_MS, Math.min(FOLLOW_MAX_FLY_MS, natural)) : FOLLOW_MIN_FLY_MS;
+    const began = performance.now();
+    flying = true;
+    const step = (now) => {
+      const t = Math.min(1, Math.max(0, (now - began) / duration));
+      const at = interpolator.interpolateProps(start, end, easeInOutCubic(t));
+      // never hand deck a broken view: land on the target if the curve gives anything odd
+      const good = [at.longitude, at.latitude, at.zoom].every(Number.isFinite);
+      viewState = {...viewState, ...(good ? {longitude: at.longitude, latitude: at.latitude, zoom: at.zoom} : target)};
+      deck.setProps({viewState});
+      if (t < 1) {
+        flightFrame = requestAnimationFrame(step);
+      } else {
+        flightFrame = null;
+        flying = false;
+        // labels are placed for the final view only
+        labelLayer = buildLabelLayer();
+        deck.setProps({layers: compose()});
+      }
+    };
+    flightFrame = requestAnimationFrame(step);
+  }
+
+  function cancelFlight() {
+    if (flightFrame !== null) {
+      cancelAnimationFrame(flightFrame);
+      flightFrame = null;
+    }
+    flying = false;
   }
 
   function settle() {
-    clearTimeout(flightTimer);
-    // drop the transition so the next change (or the next follow check) starts from rest
-    flying = false;
+    // the end of a button zoom (deck transition): drop the transition props
     const {transitionDuration, transitionInterpolator, transitionEasing, onTransitionEnd, onTransitionInterrupt, ...rest} = viewState;
     viewState = rest;
     labelLayer = buildLabelLayer();
@@ -1614,20 +1651,11 @@ export function createFirewallMap(container, options = {}) {
     /** Keep the view on the traffic (see followTraffic); turning it on flies there at once. */
     setFollow(on) {
       follow = Boolean(on);
-      tightenSince = null;
       followTraffic(true);
     },
     /** Re-frame now (after a filter change) rather than waiting for the traffic to settle. */
     refit() {
-      tightenSince = null;
       followTraffic(true);
-    },
-    /** Hold the view still while something on it is selected. */
-    holdFollow(held) {
-      followHeld = Boolean(held);
-      if (!followHeld) {
-        followTraffic();
-      }
     },
     legend,
     setSettings(next) {
@@ -1669,7 +1697,9 @@ export function createFirewallMap(container, options = {}) {
       labelLayer = buildLabelLayer();
       deck.setProps({layers: compose()});
       deck.redraw(true);
-      followTraffic(true);
+      // a new map size needs a new frame, but keeps what the window has seen
+      pendingFit = true;
+      followTraffic();
     },
     destroy() {
       if (frame !== null) {
@@ -1677,7 +1707,7 @@ export function createFirewallMap(container, options = {}) {
         frame = null;
       }
       clearTimeout(resumeTimer);
-      clearTimeout(flightTimer);
+      cancelFlight();
       container.removeEventListener('mouseleave', hideTooltip);
       tooltip.remove();
       deck.finalize();

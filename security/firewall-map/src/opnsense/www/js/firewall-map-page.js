@@ -1311,8 +1311,6 @@
     }
 
     function renderDetails() {
-        // the view holds still while something on it is being looked at
-        state.renderer?.holdFollow(Boolean(state.selection));
         const selection = state.selection;
         const $details = $('#fwmap-details');
         if (!selection) {
