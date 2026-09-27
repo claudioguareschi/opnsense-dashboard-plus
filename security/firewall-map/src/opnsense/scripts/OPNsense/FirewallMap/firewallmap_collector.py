@@ -1647,6 +1647,11 @@ class Correlator:
             if location is None:
                 continue
             active = key in self.current
+            # when the connection was last seen open, so the map can let its arc fade out
+            if active:
+                flow.pop("closed", None)
+            else:
+                flow.setdefault("closed", now)
             connection = self.current.get(key) or flow["connection"]
             inside = (connection.get("inside") or "").rsplit(":", 1)[0] if flow["kind"] != "blocked" else ""
             groups = []
@@ -1674,6 +1679,7 @@ class Correlator:
                 "severity": self._severity(flow),
                 "count": sum(item["count"] for group in flow["alerts"].values() for item in group.values()),
                 "last_seconds": round(max(0, now - flow["last"])),
+                "closed_seconds": None if active else round(max(0, now - flow["closed"])),
                 "groups": groups,
                 "ips_dropped": "blocked" in actions,
                 "lat": location["lat"],

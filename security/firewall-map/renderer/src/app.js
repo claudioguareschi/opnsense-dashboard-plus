@@ -1,6 +1,6 @@
 /* Firewall Map+ renderer. Bundled locally from deck.gl. */
 import {Deck, MapView, WebMercatorViewport} from '@deck.gl/core';
-import {GeoJsonLayer, PathLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
+import {GeoJsonLayer, IconLayer, PathLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
 import worldData from './world.json';
 
 // Antarctica only adds empty space below the flows.
@@ -582,14 +582,39 @@ function describe(place, members, locations, hostnames = {}, showAsn = true) {
 }
 
 /** The arc and map entries for connections Suricata alerted on (see the collector's Correlator). */
+export const IDS_ARC_FADE_SECONDS = 60;
+
+// the firewall's own location: an outline house, tinted by the layer (mask), so it is not
+// mistaken for the hollow rings that mark flagged addresses
+const HOME_ICON = {
+  url: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#000" ' +
+    'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/>' +
+    '<path d="M5.5 8.5V21h13V8.5"/><path d="M10 21v-6h4v6"/></svg>'),
+  width: 48,
+  height: 48,
+  anchorY: 24,
+  mask: true,
+};
+
+/** How visible a correlated connection's arc is: full while open, then fading out over a minute. */
+export function idsArcActivity(flow) {
+  if (flow.active) {
+    return 1;
+  }
+  const closed = flow.closed_seconds ?? flow.last_seconds ?? IDS_ARC_FADE_SECONDS;
+  return Math.max(0, 0.45 * (1 - closed / IDS_ARC_FADE_SECONDS));
+}
+
 export function idsArcData(data) {
-  const flows = (data.ids_flows || []).filter((flow) => flow.kind !== 'blocked').map((flow) => ({
+  // the endpoint keeps its IDS ring for the alert window; only the arc goes away
+  const flows = (data.ids_flows || []).filter((flow) => flow.kind !== 'blocked' && idsArcActivity(flow) > 0).map((flow) => ({
     origin: flow.origin,
     dest: flow.dest,
     rate: flow.active ? 1 : 0,
     rate_in: flow.remote_started ? 1 : 0,
     rate_out: flow.remote_started ? 0 : 1,
-    activity: flow.active ? 1 : 0.45,
+    activity: idsArcActivity(flow),
     initiated: flow.remote_started ? 'remote' : 'local',
     threat: flow.severity <= 2 || (flow.lists || []).length > 0,
     ids_flow: flow,
@@ -931,6 +956,7 @@ export function createFirewallMap(container, options = {}) {
   let idsHistory = new Set();
   let alertPoints = [];
   let frameNow = performance.now();
+  let dataTime = performance.now();
   let fadeKey = 'steady';
   // stable colour per category across refreshes (first seen keeps its colour)
   const categoryColors = new Map();
@@ -953,7 +979,20 @@ export function createFirewallMap(container, options = {}) {
   }
 
   function arcColor(arc) {
-    return faded(arcBaseColor(arc), arcFader.opacity(arc, frameNow));
+    return faded(arcBaseColor(arc), arcOpacity(arc));
+  }
+
+  /** How far a closed IDS connection's arc has faded, counting on from the last refresh. */
+  function idsLinger(arc) {
+    if (!arc.ids || arc.ids.active) {
+      return 1;
+    }
+    const closed = (arc.ids.closed_seconds ?? arc.ids.last_seconds ?? 0) + (frameNow - dataTime) / 1000;
+    return Math.max(0, 1 - closed / IDS_ARC_FADE_SECONDS);
+  }
+
+  function arcOpacity(arc) {
+    return arcFader.opacity(arc, frameNow) * idsLinger(arc);
   }
 
   function arcBaseColor(arc) {
@@ -971,7 +1010,7 @@ export function createFirewallMap(container, options = {}) {
   }
 
   function pulseColor(item) {
-    return faded(pulseBaseColor(item), arcFader.opacity(item.arc, frameNow));
+    return faded(pulseBaseColor(item), arcOpacity(item.arc));
   }
 
   function pulseBaseColor(item) {
@@ -1205,8 +1244,8 @@ export function createFirewallMap(container, options = {}) {
         radiusUnits: 'pixels',
         stroked: true,
         filled: true,
-        getFillColor: (item) => faded(rgb(colors.background.slice(0, 3), 240), arcFader.opacity(item.arc, frameNow)),
-        getLineColor: (item) => faded(item.arc.ids.severity <= 2 ? rgb(colors.block) : [230, 140, 0, 255], arcFader.opacity(item.arc, frameNow)),
+        getFillColor: (item) => faded(rgb(colors.background.slice(0, 3), 240), arcOpacity(item.arc)),
+        getLineColor: (item) => faded(item.arc.ids.severity <= 2 ? rgb(colors.block) : [230, 140, 0, 255], arcOpacity(item.arc)),
         lineWidthUnits: 'pixels',
         getLineWidth: 2.5,
         pickable: true,
@@ -1218,7 +1257,7 @@ export function createFirewallMap(container, options = {}) {
         getPosition: (item) => item.position,
         getText: () => '!',
         getSize: 10,
-        getColor: (item) => faded(item.arc.ids.severity <= 2 ? rgb(colors.block) : [230, 140, 0, 255], arcFader.opacity(item.arc, frameNow)),
+        getColor: (item) => faded(item.arc.ids.severity <= 2 ? rgb(colors.block) : [230, 140, 0, 255], arcOpacity(item.arc)),
         fontWeight: 700,
         characterSet: ['!'],
         pickable: false,
@@ -1244,23 +1283,33 @@ export function createFirewallMap(container, options = {}) {
         id: 'firewall-map-endpoints',
         data: locationsShown,
         getPosition: (location) => [location.lon, location.lat],
-        getRadius: (location) => location.local ? 5 : 2.5,
+        // home is a background disc that hides the arc ends under the house icon drawn above it
+        getRadius: (location) => location.local ? 8 : 2.5,
         radiusUnits: 'pixels',
-        stroked: true,
+        stroked: false,
         filled: true,
         getFillColor: (location) => faded(location.local ? colors.background : colors.endpoint, endpointFader.opacity(location, frameNow)),
-        getLineColor: (location) => faded(colors.endpoint, endpointFader.opacity(location, frameNow)),
-        lineWidthUnits: 'pixels',
-        getLineWidth: (location) => location.local ? 2 : 0,
         pickable: true,
         radiusMinPixels: 2.5,
-        updateTriggers: {getFillColor: [colors.endpoint, fadeKey], getLineColor: [colors.endpoint, fadeKey]},
+        updateTriggers: {getFillColor: [colors.endpoint, fadeKey]},
+      }),
+      new IconLayer({
+        id: 'firewall-map-home',
+        data: locationsShown.filter((location) => location.local),
+        getPosition: (location) => [location.lon, location.lat],
+        getIcon: () => HOME_ICON,
+        getSize: 15,
+        sizeUnits: 'pixels',
+        getColor: (location) => faded(colors.endpoint, endpointFader.opacity(location, frameNow)),
+        pickable: false,
+        updateTriggers: {getColor: [colors.endpoint, fadeKey]},
       }),
     ];
   }
 
   function animating(now) {
-    return arcFader.animating(now) || blockFader.animating(now) || endpointFader.animating(now) || alertFader.animating(now);
+    return arcFader.animating(now) || blockFader.animating(now) || endpointFader.animating(now) || alertFader.animating(now) ||
+      arcs.some((arc) => arc.ids && !arc.ids.active);
   }
 
   function compose(now = performance.now()) {
@@ -1274,6 +1323,7 @@ export function createFirewallMap(container, options = {}) {
   function layers(data) {
     const now = performance.now();
     const previousLanes = new Map([...arcFader.entries.values()].map((entry) => [entry.item.key, entry.item.lane]));
+    dataTime = now;
     const ids = idsArcData(data);
     const arcData = {...data, flows: [...(data.flows || []), ...ids.flows], locations: [...(data.locations || []), ...ids.locations]};
     arcs = arcFader.update(buildArcs(arcData, {...settings, previousLanes}), now);
