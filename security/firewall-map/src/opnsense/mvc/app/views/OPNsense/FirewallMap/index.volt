@@ -46,6 +46,7 @@
     #fwmap-zoom button { width: 30px; height: 30px; border: 0; background: transparent; color: inherit; }
     #fwmap-zoom button + button { border-top: 1px solid rgba(128, 128, 128, .25); }
     #fwmap-zoom button:hover { background: rgba(128, 128, 128, .12); }
+    #fwmap-zoom button.active { background: rgba(128, 128, 128, .22); color: var(--fwmap-accent, rgb(192, 62, 20)); }
     #fwmap-statusbar { display: flex; align-items: center; gap: 12px; padding: 12px 6px; font-size: .92em;
         border-top: 1px solid rgba(128, 128, 128, .15); margin-top: 8px; }
     #fwmap-statusbar #fwmap-status { flex: 1; min-width: 0; }
@@ -621,6 +622,7 @@
                 <button type="button" data-zoom="1" title="{{ lang._('Zoom in') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button>
                 <button type="button" data-zoom="-1" title="{{ lang._('Zoom out') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg></button>
                 <button type="button" data-zoom="fit" title="{{ lang._('Whole world') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+                <button type="button" id="fwmap-follow" data-zoom="follow" aria-pressed="false" title="{{ lang._('Follow traffic: keep the map zoomed to the current arcs') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
             </div>
             <div id="fwmap-credit"></div>
         </div>

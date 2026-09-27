@@ -129,6 +129,7 @@ export default class FirewallMap extends BaseWidget {
                 ['blocks', this.translations.blocks],
                 ['hostnames', this.translations.hostnames],
                 ['asn', this.translations.asn],
+                ['follow', this.translations.follow],
             ]) {
                 const $select = $(`#${this.id}-option-${option}`);
                 const $container = $select.closest('.widget-option-container');
@@ -230,6 +231,13 @@ export default class FirewallMap extends BaseWidget {
                 options: choices([['1', this.translations.asn], ['0', this.translations.labels_off]]),
                 default: '1',
             },
+            follow: {
+                id: `${this.id}-option-follow`,
+                title: this.translations.follow,
+                type: 'select',
+                options: choices([['0', this.translations.labels_off], ['1', this.translations.follow]]),
+                default: '0',
+            },
             ...this._geoOptions(choices),
         };
     }
@@ -245,6 +253,7 @@ export default class FirewallMap extends BaseWidget {
             asn: config.asn !== '0',
             blocks: config.blocks !== '0',
             blockMin: parseInt(config.block_min ?? '3', 10) || 3,
+            follow: config.follow === '1',
         };
     }
 
@@ -401,7 +410,8 @@ export default class FirewallMap extends BaseWidget {
             const theme = this._readTheme();
             this._applyTheme(theme);
             this.settings = await this._settings();
-            this.renderer = renderer.create(container, {theme, settings: this.settings});
+            // no toggle on the widget: panning pauses follow mode for a minute instead of ending it
+            this.renderer = renderer.create(container, {theme, settings: this.settings, followResumeMs: 60000});
             // deck.gl positions its canvas absolutely without left/top, so pin it explicitly
             // rather than relying on the static position (the dashboard centres widget text).
             $(container).children('canvas').css({left: 0, top: 0});

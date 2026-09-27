@@ -1,5 +1,5 @@
 /* Firewall Map+ renderer. Bundled locally from deck.gl. */
-import {Deck, MapView, WebMercatorViewport} from '@deck.gl/core';
+import {Deck, FlyToInterpolator, MapView, WebMercatorViewport} from '@deck.gl/core';
 import {GeoJsonLayer, IconLayer, PathLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
 import worldData from './world.json';
 
@@ -11,8 +11,16 @@ const LINK_WIDTH = 1.5;
 const HEAVY_WIDTH = 3;
 // heavy talkers: the busiest few links (if above a floor), or anything above a byte rate
 const DEFAULT_OPTIONS = {
-  heavyTop: 5, heavyRate: 1000000, maxArcs: 120, labels: true, asn: true, blocks: true, colorMode: 'initiator',
+  heavyTop: 5, heavyRate: 1000000, maxArcs: 120, labels: true, asn: true, blocks: true, colorMode: 'initiator', follow: false,
 };
+// "follow traffic": padding is this share of the map's shorter side, the view never zooms in
+// further than this past the whole-world view, and it only tightens after the traffic has used
+// less of the view for a while (it widens at once when something falls outside)
+const FOLLOW_PADDING = 0.12;
+const FOLLOW_MAX_ZOOM_STEPS = 3.5;
+const FOLLOW_TIGHTEN_ZOOM = 0.8;
+const FOLLOW_TIGHTEN_AFTER_MS = 30000;
+const FOLLOW_FLY_SPEED = 1.4;
 // blocked traffic: pulses race into the firewall; threats also throb at their source
 const BLOCK_PULSE_PERIOD = 1.1;
 const THREAT_THROB_PERIOD = 0.9;
@@ -862,7 +870,10 @@ export function createFirewallMap(container, options = {}) {
     parent: container,
     views: new MapView({repeat: false}),
     viewState,
-    onViewStateChange: ({viewState: next}) => {
+    onViewStateChange: ({viewState: next, interactionState}) => {
+      if (interactionState && (interactionState.isDragging || interactionState.isPanning || interactionState.isZooming)) {
+        userMoved();
+      }
       const labelsWereVisible = viewState.zoom >= viewState.minZoom + LABEL_ZOOM_STEP;
       viewState = {...next, minZoom: viewState.minZoom, maxZoom: viewState.maxZoom};
       deck.setProps({viewState});
@@ -1455,15 +1466,141 @@ export function createFirewallMap(container, options = {}) {
     return layerList;
   }
 
+  /* ---------------------------------------------------------------- follow traffic */
+
+  let follow = Boolean(settings.follow);
+  let followHeld = false;
+  let pointerInside = false;
+  let tightenSince = null;
+  let resumeTimer = null;
+  let flying = false;
+  container.addEventListener('pointerenter', () => { pointerInside = true; });
+  container.addEventListener('pointerleave', () => { pointerInside = false; });
+
+  function userMoved() {
+    if (!follow) {
+      return;
+    }
+    if (options.followResumeMs) {
+      // the dashboard widget has no toggle: pause, and pick up again once the user leaves it be
+      clearTimeout(resumeTimer);
+      followHeld = true;
+      resumeTimer = setTimeout(() => { followHeld = false; followTraffic(true); }, options.followResumeMs);
+      return;
+    }
+    follow = false;
+    options.onFollowChange?.(false);
+  }
+
+  function followPadding(width, height) {
+    const pad = Math.round(Math.min(width, height) * FOLLOW_PADDING);
+    // a little more on the top and left, where the legend and zoom buttons float over the map
+    return {top: Math.round(pad * 1.3), bottom: pad, left: Math.round(pad * 1.3), right: pad};
+  }
+
+  /** The view that shows every allowed and IDS arc (their whole curve, not only the ends). */
+  function followTarget(width, height) {
+    let west = Infinity; let east = -Infinity; let south = Infinity; let north = -Infinity;
+    for (const arc of arcs) {
+      if (arc.fading) {
+        continue;
+      }
+      for (const [lon, lat] of arc.path) {
+        west = Math.min(west, lon); east = Math.max(east, lon);
+        south = Math.min(south, lat); north = Math.max(north, lat);
+      }
+    }
+    if (west === Infinity) {
+      return null;
+    }
+    south = Math.max(south, -75);
+    north = Math.min(north, 80);
+    const maxZoom = Math.min(viewState.maxZoom, viewState.minZoom + FOLLOW_MAX_ZOOM_STEPS);
+    try {
+      const fitted = new WebMercatorViewport({width, height}).fitBounds([[west, south], [east, north]],
+        {padding: followPadding(width, height), maxZoom});
+      return {bounds: [west, south, east, north], longitude: fitted.longitude, latitude: fitted.latitude,
+        zoom: Math.max(viewState.minZoom, Math.min(maxZoom, fitted.zoom))};
+    } catch (_) {
+      return null;  // padding larger than a tiny, not yet laid out map
+    }
+  }
+
+  function followTraffic(immediately = false) {
+    if (!follow || followHeld || pointerInside || flying) {
+      return;
+    }
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    const target = width > 50 && height > 50 ? followTarget(width, height) : null;
+    if (!target) {
+      return;
+    }
+    const current = new WebMercatorViewport({...viewState, width, height});
+    const pad = followPadding(width, height);
+    const [west, south, east, north] = target.bounds;
+    // everything still inside the view, allowing half the padding before it counts as the edge
+    const inside = [[west, south], [east, north], [west, north], [east, south]].every((corner) => {
+      const [x, y] = current.project(corner);
+      return x >= pad.left / 2 && x <= width - pad.right / 2 && y >= pad.top / 2 && y <= height - pad.bottom / 2;
+    });
+    const now = performance.now();
+    let go = immediately || !inside;
+    if (!go && target.zoom - viewState.zoom > FOLLOW_TIGHTEN_ZOOM) {
+      tightenSince = tightenSince ?? now;
+      go = now - tightenSince >= FOLLOW_TIGHTEN_AFTER_MS;
+    } else if (!go) {
+      tightenSince = null;
+    }
+    if (!go || (Math.abs(target.zoom - viewState.zoom) < 0.05
+        && Math.abs(target.longitude - viewState.longitude) < 0.5 && Math.abs(target.latitude - viewState.latitude) < 0.5)) {
+      return;
+    }
+    tightenSince = null;
+    flying = true;
+    viewState = {...viewState, longitude: target.longitude, latitude: target.latitude, zoom: target.zoom,
+      transitionDuration: 'auto', transitionInterpolator: new FlyToInterpolator({speed: FOLLOW_FLY_SPEED}),
+      onTransitionEnd: settle, onTransitionInterrupt: settle};
+    deck.setProps({viewState});
+  }
+
+  function settle() {
+    // drop the transition so the next change (or the next follow check) starts from rest
+    flying = false;
+    const {transitionDuration, transitionInterpolator, onTransitionEnd, onTransitionInterrupt, ...rest} = viewState;
+    viewState = rest;
+    labelLayer = buildLabelLayer();
+    deck.setProps({layers: compose()});
+  }
+
   return {
     render(data) {
       lastData = data;
       deck.setProps({layers: layers(data)});
+      followTraffic();
+    },
+    /** Keep the view on the traffic (see followTraffic); turning it on flies there at once. */
+    setFollow(on) {
+      follow = Boolean(on);
+      tightenSince = null;
+      followTraffic(true);
+    },
+    /** Hold the view still while something on it is selected. */
+    holdFollow(held) {
+      followHeld = Boolean(held);
+      if (!followHeld) {
+        followTraffic();
+      }
     },
     legend,
     setSettings(next) {
+      const wasFollowing = follow;
       settings = {...DEFAULT_OPTIONS, ...next};
+      if (next && 'follow' in next) {
+        follow = Boolean(next.follow);
+      }
       deck.setProps({layers: layers(lastData)});
+      followTraffic(follow && !wasFollowing);
     },
     setTheme(theme) {
       colors = palette(theme);
@@ -1472,13 +1609,16 @@ export function createFirewallMap(container, options = {}) {
     /** Zoom by `steps` (positive in, negative out) around the centre; `fit` shows the whole world. */
     zoom(steps) {
       const zoom = Math.max(viewState.minZoom, Math.min(viewState.maxZoom, viewState.zoom + steps));
-      viewState = {...viewState, zoom, transitionDuration: 250};
+      userMoved();
+      viewState = {...viewState, zoom, transitionDuration: 250, transitionInterpolator: undefined, onTransitionEnd: settle, onTransitionInterrupt: settle};
       deck.setProps({viewState});
       labelLayer = buildLabelLayer();
       deck.setProps({layers: compose()});
     },
     fit() {
-      viewState = {...viewState, longitude: VIEW_LONGITUDE, latitude: VIEW_LATITUDE, zoom: viewState.minZoom, transitionDuration: 300};
+      userMoved();
+      viewState = {...viewState, longitude: VIEW_LONGITUDE, latitude: VIEW_LATITUDE, zoom: viewState.minZoom, transitionDuration: 300,
+        transitionInterpolator: undefined, onTransitionEnd: settle, onTransitionInterrupt: settle};
       deck.setProps({viewState});
       labelLayer = buildLabelLayer();
       deck.setProps({layers: compose()});
@@ -1492,12 +1632,14 @@ export function createFirewallMap(container, options = {}) {
       labelLayer = buildLabelLayer();
       deck.setProps({layers: compose()});
       deck.redraw(true);
+      followTraffic(true);
     },
     destroy() {
       if (frame !== null) {
         cancelAnimationFrame(frame);
         frame = null;
       }
+      clearTimeout(resumeTimer);
       container.removeEventListener('mouseleave', hideTooltip);
       tooltip.remove();
       deck.finalize();

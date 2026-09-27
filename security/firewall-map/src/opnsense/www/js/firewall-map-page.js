@@ -1286,7 +1286,33 @@
             <ul class="dropdown-menu dropdown-menu-right">${more.join('')}</ul></div></div>`;
     }
 
+    const FOLLOW_KEY = 'firewallmap.follow';
+
+    function readFollow() {
+        try {
+            return window.localStorage.getItem(FOLLOW_KEY) === '1';
+        } catch (_) {
+            return false;
+        }
+    }
+
+    /** Follow traffic: off by default, remembered per browser. */
+    function setFollow(on, tellRenderer = true) {
+        state.follow = Boolean(on);
+        $('#fwmap-follow').toggleClass('active', state.follow).attr('aria-pressed', String(state.follow));
+        try {
+            window.localStorage.setItem(FOLLOW_KEY, state.follow ? '1' : '0');
+        } catch (_) {
+            // private browsing: the choice lasts for this page only
+        }
+        if (tellRenderer) {
+            state.renderer?.setFollow(state.follow);
+        }
+    }
+
     function renderDetails() {
+        // the view holds still while something on it is being looked at
+        state.renderer?.holdFollow(Boolean(state.selection));
         const selection = state.selection;
         const $details = $('#fwmap-details');
         if (!selection) {
@@ -1691,7 +1717,9 @@
         setInterval(updatedLine, 1000);
         $('#fwmap-zoom').on('click', 'button', function () {
             const step = $(this).data('zoom');
-            if (step === 'fit') {
+            if (step === 'follow') {
+                setFollow(!state.follow);
+            } else if (step === 'fit') {
                 state.renderer.fit();
             } else {
                 state.renderer.zoom(Number(step));
@@ -1862,7 +1890,8 @@
             // the side panel boxes sit on the page's own background colour
             document.getElementById('fwmap-side').style.setProperty('--fwmap-panel', `rgb(${theme.background.join(', ')})`);
             // the zoom buttons float on the map: same surface and text colour as the theme
-            $('#fwmap-zoom').css({background: `rgb(${theme.background.join(', ')})`, color: `rgb(${theme.text.join(', ')})`});
+            $('#fwmap-zoom').css({background: `rgb(${theme.background.join(', ')})`, color: `rgb(${theme.text.join(', ')})`,
+                '--fwmap-accent': `rgb(${theme.accent.join(', ')})`});
             const container = document.getElementById('fwmap-canvas');
             state.renderer = FirewallMapRenderer.create(container, {
                 theme,
@@ -1871,7 +1900,10 @@
                     state.selection = selection;
                     renderDetails();
                 },
+                // moving the map by hand ends follow mode, as in a navigation app
+                onFollowChange: (on) => setFollow(on, false),
             });
+            setFollow(readFollow());
             $(container).children('canvas').css({left: 0, top: 0});
         } catch (error) {
             console.error('Firewall Map+: renderer initialisation failed', error);
