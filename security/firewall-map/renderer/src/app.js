@@ -585,17 +585,24 @@ function describe(place, members, locations, hostnames = {}, showAsn = true) {
 export const IDS_ARC_FADE_SECONDS = 60;
 
 // the firewall's own location: an outline house, tinted by the layer (mask), so it is not
-// mistaken for the hollow rings that mark flagged addresses
-const HOME_ICON = {
-  url: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#000" ' +
-    'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/>' +
-    '<path d="M5.5 8.5V21h13V8.5"/><path d="M10 21v-6h4v6"/></svg>'),
-  width: 48,
-  height: 48,
-  anchorY: 24,
-  mask: true,
-};
+// mistaken for the hollow rings that mark flagged addresses. Drawn on a canvas because the
+// OPNsense content policy does not let deck.gl fetch a data: URL.
+let homeAtlas = null;
+function homeIconAtlas() {
+  if (!homeAtlas) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 48;
+    const context = canvas.getContext('2d');
+    context.scale(2, 2);
+    context.strokeStyle = '#000';
+    context.lineWidth = 2.2;
+    context.lineCap = context.lineJoin = 'round';
+    context.stroke(new Path2D('M3 10.5 12 3l9 7.5M5.5 8.5V21h13V8.5M10 21v-6h4v6'));
+    homeAtlas = canvas;
+  }
+  return homeAtlas;
+}
+const HOME_ICON_MAPPING = {home: {x: 0, y: 0, width: 48, height: 48, anchorY: 24, mask: true}};
 
 /** How visible a correlated connection's arc is: full while open, then fading out over a minute. */
 export function idsArcActivity(flow) {
@@ -1297,7 +1304,9 @@ export function createFirewallMap(container, options = {}) {
         id: 'firewall-map-home',
         data: locationsShown.filter((location) => location.local),
         getPosition: (location) => [location.lon, location.lat],
-        getIcon: () => HOME_ICON,
+        iconAtlas: homeIconAtlas(),
+        iconMapping: HOME_ICON_MAPPING,
+        getIcon: () => 'home',
         getSize: 15,
         sizeUnits: 'pixels',
         getColor: (location) => faded(colors.endpoint, endpointFader.opacity(location, frameNow)),
