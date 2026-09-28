@@ -88,6 +88,7 @@ BLOCK_BUCKET_SECONDS = 10
 MAX_HOSTNAMES = 5000
 MAX_FAILURE_BACKOFF = 30.0
 COLLECTOR_LOCK = "/var/run/firewallmap/collector.lock"
+RELOAD_MARKER = "/var/run/firewallmap/reload"
 # read back this much of the log when the collector starts, so the 10-minute hit window is full
 BACKLOG_BYTES = 2 * 1024 * 1024
 BLOCK_REFRESH_SECONDS = 60
@@ -933,12 +934,13 @@ class BlocklistIndex:
 
     def refresh(self, tables, background=True):
         if self.refreshing:
-            return
+            return False
         self.refreshing = True
         if background:
             threading.Thread(target=self._refresh, args=(tables,), daemon=True).start()
         else:
             self._refresh(tables)
+        return True
 
     def lookup(self, address):
         try:
@@ -2158,6 +2160,24 @@ def block_event_time(line, now, wall):
     return now - max(0.0, age)
 
 
+def reload_token(path=RELOAD_MARKER):
+    """Opaque token changed by the settings API when the live collector must reload."""
+    try:
+        with open(path, encoding="ascii") as handle:
+            return handle.read(64)
+    except OSError:
+        return None
+
+
+def request_reload(path=RELOAD_MARKER):
+    """Atomically notify a running collector without losing its in-memory flow history."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    temporary = f"{path}.{os.getpid()}"
+    with open(temporary, "w", encoding="ascii") as handle:
+        handle.write(str(time.time_ns()))
+    os.replace(temporary, path)
+
+
 def run():
     lock = acquire_lock()
     if lock is None:
@@ -2188,9 +2208,15 @@ def run():
     local_addresses, role, networks = set(), None, []
     host_checked = None
     settings_checked = None
+    reload_checked = reload_token()
     provider = "maxmind"
     while True:
         started = time.monotonic()
+        reload_now = reload_token()
+        if reload_now != reload_checked:
+            reload_checked = reload_now
+            settings_checked = None
+            blocklists_checked = None
         if host_checked is None or started - host_checked >= HOST_REFRESH_SECONDS:
             local_addresses, role, networks = host_info()
             host_checked = started
@@ -2218,8 +2244,8 @@ def run():
             except (OSError, subprocess.TimeoutExpired, RuntimeError) as error:
                 print(f"firewallmap: background sample failed: {error}", file=sys.stderr)
             else:
-                if blocklists_checked is None or started - blocklists_checked >= BLOCKLIST_REFRESH_SECONDS:
-                    blocklists.refresh(chosen_threat_lists(values.get("threat_lists")))
+                if ((blocklists_checked is None or started - blocklists_checked >= BLOCKLIST_REFRESH_SECONDS)
+                        and blocklists.refresh(chosen_threat_lists(values.get("threat_lists")))):
                     blocklists_checked = started
                 reputation.refresh(time.monotonic())
                 wall = time.time()
@@ -2286,8 +2312,8 @@ def run():
                     descriptions, interfaces, leases = rule_descriptions(), interface_names(), lease_names()
                     correlator.forwards = port_forwards()
                     block_meta_checked = started
-                if blocklists_checked is None or started - blocklists_checked >= BLOCKLIST_REFRESH_SECONDS:
-                    blocklists.refresh(chosen_threat_lists(geodb.settings().get("threat_lists")))
+                if ((blocklists_checked is None or started - blocklists_checked >= BLOCKLIST_REFRESH_SECONDS)
+                        and blocklists.refresh(chosen_threat_lists(values.get("threat_lists")))):
                     blocklists_checked = started
                 reputation.refresh(now)
                 # while the map is open the queue is always fed; the setting and the widget only
@@ -2348,6 +2374,9 @@ if __name__ == "__main__":
         # periodic (cron) and after boot: keep the review queue fed while the widget is in use
         if recording_wanted():
             subprocess.run([RC_SCRIPT, "onestart"], capture_output=True, check=False, timeout=10)
+        sys.exit(0)
+    if sys.argv[1:] == ["reload"]:
+        request_reload()
         sys.exit(0)
     try:
         run()

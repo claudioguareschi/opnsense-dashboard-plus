@@ -105,6 +105,8 @@ class SettingsController extends ApiControllerBase
         }
         $model->serializeToConfig();
         Config::getInstance()->save();
+        /* Reload in place: preserve live flow/alert history while rebuilding the chosen list index. */
+        (new Backend())->configdRun('firewallmap reload');
         if (!empty($fetchBlacklist)) {
             (new Backend())->configdRun('firewallmap abuseipdb refresh', true);
         }

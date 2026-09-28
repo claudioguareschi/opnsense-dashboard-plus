@@ -173,6 +173,9 @@ signed; `publish.sh` replaces older versions and signs the whole catalogue.
 
 ## Changelog
 
+- **os-firewall-map 0.1_6**: saved threat-list choices reload the live collector in place and
+  appear in Reputation without waiting for its periodic refresh; compact, consistent spacing for
+  checkbox rows in the widget Options dialog.
 - **os-firewall-map 0.1_5**: a "Firewall Map+" item in System > High Availability > Settings,
   so the plugin settings (MaxMind and AbuseIPDB keys included) sync to the backup; the review
   queue, caches and downloaded databases stay local to each firewall.

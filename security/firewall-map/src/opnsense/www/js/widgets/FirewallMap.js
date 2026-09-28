@@ -133,12 +133,13 @@ export default class FirewallMap extends BaseWidget {
             ]) {
                 const $select = $(`#${this.id}-option-${option}`);
                 const $container = $select.closest('.widget-option-container');
+                $container.css({marginTop: '8px', marginBottom: '2px'});
                 $container.find('.bootstrap-select').hide();
                 const $checkbox = $('<input type="checkbox" style="margin: 0 6px 0 0;">')
                     .prop('checked', $select.val() === '1')
                     .on('change', (event) => $select.val(event.target.checked ? '1' : '0'));
                 $container.children('div').first().empty().append(
-                    $('<label style="font-weight: bold; cursor: pointer;"></label>')
+                    $('<label style="font-weight: bold; cursor: pointer; margin: 0; line-height: 20px;"></label>')
                         .append($checkbox, document.createTextNode(label)),
                 );
             }

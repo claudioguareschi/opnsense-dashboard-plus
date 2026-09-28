@@ -283,6 +283,16 @@ class InitiatorTest(unittest.TestCase):
 
 
 class BlocklistTest(unittest.TestCase):
+    def test_reload_marker_changes_without_restarting_collector(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = os.path.join(directory, "reload")
+            self.assertIsNone(COLLECTOR.reload_token(marker))
+            COLLECTOR.request_reload(marker)
+            first = COLLECTOR.reload_token(marker)
+            self.assertTrue(first)
+            COLLECTOR.request_reload(marker)
+            self.assertNotEqual(COLLECTOR.reload_token(marker), first)
+
     def test_longest_prefix_lookup_across_tables(self):
         index = COLLECTOR.BlocklistIndex()
         index.load({
@@ -293,6 +303,13 @@ class BlocklistTest(unittest.TestCase):
         self.assertEqual(index.lookup("203.0.113.7"), ["spamhaus_drop"])
         self.assertEqual(index.lookup("10.1.2.3"), [])
         self.assertEqual(index.lookup("not-an-ip"), [])
+
+    def test_busy_blocklist_refresh_is_retried(self):
+        index = COLLECTOR.BlocklistIndex()
+        index.refreshing = True
+        self.assertFalse(index.refresh(set()))
+        index.refreshing = False
+        self.assertTrue(index.refresh(set(), background=False))
 
     def test_selects_feed_tables(self):
         with tempfile.TemporaryDirectory() as directory:
