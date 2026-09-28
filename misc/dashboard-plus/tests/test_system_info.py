@@ -101,6 +101,7 @@ dev.qat_ocf.0.enable: 1
     def test_efi_runtime_overrides_an_inconsistent_kernel_boot_label(self):
         self.assertEqual(SYSTEM_INFO.boot_method("BIOS", True, ""), "UEFI")
         self.assertEqual(SYSTEM_INFO.boot_method("BIOS", False, ""), "BIOS")
+        self.assertEqual(SYSTEM_INFO.boot_method("", False, ""), "")
 
     def test_parse_zfs_boot_environment(self):
         environments = SYSTEM_INFO.collect_boot_environments("default\tNR\t/\t1.64G\t2026-09-20 10:21\n")
@@ -130,11 +131,14 @@ dev.qat_ocf.0.enable: 1
         )
 
     def test_ipsec_status_reports_active_hardware_not_packet_offload(self):
-        self.assertEqual(SYSTEM_INFO.collect_ipsec_status([]), "Hardware acceleration unavailable")
-        self.assertEqual(
-            SYSTEM_INFO.collect_ipsec_status([{"active": True}]),
-            "Hardware acceleration active",
-        )
+        self.assertEqual(SYSTEM_INFO.collect_ipsec_status([]), "unavailable")
+        self.assertEqual(SYSTEM_INFO.collect_ipsec_status([{"active": True}]), "active")
+
+    def test_mitigation_state_returns_codes_for_the_ui_to_translate(self):
+        self.assertEqual(SYSTEM_INFO.mitigation_state("1"), "enabled")
+        self.assertEqual(SYSTEM_INFO.mitigation_state("0"), "disabled")
+        self.assertEqual(SYSTEM_INFO.mitigation_state("VERW"), "VERW")
+        self.assertEqual(SYSTEM_INFO.mitigation_state(""), "")
 
 
 if __name__ == "__main__":

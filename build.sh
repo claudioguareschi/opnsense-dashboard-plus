@@ -36,6 +36,8 @@ for PLUGIN in ${PLUGINS}; do
     rm -rf "${WORK:?}/${PLUGIN}"
     mkdir -p "$(dirname "${WORK}/${PLUGIN}")"
     cp -R "${ROOT}/${PLUGIN}" "${WORK}/${PLUGIN}"
+    # Bytecode from running the tests locally must not ship in the package.
+    find "${WORK}/${PLUGIN}" -name __pycache__ -type d -prune -exec rm -rf {} +
     if [ -n "${DEVEL:-}" ]; then
         (cd "${WORK}/${PLUGIN}" && make PLUGIN_DEVEL=yes package > /dev/null)
     else

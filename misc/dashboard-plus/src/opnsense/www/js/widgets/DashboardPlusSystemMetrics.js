@@ -3,6 +3,8 @@
  * All rights reserved.
  */
 
+const {renderTitle, sizeToContent, widthChanged} = await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
+
 export default class DashboardPlusSystemMetrics extends BaseWidget {
     constructor(config) {
         super(config);
@@ -36,6 +38,8 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
             tooltip: true,
             labels: {
                 fillStyle: Chart.defaults.color,
+                // Match the dashboard text instead of Smoothie's default monospace.
+                fontFamily: getComputedStyle(document.body).fontFamily,
                 precision,
                 fontSize: 11
             },
@@ -226,7 +230,8 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
     }
 
     async onMarkupRendered() {
-        $(`#${this.id}-title`).html(`<b>${this.translations.dashboard_title}</b>`);
+        renderTitle(this);
+        sizeToContent(this);
         this.currentConfig = await this.getWidgetConfig();
         this._applyTimeWindow(this.currentConfig);
         this._applyComponentVisibility(this.currentConfig);
@@ -244,7 +249,7 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
             {minValue: 0, maxValue: 100}
         );
         this._createChart(
-            `${this.id}-temperature-chart`, this.temperatureSeries, '#d62728', 1,
+            `${this.id}-temperature-chart`, this.temperatureSeries, '#d62728', 0,
             {minValue: 0, maxValue: 100}
         );
         this._createChart(
@@ -256,11 +261,9 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
             {minValue: 0, maxValue: 100}
         );
 
+        // One sample per second for every series, paced by the CPU stream. The tick only
+        // refreshes the latest memory, temperature, states and mbuf values.
         this.openEventSource('/api/diagnostics/cpu_usage/stream', event => {
-            if (!event) {
-                this.closeEventSource();
-                return;
-            }
             const cpu = JSON.parse(event.data).total;
             this.cpuSeries.append(Date.now(), cpu);
             if (this.memoryPercent !== null) {
@@ -305,16 +308,30 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         };
     }
 
-    onWidgetOptionsChanged(options) {
-        this.currentConfig = options;
-        this._applyTimeWindow(options);
-        this._applyComponentVisibility(options);
-        this.config.callbacks.updateGrid();
+    async onWidgetOptionsChanged() {
+        // Read the options back through getWidgetConfig so an empty selection means the
+        // defaults now, as it will after the dashboard reloads.
+        this.currentConfig = await this.getWidgetConfig();
+        this._applyTimeWindow(this.currentConfig);
+        this._applyComponentVisibility(this.currentConfig);
+        this.config.callbacks?.updateGrid?.();
     }
 
-    onWidgetResize() {
+    onWidgetResize(elem, width) {
+        if (!widthChanged(this, width)) {
+            return false;
+        }
         this._applyTimeWindow(this.currentConfig || {time_window: '60'});
+        // Resize the backing stores now rather than on Smoothie's next frame, so the charts
+        // are not drawn stretched while the column changes width.
+        this.charts.forEach(({chart}) => chart.resize());
         return true;
+    }
+
+    onWidgetClose() {
+        super.onWidgetClose();
+        this.charts.forEach(({chart}) => chart.stop());
+        this.charts = [];
     }
 
     async onWidgetTick() {
@@ -335,7 +352,6 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
             const pressureUsed = Math.max(0, used - arc);
             const percent = total > 0 ? (pressureUsed / total) * 100 : 0;
             this.memoryPercent = percent;
-            this.memorySeries.append(Date.now(), percent);
             $(`#${this.id}-memory-current`).text(`${percent.toFixed(0)}%`);
             $(`#${this.id}-memory-total`).text(
                 `${pressureUsed} MiB / ${this._formatTotalMemory(total)} ${this.translations.used}`
@@ -353,7 +369,6 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
             const celsius = parseFloat(hottest.temperature);
             this.temperatureCelsius = celsius;
             this._expandTemperatureScale(celsius);
-            this.temperatureSeries.append(Date.now(), celsius);
             $(`#${this.id}-temperature-current`).text(`${celsius.toFixed(1)} °C`);
         } else {
             $(`#${this.id}-temperature-current`).text(this.translations.unavailable);
@@ -364,20 +379,19 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         if (Number.isFinite(stateCurrent) && Number.isFinite(stateLimit) && stateLimit > 0) {
             const percent = (stateCurrent / stateLimit) * 100;
             this.statesPercent = percent;
-            this.statesSeries.append(Date.now(), percent);
             $(`#${this.id}-states-current`).text(`${percent.toFixed(0)}%`);
             $(`#${this.id}-states-total`).text(`${stateCurrent.toLocaleString()} / ${stateLimit.toLocaleString()} ${this.translations.states.toLowerCase()}`);
         }
 
         const mbuf = mbufs?.['mbuf-statistics'];
-        const mbufCurrent = parseInt(mbuf?.['mbuf-current'], 10);
+        // Clusters in use against the cluster limit, as the core Mbuf widget reports it.
+        const mbufCurrent = parseInt(mbuf?.['cluster-total'], 10);
         const mbufLimit = parseInt(mbuf?.['cluster-max'], 10);
         if (Number.isFinite(mbufCurrent) && Number.isFinite(mbufLimit) && mbufLimit > 0) {
             const percent = (mbufCurrent / mbufLimit) * 100;
             this.mbufPercent = percent;
-            this.mbufSeries.append(Date.now(), percent);
             $(`#${this.id}-mbufs-current`).text(`${percent.toFixed(0)}%`);
-            $(`#${this.id}-mbufs-total`).text(`${mbufCurrent.toLocaleString()} / ${mbufLimit.toLocaleString()} ${this.translations.mbufs.toLowerCase()}`);
+            $(`#${this.id}-mbufs-total`).text(`${mbufCurrent.toLocaleString()} / ${mbufLimit.toLocaleString()} ${this.translations.mbuf_clusters}`);
         }
 
         const swapDevices = Array.isArray(swap?.swap) ? swap.swap : [];

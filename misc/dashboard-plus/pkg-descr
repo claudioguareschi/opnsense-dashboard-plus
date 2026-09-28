@@ -4,3 +4,7 @@ Sensors+, Interface Statistics+, Gateways+, Interfaces+ and Firewall Logs+.
 They extend the standard widgets with hardware, firmware and CPU security
 details, configurable time windows, per-interface colours, field selection
 and drag-to-reorder, without modifying the OPNsense core.
+
+The "Dashboard Plus widgets" privilege also allows reading the live firewall
+log, gateway status, pf state counts and interface details, which the widgets
+display.

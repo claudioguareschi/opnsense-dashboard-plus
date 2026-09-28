@@ -24,179 +24,193 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+const {escapeHtml, renderTitle, sizeToContent, widthChanged} =
+    await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
+
 export default class DashboardPlusSystemInformation extends BaseTableWidget {
     constructor(config) {
         super(config);
         this.tickTimeout = 10;
+        this.loaded = false;
     }
 
     getGridOptions() {
-        return {
-            sizeToContent: 650
-        };
+        return {sizeToContent: 650};
+    }
+
+    _tableId() {
+        return `${this.id}-table`;
     }
 
     getMarkup() {
-        const markup = this.createTable('dashboard-plus-system-information', {
-            headerPosition: 'left'
-        });
-        const desktopStyles = this.sizeStates[this.headerBreakpoint];
-        desktopStyles['.flextable-row > .flex-cell.first'] = {width: '28%'};
-        desktopStyles['.flextable-row > .flex-cell:not(.first)'] = {
-            width: '72%',
-            'box-sizing': 'border-box',
-            'padding-left': '0.75em'
-        };
+        const markup = this.createTable(this._tableId(), {headerPosition: 'left'});
+        // Label and value side by side from the breakpoint up, stacked below it. Both states
+        // set the same properties, so crossing the breakpoint (the side menu is toggled)
+        // never leaves the other layout's widths or padding behind.
+        const narrow = this.sizeStates[0];
+        const wide = this.sizeStates[this.headerBreakpoint];
+        narrow['.flextable-row > .flex-cell.first'] = {width: '100%'};
+        narrow['.flextable-row > .flex-cell:not(.first)'] = {width: '100%', 'box-sizing': '', 'padding-left': ''};
+        wide['.flextable-row > .flex-cell.first'] = {width: '28%'};
+        wide['.flextable-row > .flex-cell:not(.first)'] = {width: '72%', 'box-sizing': 'border-box', 'padding-left': '0.75em'};
         return markup;
     }
 
-    escape(value) {
-        const displayValue = value === null || value === undefined || value === ''
-            ? this.translations.unavailable
-            : String(value);
-        return $('<div>').text(displayValue).html();
+    _value(value) {
+        return escapeHtml(value === null || value === undefined || value === '' ? this.translations.unavailable : value);
     }
 
-    formatList(values) {
+    _list(values, separator = '<br>') {
         if (!Array.isArray(values) || values.length === 0) {
-            return this.escape(this.translations.unavailable);
+            return this._value(null);
         }
-        return values.map(value => this.escape(value)).join('<br>');
+        return values.map(value => this._value(value)).join(separator);
     }
 
-    formatCommaList(values) {
-        if (!Array.isArray(values) || values.length === 0) {
-            return this.escape(this.translations.unavailable);
-        }
-        return values.map(value => this.escape(value)).join(', ');
-    }
-
-    formatGroup(items) {
+    _group(items) {
         const values = items.filter(item => item.value !== null && item.value !== undefined && item.value !== '');
         if (values.length === 0) {
-            return this.escape(this.translations.unavailable);
+            return this._value(null);
         }
         return values.map(item => {
-            const value = item.html ? item.value : this.escape(item.value);
-            return item.label ? `<strong>${this.escape(item.label)}:</strong> ${value}` : value;
+            const value = item.html ? item.value : this._value(item.value);
+            return item.label ? `<strong>${escapeHtml(item.label)}:</strong> ${value}` : value;
         }).join('<br>');
     }
 
-    formatCryptoHardware(providers) {
-        const values = (providers || []).map(provider => {
+    _cryptoHardware(providers) {
+        return this._list((providers || []).map(provider => {
             const state = this.translations[provider.state] || this.translations.inactive;
             return `${provider.feature}: ${provider.provider} (${state})`;
-        });
-        return this.formatList(values);
+        }));
     }
 
-    async onMarkupRendered() {
-        $(`#${this.id}-title`).html(`<b>${this.translations.dashboard_title}</b>`);
-        const [system, time, details] = await Promise.all([
-            this.ajaxCall('/api/diagnostics/system/system_information'),
-            this.ajaxCall('/api/diagnostics/system/system_time'),
-            this.ajaxCall('/api/dashboardplus/system/info')
-        ]);
+    /* The system script reports states as codes; show them in the UI language. */
+    _state(code) {
+        return {
+            enabled: this.translations.enabled,
+            disabled: this.translations.disabled,
+            active: this.translations.hardware_acceleration_active,
+            unavailable: this.translations.hardware_acceleration_unavailable
+        }[code] ?? code;
+    }
 
-        if (!details || details.status !== 'ok') {
-            this.displayError(this.translations.unavailable);
-            return;
+    _frequency(cpu) {
+        if (!cpu?.current_mhz) {
+            return null;
         }
+        const maximum = cpu.maximum_mhz ? `, ${this.translations.maximum}: ${cpu.maximum_mhz} MHz` : '';
+        return `${this.translations.current}: ${cpu.current_mhz} MHz${maximum}`;
+    }
 
+    _topology(cpu) {
+        if (!(cpu.threads && cpu.packages && cpu.cores && cpu.threads_per_core)) {
+            return null;
+        }
+        return `${cpu.threads} CPU${cpu.threads === 1 ? '' : 's'} : ${cpu.packages} package(s) x ` +
+            `${cpu.cores} core(s) x ${cpu.threads_per_core} hardware threads`;
+    }
+
+    _rows(system, time, details) {
         const versions = Array.isArray(system?.versions) ? system.versions : [];
         const hardware = details.hardware || {};
         const bios = details.bios || {};
         const bootEnvironment = details.boot_environment || {};
         const cpu = details.cpu || {};
         const mitigations = details.mitigations || {};
-        const hardwareName = [hardware.manufacturer, hardware.model].filter(Boolean).join(' ');
-        const biosName = [bios.vendor, bios.version, bios.date].filter(Boolean).join(' / ');
-        const topology = cpu.threads && cpu.packages && cpu.cores && cpu.threads_per_core
-            ? `${cpu.threads} CPU${cpu.threads === 1 ? '' : 's'} : ${cpu.packages} package(s) x ` +
-                `${cpu.cores} core(s) x ${cpu.threads_per_core} hardware threads`
-            : null;
-        const frequency = cpu.current_mhz
-            ? `${this.translations.current}: ${cpu.current_mhz} MHz` +
-                (cpu.maximum_mhz ? `, ${this.translations.maximum}: ${cpu.maximum_mhz} MHz` : '')
-            : null;
+        const frequency = this._frequency(cpu);
         const updateLink = $('<a>')
             .attr('href', '/ui/core/firmware#checkupdate')
             .text(system?.updates || this.translations.unavailable)
             .prop('outerHTML');
 
         const rows = [
-            [this.translations.name, this.escape(system?.name)],
-            [this.translations.user, this.escape(details.user)],
-            [this.translations.hardware, this.formatGroup([
+            [this.translations.name, this._value(system?.name)],
+            [this.translations.user, this._value(details.user)],
+            [this.translations.hardware, this._group([
                 {label: this.translations.manufacturer, value: hardware.manufacturer},
-                {label: this.translations.model, value: hardware.model || hardwareName},
+                {label: this.translations.model, value: hardware.model},
                 {label: this.translations.serial, value: hardware.serial}
             ])],
-            [this.translations.firmware, this.formatGroup([
+            [this.translations.firmware, this._group([
                 {label: this.translations.vendor, value: bios.vendor},
                 {label: this.translations.version, value: bios.version},
                 {label: this.translations.release_date, value: bios.date},
                 {label: this.translations.boot_method, value: bios.boot_method}
             ])]
         ];
-
         if (bootEnvironment.current || bootEnvironment.next) {
-            rows.push([this.translations.boot_environment, this.formatGroup([
+            rows.push([this.translations.boot_environment, this._group([
                 {label: this.translations.current, value: bootEnvironment.current},
                 {label: this.translations.next, value: bootEnvironment.next}
             ])]);
         }
-
         rows.push(
-            [this.translations.version, this.formatGroup([
+            [this.translations.version, this._group([
                 {label: this.translations.opnsense, value: versions[0]},
                 {label: this.translations.freebsd, value: versions[1]},
                 {label: this.translations.update_status, value: updateLink, html: true}
             ])],
-            [this.translations.cpu, this.formatGroup([
+            [this.translations.cpu, this._group([
                 {label: this.translations.model, value: cpu.model},
-                {label: '', value: frequency ? `<span id="dashboard-plus-frequency">${frequency}</span>` : null, html: true},
-                {label: '', value: topology}
+                {label: '', value: frequency ? `<span id="${this.id}-frequency">${escapeHtml(frequency)}</span>` : null, html: true},
+                {label: '', value: this._topology(cpu)}
             ])]
         );
-
         if ((details.crypto_hardware || []).length > 0) {
-            rows.push(
-                [this.translations.accelerator, this.formatCryptoHardware(details.crypto_hardware)]
-            );
+            rows.push([this.translations.accelerator, this._cryptoHardware(details.crypto_hardware)]);
         }
-
         rows.push(
-            [this.translations.ipsec, this.escape(details.ipsec)],
-            [this.translations.accelerated_algorithms, this.formatCommaList(details.accelerated_algorithms)],
-            [this.translations.pti, this.escape(mitigations.pti)],
-            [this.translations.mds, this.escape(mitigations.mds)],
-            [this.translations.uptime, `<span id="dashboard-plus-uptime">${this.escape(time?.uptime)}</span>`],
-            [this.translations.datetime, `<span id="dashboard-plus-datetime">${this.escape(time?.datetime)}</span>`],
-            [this.translations.dns_servers, this.formatList(details.dns_servers)]
+            [this.translations.ipsec, this._value(this._state(details.ipsec))],
+            [this.translations.accelerated_algorithms, this._list(details.accelerated_algorithms, ', ')],
+            [this.translations.pti, this._value(this._state(mitigations.pti))],
+            [this.translations.mds, this._value(this._state(mitigations.mds))],
+            [this.translations.uptime, `<span id="${this.id}-uptime">${this._value(time?.uptime)}</span>`],
+            [this.translations.datetime, `<span id="${this.id}-datetime">${this._value(time?.datetime)}</span>`],
+            [this.translations.dns_servers, this._list(details.dns_servers)]
         );
+        return rows.map(([label, value]) => [escapeHtml(label), value]);
+    }
 
-        super.updateTable('dashboard-plus-system-information', rows);
+    async onMarkupRendered() {
+        renderTitle(this);
+        sizeToContent(this);
     }
 
     async onWidgetTick() {
+        if (!this.loaded) {
+            // Load in the tick, not in onMarkupRendered: a failure then shows the dashboard's
+            // error state and the next tick retries.
+            const [system, time, details] = await Promise.all([
+                this.ajaxCall('/api/diagnostics/system/system_information'),
+                this.ajaxCall('/api/diagnostics/system/system_time'),
+                this.ajaxCall('/api/dashboardplus/system/info')
+            ]);
+            if (details?.status !== 'ok') {
+                throw new Error('System information is unavailable');
+            }
+            super.updateTable(this._tableId(), this._rows(system, time, details));
+            this.loaded = true;
+            return;
+        }
         const [time, frequency] = await Promise.all([
             this.ajaxCall('/api/diagnostics/system/system_time'),
             this.ajaxCall('/api/dashboardplus/system/frequency')
         ]);
         if (time?.uptime) {
-            $('#dashboard-plus-uptime').text(time.uptime);
+            $(`#${this.id}-uptime`).text(time.uptime);
         }
         if (time?.datetime) {
-            $('#dashboard-plus-datetime').text(time.datetime);
+            $(`#${this.id}-datetime`).text(time.datetime);
         }
-        if (frequency?.current_mhz) {
-            const maximum = frequency.maximum_mhz
-                ? `, ${this.translations.maximum}: ${frequency.maximum_mhz} MHz`
-                : '';
-            $('#dashboard-plus-frequency').text(
-                `${this.translations.current}: ${frequency.current_mhz} MHz${maximum}`
-            );
+        const text = this._frequency(frequency);
+        if (text) {
+            $(`#${this.id}-frequency`).text(text);
         }
+    }
+
+    onWidgetResize(elem, width, height) {
+        const layoutChanged = super.onWidgetResize(elem, width, height);
+        return widthChanged(this, width) || layoutChanged;
     }
 }

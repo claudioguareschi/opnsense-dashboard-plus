@@ -3,17 +3,17 @@
  * All rights reserved.
  */
 
+const {escapeHtml, renderTitle, mergeOrder, makeSortable, sizeToContent, widthChanged, formatBitRate} =
+    await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
+
 export default class DashboardPlusTraffic extends BaseWidget {
     constructor(config) {
         super(config);
         this.configurable = true;
         this.charts = {};
-        this.datasets = {};
-        this.initialized = false;
-        this.latestData = null;
+        this.buildPromise = null;
         this.currentConfig = null;
-        this.configChanged = false;
-        this.compactVisible = false;
+        this.interfaceColors = {};
         this.windowDuration = 60000;
         this.directionColors = {
             inbytes: {line: '#2ca02c', fill: 'rgba(44, 160, 44, 0.28)'},
@@ -29,7 +29,7 @@ export default class DashboardPlusTraffic extends BaseWidget {
         return `${this.id}-traffic-${name}`;
     }
 
-    _chartConfig(datasets, showLegend = true, useThemePalette = true) {
+    _chartConfig(datasets) {
         return {
             type: 'line',
             data: {datasets},
@@ -49,256 +49,147 @@ export default class DashboardPlusTraffic extends BaseWidget {
                         },
                         realtime: {duration: this.windowDuration, delay: 2000},
                     },
-                    y: {ticks: {callback: value => this._formatBits(value)}}
+                    y: {ticks: {callback: value => formatBitRate(value)}}
                 },
                 plugins: {
-                    legend: {display: showLegend, position: 'top'},
+                    legend: {display: false},
                     tooltip: {
                         mode: 'nearest',
                         intersect: false,
-                        callbacks: {label: context => `${context.dataset.label}: ${this._formatBits(context.raw.y)}`}
+                        callbacks: {label: context => `${context.dataset.label}: ${formatBitRate(context.raw.y)}`}
                     },
                     streaming: {frameRate: 30, ttl: this.windowDuration + 10000},
-                    // Match the stock Traffic widget and therefore the active theme.
-                    colorschemes: useThemePalette ? {scheme: 'tableau.Classic10'} : false
+                    colorschemes: false
                 }
             }
         };
     }
 
-    _dataset(name, direction, time, explicitColor = false, customColor = null) {
-        const color = this.directionColors[direction];
-        return {
-            label: name,
-            ...(explicitColor ? {borderColor: color.line, backgroundColor: color.fill} : {}),
-            ...(customColor ? {borderColor: customColor, backgroundColor: `${customColor}47`} : {}),
-            pointRadius: 0,
-            borderWidth: 2,
-            direction,
-            lastTime: time,
-            data: []
-        };
+    _dataset(label, direction, time, color = null) {
+        const colors = color
+            ? {borderColor: color, backgroundColor: `${color}47`}
+            : {borderColor: this.directionColors[direction].line, backgroundColor: this.directionColors[direction].fill};
+        return {label, ...colors, pointRadius: 0, borderWidth: 2, direction, lastTime: time, data: []};
     }
 
-    _perInterfaceHeading(name) {
+    _perInterfacePanel(id, name, canvasId) {
         const color = this.directionColors;
         return `
-            <div style="width: 95%; margin: 0 auto;">
-                <div class="dashboard-plus-traffic-heading" draggable="true" title="Drag to reorder" style="display: flex; justify-content: space-between; align-items: center; margin: 0 0.25em; cursor: grab;">
-                    <h3 style="margin: 0;">${$('<div>').text(name).html()}</h3>
-                    <div style="display: flex; gap: 1em; white-space: nowrap;">
-                        <span><i style="display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; background: ${color.inbytes.line};"></i> ${this.translations.in}</span>
-                        <span><i style="display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; background: ${color.outbytes.line};"></i> ${this.translations.out}</span>
+            <div class="dashboard-plus-traffic-interface" data-sort-id="${escapeHtml(id)}">
+                <div style="width: 95%; margin: 0 auto;">
+                    <div class="dashboard-plus-traffic-heading" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}" style="display: flex; justify-content: space-between; align-items: center; margin: 0 0.25em; cursor: grab;">
+                        <h3 style="margin: 0;">${escapeHtml(name)}</h3>
+                        <div style="display: flex; gap: 1em; white-space: nowrap;">
+                            <span><i style="display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; background: ${color.inbytes.line};"></i> ${escapeHtml(this.translations.in)}</span>
+                            <span><i style="display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; background: ${color.outbytes.line};"></i> ${escapeHtml(this.translations.out)}</span>
+                        </div>
                     </div>
                 </div>
+                <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="${escapeHtml(canvasId)}"></canvas></div>
             </div>`;
     }
 
-    _renderCombinedLegend(datasets) {
+    _renderCombinedLegend(entries) {
         const $legend = $(`#${this._elementId('combined-legend')}`).empty();
-        datasets.forEach(dataset => {
-            const label = $('<div>').text(dataset.label).html();
+        entries.forEach(({label, color}) => {
             $legend.append(`
-                <span class="dashboard-plus-traffic-legend-item" data-interface="${dataset.intf}" title="${label}" style="display: inline-flex; align-items: center; gap: 0.35em; flex: 0 0 auto;">
-                    <i style="display: inline-block; width: 0.75em; height: 0.75em; border-radius: 50%; background: ${dataset.borderColor};"></i>${label}
+                <span style="display: inline-flex; align-items: center; gap: 0.35em;">
+                    <i style="display: inline-block; width: 0.75em; height: 0.75em; border-radius: 50%; background: ${color};"></i>${escapeHtml(label)}
                 </span>
             `);
         });
-        requestAnimationFrame(() => this._updateLegendControls());
     }
 
-    _updateLegendControls() {
-        const element = $(`#${this._elementId('combined-legend')}`)[0];
-        if (!element) {
-            return;
-        }
-        const scrollThreshold = 5;
-        const canScrollLeft = element.scrollLeft > scrollThreshold;
-        const canScrollRight = element.scrollLeft + element.clientWidth < element.scrollWidth - scrollThreshold;
-        $(`#${this.id}-traffic-legend-previous`).toggle(canScrollLeft);
-        $(`#${this.id}-traffic-legend-next`).toggle(canScrollRight);
+    _destroyCharts() {
+        Object.values(this.charts).forEach(chart => chart.destroy());
+        this.charts = {};
     }
 
-    _scrollCombinedLegend(direction) {
-        const element = $(`#${this._elementId('combined-legend')}`)[0];
-        if (!element) {
-            return;
-        }
-        const current = element.scrollLeft;
-        const containerLeft = element.getBoundingClientRect().left;
-        const positions = [...element.children]
-            .filter(item => $(item).is(':visible'))
-            .map(item => item.getBoundingClientRect().left - containerLeft + current);
-        const target = direction > 0
-            ? positions.find(position => position > current + 5)
-            : [...positions].reverse().find(position => position < current - 5);
-        element.scrollTo({
-            left: target ?? (direction > 0 ? element.scrollWidth : 0),
-            behavior: 'smooth'
+    /*
+     * Build the charts for the selected interfaces only. Called once for the first stream
+     * message and again whenever the selection changes; a rebuild starts the graphs afresh.
+     */
+    _build(data, config) {
+        this._destroyCharts();
+        const selected = mergeOrder(config.interfaces, config.interfaces).filter(id => id in data.interfaces);
+        // Classic10 repeats once a firewall has more than ten interfaces. Tableau20, keyed on
+        // every interface the firewall has, keeps each interface's colour stable.
+        const palette = Chart.colorschemes.tableau.Tableau20;
+        Object.keys(data.interfaces).forEach((id, index) => {
+            this.interfaceColors[id] = palette[index % palette.length];
         });
-    }
 
-    async _initialize(data) {
-        const config = await this.getWidgetConfig();
+        const $perInterface = $(`#${this._elementId('per-interface')}`).empty();
+        // Show the chosen view first: a chart created inside a hidden container starts at
+        // zero size and only corrects itself on its next resize.
+        this._showView(config);
         const combinedIn = [];
         const combinedOut = [];
-        const $perInterface = $(`#${this._elementId('per-interface')}`);
+        selected.forEach(id => {
+            const name = data.interfaces[id].name;
+            const color = this.interfaceColors[id];
+            combinedIn.push({...this._dataset(name, 'inbytes', data.time, color), intf: id});
+            combinedOut.push({...this._dataset(name, 'outbytes', data.time, color), intf: id});
 
-        // Classic10 repeats once a firewall has more than ten interfaces.
-        // Tableau20 keeps the identity of every plotted interface distinct.
-        const palette = Chart.colorschemes.tableau.Tableau20;
-        const interfaceColors = Object.keys(data.interfaces).reduce((colors, id, index) => {
-            colors[id] = palette[index % palette.length];
-            return colors;
-        }, {});
-        this._orderedInterfaces(data.interfaces, config).forEach(([id, intf]) => {
-            const color = interfaceColors[id];
-            combinedIn.push({...this._dataset(intf.name, 'inbytes', data.time, false, color), intf: id});
-            combinedOut.push({...this._dataset(intf.name, 'outbytes', data.time, false, color), intf: id});
-
-            const canvasId = this._elementId(`interface-${id}`);
-            $perInterface.append(`
-                <div class="dashboard-plus-traffic-interface" data-interface="${id}">
-                    ${this._perInterfaceHeading(intf.name)}
-                    <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="${canvasId}"></canvas></div>
-                </div>
-            `);
-            this.charts[id] = new Chart($(`#${canvasId}`)[0].getContext('2d'), this._chartConfig([
-                this._dataset(this.translations.in, 'inbytes', data.time, true),
-                this._dataset(this.translations.out, 'outbytes', data.time, true)
-            ], false, false));
+            const canvasId = this._elementId(`interface-${this.sanitizeSelector(id)}`);
+            $perInterface.append(this._perInterfacePanel(id, name, canvasId));
+            const chart = new Chart(document.getElementById(canvasId).getContext('2d'), this._chartConfig([
+                this._dataset(this.translations.in, 'inbytes', data.time),
+                this._dataset(this.translations.out, 'outbytes', data.time)
+            ]));
+            chart.config.data.datasets.forEach(dataset => dataset.intf = id);
+            this.charts[`interface-${id}`] = chart;
         });
 
-        this.charts.combinedIn = new Chart($(`#${this._elementId('in')}`)[0].getContext('2d'), this._chartConfig(combinedIn, false, false));
-        this.charts.combinedOut = new Chart($(`#${this._elementId('out')}`)[0].getContext('2d'), this._chartConfig(combinedOut, false, false));
-        this._renderCombinedLegend(combinedIn);
-        this._makeSubpanelsSortable();
-        this.initialized = true;
-        this.currentConfig = config;
-        this._applyConfig(config);
+        this.charts.combinedIn = new Chart(document.getElementById(this._elementId('in')).getContext('2d'), this._chartConfig(combinedIn));
+        this.charts.combinedOut = new Chart(document.getElementById(this._elementId('out')).getContext('2d'), this._chartConfig(combinedOut));
+        this._renderCombinedLegend(selected.map(id => ({label: data.interfaces[id].name, color: this.interfaceColors[id]})));
+        this.builtSelection = selected.join('\n');
+        this._applyDisplay(config);
     }
 
-    _applyConfig(config) {
-        this.windowDuration = (parseInt(config.time_window, 10) || 60) * 1000;
+    _showView(config) {
         const combined = config.display === 'combined';
-        if (combined && !this.compactVisible) {
-            $(`#${this._elementId('combined-legend')}`).scrollLeft(0);
-        }
-        this.compactVisible = combined;
         $(`#${this._elementId('combined')}`).toggle(combined);
         $(`#${this._elementId('per-interface')}`).toggle(!combined);
         this._updateViewToggle(combined);
-        $(`#${this._elementId('per-interface')}`).children('.dashboard-plus-traffic-interface').each((_, element) => {
-            $(element).toggle(!combined && (config.interfaces || []).includes($(element).data('interface')));
-        });
-        $(`#${this._elementId('combined-legend')}`).children('.dashboard-plus-traffic-legend-item').each((_, item) => {
-            $(item).toggle((config.interfaces || []).includes($(item).data('interface')));
-        });
-        requestAnimationFrame(() => this._updateLegendControls());
-        for (const chart of [this.charts.combinedIn, this.charts.combinedOut]) {
-            if (!chart) {
-                continue;
-            }
-            chart.config.data.datasets.forEach(dataset => {
-                dataset.hidden = !(config.interfaces || []).includes(dataset.intf);
-            });
-        }
+    }
+
+    _applyDisplay(config) {
+        this.windowDuration = (parseInt(config.time_window, 10) || 60) * 1000;
+        this._showView(config);
         Object.values(this.charts).forEach(chart => {
             chart.options.scales.x.realtime.duration = this.windowDuration;
             chart.options.plugins.streaming.ttl = this.windowDuration + 10000;
+            chart.resize();
         });
     }
 
     _updateViewToggle(compact) {
+        const label = compact ? this.translations.expand : this.translations.compact;
         const $toggle = $(`#${this.id}-traffic-view-toggle`);
-        $toggle.attr({
-            title: compact ? this.translations.expand : this.translations.compact,
-            'aria-label': compact ? this.translations.expand : this.translations.compact
-        });
+        $toggle.attr({title: label, 'aria-label': label});
         $toggle.find('i').attr('class', compact ? 'fa fa-expand' : 'fa fa-compress');
     }
 
     _toggleDisplay() {
-        const config = {...this.currentConfig};
-        config.display = config.display === 'combined' ? 'per_interface' : 'combined';
-        this.currentConfig = config;
-        this._applyConfig(config);
-        Object.values(this.charts).forEach(chart => chart.resize());
-        this.config.callbacks?.updateGrid?.();
-    }
-
-    _orderedInterfaces(interfaces, config) {
-        const order = config.interfaces || [];
-        return Object.entries(interfaces).sort(([left], [right]) => {
-            const leftIndex = order.indexOf(left);
-            const rightIndex = order.indexOf(right);
-            return (leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex) -
-                (rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex);
-        });
-    }
-
-    _saveSubpanelOrder() {
-        const order = $(`#${this._elementId('per-interface')}`).children('.dashboard-plus-traffic-interface')
-            .map((_, panel) => $(panel).data('interface')).get();
-        const selected = this.currentConfig.interfaces || [];
-        this.currentConfig.interfaces = [
-            ...order.filter(id => selected.includes(id)),
-            ...selected.filter(id => !order.includes(id))
-        ];
+        if (!this.currentConfig) {
+            return;
+        }
+        this.currentConfig = {
+            ...this.currentConfig,
+            display: this.currentConfig.display === 'combined' ? 'per_interface' : 'combined'
+        };
+        // The toggle is a view setting like the options dialog: keep it with the layout.
         this.setWidgetConfig(this.currentConfig);
         $('#save-grid').show();
-    }
-
-    _makeSubpanelsSortable() {
-        const $container = $(`#${this._elementId('per-interface')}`);
-        let draggedPanel = null;
-        let $placeholder = null;
-        const clearDragState = () => {
-            if (draggedPanel) {
-                draggedPanel.css({opacity: '', outline: ''});
-            }
-            $placeholder?.remove();
-            $placeholder = null;
-            draggedPanel = null;
-        };
-        $container.on('mousedown', '.dashboard-plus-traffic-heading', event => event.stopPropagation());
-        $container.on('dragstart', '.dashboard-plus-traffic-heading', event => {
-            draggedPanel = $(event.currentTarget).closest('.dashboard-plus-traffic-interface');
-            draggedPanel.css({opacity: 0.4, outline: '2px dashed #d94f00'});
-            $placeholder = $('<div class="dashboard-plus-traffic-drop-placeholder" aria-label="Drop graph here"></div>')
-                .css({
-                    height: draggedPanel.outerHeight(),
-                    margin: '0.5em 0',
-                    border: '2px dashed #d94f00',
-                    background: 'rgba(217, 79, 0, 0.08)'
-                });
-            event.originalEvent.dataTransfer.effectAllowed = 'move';
-            event.stopPropagation();
-        });
-        $container.on('dragover', event => {
-            event.preventDefault();
-            event.originalEvent.dataTransfer.dropEffect = 'move';
-            const $target = $(event.target).closest('.dashboard-plus-traffic-interface');
-            if (!draggedPanel || !$target.length || draggedPanel[0] === $target[0]) {
-                return;
-            }
-            const halfway = $target.offset().top + ($target.outerHeight() / 2);
-            event.originalEvent.clientY < halfway ? $target.before($placeholder) : $target.after($placeholder);
-        });
-        $container.on('drop', event => {
-            event.preventDefault();
-            if (draggedPanel && $placeholder?.parent().length) {
-                $placeholder.replaceWith(draggedPanel);
-                this._saveSubpanelOrder();
-            }
-            clearDragState();
-        });
-        $container.on('dragend', '.dashboard-plus-traffic-heading', clearDragState);
+        this._applyDisplay(this.currentConfig);
+        this.config.callbacks?.updateGrid?.();
     }
 
     _appendPoint(chart, intf, sample, time) {
         chart.config.data.datasets.forEach(dataset => {
-            if (dataset.intf && dataset.intf !== intf) {
+            if (dataset.intf !== intf) {
                 return;
             }
             const elapsed = time - dataset.lastTime;
@@ -310,26 +201,20 @@ export default class DashboardPlusTraffic extends BaseWidget {
     }
 
     async _onMessage(event) {
-        if (!event) {
-            this.closeEventSource();
-            return;
-        }
         const data = JSON.parse(event.data);
-        this.latestData = data;
-        if (!this.initialized) {
-            await this._initialize(data);
-        }
-        if (this.configChanged) {
-            this.currentConfig = await this.getWidgetConfig();
-            this._applyConfig(this.currentConfig);
-            this.configChanged = false;
-        }
+        this.lastData = data;
+        // Messages arrive every second while the first build awaits the widget config;
+        // share one build so the canvases are never claimed twice.
+        this.buildPromise ??= this.getWidgetConfig().then(config => {
+            this.currentConfig = config;
+            this._build(data, config);
+        }).catch(error => {
+            this.buildPromise = null;
+            throw error;
+        });
+        await this.buildPromise;
         Object.entries(data.interfaces).forEach(([id, sample]) => {
-            this._appendPoint(this.charts.combinedIn, id, sample, data.time);
-            this._appendPoint(this.charts.combinedOut, id, sample, data.time);
-            if (this.charts[id]) {
-                this._appendPoint(this.charts[id], id, sample, data.time);
-            }
+            Object.values(this.charts).forEach(chart => this._appendPoint(chart, id, sample, data.time));
         });
         Object.values(this.charts).forEach(chart => chart.update('quiet'));
     }
@@ -337,16 +222,11 @@ export default class DashboardPlusTraffic extends BaseWidget {
     getMarkup() {
         return $(
             `<div class="dashboard-plus-traffic-container" style="padding: 0 0.25em;">
-                <style>.dashboard-plus-traffic-combined-legend::-webkit-scrollbar { display: none; }</style>
-                <div id="${this._elementId('combined')}">
-                    <h3>${this.translations.trafficin}</h3>
-                    <div style="display: flex; align-items: center; gap: 0.35em; margin: 0 0.5em 0.35em;">
-                        <button type="button" id="${this.id}-traffic-legend-previous" style="border: 0; background: transparent; color: #777; cursor: pointer; padding: 0 0.2em;" title="${this.translations.legend_previous}" aria-label="${this.translations.legend_previous}"><i class="fa fa-angle-double-left"></i></button>
-                        <div id="${this._elementId('combined-legend')}" class="dashboard-plus-traffic-combined-legend" style="display: flex; flex: 1; min-width: 0; gap: 0.75em; overflow-x: auto; white-space: nowrap; font-size: 0.82em; scrollbar-width: none; -ms-overflow-style: none;"></div>
-                        <button type="button" id="${this.id}-traffic-legend-next" style="border: 0; background: transparent; color: #777; cursor: pointer; padding: 0 0.2em;" title="${this.translations.legend_next}" aria-label="${this.translations.legend_next}"><i class="fa fa-angle-double-right"></i></button>
-                    </div>
+                <div id="${this._elementId('combined')}" style="display: none;">
+                    <h3>${escapeHtml(this.translations.trafficin)}</h3>
+                    <div id="${this._elementId('combined-legend')}" style="display: flex; flex-wrap: wrap; gap: 0.2em 0.75em; margin: 0 0.5em 0.35em; font-size: 0.82em;"></div>
                     <div class="canvas-container-noaspectratio" style="height: 180px; margin: 0 0.5em;"><canvas id="${this._elementId('in')}"></canvas></div>
-                    <h3>${this.translations.trafficout}</h3>
+                    <h3>${escapeHtml(this.translations.trafficout)}</h3>
                     <div class="canvas-container-noaspectratio" style="height: 180px; margin: 0 0.5em;"><canvas id="${this._elementId('out')}"></canvas></div>
                 </div>
                 <div id="${this._elementId('per-interface')}"></div>
@@ -355,32 +235,36 @@ export default class DashboardPlusTraffic extends BaseWidget {
     }
 
     async onMarkupRendered() {
-        $(`#${this.id}-title`).html(`<b>${this.translations.dashboard_title}</b>`);
+        renderTitle(this);
         const $header = $(`#${this.id}-title`).closest('.widget-header');
         $header.find('.widget-header-left').append(
-            `<button type="button" id="${this.id}-traffic-view-toggle" style="border: 0; background: transparent; color: #d94f00; cursor: pointer; padding: 0; font-size: 0.9em;" title="${this.translations.compact}" aria-label="${this.translations.compact}"><i class="fa fa-compress"></i></button>`
+            `<button type="button" id="${this.id}-traffic-view-toggle" style="border: 0; background: transparent; color: #d94f00; cursor: pointer; padding: 0; font-size: 0.9em;" title="${escapeHtml(this.translations.compact)}" aria-label="${escapeHtml(this.translations.compact)}"><i class="fa fa-compress"></i></button>`
         );
         $(`#${this.id}-traffic-view-toggle`).on('click', event => {
             event.preventDefault();
             event.stopPropagation();
             this._toggleDisplay();
         });
-        $(`#${this.id}-traffic-legend-previous`).on('click', event => {
-            event.preventDefault();
-            event.stopPropagation();
-            this._scrollCombinedLegend(-1);
+        makeSortable($(`#${this._elementId('per-interface')}`), {
+            itemSelector: '.dashboard-plus-traffic-interface',
+            handleSelector: '.dashboard-plus-traffic-heading',
+            label: this.translations.drag_to_reorder,
+            onReorder: order => {
+                this.currentConfig.interfaces = mergeOrder(order, this.currentConfig.interfaces);
+                this.setWidgetConfig(this.currentConfig);
+            }
         });
-        $(`#${this.id}-traffic-legend-next`).on('click', event => {
-            event.preventDefault();
-            event.stopPropagation();
-            this._scrollCombinedLegend(1);
-        });
-        $(`#${this._elementId('combined-legend')}`).on('scroll', () => this._updateLegendControls());
+        sizeToContent(this);
         this.openEventSource('/api/diagnostics/traffic/stream/1', this._onMessage.bind(this));
     }
 
-    onWidgetResize() {
-        requestAnimationFrame(() => this._updateLegendControls());
+    onWidgetResize(elem, width) {
+        if (!widthChanged(this, width)) {
+            return false;
+        }
+        // Chart.js only notices a container resize on its own later; resize now so the
+        // canvases follow the column when the side menu is toggled.
+        Object.values(this.charts).forEach(chart => chart.resize());
         return true;
     }
 
@@ -419,12 +303,23 @@ export default class DashboardPlusTraffic extends BaseWidget {
         };
     }
 
-    onWidgetOptionsChanged() {
-        this.configChanged = true;
+    async onWidgetOptionsChanged() {
+        await this.buildPromise;
+        const previous = this.currentConfig?.interfaces;
+        const config = await this.getWidgetConfig();
+        // The dialog lists the selection in option order; keep the dragged order.
+        config.interfaces = mergeOrder(previous, config.interfaces);
+        this.setWidgetConfig(config);
+        this.currentConfig = config;
+        if (this.lastData && config.interfaces.join('\n') !== this.builtSelection) {
+            this._build(this.lastData, config);
+        } else {
+            this._applyDisplay(config);
+        }
     }
 
     onWidgetClose() {
         super.onWidgetClose();
-        Object.values(this.charts).forEach(chart => chart.destroy());
+        this._destroyCharts();
     }
 }

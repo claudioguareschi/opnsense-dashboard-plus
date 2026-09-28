@@ -37,8 +37,11 @@
             <uptime>Uptime</uptime>
             <datetime>Current Date/Time</datetime>
             <dns_servers>DNS Servers</dns_servers>
-            <not_detected>Not detected</not_detected>
             <unavailable>Unavailable</unavailable>
+            <enabled>Enabled</enabled>
+            <disabled>Disabled</disabled>
+            <hardware_acceleration_active>Hardware acceleration active</hardware_acceleration_active>
+            <hardware_acceleration_unavailable>Hardware acceleration unavailable</hardware_acceleration_unavailable>
             <inactive>Inactive</inactive>
             <active>Active</active>
             <available>Available</available>
@@ -59,8 +62,6 @@
             <display>Display</display>
             <compact>Compact view</compact>
             <expand>Expanded view</expand>
-            <legend_previous>Scroll legend left</legend_previous>
-            <legend_next>Scroll legend right</legend_next>
             <per_interface>Per interface</per_interface>
             <combined>Combined</combined>
             <interfaces>Interfaces</interfaces>
@@ -70,6 +71,7 @@
             <seconds_20>20 seconds</seconds_20>
             <minute_1>1 minute</minute_1>
             <minutes_5>5 minutes</minutes_5>
+            <drag_to_reorder>Drag to reorder</drag_to_reorder>
         </translations>
     </dashboardplustraffic>
     <dashboardplussystemmetrics>
@@ -94,6 +96,7 @@
             <states>States</states>
             <show_states>Show table</show_states>
             <mbufs>Mbufs</mbufs>
+            <mbuf_clusters>mbuf clusters</mbuf_clusters>
             <swap>Swap</swap>
             <filesystems>Filesystems</filesystems>
             <load>Load</load>
@@ -154,7 +157,6 @@
             <dashboard_title>Gateways</dashboard_title>
             <gateways>Gateways</gateways>
             <metrics>Metrics</metrics>
-            <health>Health</health>
             <gateway>Gateway</gateway>
             <rtt>RTT</rtt>
             <rttd>RTTd</rttd>
@@ -162,6 +164,7 @@
             <status>Status</status>
             <enabled>Enabled</enabled>
             <disabled>Disabled</disabled>
+            <unmonitored>Unmonitored</unmonitored>
             <default_gateway>Default gateway</default_gateway>
             <drag_to_reorder>Drag to reorder</drag_to_reorder>
             <unconfigured>No gateways configured. Click to configure gateways.</unconfigured>
@@ -177,9 +180,6 @@
             <title>Interfaces+</title>
             <dashboard_title>Interfaces</dashboard_title>
             <interfaces>Interfaces</interfaces>
-            <interface>Interface</interface>
-            <link>Link</link>
-            <addresses>Addresses</addresses>
             <up>Up</up>
             <down>Down</down>
             <unavailable>Unavailable</unavailable>
@@ -206,7 +206,6 @@
             <action>Act.</action>
             <time>Time</time>
             <interface>Interface</interface>
-            <rule>Rule</rule>
             <source>Source</source>
             <destination>Destination</destination>
             <actions>Actions</actions>

@@ -1,3 +1,5 @@
 dist/
 work/
 node_modules/
+__pycache__/
+*.pyc

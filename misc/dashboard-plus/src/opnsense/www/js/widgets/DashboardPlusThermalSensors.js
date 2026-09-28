@@ -3,6 +3,8 @@
  * All rights reserved.
  */
 
+const {renderTitle, sizeToContent} = await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
+
 export default class DashboardPlusThermalSensors extends BaseWidget {
     constructor(config) {
         super(config);
@@ -72,9 +74,9 @@ export default class DashboardPlusThermalSensors extends BaseWidget {
     }
 
     async onMarkupRendered() {
-        $(`#${this.id}-title`).html(`<b>${this.translations.dashboard_title}</b>`);
+        renderTitle(this);
         this.currentConfig = await this.getWidgetConfig();
-        await this.onWidgetTick();
+        sizeToContent(this);
     }
 
     async getWidgetOptions() {
@@ -91,10 +93,11 @@ export default class DashboardPlusThermalSensors extends BaseWidget {
         };
     }
 
-    onWidgetOptionsChanged(options) {
-        this.currentConfig = options;
+    async onWidgetOptionsChanged() {
+        // Read back through getWidgetConfig so an empty selection means the defaults now,
+        // as it will after the dashboard reloads.
+        this.currentConfig = await this.getWidgetConfig();
         this._renderSensors();
-        this.config.callbacks.updateGrid();
     }
 
     async onWidgetTick() {

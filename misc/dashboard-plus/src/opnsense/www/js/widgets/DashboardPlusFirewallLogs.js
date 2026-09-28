@@ -3,12 +3,16 @@
  * All rights reserved.
  */
 
-export default class DashboardPlusFirewallLogs extends BaseTableWidget {
+const {escapeHtml, renderTitle, sizeToContent} =
+    await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
+
+export default class DashboardPlusFirewallLogs extends BaseWidget {
     constructor(config) {
         super(config);
         this.configurable = true;
         this.currentConfig = null;
         this.interfaceNames = {};
+        // Digests of the rows on screen, so a stream event already loaded is not shown twice.
         this.seen = new Set();
     }
 
@@ -16,134 +20,118 @@ export default class DashboardPlusFirewallLogs extends BaseTableWidget {
         return {sizeToContent: 650};
     }
 
+    _tableId() {
+        return `${this.id}-table`;
+    }
+
     getMarkup() {
-        const $container = $('<div class="dashboard-plus-firewall-logs"></div>');
-        const $table = this.createTable('dashboard-plus-firewall-logs-table', {headerPosition: 'none'});
-        const $header = $('<div class="flextable-header dashboard-plus-firewall-logs-header" role="row"></div>');
-        [
-            this.translations.action,
-            this.translations.time,
-            this.translations.interface,
-            this.translations.source,
-            this.translations.destination
-        ].forEach(title => $header.append(`<div class="flex-cell" role="columnheader">${title}</div>`));
-        $table.prepend($header);
-        $container.append($table);
-        return $container;
-    }
-
-    _escape(value) {
-        return $('<div>').text(value ?? '').html();
-    }
-
-    _applyColumns() {
-        const widths = ['7%', '19%', '16%', '28%', '30%'];
-        $('#dashboard-plus-firewall-logs-table')
-            .children('.flextable-header, .dashboard-plus-firewall-logs-row')
-            .each((_, row) => {
-                $(row).children('.flex-cell').each((column, cell) => {
-                    const $cell = $(cell);
-                    if (column === 5) {
-                        $cell.css({
-                            width: '93%',
-                            flexBasis: '93%',
-                            marginLeft: '7%',
-                            marginTop: '0',
-                            textAlign: 'left'
-                        });
-                    } else {
-                        $cell.css({
-                            width: widths[column],
-                            flexBasis: widths[column],
-                            marginLeft: '',
-                            marginTop: '',
-                            textAlign: 'left'
-                        });
-                    }
-                });
-            });
+        // Stock flextable classes for the native look. The table is one grid and each row a
+        // subgrid, so the columns line up; the interface and rule go on a second line so the
+        // addresses keep room for "address:port".
+        const table = `#${this._tableId()}`;
+        return $(`
+            <div>
+                <style>
+                    ${table} { display: grid; grid-template-columns: auto auto minmax(0, 1fr) minmax(0, 1fr); column-gap: 0.75em; }
+                    ${table} > .dashboard-plus-logs-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; text-align: left; }
+                    ${table} > .dashboard-plus-logs-empty { grid-column: 1 / -1; }
+                    ${table} .dashboard-plus-logs-row > div { min-width: 0; word-break: normal; overflow-wrap: anywhere; }
+                    ${table} .dashboard-plus-logs-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+                    ${table} .dashboard-plus-logs-detail { grid-column: 2 / -1; font-size: 0.86em; }
+                </style>
+                <div class="flextable-container" id="${this._tableId()}" role="table">
+                    <div class="flextable-header dashboard-plus-logs-row" role="row">
+                        ${[
+                            this.translations.action,
+                            this.translations.time,
+                            this.translations.source,
+                            this.translations.destination
+                        ].map(title => `<div role="columnheader">${escapeHtml(title)}</div>`).join('')}
+                    </div>
+                </div>
+            </div>
+        `);
     }
 
     _actionIcon(action) {
         if (action === 'pass') {
-            return `<i class="fa fa-check-circle-o" style="color: #2ca02c; font-size: 1.35em;" title="${this.translations.pass}"></i>`;
+            return `<i class="fa fa-check-circle-o" style="color: #2ca02c; font-size: 1.35em;" title="${escapeHtml(this.translations.pass)}"></i>`;
         }
         if (action === 'block') {
-            return `<i class="fa fa-times-circle-o" style="color: #d62728; font-size: 1.35em;" title="${this.translations.block}"></i>`;
+            return `<i class="fa fa-times-circle-o" style="color: #d62728; font-size: 1.35em;" title="${escapeHtml(this.translations.block)}"></i>`;
         }
-        return `<i class="fa fa-exchange" style="color: #777777;" title="${this._escape(action)}"></i>`;
+        return `<i class="fa fa-exchange" style="color: #777777;" title="${escapeHtml(action)}"></i>`;
     }
 
+    /* The time of day in the column, the full date and time on hover. */
     _time(timestamp) {
         const value = new Date(timestamp);
         if (Number.isNaN(value.getTime())) {
-            return this._escape(timestamp);
+            return escapeHtml(timestamp);
         }
-        const date = new Intl.DateTimeFormat(undefined, {month: 'short', day: 'numeric'}).format(value);
-        const time = new Intl.DateTimeFormat(undefined, {hour: '2-digit', minute: '2-digit', second: '2-digit'}).format(value);
-        return `<div>${date}<br>${time}</div>`;
+        const time = new Intl.DateTimeFormat(undefined, {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false}).format(value);
+        const full = new Intl.DateTimeFormat(undefined, {dateStyle: 'medium', timeStyle: 'medium'}).format(value);
+        return `<span title="${escapeHtml(full)}">${escapeHtml(time)}</span>`;
     }
 
     _endpoint(address, port) {
-        const escapedAddress = this._escape(address || '—');
-        return port
-            ? `${escapedAddress}<br><span style="color: inherit;">${this._escape(port)}</span>`
-            : escapedAddress;
-    }
-
-    _identity(entry) {
-        const interfaceName = this.interfaceNames[entry.interface] || entry.interface || '—';
-        return this._escape(interfaceName);
+        if (!address) {
+            return '—';
+        }
+        if (!port) {
+            return escapeHtml(address);
+        }
+        return escapeHtml(address.includes(':') ? `[${address}]:${port}` : `${address}:${port}`);
     }
 
     _rule(entry) {
         const rule = entry.label || `@${entry.rulenr || '0'}`;
         const query = new URLSearchParams({field: 'rid', operator: '=', value: entry.rid || ''});
-        return `<a href="/ui/diagnostics/firewall/log#${query}" target="_blank" rel="noopener noreferrer" style="font-size: 0.86em;">${this._escape(rule)}</a>`;
+        return `<a href="/ui/diagnostics/firewall/log#${query}" target="_blank" rel="noopener noreferrer">${escapeHtml(rule)}</a>`;
     }
 
     _matches(entry) {
         const action = this.currentConfig.actions || 'block';
-        const selectedInterfaces = this.currentConfig.interfaces;
-        const interfaces = Array.isArray(selectedInterfaces) && selectedInterfaces.length
-            ? selectedInterfaces
-            : Object.keys(this.interfaceNames);
+        const selected = this.currentConfig.interfaces;
+        const interfaces = Array.isArray(selected) && selected.length ? selected : Object.keys(this.interfaceNames);
         return (action === 'all' || entry.action === action) && interfaces.includes(entry.interface);
     }
 
+    _rows() {
+        return $(`#${this._tableId()}`).children('.flextable-row');
+    }
+
     _clearRows() {
-        $('#dashboard-plus-firewall-logs-table')
-            .children('.dashboard-plus-firewall-logs-row, .dashboard-plus-firewall-logs-empty').remove();
+        this._rows().remove();
+        $(`#${this._tableId()}`).children('.dashboard-plus-logs-empty').remove();
         this.seen.clear();
     }
 
-    _addEntry(entry, prepend = true) {
+    _addEntry(entry) {
         const digest = entry.__digest__ || `${entry.__timestamp__}-${entry.interface}-${entry.src}-${entry.dst}-${entry.rid}`;
         if (!this._matches(entry) || this.seen.has(digest)) {
-            return;
+            return false;
         }
         this.seen.add(digest);
-        const $row = $('<div class="flextable-row dashboard-plus-firewall-logs-row" role="row"></div>');
-        [
-            this._actionIcon(entry.action),
-            this._time(entry.__timestamp__),
-            this._identity(entry),
-            this._endpoint(entry.src, entry.srcport),
-            this._endpoint(entry.dst, entry.dstport),
-            this._rule(entry)
-        ].forEach(value => $row.append(`<div class="flex-cell" role="cell">${value}</div>`));
-        const $table = $('#dashboard-plus-firewall-logs-table');
-        const $header = $table.children('.dashboard-plus-firewall-logs-header');
-        prepend ? $header.after($row) : $table.append($row);
+        const $row = $(`
+            <div class="flextable-row dashboard-plus-logs-row" role="row">
+                <div role="cell">${this._actionIcon(entry.action)}</div>
+                <div role="cell" class="dashboard-plus-logs-time">${this._time(entry.__timestamp__)}</div>
+                <div role="cell">${this._endpoint(entry.src, entry.srcport)}</div>
+                <div role="cell">${this._endpoint(entry.dst, entry.dstport)}</div>
+                <div role="cell" class="dashboard-plus-logs-detail">${escapeHtml(this.interfaceNames[entry.interface] || entry.interface || '—')} · ${this._rule(entry)}</div>
+            </div>
+        `).attr('data-digest', digest);
+        const $table = $(`#${this._tableId()}`);
+        $table.children('.dashboard-plus-logs-empty').remove();
+        $table.children('.flextable-header').after($row);
 
-        const count = parseInt(this.currentConfig.rows, 10) || 5;
-        const $rows = $table.children('.dashboard-plus-firewall-logs-row');
-        if ($rows.length > count) {
-            $rows.last().remove();
-        }
-        $table.children('.dashboard-plus-firewall-logs-empty').remove();
-        this._applyColumns();
-        this.config.callbacks?.updateGrid?.();
+        const limit = parseInt(this.currentConfig.rows, 10) || 5;
+        this._rows().slice(limit).each((_, row) => {
+            this.seen.delete(row.dataset.digest);
+            row.remove();
+        });
+        return true;
     }
 
     async _startLog(config) {
@@ -152,34 +140,45 @@ export default class DashboardPlusFirewallLogs extends BaseTableWidget {
         this._clearRows();
         const limit = parseInt(config.rows, 10) || 5;
         const recent = await this.ajaxCall(`/api/diagnostics/firewall/log?limit=${limit}`);
-        (Array.isArray(recent) ? [...recent] : []).reverse().forEach(entry => this._addEntry(entry, true));
-        if (!$('#dashboard-plus-firewall-logs-table').children('.dashboard-plus-firewall-logs-row').length) {
-            $('#dashboard-plus-firewall-logs-table').append(
-                `<div class="dashboard-plus-firewall-logs-empty" style="padding: 0.75em;">${this.translations.no_entries}</div>`
+        (Array.isArray(recent) ? [...recent] : []).reverse().forEach(entry => this._addEntry(entry));
+        if (!this._rows().length) {
+            $(`#${this._tableId()}`).append(
+                `<div class="dashboard-plus-logs-empty" style="padding: 0.75em;">${escapeHtml(this.translations.no_entries)}</div>`
             );
         }
         this.openEventSource('/api/diagnostics/firewall/stream_log', event => {
+            let entry;
             try {
-                this._addEntry(JSON.parse(event.data));
+                entry = JSON.parse(event.data);
             } catch (_) {
                 // Keep the stream alive when an unrelated or malformed event arrives.
+                return;
+            }
+            const count = this._rows().length;
+            // Once the list is full a new row replaces the oldest; only a change in the row
+            // count changes the widget's height.
+            if (this._addEntry(entry) && this._rows().length !== count) {
+                this.config.callbacks?.updateGrid?.();
             }
         });
         this.config.callbacks?.updateGrid?.();
     }
 
     async onMarkupRendered() {
-        $(`#${this.id}-title`).html(`<b>${this.translations.dashboard_title}</b>`);
+        renderTitle(this);
         const [interfaceNames, config] = await Promise.all([
             this.ajaxCall('/api/diagnostics/interface/get_interface_names'),
             this.getWidgetConfig()
         ]);
         this.interfaceNames = interfaceNames || {};
+        sizeToContent(this);
         await this._startLog(config);
     }
 
-    async onWidgetOptionsChanged(options) {
-        await this._startLog(options);
+    async onWidgetOptionsChanged() {
+        // Read back through getWidgetConfig so an empty selection means the defaults now,
+        // as it will after the dashboard reloads.
+        await this._startLog(await this.getWidgetConfig());
     }
 
     async getWidgetOptions() {

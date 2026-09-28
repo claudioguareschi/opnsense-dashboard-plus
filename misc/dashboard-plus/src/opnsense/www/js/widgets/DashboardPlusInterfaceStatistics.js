@@ -3,191 +3,135 @@
  * All rights reserved.
  */
 
-export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
+const {escapeHtml, renderTitle, mergeOrder, makeSortable, isDragging, sizeToContent} =
+    await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
+
+const FIELDS = ['bytes', 'packets', 'errors', 'collisions'];
+
+export default class DashboardPlusInterfaceStatistics extends BaseWidget {
     constructor(config) {
         super(config);
         this.configurable = true;
-        this.configChanged = false;
         this.currentConfig = null;
         this.tickTimeout = 1;
         this.lastRefresh = 0;
+        this.interfaces = null;
     }
 
     getGridOptions() {
         return {sizeToContent: 650};
     }
 
+    _tableId() {
+        return `${this.id}-table`;
+    }
+
     getMarkup() {
-        const $container = $('<div class="dashboard-plus-interface-statistics"></div>');
-        const $table = this.createTable('dashboard-plus-interface-statistics-table', {
-            // Use the stock dashboard table so its 95% width, padding and
-            // separators match Interfaces+ and the native widgets.
-            headerPosition: 'none'
-        });
-        const $header = $('<div class="flextable-header dashboard-plus-interface-statistics-header" role="row"></div>');
-        [
-            this.translations.interface,
-            this.translations.bytes,
-            this.translations.packets,
-            this.translations.errors,
-            this.translations.collisions_short
-        ].forEach(title => $header.append(`<div class="flex-cell" role="columnheader">${title}</div>`));
-        $table.prepend($header);
-        $container.append($table);
-        return $container;
+        // The stock flextable classes give the native width, separators and hover. The table
+        // is one grid and each row a subgrid of it, so every row shares the same column widths
+        // and a gutter at any width.
+        const table = `#${this._tableId()}`;
+        return $(`
+            <div>
+                <style>
+                    ${table} { display: grid; grid-template-columns: var(--dashboard-plus-ifstats-columns); column-gap: 0.9em; }
+                    ${table} > .dashboard-plus-ifstats-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; text-align: left; }
+                    ${table} .dashboard-plus-ifstats-row > div { min-width: 0; word-break: normal; }
+                    ${table} .dashboard-plus-ifstats-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                    ${table} .dashboard-plus-ifstats-number { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+                    ${table} .dashboard-plus-ifstats-direction { opacity: 0.7; white-space: nowrap; }
+                    ${table} .dashboard-plus-ifstats-pair { font-size: 0.92em; line-height: 1.4; }
+                </style>
+                <div class="flextable-container" id="${this._tableId()}" role="table"></div>
+            </div>
+        `);
+    }
+
+    _fields() {
+        const fields = this.currentConfig?.fields;
+        return FIELDS.filter(field => !Array.isArray(fields) || fields.includes(field));
+    }
+
+    _headerRow(fields) {
+        const titles = {
+            bytes: this.translations.bytes,
+            packets: this.translations.packets,
+            errors: this.translations.errors,
+            collisions: this.translations.collisions_short
+        };
+        const cells = fields.map(field => `<div class="dashboard-plus-ifstats-number" role="columnheader"${field === 'collisions' ? ` title="${escapeHtml(this.translations.collisions)}"` : ''}>${escapeHtml(titles[field])}</div>`);
+        return `<div class="flextable-header dashboard-plus-ifstats-row" role="row">
+            <div role="columnheader">${escapeHtml(this.translations.interface)}</div><div></div>${cells.join('')}
+        </div>`;
     }
 
     _pair(first, second) {
-        return `<div style="font-size: 0.92em; line-height: 1.4;">${this.translations.in}: ${first}<br>${this.translations.out}: ${second}</div>`;
+        return `<div class="dashboard-plus-ifstats-number dashboard-plus-ifstats-pair" role="cell">${escapeHtml(first)}<br>${escapeHtml(second)}</div>`;
     }
 
-    _escape(value) {
-        return $('<div>').text(value ?? '').html();
-    }
-
-    _applyConfig(config) {
-        this._applyFieldVisibility(config);
-    }
-
-    _applyFieldVisibility(config) {
-        const visibleFields = config.fields || ['bytes', 'packets', 'errors', 'collisions'];
-        const fieldColumns = {bytes: 1, packets: 2, errors: 3, collisions: 4};
-        const widths = {
-            0: ['100%'],
-            1: ['42%', '58%'],
-            2: ['32%', '34%', '34%'],
-            3: ['27%', '24.5%', '24.5%', '24%'],
-            4: ['27%', '21%', '21%', '20%', '11%']
-        }[visibleFields.length];
-        const $table = $('#dashboard-plus-interface-statistics-table');
-        $table.children('.flextable-header, .flextable-row').each((_, row) => {
-            let visibleIndex = 0;
-            $(row).children('.flex-cell').each((column, cell) => {
-                const field = Object.keys(fieldColumns).find(key => fieldColumns[key] === column);
-                const visible = !field || visibleFields.includes(field);
-                $(cell).toggle(visible).css({
-                    width: visible ? widths[visibleIndex++] : '',
-                    textAlign: column === fieldColumns.collisions ? 'right' : 'left'
-                });
-            });
-        });
-    }
-
-    _clearTable() {
-        const id = 'dashboard-plus-interface-statistics-table';
-        $(`#${id}`).children('.flextable-row').remove();
-        this.tables[id].data = [];
-    }
-
-    _orderedInterfaces(interfaces, config) {
-        const order = config.interfaces || Object.keys(interfaces);
-        return order.filter(id => interfaces[id]).map(id => [id, interfaces[id]]);
-    }
-
-    _saveInterfaceOrder() {
-        const order = $('#dashboard-plus-interface-statistics-table').children('.flextable-row')
-            .map((_, row) => $(row).data('interface')).get();
-        this.currentConfig.interfaces = order;
-        this.setWidgetConfig(this.currentConfig);
-        $('#save-grid').show();
-    }
-
-    _makeRowsSortable() {
-        const $table = $('#dashboard-plus-interface-statistics-table');
-        let $draggedRow = null;
-        let $placeholder = null;
-        const clearDragState = () => {
-            $draggedRow?.css({opacity: '', outline: ''});
-            $placeholder?.remove();
-            $draggedRow = null;
-            $placeholder = null;
+    _row(id, intf, fields) {
+        const number = key => parseInt(intf[key], 10) || 0;
+        const cells = {
+            bytes: () => this._pair(this._formatBytes(number('bytes received')) || '0 B', this._formatBytes(number('bytes transmitted')) || '0 B'),
+            packets: () => this._pair(number('packets received').toLocaleString(), number('packets transmitted').toLocaleString()),
+            errors: () => this._pair(number('input errors').toLocaleString(), number('output errors').toLocaleString()),
+            // FreeBSD counts collisions for the interface as a whole, not per direction.
+            collisions: () => `<div class="dashboard-plus-ifstats-number dashboard-plus-ifstats-pair" role="cell">${number('collisions').toLocaleString()}<br>&nbsp;</div>`
         };
-        $table.on('mousedown', '.flextable-row .flex-cell:nth-child(1)', event => event.stopPropagation());
-        $table.on('dragstart', '.flextable-row .flex-cell:nth-child(1)', event => {
-            $draggedRow = $(event.currentTarget).closest('.flextable-row');
-            $draggedRow.css({opacity: 0.4, outline: '2px dashed #d94f00'});
-            $placeholder = $('<div class="flextable-row dashboard-plus-interface-statistics-drop-placeholder" aria-label="Drop interface here"></div>')
-                .css({
-                    height: $draggedRow.outerHeight(),
-                    border: '2px dashed #d94f00',
-                    background: 'rgba(217, 79, 0, 0.08)'
-                });
-            event.originalEvent.dataTransfer.effectAllowed = 'move';
-            event.stopPropagation();
-        });
-        $table.on('dragover', event => {
-            event.preventDefault();
-            event.originalEvent.dataTransfer.dropEffect = 'move';
-            const $target = $(event.target).closest('.flextable-row');
-            if (!$draggedRow || !$target.length || $target[0] === $draggedRow[0]) {
-                return;
-            }
-            const halfway = $target.offset().top + ($target.outerHeight() / 2);
-            event.originalEvent.clientY < halfway ? $target.before($placeholder) : $target.after($placeholder);
-        });
-        $table.on('drop', event => {
-            event.preventDefault();
-            if ($draggedRow && $placeholder?.parent().length) {
-                $placeholder.replaceWith($draggedRow);
-                this._saveInterfaceOrder();
-            }
-            clearDragState();
-        });
-        $table.on('dragend', '.flextable-row .flex-cell:nth-child(1)', clearDragState);
+        return `<div class="flextable-row dashboard-plus-ifstats-row" role="row" data-sort-id="${escapeHtml(id)}">
+            <div class="dashboard-plus-ifstats-name" role="cell" draggable="true" title="${escapeHtml(`${intf.name} · ${this.translations.drag_to_reorder}`)}" style="cursor: grab;">
+                <a href="/interfaces.php?if=${encodeURIComponent(id)}">${escapeHtml(intf.name)}</a>
+            </div>
+            <div class="dashboard-plus-ifstats-direction dashboard-plus-ifstats-pair">${escapeHtml(this.translations.in)}<br>${escapeHtml(this.translations.out)}</div>
+            ${fields.map(field => cells[field]()).join('')}
+        </div>`;
+    }
+
+    _render() {
+        const $table = $(`#${this._tableId()}`);
+        if (!this.interfaces || isDragging($table)) {
+            return;
+        }
+        const fields = this._fields();
+        const selected = mergeOrder(this.currentConfig.interfaces, this.currentConfig.interfaces || Object.keys(this.interfaces));
+        const rows = selected.filter(id => this.interfaces[id]).map(id => this._row(id, this.interfaces[id], fields));
+        $table[0].style.setProperty(
+            '--dashboard-plus-ifstats-columns',
+            `minmax(4.5em, 1fr) auto${' auto'.repeat(fields.length)}`
+        );
+        $table.html(this._headerRow(fields) + rows.join(''));
     }
 
     async onMarkupRendered() {
-        $(`#${this.id}-title`).html(`<b>${this.translations.dashboard_title}</b>`);
+        renderTitle(this);
         this.currentConfig = await this.getWidgetConfig();
-        this._applyConfig(this.currentConfig);
-        this._makeRowsSortable();
+        makeSortable($(`#${this._tableId()}`), {
+            itemSelector: '.flextable-row',
+            handleSelector: '.dashboard-plus-ifstats-name',
+            placeholderClass: 'flextable-row dashboard-plus-ifstats-row',
+            label: this.translations.drag_to_reorder,
+            onReorder: order => {
+                this.currentConfig.interfaces = mergeOrder(order, this.currentConfig.interfaces);
+                this.setWidgetConfig(this.currentConfig);
+            }
+        });
+        sizeToContent(this);
     }
 
     async onWidgetTick() {
-        if (this.configChanged || !this.currentConfig) {
-            this.currentConfig = await this.getWidgetConfig();
-            this._applyConfig(this.currentConfig);
-            this._clearTable();
-            this.configChanged = false;
-            this.lastRefresh = 0;
-        }
         const refreshInterval = (parseInt(this.currentConfig.refresh_interval, 10) || 5) * 1000;
         if (this.lastRefresh && Date.now() - this.lastRefresh < refreshInterval) {
             return;
         }
         this.lastRefresh = Date.now();
         const data = await this.ajaxCall('/api/diagnostics/traffic/interface');
-        const config = this.currentConfig;
-        const rows = [];
-        const orderedInterfaces = this._orderedInterfaces(data.interfaces || {}, config);
-        orderedInterfaces.forEach(([id, intf]) => {
-            const received = parseInt(intf['bytes received']) || 0;
-            const transmitted = parseInt(intf['bytes transmitted']) || 0;
-            const packetsReceived = parseInt(intf['packets received']) || 0;
-            const packetsTransmitted = parseInt(intf['packets transmitted']) || 0;
-            const errorsReceived = parseInt(intf['input errors']) || 0;
-            const errorsTransmitted = parseInt(intf['output errors']) || 0;
-            rows.push([
-                `<a href="/interfaces.php?if=${encodeURIComponent(id)}">${this._escape(intf.name)}</a>`,
-                this._pair(this._formatBytes(received) || '0', this._formatBytes(transmitted) || '0'),
-                this._pair(packetsReceived.toLocaleString(), packetsTransmitted.toLocaleString()),
-                this._pair(errorsReceived.toLocaleString(), errorsTransmitted.toLocaleString()),
-                `<span style="font-size: 0.92em;">${(parseInt(intf.collisions) || 0).toLocaleString()}</span>`
-            ]);
-        });
-        super.updateTable('dashboard-plus-interface-statistics-table', rows);
-        $('#dashboard-plus-interface-statistics-table').children('.flextable-row').each((index, row) => {
-            $(row).data('interface', orderedInterfaces[index][0]);
-            $(row).children('.flex-cell').eq(0).attr({
-                draggable: 'true', title: this.translations.drag_to_reorder
-            }).css('cursor', 'grab');
-        });
-        this._applyFieldVisibility(config);
+        this.interfaces = data.interfaces || {};
+        this._render();
     }
 
     async getWidgetOptions() {
-        const data = await this.ajaxCall('/api/diagnostics/traffic/interface');
-        const interfaces = Object.entries(data.interfaces || {}).map(([id, intf]) => ({value: id, label: intf.name}));
+        const source = this.interfaces ?? (await this.ajaxCall('/api/diagnostics/traffic/interface')).interfaces ?? {};
+        const interfaces = Object.entries(source).map(([id, intf]) => ({value: id, label: intf.name}));
         return {
             interfaces: {
                 title: this.translations.interfaces,
@@ -200,13 +144,8 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
                 title: this.translations.fields,
                 type: 'select_multiple',
                 id: 'dashboard-plus-interface-statistics-fields',
-                options: [
-                    {value: 'bytes', label: this.translations.bytes},
-                    {value: 'packets', label: this.translations.packets},
-                    {value: 'errors', label: this.translations.errors},
-                    {value: 'collisions', label: this.translations.collisions}
-                ],
-                default: ['bytes', 'packets', 'errors', 'collisions']
+                options: FIELDS.map(field => ({value: field, label: this.translations[field]})),
+                default: FIELDS
             },
             refresh_interval: {
                 title: this.translations.refresh_interval,
@@ -222,7 +161,13 @@ export default class DashboardPlusInterfaceStatistics extends BaseTableWidget {
         };
     }
 
-    onWidgetOptionsChanged() {
-        this.configChanged = true;
+    async onWidgetOptionsChanged() {
+        const previous = this.currentConfig?.interfaces;
+        const config = await this.getWidgetConfig();
+        // The dialog lists the selection in option order; keep the dragged order.
+        config.interfaces = mergeOrder(previous, config.interfaces);
+        this.setWidgetConfig(config);
+        this.currentConfig = config;
+        this._render();
     }
 }

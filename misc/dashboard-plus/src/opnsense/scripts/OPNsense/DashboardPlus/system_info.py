@@ -36,16 +36,6 @@ QAT_DEVICES = {
     0x4945: ("Intel QAT 402xx VF", "virtual function", True),
 }
 
-CPU_CRYPTO_FEATURES = (
-    "AESNI",
-    "VAES",
-    "PCLMULQDQ",
-    "VPCLMULQDQ",
-    "SHA",
-    "RDRAND",
-    "RDSEED",
-)
-
 QAT_OCF_ALGORITHMS = (
     "AES-CBC",
     "AES-CTR",
@@ -372,15 +362,15 @@ def collect_accelerated_algorithms(providers):
 
 
 def collect_ipsec_status(providers):
-    """Report whether IPsec has an active hardware crypto provider available."""
-    return "Hardware acceleration active" if any(provider["active"] for provider in providers) else "Hardware acceleration unavailable"
+    """Report whether IPsec has an active hardware crypto provider (a state code the UI translates)."""
+    return "active" if any(provider["active"] for provider in providers) else "unavailable"
 
 
 def boot_method(kernel_method, efi_runtime, mount_output):
-    """Prefer live EFI runtime evidence over an inconsistent kernel label."""
+    """Prefer live EFI runtime evidence over an inconsistent kernel label; empty when unknown."""
     if efi_runtime or re.search(r"\b(?:efi|efiboot)\b", mount_output, re.IGNORECASE):
         return "UEFI"
-    return kernel_method or "Unavailable"
+    return kernel_method
 
 
 def collect_boot_environments(output):
@@ -407,12 +397,13 @@ def cpu_package_count(sysctl_packages, dmesg_output):
     return int(match.group(1)) if match else None
 
 
-def mitigation_state(value, enabled="Enabled", disabled="Disabled"):
+def mitigation_state(value):
+    """Map a 0/1 sysctl to a state code the UI translates; other values pass through."""
     if value == "1":
-        return enabled
+        return "enabled"
     if value == "0":
-        return disabled
-    return value or "Unavailable"
+        return "disabled"
+    return value
 
 
 def collect():
@@ -422,12 +413,13 @@ def collect():
     system = system_records[0] if system_records else {}
     bios = bios_records[0] if bios_records else {}
 
-    product = clean(system.get("Product Name"))
-    product_version = clean(system.get("Version"))
+    product = system.get("Product Name", "")
+    product_version = system.get("Version", "")
     if product_version and product_version.lower() not in product.lower():
         product = f"{product} {product_version}".strip()
 
     dmesg_output = run([DMESG])
+    # AES-NI capability; collect_cpu_crypto then checks that the driver attached.
     feature_values = " ".join(
         sysctl_value(name)
         for name in (
@@ -439,7 +431,6 @@ def collect():
         )
     ) + " " + dmesg_output
     feature_tokens = set(re.findall(r"[A-Z0-9_]+", feature_values.upper()))
-    cpu_crypto = [feature for feature in CPU_CRYPTO_FEATURES if feature in feature_tokens]
 
     pti = mitigation_state(sysctl_value("vm.pmap.pti"))
     mds = sysctl_value("machdep.mitigations.mds.state") or sysctl_value("hw.mds_disable_state")
@@ -452,19 +443,19 @@ def collect():
         slot_output,
     )
     cpu_algorithms = collect_cpu_crypto(dmesg_output)
-    crypto_hardware = collect_crypto_hardware("AESNI" in cpu_crypto, cpu_algorithms, accelerator["devices"])
+    crypto_hardware = collect_crypto_hardware("AESNI" in feature_tokens, cpu_algorithms, accelerator["devices"])
     frequency = collect_cpu_frequency()
 
     return {
         "hardware": {
-            "manufacturer": clean(system.get("Manufacturer")),
+            "manufacturer": system.get("Manufacturer", ""),
             "model": product,
-            "serial": clean(system.get("Serial Number")),
+            "serial": system.get("Serial Number", ""),
         },
         "bios": {
-            "vendor": clean(bios.get("Vendor")),
-            "version": clean(bios.get("Version")),
-            "date": clean(bios.get("Release Date")),
+            "vendor": bios.get("Vendor", ""),
+            "version": bios.get("Version", ""),
+            "date": bios.get("Release Date", ""),
             "boot_method": boot_method(
                 kernel_boot_method,
                 bool(sysctl_value("hw.efi.poweroff")),
@@ -473,7 +464,7 @@ def collect():
         },
         "boot_environment": boot_environments,
         "cpu": {
-            "model": sysctl_value("hw.model") or "Unavailable",
+            "model": sysctl_value("hw.model"),
             "packages": cpu_package_count(sysctl_value("kern.smp.packages"), dmesg_output),
             "cores": int_value(sysctl_value("kern.smp.cores")),
             "threads": int_value(sysctl_value("kern.smp.cpus") or sysctl_value("hw.ncpu")),
@@ -485,7 +476,7 @@ def collect():
         "accelerated_algorithms": collect_accelerated_algorithms(crypto_hardware),
         "mitigations": {
             "pti": pti,
-            "mds": mds or "Unavailable",
+            "mds": mds,
         },
     }
 

@@ -1,6 +1,12 @@
 <acl>
     <page-dashboard-widget-dashboard-plus>
-        <name>Dashboard: Dashboard Plus widgets</name>
+        <!--
+            One privilege for all eight widgets, as the core widgets do it. It also grants the
+            core endpoints the widgets read: the live firewall log, gateway status, pf state
+            counts and interface details. The name says so, since the privilege key has to stay
+            as it is for existing user and group assignments.
+        -->
+        <name>Dashboard: Dashboard Plus widgets (reads firewall log, gateways, states)</name>
         <patterns>
             <pattern>api/dashboardplus/system/info</pattern>
             <pattern>api/dashboardplus/system/frequency</pattern>
