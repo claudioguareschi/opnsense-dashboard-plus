@@ -380,7 +380,9 @@ class ThreatRecorder:
                 entry["connections"] = connection_snapshot(address, correlator, collector.leases, collector.interfaces)
             self.last_wall = time.time()
             threats.record(self.db, seen)
-            if self.pruned is None or now - self.pruned >= THREAT_PRUNE_SECONDS:
+            # hourly by age; at once when a burst of flagged addresses overfills the queue
+            over = self.db.execute("SELECT count(*) FROM threats").fetchone()[0] > threats.KEEP_ROWS
+            if over or self.pruned is None or now - self.pruned >= THREAT_PRUNE_SECONDS:
                 threats.prune(self.db)
                 self.pruned = now
         except sqlite3.Error as error:
