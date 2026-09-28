@@ -246,6 +246,26 @@ export function idsArcData(data) {
   return {flows, locations};
 }
 
+/**
+ * Keep every pulse where it is when new data arrives. A pulse's place on its arc is
+ * (seconds / period + phase) mod 1, and the period follows the arc's rate, which changes with
+ * every refresh: without this, a new period moved every dot at once (the jerk every 2 seconds).
+ * Each arc still carried over gets the phase that puts its pulse exactly where it was, and from
+ * there it moves at its new speed.
+ */
+export function continuePhases(previous, arcs, seconds) {
+  for (const arc of arcs) {
+    const before = previous.get(arc.key);
+    if (before && before !== arc && before.period !== arc.period) {
+      const at = seconds / before.period + before.phase;
+      arc.phase = ((at - seconds / arc.period) % 1 + 1) % 1;
+    } else if (before && before !== arc) {
+      arc.phase = before.phase;
+    }
+  }
+  return arcs;
+}
+
 export function pulsePosition(arc, seconds, reverse) {
   let t = (seconds / arc.period + arc.phase) % 1;
   if (reverse) {

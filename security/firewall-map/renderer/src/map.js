@@ -1,7 +1,7 @@
 /* The deck.gl map: layers for arcs, blocked sources, IDS markers and labels, fades and pulses. */
 import {Deck, MapView, WebMercatorViewport} from '@deck.gl/core';
 import {GeoJsonLayer, IconLayer, PathLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
-import {IDS_ARC_FADE_SECONDS, buildArcs, buildBlocks, idsArcData, pulsePosition, pulses} from './arcs.js';
+import {IDS_ARC_FADE_SECONDS, buildArcs, continuePhases, buildBlocks, idsArcData, pulsePosition, pulses} from './arcs.js';
 import {createFollow} from './follow.js';
 import {plain} from './format.js';
 import {DEFAULT_OPTIONS} from './options.js';
@@ -674,7 +674,9 @@ export function createFirewallMap(container, options = {}) {
     dataTime = now;
     const ids = idsArcData(data);
     const arcData = {...data, flows: [...(data.flows || []), ...ids.flows], locations: [...(data.locations || []), ...ids.locations]};
-    arcs = arcFader.update(buildArcs(arcData, {...settings, previousLanes}), now);
+    // pulses carry on from where they are, at the arc's new speed (see continuePhases)
+    const previousArcs = new Map(arcs.map((arc) => [arc.key, arc]));
+    arcs = arcFader.update(continuePhases(previousArcs, buildArcs(arcData, {...settings, previousLanes}), (now - started) / 1000), now);
     // endpoints with recent Suricata history get a ring (history, not proof about the current traffic)
     // coloured by the worst outcome there: red if flagged traffic got through, amber if it was stopped
     const rank = {blocked: 0, ok: 0, contained: 1, danger: 2};
