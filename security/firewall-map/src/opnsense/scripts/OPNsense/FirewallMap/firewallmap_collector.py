@@ -50,8 +50,8 @@ from fwmap_ids import (  # noqa: E402
 )
 from fwmap_leases import HostnameResolver, describe_inside, describe_target, lease_names  # noqa: E402
 from fwmap_pf import (  # noqa: E402
-    flow_endpoints, host_info, inside_endpoint, interface_names, lan_rule_index, orientation, port_forwards,
-    rule_descriptions, rule_for, sample_states,
+    TooManyStates, flow_endpoints, host_info, inside_endpoint, interface_names, lan_rule_index, orientation,
+    port_forwards, rule_descriptions, rule_for, sample_states,
 )
 
 
@@ -64,6 +64,8 @@ BACKGROUND_INTERVAL = 20.0
 THREAT_RECORD_SECONDS = 20.0
 THREAT_PRUNE_SECONDS = 3600.0
 MAX_FAILURE_BACKOFF = 30.0
+# while the state table is too large to walk, check its size this often
+TOO_MANY_STATES_INTERVAL = 30.0
 COLLECTOR_LOCK = f"{RUN_DIR}/collector.lock"
 # files earlier versions wrote that nothing reads any more
 LEGACY_FILES = (f"{RUN_DIR}/ids_stats.json", "/var/db/firewallmap/geo.json")
@@ -383,6 +385,11 @@ class ThreatRecorder:
                 self.pruned = now
         except sqlite3.Error as error:
             print(f"firewallmap: threat recording failed: {error}", file=sys.stderr)
+            # reconnect on the next recording, without leaving the failed connection open
+            try:
+                self.db.close()
+            except (AttributeError, sqlite3.Error):
+                pass
             self.db = None
 
 
@@ -471,6 +478,7 @@ class Collector:
         self.geo = None
         self.problem = None
         self.failures = 0
+        self.too_many_states = False
         self.background = False
         self.checked = {"host": None, "settings": None, "metadata": None, "blocklists": None}
         self.reload_seen = reload_token()
@@ -587,6 +595,13 @@ class Collector:
             return self._rest(started, background)
         try:
             records = sample_states()
+        except TooManyStates as error:
+            if not background:
+                write_json(OUTPUT_FILE, status_document("too_many_states", count=error.count, limit=error.limit))
+            if not self.too_many_states:
+                print(f"firewallmap: sampling paused: {error}", file=sys.stderr)
+            self.too_many_states = True
+            return TOO_MANY_STATES_INTERVAL
         except (OSError, subprocess.TimeoutExpired, RuntimeError) as error:
             self.failures += 1
             print(f"firewallmap: sample failed: {error}", file=sys.stderr)
@@ -594,6 +609,7 @@ class Collector:
                 write_json(OUTPUT_FILE, status_document("failed", error=str(error)))
             return self._rest(started, background)
         self.failures = 0
+        self.too_many_states = False
         now = time.monotonic()
         wall = time.time()
         self.refresh_metadata(now)

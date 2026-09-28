@@ -485,7 +485,9 @@ export default class FirewallMap extends BaseWidget {
     }
 
     async onWidgetTick() {
-        if (!this.renderer || this.polling || this.closed) {
+        // a dashboard left open in a background tab must not keep the collector sampling forever:
+        // without requests it slows down and stops (or keeps only background recording)
+        if (!this.renderer || this.polling || this.closed || document.hidden) {
             return;
         }
         this.polling = true;
@@ -498,8 +500,8 @@ export default class FirewallMap extends BaseWidget {
             }
             const problem = host.problemText(snapshot, this._text());
             if (problem) {
-                if (snapshot.status === 'no_database') {
-                    // no locations without a geolocation database: keep the map empty and say why
+                if (snapshot.status === 'no_database' || snapshot.status === 'too_many_states') {
+                    // no locations or no sample: keep the map empty and say why
                     this.renderer.render({flows: [], locations: []});
                 } else if (snapshot.status !== 'starting') {
                     console.error('Firewall Map+: collector reported', snapshot);

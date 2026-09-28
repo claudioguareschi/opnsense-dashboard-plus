@@ -2,7 +2,7 @@
  * What the dashboard widget and the map page share around the renderer: theme application,
  * WebGL detection, the status line and the DB-IP credit. Exported as FirewallMapRenderer.host.
  */
-import {escapeHtml, plain, plural} from './format.js';
+import {escapeHtml, fill, plain, plural} from './format.js';
 import {cssVariables, palette, readTheme} from './palette.js';
 
 export function hasWebGL() {
@@ -74,6 +74,9 @@ export function creditHtml(provider) {
 export function problemText(snapshot, text) {
   if (snapshot.status === 'starting') {
     return text.starting;
+  }
+  if (snapshot.status === 'too_many_states') {
+    return fill(text.too_many_states, {count: Number(snapshot.count).toLocaleString(), limit: Number(snapshot.limit).toLocaleString()});
   }
   if (snapshot.status === 'no_database') {
     return snapshot.reason === 'maxmind_key_missing' ? text.key_missing

@@ -15,6 +15,7 @@ export const ABUSEIPDB_BLACKLIST_LIST = 'AbuseIPDB blacklist';
 export const ABUSEIPDB_LOOKUP_LIST = 'AbuseIPDB (looked up)';
 // investigations are kept for this many addresses, the oldest dropped first
 export const MAX_INVESTIGATIONS = 50;
+export const MAX_ABUSE_SCORES = 500;
 
 export const state = {
   renderer: null,

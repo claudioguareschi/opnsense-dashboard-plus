@@ -113,6 +113,18 @@ class BlockTest(unittest.TestCase):
                 handle.write("next\n")
             self.assertEqual(tail.lines(), ["first of the new file", "next"])
 
+    def test_a_log_without_newlines_does_not_grow_the_buffer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "latest.log")
+            open(path, "w").close()
+            tail = BLOCKS.FilterLogTail(path)
+            tail.lines()
+            for _ in range(5):
+                with open(path, "a") as handle:
+                    handle.write("x" * (BLOCKS.MAX_LINE_BYTES // 2))
+                tail.lines()
+            self.assertLessEqual(len(tail.pending), BLOCKS.MAX_LINE_BYTES)
+
     def test_old_log_lines_do_not_count_as_current(self):
         wall = BLOCKS.log_time(self.LINE)
         self.assertEqual(BLOCKS.block_event_time(self.LINE, 100.0, wall + 30), 70.0)

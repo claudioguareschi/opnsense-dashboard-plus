@@ -1065,7 +1065,11 @@
 		while (state.investigations.size > 50) state.investigations.delete(state.investigations.keys().next().value);
 	}
 	function noteScore(result, address) {
-		if (result.abuseipdb && typeof result.abuseipdb.score === "number") state.abuseScores.set(address, result.abuseipdb.score);
+		if (result.abuseipdb && typeof result.abuseipdb.score === "number") {
+			state.abuseScores.delete(address);
+			state.abuseScores.set(address, result.abuseipdb.score);
+			while (state.abuseScores.size > 500) state.abuseScores.delete(state.abuseScores.keys().next().value);
+		}
 	}
 	/** The full lookup for an address; `rerender` redraws whatever shows the card. */
 	async function investigate(address, rerender) {
@@ -1930,7 +1934,7 @@
 				const snapshot = await getJSON(`/api/firewallmap/flow/snapshot${query}`);
 				const problem = host().problemText(snapshot, T);
 				if (problem) {
-					if (snapshot.status === "no_database") state.renderer.render({
+					if (snapshot.status === "no_database" || snapshot.status === "too_many_states") state.renderer.render({
 						flows: [],
 						locations: []
 					});

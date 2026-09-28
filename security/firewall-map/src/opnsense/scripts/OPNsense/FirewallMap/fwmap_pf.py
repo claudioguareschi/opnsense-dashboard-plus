@@ -375,7 +375,33 @@ def state_outside(record, pair):
     return outside_key(record["protocol"], local, public["port"], remote, far["port"])
 
 
-def sample_states():
+# Walking the state table costs about 2 kB of memory and 20 µs per state; above this many states
+# (a flood, or a very busy firewall) the map stops sampling instead of risking the firewall's memory
+MAX_SAMPLED_STATES = 100000
+STATE_COUNT = re.compile(r"current entries\s+(\d+)")
+
+
+class TooManyStates(RuntimeError):
+    def __init__(self, count, limit):
+        super().__init__(f"{count} states (limit {limit})")
+        self.count = count
+        self.limit = limit
+
+
+def state_count():
+    """The number of states pf holds now (cheap: a counter, not a walk), or None when unknown."""
+    try:
+        output = subprocess.run([PFCTL, "-si"], capture_output=True, check=False, text=True, timeout=5).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = STATE_COUNT.search(output)
+    return int(match.group(1)) if match else None
+
+
+def sample_states(limit=MAX_SAMPLED_STATES):
+    count = state_count()
+    if count is not None and count > limit:
+        raise TooManyStates(count, limit)
     result = subprocess.run(
         [PFCTL, "-vv", "-s", "state"], capture_output=True, check=False, text=True, timeout=10,
     )

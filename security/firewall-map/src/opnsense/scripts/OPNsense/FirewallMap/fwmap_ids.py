@@ -51,6 +51,11 @@ MAX_CORRELATION_KEYS = 20000
 # an alert can arrive before the next PF sample sees its connection: retry this long
 CORRELATION_RETRY_SECONDS = 15
 MAX_PENDING_ALERTS = 2000
+# one connection keeps at most this many Suricata flows, each with at most this many signatures
+MAX_GROUPS_PER_FLOW = 10
+MAX_SIGNATURES_PER_GROUP = 10
+# the map receives the most recent correlated connections only
+MAX_SNAPSHOT_IDS_FLOWS = 200
 MAX_IDS_FLOWS = 500
 
 
@@ -223,8 +228,15 @@ class Correlator:
         if rank.get(kind, 0) >= rank.get(flow["kind"], 0):
             flow["kind"], flow["connection"] = kind, connection
         flow["last"] = now
-        group = flow["alerts"].setdefault(str(alert.get("flow_id") or "-"), {})
-        signature = group.setdefault(alert["sid"] or alert["signature"], {
+        flow_id = str(alert.get("flow_id") or "-")
+        if flow_id not in flow["alerts"] and len(flow["alerts"]) >= MAX_GROUPS_PER_FLOW:
+            # a connection that keeps raising alerts on new Suricata flows keeps the latest ones
+            del flow["alerts"][next(iter(flow["alerts"]))]
+        group = flow["alerts"].setdefault(flow_id, {})
+        key = alert["sid"] or alert["signature"]
+        if key not in group and len(group) >= MAX_SIGNATURES_PER_GROUP:
+            return
+        signature = group.setdefault(key, {
             "sid": alert["sid"], "signature": alert["signature"], "category": alert["category"],
             "severity": alert["severity"], "action": alert["action"], "count": 0,
             "first": alert["time"] or now, "last": alert["time"] or now,
@@ -294,7 +306,7 @@ class Correlator:
         now = time.time() if now is None else now
         geo.resolve([key[3] for key in self.flows])
         result = []
-        for key, flow in sorted(self.flows.items(), key=lambda item: -item[1]["last"]):
+        for key, flow in sorted(self.flows.items(), key=lambda item: -item[1]["last"])[:MAX_SNAPSHOT_IDS_FLOWS]:
             location = geo.get(key[3])
             if location is None:
                 continue

@@ -182,5 +182,20 @@ class InitiatorTest(unittest.TestCase):
             self.assertEqual(BLOCKLISTS.threat_lists_for("8.8.8.8", index, reputation), [])
 
 
+class StateGuardTest(unittest.TestCase):
+    def test_a_huge_state_table_is_not_walked(self):
+        walked = []
+        with mock.patch.object(PF, "state_count", lambda: PF.MAX_SAMPLED_STATES + 1), \
+                mock.patch.object(PF.subprocess, "run", lambda *a, **k: walked.append(a)):
+            with self.assertRaises(PF.TooManyStates):
+                PF.sample_states()
+        self.assertEqual(walked, [])
+
+    def test_reads_the_state_count(self):
+        output = "State Table                          Total             Rate\n  current entries                     1246               \n"
+        with mock.patch.object(PF.subprocess, "run", lambda *a, **k: mock.Mock(stdout=output)):
+            self.assertEqual(PF.state_count(), 1246)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -200,6 +200,21 @@ class CollectorLoopTest(unittest.TestCase):
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [2.0, 0.01])
 
 
+class CollectorStateGuardTest(CollectorLoopTest):
+    def test_too_many_states_pauses_and_says_so(self):
+        def huge():
+            raise COLLECTOR.TooManyStates(500000, 100000)
+        with mock.patch.object(COLLECTOR, "sample_states", huge):
+            rest = self.collector.step()
+        with open(self.output) as handle:
+            payload = json.load(handle)
+        self.assertEqual((payload["status"], payload["count"], rest), ("too_many_states", 500000, COLLECTOR.TOO_MANY_STATES_INTERVAL))
+        # sampling resumes as soon as the table is small again
+        self.assertIsNotNone(self.collector.step())
+        with open(self.output) as handle:
+            self.assertEqual(json.load(handle)["status"], "ok")
+
+
 class ThreatRecorderTest(unittest.TestCase):
     def test_records_flagged_addresses_with_identity_and_connections(self):
         with tempfile.TemporaryDirectory() as directory:

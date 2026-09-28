@@ -205,5 +205,22 @@ class CorrelationTest(unittest.TestCase):
         self.assertEqual(record["rule"], "abc123")
 
 
+class BoundsTest(unittest.TestCase):
+    def test_one_connection_cannot_grow_its_alert_history_without_limit(self):
+        correlator = IDS.Correlator()
+        key = PF.outside_key("tcp", "198.13.91.163", "443", "94.154.43.203", "51234")
+        connection = IDS.make_connection(key)
+        for index in range(100):
+            alert = {"time": 1000.0, "src": "94.154.43.203", "dst": "198.13.91.163", "src_port": 51234, "dst_port": 443,
+                     "protocol": "tcp", "sid": index, "signature": f"s{index}", "category": "", "severity": 3,
+                     "action": "allowed", "flow_id": index // 3}
+            correlator._attach(key, "current", connection, alert, 1000.0 + index)
+        (flow,) = correlator.flows.values()
+        self.assertLessEqual(len(flow["alerts"]), IDS.MAX_GROUPS_PER_FLOW)
+        self.assertTrue(all(len(group) <= IDS.MAX_SIGNATURES_PER_GROUP for group in flow["alerts"].values()))
+        # the latest Suricata flow is the one kept
+        self.assertIn(str(99 // 3), flow["alerts"])
+
+
 if __name__ == "__main__":
     unittest.main()

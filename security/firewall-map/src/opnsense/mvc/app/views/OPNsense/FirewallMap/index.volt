@@ -529,6 +529,7 @@
         queue_empty_dropped: {{ lang._('Suricata has not dropped traffic from a flagged address.')|json_encode }},
         queue_empty_dismissed: {{ lang._('No dismissed entries.')|json_encode }},
         queue_empty_all: {{ lang._('The review queue is empty.')|json_encode }},
+        too_many_states: {{ lang._('The state table is too large to map ({count} states). The map resumes below {limit}.')|json_encode }},
         resize_hint: {{ lang._('Drag or use the arrow keys to resize; double-click or Home to reset')|json_encode }},
         // the renderer's words: legend, hover cards and flow sentences ({name} is filled in)
         map_started_inside: {{ lang._('Started inside')|json_encode }},

@@ -79,7 +79,8 @@ function poll(query) {
       const snapshot = await getJSON(`/api/firewallmap/flow/snapshot${query}`);
       const problem = host().problemText(snapshot, T);
       if (problem) {
-        if (snapshot.status === 'no_database') {
+        // no database or no sample: an empty map, not the last picture
+        if (snapshot.status === 'no_database' || snapshot.status === 'too_many_states') {
           state.renderer.render({flows: [], locations: []});
         }
         $('#fwmap-status').text(problem);

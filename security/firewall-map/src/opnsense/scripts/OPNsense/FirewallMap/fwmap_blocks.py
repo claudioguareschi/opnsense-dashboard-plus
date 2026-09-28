@@ -25,6 +25,7 @@ MAX_PORTS_PER_SOURCE = 20
 BLOCK_BUCKET_SECONDS = 10
 # read back this much of the log when the collector starts, so the 10-minute hit window is full
 BACKLOG_BYTES = 2 * 1024 * 1024
+MAX_LINE_BYTES = 64 * 1024
 
 
 class FilterLogTail:
@@ -77,6 +78,9 @@ class FilterLogTail:
             data = data.rsplit(b"\n", 1)[0] + b"\n"
         parts = (self.pending + data).split(b"\n")
         self.pending = parts.pop()
+        if len(self.pending) > MAX_LINE_BYTES:
+            # no line is this long: a file without newlines must not grow the buffer forever
+            self.pending = b""
         try:
             if os.stat(self.path).st_ino != self.inode:
                 # rotated: finish the old file, then read the new one from its start

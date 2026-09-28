@@ -1,7 +1,7 @@
 /* Investigations: registry, routing and AbuseIPDB lookups for one address. */
 import {escapeHtml} from '../src/format.js';
 import {errorText, getJSON, notify} from './api.js';
-import {MAX_INVESTIGATIONS, state, T} from './context.js';
+import {MAX_ABUSE_SCORES, MAX_INVESTIGATIONS, state, T} from './context.js';
 import {rows} from './parts.js';
 
 function scoreBadge(score) {
@@ -57,7 +57,12 @@ function remember(address, html) {
 
 function noteScore(result, address) {
   if (result.abuseipdb && typeof result.abuseipdb.score === 'number') {
+    state.abuseScores.delete(address);
     state.abuseScores.set(address, result.abuseipdb.score);
+    // the page may stay open for weeks: keep the most recent verdicts only
+    while (state.abuseScores.size > MAX_ABUSE_SCORES) {
+      state.abuseScores.delete(state.abuseScores.keys().next().value);
+    }
   }
 }
 
