@@ -117,6 +117,8 @@ function homeIconAtlas() {
   }
   return homeAtlas;
 }
+const HOME_BADGE = 'firewall-map-home-badge';
+const HOME_BADGE_RADIUS = 11;
 const HOME_ICON_MAPPING = {home: {x: 0, y: 0, width: 48, height: 48, anchorY: 24, mask: true}};
 
 // Mercator world is 512px wide at zoom 0. The whole-world view is centred on longitude 0, so the
@@ -239,7 +241,7 @@ export function createFirewallMap(container, options = {}) {
     if (!object || !layer) {
       return null;
     }
-    if (layer.id === 'firewall-map-endpoints' && object.local) {
+    if ((layer.id === 'firewall-map-endpoints' || layer.id === HOME_BADGE) && object.local) {
       return card.firewall(object, (lastData.flows || []).filter((flow) => flow.origin === object.id));
     }
     if (layer.id === 'firewall-map-endpoints') {
@@ -629,28 +631,51 @@ export function createFirewallMap(container, options = {}) {
       }),
       new ScatterplotLayer({
         id: 'firewall-map-endpoints',
-        data: locationsShown,
+        data: locationsShown.filter((location) => !location.local),
         getPosition: (location) => [location.lon, location.lat],
-        // home is a background disc that hides the arc ends under the house icon drawn above it
-        getRadius: (location) => location.local ? 8 : 2.5,
+        getRadius: 2.5,
         radiusUnits: 'pixels',
         stroked: false,
         filled: true,
-        getFillColor: (location) => faded(location.local ? colors.background : colors.endpoint, endpointFader.opacity(location, frameNow)),
+        getFillColor: (location) => faded(colors.endpoint, endpointFader.opacity(location, frameNow)),
         pickable: true,
         radiusMinPixels: 2.5,
         updateTriggers: {getFillColor: [colors.endpoint, fadeKey]},
       }),
+    ];
+  }
+
+  // the firewall's own location, drawn above the arches, pulses and nearby endpoints: a disc in
+  // the map's background colour with a thin ring keeps the house readable however busy it gets
+  function homeLayers() {
+    const homes = locationsShown.filter((location) => location.local);
+    const opacity = (location) => endpointFader.opacity(location, frameNow);
+    return [
+      new ScatterplotLayer({
+        id: HOME_BADGE,
+        data: homes,
+        getPosition: (location) => [location.lon, location.lat],
+        getRadius: HOME_BADGE_RADIUS,
+        radiusUnits: 'pixels',
+        stroked: true,
+        filled: true,
+        getFillColor: (location) => faded(rgb(colors.background.slice(0, 3), 245), opacity(location)),
+        getLineColor: (location) => faded(rgb(colors.endpoint.slice(0, 3), 170), opacity(location)),
+        lineWidthUnits: 'pixels',
+        getLineWidth: 1.5,
+        pickable: true,
+        updateTriggers: {getFillColor: [colors.background, fadeKey], getLineColor: [colors.endpoint, fadeKey]},
+      }),
       new IconLayer({
         id: 'firewall-map-home',
-        data: locationsShown.filter((location) => location.local),
+        data: homes,
         getPosition: (location) => [location.lon, location.lat],
         iconAtlas: homeIconAtlas(),
         iconMapping: HOME_ICON_MAPPING,
         getIcon: () => 'home',
         getSize: 15,
         sizeUnits: 'pixels',
-        getColor: (location) => faded(colors.endpoint, endpointFader.opacity(location, frameNow)),
+        getColor: (location) => faded(colors.endpoint, opacity(location)),
         pickable: false,
         updateTriggers: {getColor: [colors.endpoint, fadeKey]},
       }),
@@ -682,7 +707,7 @@ export function createFirewallMap(container, options = {}) {
     // colours are recomputed every frame only while something is fading
     fadeKey = animating(now) ? now : 'steady';
     clearHome();
-    return [...baseLayers, ...fadingLayers(), pulseLayer(seconds), ...blockPulseLayers(seconds), labelLayer].filter(Boolean);
+    return [...baseLayers, ...fadingLayers(), pulseLayer(seconds), ...blockPulseLayers(seconds), ...homeLayers(), labelLayer].filter(Boolean);
   }
 
   function layers(data) {
