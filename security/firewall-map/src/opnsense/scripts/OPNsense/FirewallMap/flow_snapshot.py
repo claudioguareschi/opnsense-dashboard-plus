@@ -14,12 +14,10 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fwmap_common import HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR  # noqa: E402
 
-OUTPUT_FILE = "/var/run/firewallmap/flows.json"
-REQUEST_MARKER = "/var/run/firewallmap/last_request"
-HOSTNAME_MARKER = "/var/run/firewallmap/hostnames_request"
-GEODB = "/usr/local/opnsense/scripts/OPNsense/FirewallMap/firewallmap_geodb.py"
-RC_SCRIPT = "/usr/local/etc/rc.d/firewallmap"
+GEODB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "firewallmap_geodb.py")
 STALE_SECONDS = 10
 
 
@@ -30,7 +28,8 @@ def start_collector():
         pass
 
 
-def read_snapshot(path=OUTPUT_FILE, now=None):
+def read_snapshot(path=None, now=None):
+    path = path or OUTPUT_FILE
     try:
         age = (now or time.time()) - os.stat(path).st_mtime
         with open(path) as handle:
@@ -43,8 +42,9 @@ def read_snapshot(path=OUTPUT_FILE, now=None):
     return payload
 
 
-def mark_request(path=REQUEST_MARKER):
+def mark_request(path=None):
     """Tell the collector a dashboard is watching, so it keeps running."""
+    path = path or REQUEST_MARKER
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "a"):
@@ -53,12 +53,13 @@ def mark_request(path=REQUEST_MARKER):
         pass
 
 
-FETCH_MARKER = "/var/run/firewallmap/fetch_started"
+FETCH_MARKER = f"{RUN_DIR}/fetch_started"
 FETCH_EVERY_SECONDS = 60
 
 
-def fetch_database(marker=FETCH_MARKER, now=None):
+def fetch_database(marker=None, now=None):
     """A missing database is downloaded in the background, at most once a minute."""
+    marker = marker or FETCH_MARKER
     try:
         if (now or time.time()) - os.stat(marker).st_mtime < FETCH_EVERY_SECONDS:
             return

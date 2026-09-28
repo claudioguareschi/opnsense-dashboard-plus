@@ -25,7 +25,8 @@ import xml.etree.ElementTree as ElementTree
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import firewallmap_collector as collector  # noqa: E402
+from fwmap_cache import CacheStore  # noqa: E402
+from fwmap_common import REPUTATION_KIND, REPUTATION_MAX_AGE, secure_umask  # noqa: E402
 
 CONFIG_XML = "/conf/config.xml"
 TIMEOUT = 10
@@ -139,7 +140,7 @@ def investigate(address, store=None, key=None, fetchers=None, now=None):
         return {"status": "failed", "error": "not a public address"}
     address = str(parsed)
     now = time.time() if now is None else now
-    store = store if store is not None else collector.CacheStore()
+    store = store if store is not None else CacheStore()
     fetchers = fetchers if fetchers is not None else lookups(address, key)
     result = {"status": "ok", "address": address, "abuseipdb_configured": "abuseipdb" in fetchers}
     missing = {}
@@ -167,12 +168,13 @@ def investigate(address, store=None, key=None, fetchers=None, now=None):
         store.prune(source, max_age=MAX_AGE[source], keep=MAX_ENTRIES[source], now=now)
         if source == "abuseipdb":
             # the verdict flags the address on the map for 30 days; a newer lookup replaces it
-            store.put_many(collector.REPUTATION_KIND, [(address, {"score": data.get("score")})], now=now)
-            store.prune(collector.REPUTATION_KIND, max_age=collector.REPUTATION_MAX_AGE, keep=20000, now=now)
+            store.put_many(REPUTATION_KIND, [(address, {"score": data.get("score")})], now=now)
+            store.prune(REPUTATION_KIND, max_age=REPUTATION_MAX_AGE, keep=20000, now=now)
         result[source] = data
     return result
 
 
 if __name__ == "__main__":
+    secure_umask()
     target = sys.argv[1] if len(sys.argv) > 1 else ""
     print(json.dumps(investigate(target, key=abuseipdb_key())))

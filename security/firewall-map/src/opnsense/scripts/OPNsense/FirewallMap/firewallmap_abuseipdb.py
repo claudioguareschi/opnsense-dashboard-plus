@@ -19,30 +19,18 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import firewallmap_collector as collector  # noqa: E402
 import firewallmap_investigate as investigate  # noqa: E402
+from fwmap_common import ABUSEIPDB_BLACKLIST, STATE_DIR, read_json, secure_umask, write_json, write_text  # noqa: E402
 
-LIST_FILE = collector.ABUSEIPDB_BLACKLIST
-STATUS_FILE = "/var/db/firewallmap/abuseipdb.json"
+LIST_FILE = ABUSEIPDB_BLACKLIST
+STATUS_FILE = f"{STATE_DIR}/abuseipdb.json"
 URL = "https://api.abuseipdb.com/api/v2/blacklist?confidenceMinimum=100&limit=10000"
 MIN_AGE_SECONDS = 20 * 3600
 TIMEOUT = 60
 
 
 def read_status(path=None):
-    try:
-        with open(path or STATUS_FILE) as handle:
-            return json.load(handle)
-    except (OSError, ValueError):
-        return {}
-
-
-def write_atomic(path, text):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    temporary = f"{path}.tmp"
-    with open(temporary, "w") as handle:
-        handle.write(text)
-    os.replace(temporary, path)
+    return read_json(path or STATUS_FILE)
 
 
 def parse_list(text):
@@ -81,7 +69,7 @@ def update(force=False, key=None, fetch=download, now=None):
         addresses = parse_list(fetch(key))
         if not addresses:
             raise ValueError("empty list")
-        write_atomic(LIST_FILE, "\n".join(addresses) + "\n")
+        write_text(LIST_FILE, "\n".join(addresses) + "\n")
         status.update({"updated": now, "count": len(addresses), "error": None})
         result = {"result": "ok", "count": len(addresses)}
     except urllib.error.HTTPError as error:
@@ -90,11 +78,12 @@ def update(force=False, key=None, fetch=download, now=None):
     except Exception as error:  # network or parse errors; never let the key reach the status file
         status["error"] = str(error).replace(key, "<key>")[:200]
         result = {"result": "failed", "error": status["error"]}
-    write_atomic(STATUS_FILE, json.dumps(status))
+    write_json(STATUS_FILE, status)
     return result
 
 
 if __name__ == "__main__":
+    secure_umask()
     command = sys.argv[1] if len(sys.argv) > 1 else "status"
     if command == "update":
         print(json.dumps(update(force=len(sys.argv) > 2 and sys.argv[2] == "force")))

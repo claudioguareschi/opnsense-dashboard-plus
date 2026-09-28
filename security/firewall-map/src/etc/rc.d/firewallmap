@@ -21,7 +21,8 @@ firewallmap_start()
 		return 0
 	fi
 	echo "Starting ${name}."
-	/usr/sbin/daemon -f -p ${pidfile} ${command_interpreter} ${command}
+	# -S -T: the collector's errors go to the system log instead of being discarded
+	/usr/sbin/daemon -f -S -T ${name} -p ${pidfile} ${command_interpreter} ${command}
 }
 
 load_rc_config $name

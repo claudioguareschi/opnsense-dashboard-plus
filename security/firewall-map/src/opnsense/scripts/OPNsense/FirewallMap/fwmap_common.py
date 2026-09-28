@@ -1,0 +1,172 @@
+#!/usr/local/bin/python3
+
+"""Shared by the Firewall Map+ scripts: paths, service names, address helpers and file writing.
+
+Kept free of heavy imports, since the dashboard's snapshot reader and the review queue load it
+on every request.
+"""
+
+import functools
+import ipaddress
+import json
+import os
+import tempfile
+import time
+
+# ephemeral files (the snapshot, markers) and state that outlives a reboot (caches, the review queue)
+RUN_DIR = "/var/run/firewallmap"
+STATE_DIR = "/var/db/firewallmap"
+OUTPUT_FILE = f"{RUN_DIR}/flows.json"
+# touched by the dashboard API on every read; the collector stops once nobody is watching
+REQUEST_MARKER = f"{RUN_DIR}/last_request"
+# touched only when a viewer has hostname lookups enabled; reverse DNS runs while it is fresh
+HOSTNAME_MARKER = f"{RUN_DIR}/hostnames_request"
+RC_SCRIPT = "/usr/local/etc/rc.d/firewallmap"
+CACHE_DB = f"{STATE_DIR}/cache.db"
+ABUSEIPDB_BLACKLIST = f"{STATE_DIR}/abuseipdb_blacklist.txt"
+
+PFCTL = "/sbin/pfctl"
+RULES_DEBUG = "/tmp/rules.debug"
+CONFIG_XML = "/conf/config.xml"
+REPUTATION_MAX_AGE = 30 * 86400
+# verdicts from AbuseIPDB lookups, kept longer than the full lookup results
+REPUTATION_KIND = "reputation"
+CGNAT = ipaddress.ip_network("100.64.0.0/10")
+ICMP_PROTOCOLS = ("icmp", "ipv6-icmp")
+SERVICES = {
+    ("tcp", "20"): "FTP data", ("tcp", "21"): "FTP", ("tcp", "22"): "SSH", ("tcp", "25"): "SMTP",
+    ("udp", "53"): "DNS", ("tcp", "53"): "DNS", ("tcp", "80"): "HTTP", ("udp", "123"): "NTP",
+    ("tcp", "143"): "IMAP", ("tcp", "443"): "HTTPS", ("udp", "443"): "QUIC", ("udp", "500"): "IKE",
+    ("tcp", "465"): "SMTPS", ("tcp", "587"): "Submission", ("tcp", "853"): "DNS over TLS",
+    ("udp", "853"): "DNS over QUIC", ("tcp", "993"): "IMAPS", ("tcp", "995"): "POP3S",
+    ("udp", "1194"): "OpenVPN", ("tcp", "1194"): "OpenVPN", ("udp", "3478"): "STUN/TURN",
+    ("tcp", "3389"): "RDP", ("udp", "4500"): "IPsec NAT-T", ("tcp", "5223"): "Apple Push",
+    ("tcp", "5228"): "Google Push", ("udp", "51820"): "WireGuard", ("tcp", "8080"): "HTTP alt",
+    ("tcp", "8443"): "HTTPS alt", ("udp", "19302"): "Google STUN",
+    # what scanners knock on most, so blocked attempts read as services too
+    ("tcp", "23"): "Telnet", ("tcp", "110"): "POP3", ("tcp", "135"): "MS RPC", ("tcp", "139"): "NetBIOS",
+    ("udp", "137"): "NetBIOS", ("tcp", "445"): "SMB", ("udp", "161"): "SNMP", ("tcp", "1433"): "MS SQL",
+    ("tcp", "1723"): "PPTP", ("udp", "1900"): "SSDP", ("tcp", "2375"): "Docker API", ("tcp", "3306"): "MySQL",
+    ("tcp", "5060"): "SIP", ("udp", "5060"): "SIP", ("tcp", "5432"): "PostgreSQL", ("tcp", "5900"): "VNC",
+    ("tcp", "6379"): "Redis", ("tcp", "8291"): "MikroTik Winbox", ("tcp", "9200"): "Elasticsearch",
+    ("tcp", "27017"): "MongoDB", ("udp", "11211"): "Memcached", ("tcp", "2222"): "SSH alt",
+}
+
+
+def secure_umask():
+    """Files written by these scripts hold notes, host names and topology: not world-readable."""
+    os.umask(0o027)
+
+
+def is_icmp(protocol):
+    return protocol in ICMP_PROTOCOLS
+
+
+def service_port_label(protocol, port):
+    """'443/tcp' for the summary sentence; ICMP has no port."""
+    if is_icmp(protocol) or not port:
+        return None
+    return f"{port}/{protocol}"
+
+
+def service_name(protocol, port):
+    """Name the responder side of a connection (the service being used)."""
+    if is_icmp(protocol):
+        return "ICMP"
+    if port is None:
+        return protocol.upper()
+    return SERVICES.get((protocol, port), f"{protocol.upper()}/{port}")
+
+
+@functools.lru_cache(maxsize=65536)
+def public_ipv4(value):
+    try:
+        address = ipaddress.ip_address(value)
+    except (TypeError, ValueError):
+        return False
+    # multicast (e.g. CARP advertisements to 224.0.0.18) counts as global in ipaddress, not here
+    return address.version == 4 and address.is_global and not address.is_multicast
+
+
+@functools.lru_cache(maxsize=65536)
+def private_ipv4(value):
+    try:
+        address = ipaddress.ip_address(value)
+    except (TypeError, ValueError):
+        return False
+    # carrier-grade NAT space (Tailscale, some VPN tunnels) is inside space too
+    return address.version == 4 and (address.is_private or address in CGNAT) and not address.is_loopback
+
+
+def write_text(path, text):
+    """Write atomically, through a unique temporary file, so readers never see a partial
+    document and two writers never share a temporary name."""
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(dir=directory, prefix=f".{os.path.basename(path)}.")
+    try:
+        # mkstemp creates the file 0600; give it the mode the process umask allows instead
+        mask = os.umask(0)
+        os.umask(mask)
+        os.fchmod(handle, 0o666 & ~mask)
+        with os.fdopen(handle, "w") as output:
+            output.write(text)
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def write_json(path, payload):
+    write_text(path, json.dumps(payload, separators=(",", ":")))
+
+
+def read_json(path):
+    """A JSON document written by write_json, or {} when missing or damaged."""
+    try:
+        with open(path) as handle:
+            value = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def requested(marker, seconds, now=None):
+    try:
+        return (time.time() if now is None else now) - os.stat(marker).st_mtime < seconds
+    except OSError:
+        return False
+
+
+def connection_target(protocol, address, port):
+    """'tcp|192.168.1.2|443': what a remote side connected to (an inside host or the firewall)."""
+    return f"{protocol}|{address}|{'' if is_icmp(protocol) else port or ''}"
+
+
+def remote_target(record, remote, local, inside, service_port):
+    """The target of a state the remote side started.
+
+    A reply state (the remote is not the source) is keyed by the server's own port; otherwise
+    by the port the remote aimed at, which for a port forward is the inside host's port.
+    """
+    if record["src"]["address"] != remote:
+        port = service_port
+    else:
+        port = (inside or record["dst"])["port"]
+    return connection_target(record["protocol"], inside["address"] if inside else local, port)
+
+
+def location_fields(location):
+    """The geolocation fields every map entry carries for an address."""
+    return {
+        "lat": location["lat"],
+        "lon": location["lon"],
+        "city": location.get("city") or location.get("region"),
+        "country": location.get("country_name") or location.get("country"),
+        "country_code": location.get("country"),
+        "asn": location.get("asn"),
+        "as_org": location.get("as_org"),
+    }

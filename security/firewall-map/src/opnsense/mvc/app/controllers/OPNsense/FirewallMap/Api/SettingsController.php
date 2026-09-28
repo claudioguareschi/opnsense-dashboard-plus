@@ -65,6 +65,10 @@ class SettingsController extends ApiControllerBase
         }
         $model = new FirewallMap();
         $general = $model->general;
+        $ensure = false;
+        $fetchBlacklist = false;
+        /* the database is only re-checked when something that decides which one to fetch changed */
+        $databaseBefore = [(string)$general->provider, (string)$general->update_days, (string)$general->license_key];
         foreach (['provider', 'update_days'] as $field) {
             if ($this->request->hasPost($field) && $this->request->getPost($field) !== '') {
                 $general->$field = $this->request->getPost($field);
@@ -107,13 +111,16 @@ class SettingsController extends ApiControllerBase
         Config::getInstance()->save();
         /* Reload in place: preserve live flow/alert history while rebuilding the chosen list index. */
         (new Backend())->configdRun('firewallmap reload');
-        if (!empty($fetchBlacklist)) {
+        if ($fetchBlacklist) {
             (new Backend())->configdRun('firewallmap abuseipdb refresh', true);
         }
-        if (!empty($ensure)) {
+        if ($ensure) {
             (new Backend())->configdRun('firewallmap ensure', true);
         }
-        (new Backend())->configdRun('firewallmap geodb update', true);
+        $databaseAfter = [(string)$general->provider, (string)$general->update_days, (string)$general->license_key];
+        if ($databaseAfter !== $databaseBefore) {
+            (new Backend())->configdRun('firewallmap geodb update', true);
+        }
         return ['result' => 'saved'];
     }
 
@@ -124,14 +131,5 @@ class SettingsController extends ApiControllerBase
     {
         $result = json_decode((new Backend())->configdRun('firewallmap tables'), true);
         return is_array($result) ? $result : ['tables' => [], 'automatic' => []];
-    }
-
-    public function updateAction()
-    {
-        if (!$this->request->isPost()) {
-            return ['result' => 'failed'];
-        }
-        (new Backend())->configdRun('firewallmap geodb refresh', true);
-        return ['result' => 'started'];
     }
 }

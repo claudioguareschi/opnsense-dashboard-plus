@@ -1,3 +1,8 @@
 if [ -x /usr/local/etc/rc.d/firewallmap ]; then
 	/usr/local/etc/rc.d/firewallmap onestop > /dev/null 2>&1
 fi
+# the snapshot and markers are ephemeral
+rm -rf /var/run/firewallmap
+# kept on purpose: /var/db/firewallmap (the review queue with its notes, and the caches) survives
+# an upgrade or a reinstall, and the GeoIP databases in /usr/local/share/GeoIP may be shared with
+# the firewall's own GeoIP aliases

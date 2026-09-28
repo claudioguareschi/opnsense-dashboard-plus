@@ -1,0 +1,240 @@
+#!/usr/local/bin/python3
+
+"""Local geolocation lookups and the SQLite cache shared by the Firewall Map+ scripts."""
+
+import json
+import os
+import re
+import sqlite3
+import subprocess
+import sys
+import threading
+import time
+
+from fwmap_common import CACHE_DB
+
+
+MMDBLOOKUP = "/usr/local/bin/mmdblookup"
+# database paths follow the provider chosen in the firewall-wide settings (see firewallmap_geodb)
+GEO_CACHE_SAVE_SECONDS = 60.0
+GEO_LOOKUPS_PER_SAMPLE = 25
+GEO_CACHE_MAX = 20000
+GEO_CACHE_VERSION = 2
+MMDB_KEY = re.compile(r'^"(?P<key>[^"]+)":\s*$')
+MMDB_STRING = re.compile(r'^"(?P<value>.*)" <utf8_string>$')
+MMDB_NUMBER = re.compile(r"^(?P<value>[-+]?\d+(?:\.\d+)?) <(?:double|float|uint\d+|int\d+)>$")
+
+
+def parse_mmdb(output):
+    """Flatten mmdblookup's annotated dump into {("a", "b"): value} (array indices omitted)."""
+    values = {}
+    path = []
+    pending = None
+    for raw in output.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        key = MMDB_KEY.match(line)
+        if key:
+            pending = key.group("key")
+        elif line in ("{", "["):
+            path.append(pending)
+            pending = None
+        elif line in ("}", "]"):
+            if path:
+                path.pop()
+        else:
+            match = MMDB_STRING.match(line) or MMDB_NUMBER.match(line)
+            if match and pending is not None:
+                values[tuple(part for part in path if part is not None) + (pending,)] = match.group("value")
+            pending = None
+    return values
+
+
+def mmdb_lookup(database, address):
+    try:
+        result = subprocess.run(
+            [MMDBLOOKUP, "--file", database, "--ip", address],
+            capture_output=True, check=False, text=True, timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        # a transient failure, not "no data": callers must not cache it
+        raise LookupError(str(error)) from error
+    if result.returncode == 6 or "Could not find an entry" in result.stderr:
+        return {}  # not in the database: a definite miss that is cached
+    if result.returncode != 0:
+        raise LookupError(result.stderr.strip() or "mmdblookup failed")
+    return parse_mmdb(result.stdout)
+
+
+def lookup_location(address, city_database, asn_database):
+    """Resolve one address against the local geolocation databases (never a remote service)."""
+    values = mmdb_lookup(city_database, address)
+    try:
+        latitude = float(values[("location", "latitude")])
+        longitude = float(values[("location", "longitude")])
+    except (KeyError, ValueError):
+        return None
+    location = {
+        "lat": round(latitude, 4),
+        "lon": round(longitude, 4),
+        "city": values.get(("city", "names", "en")),
+        # GeoLite often knows only the state/province (with a coarse accuracy radius)
+        "region": values.get(("subdivisions", "names", "en")),
+        "accuracy_km": int(float(values[("location", "accuracy_radius")])) if ("location", "accuracy_radius") in values else None,
+        "country": values.get(("country", "iso_code")) or values.get(("registered_country", "iso_code")),
+        "country_name": values.get(("country", "names", "en")) or values.get(("registered_country", "names", "en")),
+    }
+    if os.path.exists(asn_database):
+        try:
+            asn = mmdb_lookup(asn_database, address)
+        except LookupError:
+            asn = {}
+        if ("autonomous_system_number",) in asn:
+            location["asn"] = int(asn[("autonomous_system_number",)])
+            location["as_org"] = asn.get(("autonomous_system_organization",))
+    return location
+
+
+class CacheStore:
+    """Small SQLite key/value store with expiry, shared by the collector's caches.
+
+    One file, no service: GeoIP results, reverse DNS names and investigation lookups survive
+    restarts, are written incrementally and are pruned by age and count. A cache must never
+    take the collector down: a damaged file is moved aside, and any later database error
+    degrades to "not cached" instead of raising.
+    """
+
+    def __init__(self, path=CACHE_DB):
+        self.path = path
+        self.lock = threading.Lock()
+        try:
+            self.db = self._open(path)
+        except sqlite3.Error:
+            try:
+                os.replace(path, f"{path}.corrupt")
+                self.db = self._open(path)
+            except (OSError, sqlite3.Error):
+                self.db = self._open(":memory:")
+
+    @staticmethod
+    def _open(path):
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        db = sqlite3.connect(path, timeout=5, isolation_level=None, check_same_thread=False)
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA synchronous=NORMAL")
+        db.execute("CREATE TABLE IF NOT EXISTS cache (kind TEXT, key TEXT, value TEXT, stored REAL, PRIMARY KEY (kind, key))")
+        db.execute("SELECT count(*) FROM cache").fetchone()
+        return db
+
+    def _query(self, sql, parameters=()):
+        try:
+            with self.lock:
+                return self.db.execute(sql, parameters).fetchall()
+        except sqlite3.Error as error:
+            print(f"firewallmap: cache query failed: {error}", file=sys.stderr)
+            return []
+
+    def get_all(self, kind, max_age=None, now=None):
+        now = time.time() if now is None else now
+        rows = self._query("SELECT key, value, stored FROM cache WHERE kind = ?", (kind,))
+        result = {}
+        for key, value, stored in rows:
+            if max_age is None or now - stored < max_age:
+                try:
+                    result[key] = json.loads(value)
+                except ValueError:
+                    continue
+        return result
+
+    def get(self, kind, key, max_age=None, now=None):
+        now = time.time() if now is None else now
+        rows = self._query("SELECT value, stored FROM cache WHERE kind = ? AND key = ?", (kind, key))
+        if not rows or (max_age is not None and now - rows[0][1] >= max_age):
+            return None
+        try:
+            return json.loads(rows[0][0])
+        except ValueError:
+            return None
+
+    def put_many(self, kind, items, now=None):
+        now = time.time() if now is None else now
+        rows = [(kind, key, json.dumps(value), now) for key, value in items]
+        with self.lock:
+            try:
+                self.db.execute("BEGIN")
+                self.db.executemany("INSERT OR REPLACE INTO cache (kind, key, value, stored) VALUES (?, ?, ?, ?)", rows)
+                self.db.execute("COMMIT")
+            except sqlite3.Error as error:
+                print(f"firewallmap: cache write failed: {error}", file=sys.stderr)
+                try:
+                    self.db.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+
+    def prune(self, kind, max_age=None, keep=None, now=None):
+        now = time.time() if now is None else now
+        if max_age is not None:
+            self._query("DELETE FROM cache WHERE kind = ? AND stored < ?", (kind, now - max_age))
+        if keep is not None:
+            self._query(
+                "DELETE FROM cache WHERE kind = ? AND key NOT IN "
+                "(SELECT key FROM cache WHERE kind = ? ORDER BY stored DESC LIMIT ?)", (kind, kind, keep),
+            )
+
+
+class GeoCache:
+    """IP -> location cache persisted in SQLite and invalidated when the databases change."""
+
+    def __init__(self, store=None, database=None, asn_database=None, lookup=None, path=None):
+        self.store = store if store is not None else CacheStore(path or CACHE_DB)
+        self.database = database
+        self.asn_database = asn_database
+        self.lookup = lookup or (lambda address: lookup_location(address, database, asn_database))
+        self.database_mtime = self._database_mtime()
+        self.kind = f"geo:{GEO_CACHE_VERSION}:{database}:{self.database_mtime}"
+        self.pending = {}
+        self.saved_at = time.monotonic()
+        self.entries = self.store.get_all(self.kind)
+
+    def _database_mtime(self):
+        mtimes = []
+        for database in (self.database, self.asn_database):
+            try:
+                mtimes.append(int(os.stat(database).st_mtime))
+            except (OSError, TypeError):
+                mtimes.append(None)
+        return mtimes
+
+    def save(self, force=False):
+        if not self.pending or (not force and time.monotonic() - self.saved_at < GEO_CACHE_SAVE_SECONDS):
+            return
+        self.store.put_many(self.kind, self.pending.items())
+        self.store.prune(self.kind, keep=GEO_CACHE_MAX)
+        self.pending = {}
+        self.saved_at = time.monotonic()
+
+    def forget_old_databases(self):
+        """Drop cached locations from previous database files."""
+        self.store._query("DELETE FROM cache WHERE kind LIKE 'geo:%' AND kind != ?", (self.kind,))
+
+    def resolve(self, addresses, budget=GEO_LOOKUPS_PER_SAMPLE):
+        """Look up at most `budget` unknown addresses; unresolvable ones are cached as null."""
+        for address in addresses:
+            if budget <= 0:
+                break
+            if address not in self.entries:
+                budget -= 1
+                try:
+                    self.entries[address] = self.pending[address] = self.lookup(address)
+                except LookupError:
+                    continue  # try again on a later sample
+        if len(self.entries) > GEO_CACHE_MAX * 2:
+            # keep memory bounded: the store keeps the most recent entries
+            self.save(force=True)
+            self.entries = self.store.get_all(self.kind)
+
+    def get(self, address):
+        return self.entries.get(address)

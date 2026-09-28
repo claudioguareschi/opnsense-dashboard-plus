@@ -8,7 +8,12 @@
         </patterns>
     </page-dashboard-widget-firewall-map>
     <page-firewall-map-settings>
-        <name>Firewall Map+: firewall-wide settings</name>
+        <!--
+            Also covers the lookups an investigation makes to outside services and the review
+            queue (including deleting reviewed or dismissed entries). The privilege key stays as
+            it is so existing user and group assignments keep working; the name says what it grants.
+        -->
+        <name>Firewall Map+: settings, investigations and review queue</name>
         <patterns>
             <pattern>api/firewallmap/settings/*</pattern>
             <pattern>api/firewallmap/investigate/*</pattern>

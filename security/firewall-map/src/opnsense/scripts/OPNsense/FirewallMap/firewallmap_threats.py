@@ -20,7 +20,12 @@ import sqlite3
 import sys
 import time
 
-DATABASE = "/var/db/firewallmap/cache.db"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fwmap_common import CACHE_DB, is_icmp, remote_target, secure_umask, service_name  # noqa: E402
+from fwmap_leases import lease_names  # noqa: E402
+from fwmap_pf import flow_endpoints, inside_endpoint, orientation  # noqa: E402
+
+DATABASE = CACHE_DB
 STATUSES = ("new", "reviewed", "dismissed", "blocked", "dropped")
 KEEP_SECONDS = 90 * 86400
 KEEP_ROWS = 5000
@@ -51,7 +56,7 @@ def merge(old, new):
     return result[:MAX_ITEMS]
 
 
-def observe(records, flow_endpoints, lists_for, local_addresses, inside_endpoint, service_name, orientation):
+def observe(records, lists_for, local_addresses):
     """Group the current states that touch a flagged address: {remote: summary}."""
     seen = {}
     for record in records:
@@ -72,13 +77,7 @@ def observe(records, flow_endpoints, lists_for, local_addresses, inside_endpoint
         remote_started, service_port = orientation(record, remote)
         if remote_started:
             entry["inbound"] += 1
-            if record["src"]["address"] != remote:
-                port = service_port or ""  # a reply state: the server's own port
-            elif record["protocol"] in ("icmp", "ipv6-icmp"):
-                port = ""
-            else:
-                port = (inside or record["dst"])["port"] or ""
-            target = f'{record["protocol"]}|{inside["address"] if inside else pair[0]}|{port}'
+            target = remote_target(record, remote, pair[0], inside, service_port)
             if target not in entry["targets"]:
                 entry["targets"].append(target)
         else:
@@ -88,7 +87,7 @@ def observe(records, flow_endpoints, lists_for, local_addresses, inside_endpoint
         service = service_name(record["protocol"], service_port)
         if service not in entry["services"]:
             entry["services"].append(service)
-            if record["protocol"] not in ("icmp", "ipv6-icmp") and service_port:
+            if not is_icmp(record["protocol"]) and service_port:
                 entry["service_ports"][service] = f'{service_port}/{record["protocol"]}'
         entry["bytes"] += record.get("bytes_in", 0) + record.get("bytes_out", 0)
     return seen
@@ -181,12 +180,6 @@ def prune(db, now=None):
                (KEEP_ROWS,))
 
 
-def service_name(protocol, port):
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import firewallmap_collector  # noqa: E402  (imported lazily: the collector imports this module)
-    return firewallmap_collector.service_name(protocol, port)
-
-
 def cached_country(db, address):
     """Country code of an address from the collector's local GeoIP cache (same database file)."""
     try:
@@ -200,9 +193,7 @@ def cached_country(db, address):
 def inside_names():
     """DHCP names of inside hosts, so entries read "mail" rather than 192.168.1.2."""
     try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import firewallmap_collector  # noqa: E402  (imported lazily: the collector imports this module)
-        return firewallmap_collector.lease_names()
+        return lease_names()
     except Exception:  # names are a nicety; the queue works without them
         return {}
 
@@ -298,4 +289,5 @@ def main(arguments, path=DATABASE):
 
 
 if __name__ == "__main__":
+    secure_umask()
     print(json.dumps(main(sys.argv[1:])))

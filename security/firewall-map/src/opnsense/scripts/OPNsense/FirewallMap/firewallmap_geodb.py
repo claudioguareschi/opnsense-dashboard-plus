@@ -26,11 +26,13 @@ from configparser import ConfigParser
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlencode, urlparse
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fwmap_common import STATE_DIR, read_json, secure_umask, write_json  # noqa: E402
+
 
 CONFIG_XML = "/conf/config.xml"
 GEOIP_ALIAS_CONF = "/usr/local/etc/filter_geoip.conf"
 GEOIP_DIR = "/usr/local/share/GeoIP"
-STATE_DIR = "/var/db/firewallmap"
 STATUS_FILE = f"{STATE_DIR}/geodb.json"
 LOCK_FILE = f"{STATE_DIR}/geodb.lock"
 MMDBLOOKUP = "/usr/local/bin/mmdblookup"
@@ -120,19 +122,11 @@ def file_info(path):
 
 
 def read_status():
-    try:
-        with open(STATUS_FILE) as handle:
-            return json.load(handle)
-    except (OSError, ValueError):
-        return {}
+    return read_json(STATUS_FILE)
 
 
 def write_status(payload):
-    os.makedirs(STATE_DIR, exist_ok=True)
-    temporary = f"{STATUS_FILE}.tmp"
-    with open(temporary, "w") as handle:
-        json.dump(payload, handle)
-    os.replace(temporary, STATUS_FILE)
+    write_json(STATUS_FILE, payload)
 
 
 def status():
@@ -211,59 +205,72 @@ def needs_update(path, update_days, force):
     return info is None or time.time() - info.st_mtime > update_days * 86400
 
 
+def in_backoff(last, now=None):
+    """True while a failed download is recent; a missing key is not a download failure."""
+    if last.get("last_error") in (None, "maxmind_key_missing") or not last.get("last_attempt"):
+        return False
+    try:
+        attempted = datetime.fromisoformat(last["last_attempt"]).timestamp()
+    except ValueError:
+        return False
+    return (time.time() if now is None else now) - attempted < RETRY_SECONDS
+
+
+def scrub(message, key):
+    """Never let a URL (which carries the key) reach logs or the browser."""
+    return message.replace(key, "<key>") if key else message
+
+
+def fetch_databases(provider, paths, key, update_days, force):
+    """Download, validate and install what is due. Returns (updated kinds, error or None)."""
+    updated = []
+    error = None
+    with tempfile.TemporaryDirectory(dir=STATE_DIR) as workdir:
+        for kind, probe in (("city", ["location", "latitude"]), ("asn", [])):
+            if not needs_update(paths[kind], update_days, force):
+                continue
+            edition = paths["editions"][kind]
+            try:
+                fetched = fetch_maxmind(edition, key, workdir) if provider.startswith("maxmind") else fetch_dbip(edition, workdir)
+                validate(fetched, probe)
+                os.chmod(fetched, 0o644)
+                os.makedirs(GEOIP_DIR, exist_ok=True)
+                shutil.move(fetched, f"{paths[kind]}.new")
+                os.replace(f"{paths[kind]}.new", paths[kind])
+                updated.append(kind)
+            except Exception as exc:
+                error = scrub(f"{edition}: {exc}", key)
+    return updated, error
+
+
 def update(force=False):
     values = settings()
     provider = effective_provider(values)
     paths = DATABASES[provider]
-    key = None
-    if provider.startswith("maxmind"):
-        key, _ = license_key(values)
-        if not key:
-            write_status({**read_status(), "last_attempt": datetime.now(timezone.utc).isoformat(),
-                          "last_error": "maxmind_key_missing"})
-            return {"result": "failed", "error": "maxmind_key_missing"}
-
-    last = read_status()
-    # a missing key is not a download failure, so it never delays the next attempt
-    if not force and last.get("last_error") not in (None, "maxmind_key_missing") and last.get("last_attempt"):
-        try:
-            attempted = datetime.fromisoformat(last["last_attempt"]).timestamp()
-        except ValueError:
-            attempted = 0
-        if time.time() - attempted < RETRY_SECONDS:
-            return {"result": "backoff", "error": last["last_error"]}
-
     os.makedirs(STATE_DIR, exist_ok=True)
+    # one updater at a time: status reads and writes happen under the same lock as the download
     with open(LOCK_FILE, "w") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             return {"result": "busy"}
-        updated = []
-        error = None
-        with tempfile.TemporaryDirectory(dir=STATE_DIR) as workdir:
-            for kind, probe in (("city", ["location", "latitude"]), ("asn", [])):
-                if not needs_update(paths[kind], values["update_days"], force):
-                    continue
-                edition = paths["editions"][kind]
-                try:
-                    fetched = fetch_maxmind(edition, key, workdir) if provider.startswith("maxmind") else fetch_dbip(edition, workdir)
-                    validate(fetched, probe)
-                    os.chmod(fetched, 0o644)
-                    os.makedirs(GEOIP_DIR, exist_ok=True)
-                    shutil.move(fetched, f"{paths[kind]}.new")
-                    os.replace(f"{paths[kind]}.new", paths[kind])
-                    updated.append(kind)
-                except Exception as exc:
-                    # never let a URL (which carries the key) reach logs or the browser
-                    error = f"{edition}: {exc}"
-                    if key:
-                        error = error.replace(key, "<key>")
+        key = None
+        if provider.startswith("maxmind"):
+            key, _ = license_key(values)
+            if not key:
+                write_status({**read_status(), "last_attempt": datetime.now(timezone.utc).isoformat(),
+                              "last_error": "maxmind_key_missing"})
+                return {"result": "failed", "error": "maxmind_key_missing"}
+        last = read_status()
+        if not force and in_backoff(last):
+            return {"result": "backoff", "error": last["last_error"]}
+        updated, error = fetch_databases(provider, paths, key, values["update_days"], force)
         write_status({"last_attempt": datetime.now(timezone.utc).isoformat(), "last_error": error})
     return {"result": "failed" if error else "ok", "updated": updated, "error": error}
 
 
 if __name__ == "__main__":
+    secure_umask()
     command = sys.argv[1] if len(sys.argv) > 1 else "status"
     if command == "update":
         print(json.dumps(update(force=len(sys.argv) > 2 and sys.argv[2] == "force")))
