@@ -1,7 +1,7 @@
 /* The deck.gl map: layers for arcs, blocked sources, IDS markers and labels, fades and pulses. */
 import {Deck, MapView, WebMercatorViewport} from '@deck.gl/core';
 import {GeoJsonLayer, IconLayer, PathLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
-import {IDS_ARC_FADE_SECONDS, buildArcs, continuePhases, buildBlocks, idsArcData, pulsePosition, pulses} from './arcs.js';
+import {IDS_ARC_FADE_SECONDS, buildArcs, continuePhases, buildBlocks, clearOfHome, HOME_CLEARANCE, idsArcData, pulsePosition, pulses, unitsPerPixel} from './arcs.js';
 import {createFollow} from './follow.js';
 import {plain} from './format.js';
 import {DEFAULT_OPTIONS} from './options.js';
@@ -285,6 +285,8 @@ export function createFirewallMap(container, options = {}) {
   let frameNow = performance.now();
   let dataTime = performance.now();
   let fadeKey = 'steady';
+  // the zoom (to 1/20 of a step) the arch ends were last cleared of the house icon for
+  let clearKey = null;
   // stable colour per category across refreshes (first seen keeps its colour)
   const categoryColors = new Map();
   let categoryKey = '';
@@ -534,7 +536,7 @@ export function createFirewallMap(container, options = {}) {
       new PathLayer({
         id: 'firewall-map-arcs',
         data: arcs,
-        getPath: (arc) => arc.path,
+        getPath: (arc) => arc.shown || arc.path,
         getWidth: (arc) => arc.heavy ? HEAVY_WIDTH : LINK_WIDTH,
         widthUnits: 'pixels',
         capRounded: true,
@@ -542,12 +544,12 @@ export function createFirewallMap(container, options = {}) {
         pickable: true,
         widthMinPixels: 1,
         getColor: (arc) => arcColor(arc),
-        updateTriggers: {getColor: [colors.toward.link, colors.away.link, colors.inbound.link, settings.colorMode, categoryKey, fadeKey]},
+        updateTriggers: {getColor: [colors.toward.link, colors.away.link, colors.inbound.link, settings.colorMode, categoryKey, fadeKey], getPath: clearKey},
       }),
       new PathLayer({
         id: 'firewall-map-blocks',
         data: blockArcs,
-        getPath: (block) => block.path,
+        getPath: (block) => block.shown || block.path,
         getWidth: (block) => block.threat ? 2.4 : 1.4,
         widthUnits: 'pixels',
         capRounded: true,
@@ -555,7 +557,7 @@ export function createFirewallMap(container, options = {}) {
         pickable: true,
         // bright while hits arrive, then a faint trace that can still be hovered
         getColor: (block) => rgb(blockColor(block), Math.round((35 + 185 * block.activity) * blockFader.opacity(block, frameNow))),
-        updateTriggers: {getColor: [colors.blocked, colors.contained, fadeKey]},
+        updateTriggers: {getColor: [colors.blocked, colors.contained, fadeKey], getPath: clearKey},
       }),
       new ScatterplotLayer({
         id: 'firewall-map-block-sources',
@@ -655,6 +657,20 @@ export function createFirewallMap(container, options = {}) {
     ];
   }
 
+  // arches and pulses stop short of the house icon by a fixed number of pixels, so the cleared
+  // part of each path follows the zoom; new arches are cleared on their first frame
+  function clearHome() {
+    const key = Math.round(viewState.zoom * 20);
+    const radius = HOME_CLEARANCE * unitsPerPixel(key / 20);
+    clearKey = key;
+    for (const item of [...arcs, ...blockArcs]) {
+      if (item.clearKey !== key) {
+        item.shown = clearOfHome(item.path, item.homeStart, item.homeEnd, radius);
+        item.clearKey = key;
+      }
+    }
+  }
+
   function animating(now) {
     return arcFader.animating(now) || blockFader.animating(now) || endpointFader.animating(now) || alertFader.animating(now) ||
       arcs.some((arc) => arc.ids && !arc.ids.active);
@@ -665,6 +681,7 @@ export function createFirewallMap(container, options = {}) {
     frameNow = now;
     // colours are recomputed every frame only while something is fading
     fadeKey = animating(now) ? now : 'steady';
+    clearHome();
     return [...baseLayers, ...fadingLayers(), pulseLayer(seconds), ...blockPulseLayers(seconds), labelLayer].filter(Boolean);
   }
 

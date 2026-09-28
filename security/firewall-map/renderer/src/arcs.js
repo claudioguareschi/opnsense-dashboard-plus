@@ -159,6 +159,8 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
       threat: members.some((member) => member.threat),
       contained: !members.some((member) => member.threat) && members.some((member) => member.contained),
       ids: members[0].ids_flow || null,
+      homeStart: Boolean(origin.local),
+      homeEnd: Boolean(dest.local),
       initiated: initiatedBy(members),
       direction,
       activity,
@@ -208,6 +210,7 @@ export function buildBlocks(data) {
       return target ? {
         ...block,
         path: blockPath(block, target),
+        homeEnd: Boolean(target.local),
         period: BLOCK_PULSE_PERIOD,
         phase: hash(block.source),
       } : null;
@@ -266,17 +269,71 @@ export function continuePhases(previous, arcs, seconds) {
   return arcs;
 }
 
+// clear space, in screen pixels, kept between the firewall's house icon and the arches and pulses
+// that end there (the icon is 15px, the widest pulse 3.4px in radius)
+export const HOME_CLEARANCE = 13;
+// an arch loses at most this share of its samples at each end, so a short one still shows
+const MAX_CLEARED_SHARE = 0.4;
+
+/** Map units (degrees of longitude, and mercatorY) per screen pixel at a deck.gl zoom. */
+export function unitsPerPixel(zoom) {
+  return 360 / (512 * 2 ** zoom);
+}
+
+/** The point at a fractional sample index along a sampled path. */
+function pointAt(path, t) {
+  const index = Math.min(Math.floor(t), path.length - 2);
+  const fraction = t - index;
+  const [ax, ay] = path[index];
+  const [bx, by] = path[index + 1];
+  return [ax + (bx - ax) * fraction, ay + (by - ay) * fraction];
+}
+
+/** How many samples in from one end the path leaves a circle of this radius around that end. */
+function exitIndex(path, radius, fromEnd) {
+  const last = path.length - 1;
+  const point = (index) => path[fromEnd ? last - index : index];
+  const [homeX, homeLat] = point(0);
+  const homeY = mercatorY(homeLat);
+  const limit = last * MAX_CLEARED_SHARE;
+  let inside = 0;
+  for (let index = 1; index <= limit; index++) {
+    const [x, lat] = point(index);
+    const distance = Math.hypot(x - homeX, mercatorY(lat) - homeY);
+    if (distance >= radius) {
+      return Math.min(limit, index - 1 + (radius - inside) / (distance - inside || 1));
+    }
+    inside = distance;
+  }
+  return limit;
+}
+
+/**
+ * The part of a path drawn on screen: the ends at the firewall stop a fixed number of pixels
+ * short of it, so the house icon stays clear of arches and pulses at every zoom. The result
+ * has as many samples as the path, so pulsePosition works on it unchanged.
+ */
+export function clearOfHome(path, homeStart, homeEnd, radius) {
+  const last = path.length - 1;
+  const from = homeStart ? exitIndex(path, radius, false) : 0;
+  const to = homeEnd ? last - exitIndex(path, radius, true) : last;
+  if (from === 0 && to === last) {
+    return path;
+  }
+  const shown = [];
+  for (let step = 0; step <= last; step++) {
+    shown.push(pointAt(path, from + ((to - from) * step) / last));
+  }
+  return shown;
+}
+
 export function pulsePosition(arc, seconds, reverse) {
+  const path = arc.shown || arc.path;
   let t = (seconds / arc.period + arc.phase) % 1;
   if (reverse) {
     t = 1 - t;
   }
-  t *= ARC_SAMPLES;
-  const index = Math.min(Math.floor(t), ARC_SAMPLES - 1);
-  const fraction = t - index;
-  const [ax, ay] = arc.path[index];
-  const [bx, by] = arc.path[index + 1];
-  return [ax + (bx - ax) * fraction, ay + (by - ay) * fraction];
+  return pointAt(path, t * ARC_SAMPLES);
 }
 
 /** Pulses run away from the firewall (arc origin) for outbound traffic and towards it for inbound. */
