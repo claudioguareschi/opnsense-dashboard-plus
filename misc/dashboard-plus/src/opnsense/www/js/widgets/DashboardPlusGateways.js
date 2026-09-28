@@ -3,10 +3,12 @@
  * All rights reserved.
  */
 
-const {escapeHtml, renderTitle, mergeOrder, makeSortable, isDragging, sizeToContent, widthChanged} =
+const {escapeHtml, renderTitle, mergeOrder, makeSortable, isDragging, ensureTableStyle, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
-export default class DashboardPlusGateways extends BaseTableWidget {
+const METRICS = ['rtt', 'rttd', 'loss'];
+
+export default class DashboardPlusGateways extends DashboardPlusWidget(BaseWidget) {
     constructor(config) {
         super(config);
         this.configurable = true;
@@ -23,25 +25,15 @@ export default class DashboardPlusGateways extends BaseTableWidget {
     }
 
     getMarkup() {
-        const $container = $('<div class="dashboard-plus-gateways" style="padding: 0 0.25em;"></div>');
-        const $table = this.createTable(this._tableId(), {
-            headerPosition: 'top',
-            headers: [
-                '',
-                this.translations.gateway,
-                this.translations.rtt,
-                this.translations.rttd,
-                this.translations.loss,
-                this.translations.status
-            ]
-        });
-        $table.find('.grid-header').css('text-align', 'left');
-        // A separate empty state: replacing the table's content would also drop the header
-        // row that updateTable inserts rows after.
-        $container.append($table, `<div id="${this.id}-empty" style="display: none; padding: 0.75em;">
-            <a href="/ui/routing/configuration">${escapeHtml(this.translations.unconfigured)}</a>
-        </div>`);
-        return $container;
+        ensureTableStyle();
+        return $(`
+            <div>
+                <div class="flextable-container dashboard-plus-table" id="${this._tableId()}" role="table"></div>
+                <div id="${this.id}-empty" style="display: none; padding: 0.75em;">
+                    <a href="/ui/routing/configuration">${escapeHtml(this.translations.unconfigured)}</a>
+                </div>
+            </div>
+        `);
     }
 
     async _fetchGateways() {
@@ -49,138 +41,111 @@ export default class DashboardPlusGateways extends BaseTableWidget {
         return data.rows || [];
     }
 
-    _statusInfo(status) {
-        const normalized = String(status || '').toLowerCase();
-        if (normalized.includes('disabled')) {
-            return {color: '#777777', background: 'rgba(119, 119, 119, 0.14)'};
-        }
-        if (normalized.includes('online')) {
-            return {color: '#2ca02c', background: 'rgba(44, 160, 44, 0.20)'};
-        }
-        if (normalized.includes('offline')) {
-            return {color: '#d62728', background: 'rgba(214, 39, 40, 0.20)'};
-        }
-        if (normalized.includes('delay') || normalized.includes('loss')) {
-            return {color: '#ff7f0e', background: 'rgba(255, 127, 14, 0.20)'};
-        }
-        return {color: '#777777', background: 'rgba(119, 119, 119, 0.14)'};
+    _statusColors(state) {
+        return {
+            online: {color: '#2ca02c', background: 'rgba(44, 160, 44, 0.18)'},
+            offline: {color: '#d62728', background: 'rgba(214, 39, 40, 0.16)'},
+            warning: {color: '#e06c00', background: 'rgba(255, 127, 14, 0.18)'}
+        }[state] ?? {color: '#777777', background: 'rgba(119, 119, 119, 0.14)'};
     }
 
-    _enablementIcon(disabled) {
-        return disabled
-            ? `<i class="fa fa-times-circle-o" style="font-size: 1.5em; color: #777777;" title="${escapeHtml(this.translations.disabled)}"></i>`
-            : `<i class="fa fa-check-circle-o" style="font-size: 1.5em;" title="${escapeHtml(this.translations.enabled)}"></i>`;
+    _state(gateway) {
+        if (gateway.disabled) {
+            return {label: this.translations.disabled, state: 'disabled'};
+        }
+        // A gateway without monitoring has no RTT or loss; the API still calls it "Online".
+        if (gateway.monitor_disable === '1') {
+            return {label: this.translations.unmonitored, state: 'unmonitored'};
+        }
+        const status = String(gateway.status || '');
+        const normalized = status.toLowerCase();
+        const state = normalized.includes('offline') ? 'offline'
+            : normalized.includes('delay') || normalized.includes('loss') ? 'warning'
+            : normalized.includes('online') ? 'online' : 'unknown';
+        return {label: status, state};
     }
 
-    _gatewayIdentity(gateway) {
+    _fields() {
+        const fields = this.currentConfig?.fields;
+        return METRICS.filter(field => !Array.isArray(fields) || fields.includes(field));
+    }
+
+    _headerRow(fields) {
+        const title = text => escapeHtml(this.translations[text]);
+        return `<div class="flextable-header dashboard-plus-row" role="row">
+            <div></div>
+            <div role="columnheader">${title('gateway')}</div>
+            ${fields.map(field => `<div class="dashboard-plus-number" role="columnheader">${title(field)}</div>`).join('')}
+            <div role="columnheader" style="text-align: center;">${title('status')}</div>
+        </div>`;
+    }
+
+    _row(gateway, fields) {
+        const {label, state} = this._state(gateway);
+        const colors = this._statusColors(state);
+        const measured = state !== 'disabled' && state !== 'unmonitored';
+        const values = {rtt: gateway.delay, rttd: gateway.stddev, loss: gateway.loss};
+        const metric = value => escapeHtml(measured && value && value !== '~' ? value : '—');
+        const icon = gateway.disabled
+            ? `<i class="fa fa-times-circle-o" style="font-size: 1.3em; color: #777777;" title="${escapeHtml(this.translations.disabled)}"></i>`
+            : `<i class="fa fa-check-circle-o" style="font-size: 1.3em;" title="${escapeHtml(this.translations.enabled)}"></i>`;
         const defaultMarker = gateway.defaultgw
-            ? `<i class="fa fa-globe" aria-label="${escapeHtml(this.translations.default_gateway)}" title="${escapeHtml(this.translations.default_gateway)}" style="margin-left: 0.5em;"></i>`
+            ? ` <i class="fa fa-globe" aria-label="${escapeHtml(this.translations.default_gateway)}" title="${escapeHtml(this.translations.default_gateway)}"></i>`
             : '';
-        return `<div style="text-align: left; line-height: 1.35;">
-            <a href="/ui/routing/configuration#edit=${encodeURIComponent(gateway.uuid)}" target="_blank" rel="noopener noreferrer">${escapeHtml(gateway.name)}</a>${defaultMarker}
-            <strong style="display: block; margin-top: 0.15em;">${escapeHtml(gateway.gateway)}</strong>
+        return `<div class="flextable-row dashboard-plus-row" role="row" data-sort-id="${escapeHtml(gateway.uuid)}">
+            <div role="cell">${icon}</div>
+            <div role="cell" class="dashboard-plus-gateway-name" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}" style="cursor: grab; line-height: 1.35;">
+                <div class="dashboard-plus-ellipsis"><a href="/ui/routing/configuration#edit=${encodeURIComponent(gateway.uuid)}" target="_blank" rel="noopener noreferrer">${escapeHtml(gateway.name)}</a>${defaultMarker}</div>
+                <div class="dashboard-plus-ellipsis dashboard-plus-muted dashboard-plus-small">${escapeHtml(gateway.gateway || '—')}</div>
+            </div>
+            ${fields.map(field => `<div role="cell" class="dashboard-plus-number dashboard-plus-small">${metric(values[field])}</div>`).join('')}
+            <div role="cell" style="text-align: center;">
+                <span class="dashboard-plus-pill" style="color: ${colors.color}; background: ${colors.background};">${escapeHtml(label)}</span>
+            </div>
         </div>`;
     }
 
-    _statusCell(status, info) {
-        return `<div style="min-height: 3.35em; display: flex; align-items: center; justify-content: flex-start;">
-            <span style="min-width: 5.25em; padding: 0.45em 0.65em; border-radius: 999px; background: ${info.background}; color: ${info.color}; font-weight: 600; text-align: center;">${escapeHtml(status)}</span>
-        </div>`;
+    _orderedGateways() {
+        const order = mergeOrder(this.currentConfig.gateways, this.currentConfig.gateways ?? this.cachedGateways.map(gateway => gateway.uuid));
+        const byId = new Map(this.cachedGateways.map(gateway => [gateway.uuid, gateway]));
+        return order.filter(uuid => byId.has(uuid)).map(uuid => byId.get(uuid));
     }
 
-    _applyFieldVisibility(config) {
-        const fields = config.fields || ['rtt', 'rttd', 'loss'];
-        const fieldColumns = {rtt: 2, rttd: 3, loss: 4};
+    _render() {
         const $table = $(`#${this._tableId()}`);
-        $table.children('.grid-header-container, .grid-row').each((_, row) => {
-            Object.entries(fieldColumns).forEach(([field, column]) => {
-                $(row).children().eq(column).toggle(fields.includes(field));
-            });
-        });
-
-        const columns = {
-            0: '8% 62% 15% 15%',
-            1: '8% 45% 18% 14% 15%',
-            2: '8% 36% 17% 16% 14% 15%',
-            3: '8% 31% 16% 15% 14% 16%'
-        }[fields.length];
-        $table.children('.grid-header-container, .grid-row').css('grid-template-columns', columns);
-    }
-
-    _orderedGateways(gateways, config) {
-        const order = config.gateways || gateways.map(gateway => gateway.uuid);
-        return [...gateways].filter(gateway => order.includes(gateway.uuid)).sort((left, right) =>
-            order.indexOf(left.uuid) - order.indexOf(right.uuid)
-        );
+        if (!this.currentConfig || isDragging($table)) {
+            return;
+        }
+        const empty = this.cachedGateways.length === 0;
+        $table.toggle(!empty);
+        $(`#${this.id}-empty`).toggle(empty);
+        if (empty) {
+            return;
+        }
+        const fields = this._fields();
+        $table[0].style.setProperty('--dashboard-plus-columns', `auto minmax(0, 1fr)${' auto'.repeat(fields.length)} auto`);
+        $table.html(this._headerRow(fields) + this._orderedGateways().map(gateway => this._row(gateway, fields)).join(''));
     }
 
     async onMarkupRendered() {
         renderTitle(this);
         this.currentConfig = await this.getWidgetConfig();
-        this._applyFieldVisibility(this.currentConfig);
         makeSortable($(`#${this._tableId()}`), {
-            itemSelector: '.grid-row',
-            handleSelector: '.grid-item:nth-child(2)',
-            placeholderClass: 'grid-row',
+            itemSelector: '.flextable-row',
+            handleSelector: '.dashboard-plus-gateway-name',
+            placeholderClass: 'flextable-row dashboard-plus-row',
             label: this.translations.drag_to_reorder,
             onReorder: order => {
                 this.currentConfig.gateways = mergeOrder(order, this.currentConfig.gateways || order);
                 this.setWidgetConfig(this.currentConfig);
             }
         });
-        sizeToContent(this);
-    }
-
-    _metric(gateway, unmonitored, value) {
-        return escapeHtml(gateway.disabled || unmonitored || value === '~' || !value ? '—' : value);
+        this.fitToContent();
     }
 
     async onWidgetTick() {
-        const gateways = await this._fetchGateways();
-        this.cachedGateways = gateways;
+        this.cachedGateways = await this._fetchGateways();
         this._render();
-    }
-
-    _render() {
-        const $table = $(`#${this._tableId()}`);
-        if (isDragging($table)) {
-            return;
-        }
-        const gateways = this.cachedGateways;
-        $table.toggle(gateways.length > 0);
-        $(`#${this.id}-empty`).toggle(gateways.length === 0);
-        if (!gateways.length) {
-            return;
-        }
-
-        const orderedGateways = this._orderedGateways(gateways, this.currentConfig);
-        const rows = orderedGateways.map(gateway => {
-            // A gateway without monitoring has no RTT or loss; the API still calls it "Online".
-            const unmonitored = !gateway.disabled && gateway.monitor_disable === '1';
-            const status = gateway.disabled ? this.translations.disabled
-                : unmonitored ? this.translations.unmonitored : gateway.status;
-            const info = this._statusInfo(unmonitored ? 'unmonitored' : status);
-            return [
-                this._enablementIcon(gateway.disabled),
-                this._gatewayIdentity(gateway),
-                this._metric(gateway, unmonitored, gateway.delay),
-                this._metric(gateway, unmonitored, gateway.stddev),
-                this._metric(gateway, unmonitored, gateway.loss),
-                this._statusCell(status, info)
-            ];
-        });
-        // BaseTableWidget inserts every new row immediately after the header,
-        // so feed it in reverse to retain the configured visual order.
-        super.updateTable(this._tableId(), [...rows].reverse());
-        $table.children('.grid-row').each((index, row) => {
-            const $cells = $(row).children();
-            $(row).attr('data-sort-id', orderedGateways[index].uuid);
-            $cells.css('text-align', 'left');
-            $cells.eq(0).css('text-align', 'center');
-            $cells.eq(1).attr({draggable: 'true', title: this.translations.drag_to_reorder})
-                .css('cursor', 'grab');
-        });
-        this._applyFieldVisibility(this.currentConfig);
     }
 
     async getWidgetOptions() {
@@ -197,12 +162,8 @@ export default class DashboardPlusGateways extends BaseTableWidget {
                 title: this.translations.metrics,
                 type: 'select_multiple',
                 id: 'dashboard-plus-gateways-fields',
-                options: [
-                    {value: 'rtt', label: this.translations.rtt},
-                    {value: 'rttd', label: this.translations.rttd},
-                    {value: 'loss', label: this.translations.loss}
-                ],
-                default: ['rtt', 'rttd', 'loss']
+                options: METRICS.map(field => ({value: field, label: this.translations[field]})),
+                default: METRICS
             }
         };
     }
@@ -215,10 +176,5 @@ export default class DashboardPlusGateways extends BaseTableWidget {
         this.setWidgetConfig(config);
         this.currentConfig = config;
         this._render();
-    }
-
-    onWidgetResize(elem, width, height) {
-        const layoutChanged = super.onWidgetResize(elem, width, height);
-        return widthChanged(this, width) || layoutChanged;
     }
 }

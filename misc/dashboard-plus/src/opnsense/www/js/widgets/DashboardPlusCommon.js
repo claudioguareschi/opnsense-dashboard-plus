@@ -105,29 +105,123 @@ export function isDragging($container) {
 }
 
 /*
- * The dashboard caps a widget's height at the height saved with the layout, so content
- * that grows later (the side menu is toggled and text rewraps, more rows arrive) ends up
- * in an inner scrollbar. The Dashboard Plus widgets belong in the page's own scroll,
- * so let them always size to their content.
+ * Table layout shared by the list widgets. The stock flextable classes give the native width,
+ * separators and hover; the table is one CSS grid and each row a subgrid of it, so every row
+ * shares the same column widths and gutter at any widget width. A widget sets the columns
+ * with the --dashboard-plus-columns property on its table.
  */
-export function sizeToContent(widget) {
-    const node = document.querySelector(`.widget-${widget.id}`)?.closest('.grid-stack-item')?.gridstackNode;
-    if (node) {
-        node.sizeToContent = true;
-        widget.config.callbacks?.updateGrid?.();
+// The doubled classes outrank the theme's .flextable-container and .flextable-row rules.
+const TABLE_STYLE = `
+    .dashboard-plus-table.dashboard-plus-table { display: grid; grid-template-columns: var(--dashboard-plus-columns); column-gap: 0.75em; }
+    .dashboard-plus-table > .dashboard-plus-row.dashboard-plus-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; text-align: left; }
+    .dashboard-plus-table > .dashboard-plus-span { grid-column: 1 / -1; }
+    .dashboard-plus-row > * { min-width: 0; word-break: normal; overflow-wrap: anywhere; }
+    .dashboard-plus-row .dashboard-plus-number { text-align: right; white-space: nowrap; overflow-wrap: normal; font-variant-numeric: tabular-nums; }
+    .dashboard-plus-row .dashboard-plus-nowrap { white-space: nowrap; overflow-wrap: normal; }
+    .dashboard-plus-row .dashboard-plus-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+    .dashboard-plus-row .dashboard-plus-muted { opacity: 0.7; }
+    .dashboard-plus-row .dashboard-plus-small { font-size: 0.88em; line-height: 1.4; }
+    .dashboard-plus-pill { display: inline-block; padding: 0.2em 0.7em; border-radius: 999px; font-size: 0.88em; font-weight: 600; white-space: nowrap; }
+`;
+
+/* Add the shared table styles to the page once. */
+export function ensureTableStyle() {
+    if (!document.getElementById('dashboard-plus-table-style')) {
+        $('<style id="dashboard-plus-table-style"></style>').text(TABLE_STYLE).appendTo('head');
     }
 }
 
+// A cap far above any widget: the widget grows with its content.
+const AUTO_HEIGHT = 10000;
+
 /*
- * True when the widget's width changed since the last call. Content only reflows on a
- * width change; a height change is the grid applying our own size, so re-measuring then
- * would only loop.
+ * Height handling shared by the Dashboard Plus widgets, as a mixin over BaseWidget or
+ * BaseTableWidget.
+ *
+ * The dashboard caps a widget at the height saved with the layout, whether the user chose
+ * that height or it was just the content's height when the layout was saved. Content that
+ * grows later (the side menu is toggled and text rewraps, more rows arrive) then ends up
+ * behind an inner scrollbar. These widgets fit their content instead, unless the user drags
+ * one shorter than its content: that height is kept, saved with the widget's options as
+ * manual_height, and the rest scrolls. Dragging it back to full height returns it to fitting.
  */
-export function widthChanged(widget, width) {
-    const changed = widget._dashboardPlusWidth !== undefined && widget._dashboardPlusWidth !== width;
-    widget._dashboardPlusWidth = width;
-    return changed;
-}
+export const DashboardPlusWidget = Base => class extends Base {
+    constructor(config) {
+        super(config);
+        this.manualHeight = parseInt(config?.widget?.manual_height, 10) || null;
+        this.lastWidth = undefined;
+        this.heightManaged = false;
+    }
+
+    _gridItem() {
+        return document.querySelector(`.widget-${this.id}`)?.closest('.grid-stack-item') ?? null;
+    }
+
+    _heightCap() {
+        return this.manualHeight ?? AUTO_HEIGHT;
+    }
+
+    /* Call from onMarkupRendered, once the widget is in the grid. */
+    fitToContent() {
+        const node = this._gridItem()?.gridstackNode;
+        if (node) {
+            this.heightManaged = true;
+            node.sizeToContent = this._heightCap();
+            this.config.callbacks?.updateGrid?.();
+        }
+    }
+
+    /*
+     * The grid sets sizeToContent to the new height when the user finishes a resize. Keep that
+     * height only when it is shorter than the content; otherwise go back to fitting.
+     */
+    _recordManualResize() {
+        const item = this._gridItem();
+        const node = item?.gridstackNode;
+        if (!this.heightManaged || !node || !Number.isInteger(node.sizeToContent) || node.sizeToContent === this._heightCap()) {
+            return;
+        }
+        const content = item.querySelector('.grid-stack-item-content');
+        const clipped = content && content.scrollHeight - content.clientHeight > 1;
+        this.manualHeight = clipped ? node.sizeToContent : null;
+        node.sizeToContent = this._heightCap();
+        this.setWidgetConfig(this.config.widget ?? {});
+        $('#save-grid').show();
+    }
+
+    async getWidgetConfig() {
+        const config = await super.getWidgetConfig();
+        if (this.manualHeight) {
+            config.manual_height = this.manualHeight;
+        }
+        return config;
+    }
+
+    setWidgetConfig(config) {
+        // The options dialog passes only its own fields; keep the height with them.
+        const {manual_height: _, ...rest} = config ?? {};
+        super.setWidgetConfig(this.manualHeight ? {...rest, manual_height: this.manualHeight} : rest);
+    }
+
+    /*
+     * Re-measure (return true) when the width changed: content only reflows then. A height
+     * change is the grid applying our own size, and re-measuring on it would only loop.
+     */
+    onWidgetResize(elem, width, height) {
+        this._recordManualResize();
+        const layoutChanged = super.onWidgetResize(elem, width, height);
+        const widthChanged = this.lastWidth !== undefined && this.lastWidth !== width;
+        this.lastWidth = width;
+        if (widthChanged) {
+            this.onWidthChanged(width);
+        }
+        return widthChanged || layoutChanged;
+    }
+
+    /* Hook for widgets that must redraw when their width changes (charts). */
+    onWidthChanged(width) {
+    }
+};
 
 /* Bits per second with at most one decimal, e.g. "2.5 Mb/s". */
 export function formatBitRate(value) {

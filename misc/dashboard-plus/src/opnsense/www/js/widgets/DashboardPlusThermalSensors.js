@@ -3,9 +3,10 @@
  * All rights reserved.
  */
 
-const {renderTitle, sizeToContent} = await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
+const {renderTitle, DashboardPlusWidget} =
+    await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
-export default class DashboardPlusThermalSensors extends BaseWidget {
+export default class DashboardPlusThermalSensors extends DashboardPlusWidget(BaseWidget) {
     constructor(config) {
         super(config);
         this.tickTimeout = 10;
@@ -76,7 +77,7 @@ export default class DashboardPlusThermalSensors extends BaseWidget {
     async onMarkupRendered() {
         renderTitle(this);
         this.currentConfig = await this.getWidgetConfig();
-        sizeToContent(this);
+        this.fitToContent();
     }
 
     async getWidgetOptions() {

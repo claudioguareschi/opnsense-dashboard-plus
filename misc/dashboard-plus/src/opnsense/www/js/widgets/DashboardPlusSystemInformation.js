@@ -24,10 +24,10 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-const {escapeHtml, renderTitle, sizeToContent, widthChanged} =
+const {escapeHtml, renderTitle, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
-export default class DashboardPlusSystemInformation extends BaseTableWidget {
+export default class DashboardPlusSystemInformation extends DashboardPlusWidget(BaseTableWidget) {
     constructor(config) {
         super(config);
         this.tickTimeout = 10;
@@ -43,16 +43,13 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
     }
 
     getMarkup() {
-        const markup = this.createTable(this._tableId(), {headerPosition: 'left'});
-        // Label and value side by side from the breakpoint up, stacked below it. Both states
-        // set the same properties, so crossing the breakpoint (the side menu is toggled)
-        // never leaves the other layout's widths or padding behind.
-        const narrow = this.sizeStates[0];
-        const wide = this.sizeStates[this.headerBreakpoint];
-        narrow['.flextable-row > .flex-cell.first'] = {width: '100%'};
-        narrow['.flextable-row > .flex-cell:not(.first)'] = {width: '100%', 'box-sizing': '', 'padding-left': ''};
-        wide['.flextable-row > .flex-cell.first'] = {width: '28%'};
-        wide['.flextable-row > .flex-cell:not(.first)'] = {width: '72%', 'box-sizing': 'border-box', 'padding-left': '0.75em'};
+        // Label and value side by side at every width. The stock table stacks them below
+        // 450 px, so the widget changed layout whenever the side menu was toggled.
+        const markup = this.createTable(this._tableId(), {headerPosition: 'left', headerBreakpoint: 0});
+        Object.assign(this.sizeStates[0], {
+            '.flextable-row > .flex-cell.first': {width: '32%', 'padding-right': '0.75em', 'box-sizing': 'border-box'},
+            '.flextable-row > .flex-cell:not(.first)': {width: '68%'}
+        });
         return markup;
     }
 
@@ -174,7 +171,7 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
 
     async onMarkupRendered() {
         renderTitle(this);
-        sizeToContent(this);
+        this.fitToContent();
     }
 
     async onWidgetTick() {
@@ -209,8 +206,4 @@ export default class DashboardPlusSystemInformation extends BaseTableWidget {
         }
     }
 
-    onWidgetResize(elem, width, height) {
-        const layoutChanged = super.onWidgetResize(elem, width, height);
-        return widthChanged(this, width) || layoutChanged;
-    }
 }

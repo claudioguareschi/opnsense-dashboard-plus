@@ -3,7 +3,7 @@
  * All rights reserved.
  */
 
-const {escapeHtml, renderTitle, mergeOrder, makeSortable, isDragging, sizeToContent, widthChanged} =
+const {escapeHtml, renderTitle, mergeOrder, makeSortable, isDragging, ensureTableStyle, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
 // Tunnel devices have no media line; name the tunnel type instead.
@@ -15,7 +15,7 @@ const TUNNEL_TYPES = [
     [/^ovpn\d+$/i, 'openvpn']
 ];
 
-export default class DashboardPlusInterfaces extends BaseTableWidget {
+export default class DashboardPlusInterfaces extends DashboardPlusWidget(BaseWidget) {
     constructor(config) {
         super(config);
         this.configurable = true;
@@ -37,14 +37,11 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
     }
 
     getMarkup() {
-        const $container = $('<div class="dashboard-plus-interfaces"></div>');
-        const $table = this.createTable(this._tableId(), {
-            // Match the stock Interfaces widget: its flex table owns the
-            // native 95% width and row gutters.
-            headerPosition: 'none'
-        });
-        $container.append($table);
-        return $container;
+        ensureTableStyle();
+        // Two lines per interface at any width: name and link on the first, addresses and
+        // duplex under them, so nothing stacks or wraps mid-word when the column narrows.
+        return $(`<div class="flextable-container dashboard-plus-table" id="${this._tableId()}" role="table"
+            style="--dashboard-plus-columns: auto minmax(0, 1fr) auto; row-gap: 0;"></div>`);
     }
 
     _availableInterfaces(data) {
@@ -54,11 +51,10 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
         );
     }
 
-    _orderedInterfaces(interfaces, config) {
-        const order = config.interfaces || interfaces.map(intf => intf.identifier);
-        return interfaces.filter(intf => order.includes(intf.identifier)).sort((left, right) =>
-            order.indexOf(left.identifier) - order.indexOf(right.identifier)
-        );
+    _orderedInterfaces() {
+        const byId = new Map(this.cachedInterfaces.map(intf => [intf.identifier, intf]));
+        const order = mergeOrder(this.currentConfig.interfaces, this.currentConfig.interfaces ?? [...byId.keys()]);
+        return order.filter(id => byId.has(id)).map(id => byId.get(id));
     }
 
     _media(intf) {
@@ -74,34 +70,42 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
         return {type, duplex: duplex || ''};
     }
 
-    _link(intf) {
+    _linkState(intf) {
         const status = String(intf.status || '').toLowerCase();
-        const state = status === 'up' ? {
-            icon: 'fa-arrow-up', color: '#2ca02c', title: this.translations.up
-        } : status === 'down' ? {
-            icon: 'fa-arrow-down', color: '#d62728', title: this.translations.down
-        } : {
-            icon: 'fa-minus', color: '#777777', title: this.translations.unavailable
-        };
+        if (status === 'up') {
+            return {icon: 'fa-arrow-up', color: '#2ca02c', title: this.translations.up};
+        }
+        if (status === 'down') {
+            return {icon: 'fa-arrow-down', color: '#d62728', title: this.translations.down};
+        }
+        return {icon: 'fa-minus', color: '#777777', title: this.translations.unavailable};
+    }
+
+    _row(intf) {
+        const link = this._linkState(intf);
         const media = this._media(intf);
-        return `<div style="display: flex; align-items: flex-start; gap: 0.55em; text-align: left; line-height: 1.35;">
-            <i class="fa ${state.icon}" title="${escapeHtml(state.title)}" style="color: ${state.color}; margin-top: 0.1em;"></i>
-            <span><div>${escapeHtml(media.type)}</div>${media.duplex ? `<div>${escapeHtml(media.duplex)}</div>` : ''}</span>
+        const addresses = [intf.addr4, intf.addr6].filter(Boolean);
+        const icon = this._tunnelType(intf) !== null ? 'fa-exchange' : 'fa-sitemap';
+        return `<div class="flextable-row dashboard-plus-row" role="row" data-sort-id="${escapeHtml(intf.identifier)}" style="row-gap: 0.15em; align-items: start;">
+            <div role="cell" style="grid-row: 1 / span 2;"><i class="fa ${icon}" aria-hidden="true"></i></div>
+            <div role="cell" class="dashboard-plus-ellipsis dashboard-plus-interface-name" draggable="true" title="${escapeHtml(`${intf.identifier} · ${this.translations.drag_to_reorder}`)}" style="cursor: grab;">
+                <a href="/interfaces.php?if=${encodeURIComponent(intf.identifier)}">${escapeHtml(intf.description)}</a>
+            </div>
+            <div role="cell" class="dashboard-plus-nowrap" style="text-align: right;">
+                <i class="fa ${link.icon}" title="${escapeHtml(link.title)}" style="color: ${link.color};"></i> ${escapeHtml(media.type)}
+            </div>
+            <div role="cell" class="dashboard-plus-muted dashboard-plus-small">${addresses.map(escapeHtml).join('<br>') || '—'}</div>
+            <div role="cell" class="dashboard-plus-muted dashboard-plus-small dashboard-plus-nowrap" style="text-align: right;">${escapeHtml(media.duplex)}</div>
         </div>`;
     }
 
-    _identity(intf) {
-        const isTunnel = this._tunnelType(intf) !== null;
-        return `<div style="display: flex; align-items: center; gap: 0.55em; min-height: 2.7em; text-align: left;">
-            <i class="fa ${isTunnel ? 'fa-exchange' : 'fa-sitemap'}" aria-hidden="true"></i>
-            <a href="/interfaces.php?if=${encodeURIComponent(intf.identifier)}" title="${escapeHtml(intf.identifier)}">${escapeHtml(intf.description)}</a>
-        </div>`;
-    }
-
-    _addresses(intf) {
-        return [intf.addr4, intf.addr6].filter(Boolean).map(address =>
-            `<div>${escapeHtml(address)}</div>`
-        ).join('') || '—';
+    _render() {
+        const $table = $(`#${this._tableId()}`);
+        if (!this.currentConfig || isDragging($table)) {
+            return;
+        }
+        const rows = this._orderedInterfaces().map(intf => this._row(intf));
+        $table.html(rows.join('') || `<div class="dashboard-plus-span" style="padding: 0.75em;">${escapeHtml(this.translations.no_interfaces)}</div>`);
     }
 
     async onMarkupRendered() {
@@ -109,48 +113,21 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
         this.currentConfig = await this.getWidgetConfig();
         makeSortable($(`#${this._tableId()}`), {
             itemSelector: '.flextable-row',
-            handleSelector: '.flex-cell:nth-child(1)',
-            placeholderClass: 'flextable-row',
+            handleSelector: '.dashboard-plus-interface-name',
+            placeholderClass: 'flextable-row dashboard-plus-row',
             label: this.translations.drag_to_reorder,
             onReorder: order => {
                 this.currentConfig.interfaces = mergeOrder(order, this.currentConfig.interfaces || order);
                 this.setWidgetConfig(this.currentConfig);
             }
         });
-        sizeToContent(this);
+        this.fitToContent();
     }
 
     async onWidgetTick() {
         const data = await this.ajaxCall('/api/interfaces/overview/interfaces_info');
         this.cachedInterfaces = this._availableInterfaces(data);
         this._render();
-    }
-
-    _render() {
-        const $table = $(`#${this._tableId()}`);
-        if (isDragging($table)) {
-            return;
-        }
-        const orderedInterfaces = this._orderedInterfaces(this.cachedInterfaces, this.currentConfig);
-        if (!orderedInterfaces.length) {
-            $table.children('.flextable-row, .dashboard-plus-interfaces-empty').remove();
-            $table.append(`<div class="dashboard-plus-interfaces-empty" style="padding: 0.75em;">${escapeHtml(this.translations.no_interfaces)}</div>`);
-            return;
-        }
-
-        $table.children('.dashboard-plus-interfaces-empty').remove();
-
-        const rows = orderedInterfaces.map(intf => [
-            this._identity(intf), this._link(intf), this._addresses(intf)
-        ]);
-        super.updateTable(this._tableId(), rows);
-        $table.children('.flextable-row').each((index, row) => {
-            const $cells = $(row).children();
-            $(row).attr('data-sort-id', orderedInterfaces[index].identifier);
-            $cells.css('text-align', 'left');
-            $cells.eq(0).attr({draggable: 'true', title: this.translations.drag_to_reorder})
-                .css('cursor', 'grab');
-        });
     }
 
     async getWidgetOptions() {
@@ -175,10 +152,5 @@ export default class DashboardPlusInterfaces extends BaseTableWidget {
         this.setWidgetConfig(config);
         this.currentConfig = config;
         this._render();
-    }
-
-    onWidgetResize(elem, width, height) {
-        const layoutChanged = super.onWidgetResize(elem, width, height);
-        return widthChanged(this, width) || layoutChanged;
     }
 }

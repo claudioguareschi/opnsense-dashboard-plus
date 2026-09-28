@@ -3,10 +3,10 @@
  * All rights reserved.
  */
 
-const {escapeHtml, renderTitle, sizeToContent} =
+const {escapeHtml, renderTitle, ensureTableStyle, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
-export default class DashboardPlusFirewallLogs extends BaseWidget {
+export default class DashboardPlusFirewallLogs extends DashboardPlusWidget(BaseWidget) {
     constructor(config) {
         super(config);
         this.configurable = true;
@@ -25,29 +25,19 @@ export default class DashboardPlusFirewallLogs extends BaseWidget {
     }
 
     getMarkup() {
-        // Stock flextable classes for the native look. The table is one grid and each row a
-        // subgrid, so the columns line up; the interface and rule go on a second line so the
-        // addresses keep room for "address:port".
-        const table = `#${this._tableId()}`;
+        ensureTableStyle();
+        // The interface and rule go on a second line so the addresses keep room for
+        // "address:port".
         return $(`
-            <div>
-                <style>
-                    ${table} { display: grid; grid-template-columns: auto auto minmax(0, 1fr) minmax(0, 1fr); column-gap: 0.75em; }
-                    ${table} > .dashboard-plus-logs-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; text-align: left; }
-                    ${table} > .dashboard-plus-logs-empty { grid-column: 1 / -1; }
-                    ${table} .dashboard-plus-logs-row > div { min-width: 0; word-break: normal; overflow-wrap: anywhere; }
-                    ${table} .dashboard-plus-logs-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
-                    ${table} .dashboard-plus-logs-detail { grid-column: 2 / -1; font-size: 0.86em; }
-                </style>
-                <div class="flextable-container" id="${this._tableId()}" role="table">
-                    <div class="flextable-header dashboard-plus-logs-row" role="row">
-                        ${[
-                            this.translations.action,
-                            this.translations.time,
-                            this.translations.source,
-                            this.translations.destination
-                        ].map(title => `<div role="columnheader">${escapeHtml(title)}</div>`).join('')}
-                    </div>
+            <div class="flextable-container dashboard-plus-table" id="${this._tableId()}" role="table"
+                style="--dashboard-plus-columns: auto auto minmax(0, 1fr) minmax(0, 1fr);">
+                <div class="flextable-header dashboard-plus-row" role="row">
+                    ${[
+                        this.translations.action,
+                        this.translations.time,
+                        this.translations.source,
+                        this.translations.destination
+                    ].map(title => `<div role="columnheader">${escapeHtml(title)}</div>`).join('')}
                 </div>
             </div>
         `);
@@ -114,12 +104,12 @@ export default class DashboardPlusFirewallLogs extends BaseWidget {
         }
         this.seen.add(digest);
         const $row = $(`
-            <div class="flextable-row dashboard-plus-logs-row" role="row">
+            <div class="flextable-row dashboard-plus-row" role="row" style="align-items: start; row-gap: 0.1em;">
                 <div role="cell">${this._actionIcon(entry.action)}</div>
-                <div role="cell" class="dashboard-plus-logs-time">${this._time(entry.__timestamp__)}</div>
+                <div role="cell" class="dashboard-plus-nowrap" style="font-variant-numeric: tabular-nums;">${this._time(entry.__timestamp__)}</div>
                 <div role="cell">${this._endpoint(entry.src, entry.srcport)}</div>
                 <div role="cell">${this._endpoint(entry.dst, entry.dstport)}</div>
-                <div role="cell" class="dashboard-plus-logs-detail">${escapeHtml(this.interfaceNames[entry.interface] || entry.interface || '—')} · ${this._rule(entry)}</div>
+                <div role="cell" class="dashboard-plus-small" style="grid-column: 2 / -1;">${escapeHtml(this.interfaceNames[entry.interface] || entry.interface || '—')} · ${this._rule(entry)}</div>
             </div>
         `).attr('data-digest', digest);
         const $table = $(`#${this._tableId()}`);
@@ -143,7 +133,7 @@ export default class DashboardPlusFirewallLogs extends BaseWidget {
         (Array.isArray(recent) ? [...recent] : []).reverse().forEach(entry => this._addEntry(entry));
         if (!this._rows().length) {
             $(`#${this._tableId()}`).append(
-                `<div class="dashboard-plus-logs-empty" style="padding: 0.75em;">${escapeHtml(this.translations.no_entries)}</div>`
+                `<div class="dashboard-plus-logs-empty dashboard-plus-span" style="padding: 0.75em;">${escapeHtml(this.translations.no_entries)}</div>`
             );
         }
         this.openEventSource('/api/diagnostics/firewall/stream_log', event => {
@@ -171,7 +161,7 @@ export default class DashboardPlusFirewallLogs extends BaseWidget {
             this.getWidgetConfig()
         ]);
         this.interfaceNames = interfaceNames || {};
-        sizeToContent(this);
+        this.fitToContent();
         await this._startLog(config);
     }
 

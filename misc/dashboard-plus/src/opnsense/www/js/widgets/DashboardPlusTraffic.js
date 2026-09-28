@@ -3,10 +3,10 @@
  * All rights reserved.
  */
 
-const {escapeHtml, renderTitle, mergeOrder, makeSortable, sizeToContent, widthChanged, formatBitRate} =
+const {escapeHtml, renderTitle, mergeOrder, makeSortable, formatBitRate, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
-export default class DashboardPlusTraffic extends BaseWidget {
+export default class DashboardPlusTraffic extends DashboardPlusWidget(BaseWidget) {
     constructor(config) {
         super(config);
         this.configurable = true;
@@ -146,6 +146,9 @@ export default class DashboardPlusTraffic extends BaseWidget {
         this._renderCombinedLegend(selected.map(id => ({label: data.interfaces[id].name, color: this.interfaceColors[id]})));
         this.builtSelection = selected.join('\n');
         this._applyDisplay(config);
+        // The charts exist only after the first stream message; size the widget now rather
+        // than on the dashboard's next tick.
+        this.config.callbacks?.updateGrid?.();
     }
 
     _showView(config) {
@@ -254,18 +257,14 @@ export default class DashboardPlusTraffic extends BaseWidget {
                 this.setWidgetConfig(this.currentConfig);
             }
         });
-        sizeToContent(this);
+        this.fitToContent();
         this.openEventSource('/api/diagnostics/traffic/stream/1', this._onMessage.bind(this));
     }
 
-    onWidgetResize(elem, width) {
-        if (!widthChanged(this, width)) {
-            return false;
-        }
+    onWidthChanged() {
         // Chart.js only notices a container resize on its own later; resize now so the
         // canvases follow the column when the side menu is toggled.
         Object.values(this.charts).forEach(chart => chart.resize());
-        return true;
     }
 
     async getWidgetOptions() {

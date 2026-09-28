@@ -3,9 +3,10 @@
  * All rights reserved.
  */
 
-const {renderTitle, sizeToContent, widthChanged} = await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
+const {renderTitle, DashboardPlusWidget} =
+    await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
-export default class DashboardPlusSystemMetrics extends BaseWidget {
+export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(BaseWidget) {
     constructor(config) {
         super(config);
         this.tickTimeout = 10;
@@ -231,7 +232,7 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
 
     async onMarkupRendered() {
         renderTitle(this);
-        sizeToContent(this);
+        this.fitToContent();
         this.currentConfig = await this.getWidgetConfig();
         this._applyTimeWindow(this.currentConfig);
         this._applyComponentVisibility(this.currentConfig);
@@ -317,15 +318,11 @@ export default class DashboardPlusSystemMetrics extends BaseWidget {
         this.config.callbacks?.updateGrid?.();
     }
 
-    onWidgetResize(elem, width) {
-        if (!widthChanged(this, width)) {
-            return false;
-        }
+    onWidthChanged() {
         this._applyTimeWindow(this.currentConfig || {time_window: '60'});
         // Resize the backing stores now rather than on Smoothie's next frame, so the charts
         // are not drawn stretched while the column changes width.
         this.charts.forEach(({chart}) => chart.resize());
-        return true;
     }
 
     onWidgetClose() {
