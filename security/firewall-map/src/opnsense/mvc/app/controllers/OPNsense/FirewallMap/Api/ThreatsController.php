@@ -37,10 +37,24 @@ class ThreatsController extends ApiControllerBase
 {
     private const STATUSES = ['new', 'reviewed', 'dismissed', 'blocked', 'dropped'];
 
+    /** Free text travels as base64url so configd only ever sees [A-Za-z0-9_-]; "-" means none. */
+    private function encodeText($text, $length)
+    {
+        $text = mb_substr(trim((string)$text), 0, $length);
+        return $text === '' ? '-' : rtrim(strtr(base64_encode($text), '+/', '-_'), '=');
+    }
+
+    /** One page of a tab; `q` searches what the queue displays, `offset` and `limit` page it. */
     public function listAction($status = null)
     {
         $status = in_array($status, self::STATUSES, true) || $status === 'counts' ? $status : 'all';
-        $result = json_decode((new Backend())->configdpRun('firewallmap threats list', [$status]) ?? '', true);
+        $offset = max(0, (int)($this->request->get('offset') ?? 0));
+        $limit = max(1, min(500, (int)($this->request->get('limit') ?? 100)));
+        $query = $this->encodeText($this->request->get('q') ?? '', 200);
+        $result = json_decode((new Backend())->configdpRun(
+            'firewallmap threats list',
+            [$status, (string)$offset, (string)$limit, $query]
+        ) ?? '', true);
         return is_array($result) ? $result : ['status' => 'failed', 'rows' => [], 'counts' => []];
     }
 
@@ -70,7 +84,7 @@ class ThreatsController extends ApiControllerBase
         return is_array($result) ? $result : ['result' => 'failed', 'error' => 'no response'];
     }
 
-    /** Move every entry of one status to another, e.g. dismiss all new entries. */
+    /** Move every entry of one status (matching `query`, when given) to another, e.g. dismiss all new entries. */
     public function bulkAction()
     {
         if (!$this->request->isPost()) {
@@ -81,11 +95,12 @@ class ThreatsController extends ApiControllerBase
         if (!in_array($from, self::STATUSES, true) || !in_array($to, self::STATUSES, true)) {
             return ['result' => 'failed', 'error' => 'unknown status'];
         }
-        $result = json_decode((new Backend())->configdpRun('firewallmap threats bulk', [$from, $to]) ?? '', true);
+        $query = $this->encodeText($this->request->getPost('query') ?? '', 200);
+        $result = json_decode((new Backend())->configdpRun('firewallmap threats bulk', [$from, $to, $query]) ?? '', true);
         return is_array($result) ? $result : ['result' => 'failed', 'error' => 'no response'];
     }
 
-    /** Delete dismissed or reviewed entries for good. */
+    /** Delete dismissed or reviewed entries (matching `query`, when given) for good. */
     public function purgeAction()
     {
         if (!$this->request->isPost()) {
@@ -95,7 +110,8 @@ class ThreatsController extends ApiControllerBase
         if (!in_array($status, ['dismissed', 'reviewed'], true)) {
             return ['result' => 'failed', 'error' => 'only dismissed or reviewed entries can be deleted'];
         }
-        $result = json_decode((new Backend())->configdpRun('firewallmap threats purge', [$status]) ?? '', true);
+        $query = $this->encodeText($this->request->getPost('query') ?? '', 200);
+        $result = json_decode((new Backend())->configdpRun('firewallmap threats purge', [$status, $query]) ?? '', true);
         return is_array($result) ? $result : ['result' => 'failed', 'error' => 'no response'];
     }
 }

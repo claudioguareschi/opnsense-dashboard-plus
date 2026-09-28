@@ -4,11 +4,17 @@
         <link>/ui/firewallmap</link>
         <endpoints>
             <endpoint>/api/firewallmap/flow/snapshot</endpoint>
+            <endpoint>/api/firewallmap/settings/get</endpoint>
+            <endpoint>/api/firewallmap/settings/set</endpoint>
+            <endpoint>/api/firewallmap/settings/tables</endpoint>
+            <endpoint>/api/firewall/alias/add_item</endpoint>
+            <endpoint>/api/firewall/alias/reconfigure</endpoint>
         </endpoints>
         <translations>
             <title>Firewall Map+</title>
             <dashboard_title>Firewall Map</dashboard_title>
-            <active_flows>active flows</active_flows>
+            <active_flows_one>{count} active flow</active_flows_one>
+            <active_flows_many>{count} active flows</active_flows_many>
             <no_flows>No active public flows</no_flows>
             <collector_starting>Starting flow collector…</collector_starting>
             <heavy_top>Highlight the busiest links</heavy_top>
@@ -19,8 +25,9 @@
             <labels_off>Off</labels_off>
             <none>None</none>
             <blocks>Show blocked traffic</blocks>
-            <blocked_sources>blocked sources</blocked_sources>
-            <below_threshold>below threshold</below_threshold>
+            <blocked_sources_one>{count} blocked source</blocked_sources_one>
+            <blocked_sources_many>{count} blocked sources</blocked_sources_many>
+            <below_threshold>{count} below threshold</below_threshold>
             <block_min>Show blocked sources after</block_min>
             <every_attempt>every attempt</every_attempt>
             <attempts>attempts in 10 minutes</attempts>
@@ -37,7 +44,10 @@
             <abuseipdb_key>AbuseIPDB API key</abuseipdb_key>
             <key_set_abuse>Key saved (enter a new one to replace it, "-" to remove it)</key_set_abuse>
             <abuseipdb_none>Optional: enables abuse reports when investigating an address</abuseipdb_none>
-            <threat_lists>Threat lists (none selected: automatic, ★)</threat_lists>
+            <threat_lists>Threat lists</threat_lists>
+            <threat_lists_help>With none selected, the lists marked ★ are used: well-known feed tables and URL aliases that a block rule uses.</threat_lists_help>
+            <display_heading>Display (your dashboard)</display_heading>
+            <firewall_heading>Firewall-wide (administrators)</firewall_heading>
             <feed_will_install>(feed, added when saved)</feed_will_install>
             <days>days</days>
             <key_set>Key saved (enter a new one to replace it, "-" to use the GeoIP alias key)</key_set>
@@ -51,6 +61,69 @@
             <data_unavailable>Live flow data is unavailable</data_unavailable>
             <webgl_unavailable>WebGL is required for Firewall Map+</webgl_unavailable>
             <renderer_failed>Map renderer failed to initialise</renderer_failed>
+            <map_started_inside>Started inside</map_started_inside>
+            <map_started_outside>Started outside</map_started_outside>
+            <map_started_both>Started from both sides</map_started_both>
+            <map_toward>Toward the firewall</map_toward>
+            <map_away>Away from the firewall</map_away>
+            <map_blocked>Blocked</map_blocked>
+            <map_flagged_blocked>Flagged · blocked</map_flagged_blocked>
+            <map_flagged_allowed>Flagged · allowed</map_flagged_allowed>
+            <map_allowed>Allowed</map_allowed>
+            <map_ids_alert>IDS alert</map_ids_alert>
+            <map_minutes>{count} min</map_minutes>
+            <map_hours>{count} h</map_hours>
+            <map_days>{count} days</map_days>
+            <map_moments>moments</map_moments>
+            <map_port>port {port}</map_port>
+            <map_traffic>traffic</map_traffic>
+            <map_this_firewall>this firewall</map_this_firewall>
+            <map_this_firewall_title>This firewall</map_this_firewall_title>
+            <map_other_targets_one> (and {count} other target)</map_other_targets_one>
+            <map_other_targets_many> (and {count} other targets)</map_other_targets_many>
+            <map_through_forward> through a port forward</map_through_forward>
+            <map_open_for>, open for {duration}</map_open_for>
+            <map_reached>{other} reached {where} on {service}{more}{forwarded}{open}.</map_reached>
+            <map_other_hosts_one>{host} and {count} other host</map_other_hosts_one>
+            <map_other_hosts_many>{host} and {count} other hosts</map_other_hosts_many>
+            <map_other_services_one> and {count} other service</map_other_services_one>
+            <map_other_services_many> and {count} other services</map_other_services_many>
+            <map_queried>{who} queried {service}{more} at {other}</map_queried>
+            <map_synced>{who} synced time with {other} over {service}{more}</map_synced>
+            <map_mailed>{who} delivered mail to {other} over {service}{more}</map_mailed>
+            <map_pinged>{who} pinged {other}</map_pinged>
+            <map_opened>{who} opened {service}{more} to {other}</map_opened>
+            <map_a_connection>a connection</map_a_connection>
+            <map_other_ports_one> and {count} other port</map_other_ports_one>
+            <map_other_ports_many> and {count} other ports</map_other_ports_many>
+            <map_and> and </map_and>
+            <map_by_rule> by "{rule}"</map_by_rule>
+            <map_on_interface> on {interface}</map_on_interface>
+            <map_first_seen_ago>, first seen {duration} ago</map_first_seen_ago>
+            <map_block_sentence>{source}{place} tried {tried} on this firewall: blocked {hits}× in the last {minutes} min{rule}{where}{since}.</map_block_sentence>
+            <map_ids_line>Suricata: {signature} (severity {severity}{category})</map_ids_line>
+            <map_ids_first>, {count}× in the last {window}, latest {latest} ago</map_ids_first>
+            <map_ids_count>, {count}×</map_ids_count>
+            <map_more_alerts_one>and {count} more alert</map_more_alerts_one>
+            <map_more_alerts_many>and {count} more alerts</map_more_alerts_many>
+            <map_more_addresses_one>+{count} more address here</map_more_addresses_one>
+            <map_more_addresses_many>+{count} more addresses here</map_more_addresses_many>
+            <map_addresses_many>{count} addresses</map_addresses_many>
+            <map_via>via {egress}</map_via>
+            <map_open_state>open for {duration}</map_open_state>
+            <map_closed>closed</map_closed>
+            <map_ips_dropped>Dropped by IPS</map_ips_dropped>
+            <map_ips_dropped_flagged>Dropped by IPS · flagged</map_ips_dropped_flagged>
+            <map_ids_connection>Suricata alerted on this connection</map_ids_connection>
+            <map_ids_connection_dropped>Suricata alerted on this connection · dropped by IPS</map_ids_connection_dropped>
+            <map_rule>rule: {rule}</map_rule>
+            <map_seen_by_suricata>Seen by Suricata</map_seen_by_suricata>
+            <map_seen_by_suricata_flagged>Seen by Suricata · flagged</map_seen_by_suricata_flagged>
+            <map_no_connection>No connection is open right now</map_no_connection>
+            <map_last_minute>{count} in the last minute</map_last_minute>
+            <map_hammering> · hammering</map_hammering>
+            <map_active_links_one>{count} active link</map_active_links_one>
+            <map_active_links_many>{count} active links</map_active_links_many>
         </translations>
     </firewallmap>
 </metadata>

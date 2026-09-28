@@ -10,7 +10,7 @@ from datetime import datetime
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from support import BLOCKLISTS, BLOCKS, IDS, PF, THREATS, BLOCK_LINE, Geo  # noqa: E402
+from support import BLOCKLISTS, BLOCKS, COMMON, IDS, PF, THREATS, BLOCK_LINE, Geo  # noqa: E402
 
 
 class AlertTest(unittest.TestCase):
@@ -191,6 +191,14 @@ class CorrelationTest(unittest.TestCase):
             # the same address later getting through reopens it for review
             THREATS.record(db, {"94.154.43.203": {**entry, "status_hint": None}}, now=1100.0)
             self.assertEqual(THREATS.listing(db)["rows"][0]["status"], "new")
+
+    def test_ipv6_endpoints_keep_their_ports_apart(self):
+        key = PF.outside_key("tcp", "2001:db8::1", "443", "2001:db8::2", "51234")
+        connection = IDS.make_connection(key)
+        self.assertEqual((connection["public"], connection["remote"]), ("[2001:db8::1]:443", "[2001:db8::2]:51234"))
+        self.assertEqual(COMMON.split_host_port(connection["remote"]), ("2001:db8::2", "51234"))
+        self.assertEqual(COMMON.split_host_port("192.0.2.1:80"), ("192.0.2.1", "80"))
+        self.assertEqual(COMMON.split_host_port("2001:db8::2"), ("2001:db8::2", ""))
 
     def test_rule_label_is_parsed_from_states(self):
         (record,) = PF.parse_states(self.OUTBOUND)

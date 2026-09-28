@@ -9,7 +9,7 @@ from datetime import datetime
 
 from fwmap_blocklists import IDS_LIST, threat_fields, threat_lists_for
 from fwmap_blocks import MAX_BLOCK_SOURCES
-from fwmap_common import connection_target, location_fields, public_ipv4, service_name, service_port_label
+from fwmap_common import connection_target, host_port, split_host_port, location_fields, public_ipv4, service_name, service_port_label
 from fwmap_leases import describe_inside
 from fwmap_pf import flow_endpoints, forward_target, inside_endpoint, lan_rule_index, orientation, outside_key, rule_for, state_outside
 
@@ -64,8 +64,8 @@ def make_connection(key, **fields):
     connection = {
         "key": key,
         "protocol": key[0],
-        "public": f"{key[1]}:{key[2]}" if key[2] else key[1],
-        "remote": f"{key[3]}:{key[4]}" if key[4] else key[3],
+        "public": host_port(key[1], key[2]),
+        "remote": host_port(key[3], key[4]),
         "inside": None, "remote_started": None, "bytes_in": None, "bytes_out": None, "age": None,
         "rule": None, "rule_description": None, "interface": None, "state": None, "decision": None,
         "source": None, "seen": None,
@@ -111,8 +111,7 @@ class Correlator:
             rule = rule_for(record, pair, lan_rules)
             connection = make_connection(
                 key,
-                inside=f'{inside["address"]}:{inside["port"]}' if inside and inside["port"] else
-                       (inside["address"] if inside else None),
+                inside=host_port(inside["address"], inside["port"]) if inside else None,
                 remote_started=orientation(record, pair[1])[0],
                 bytes_in=record.get("bytes_in", 0),
                 bytes_out=record.get("bytes_out", 0),
@@ -260,7 +259,7 @@ class Correlator:
         else:
             flow.setdefault("closed", now)
         connection = self.current.get(key) or flow["connection"]
-        inside = (connection.get("inside") or "").rsplit(":", 1)[0] if flow["kind"] != "blocked" else ""
+        inside = split_host_port(connection.get("inside") or "")[0] if flow["kind"] != "blocked" else ""
         groups = [{"flow_id": flow_id, "signatures": sorted(
                       signatures.values(), key=lambda item: (item["severity"], -item["count"]))[:5]}
                   for flow_id, signatures in flow["alerts"].items()]
@@ -272,8 +271,8 @@ class Correlator:
             "origin": origin,
             "dest": key[3],
             "protocol": key[0],
-            "public": f"{key[1]}:{key[2]}" if key[2] else key[1],
-            "remote": f"{key[3]}:{key[4]}" if key[4] else key[3],
+            "public": host_port(key[1], key[2]),
+            "remote": host_port(key[3], key[4]),
             "inside": connection.get("inside"),
             "inside_host": describe_inside(inside, names, networks, interfaces) if inside else None,
             "remote_started": connection.get("remote_started"),
@@ -457,7 +456,7 @@ def connection_snapshot(address, correlator, names, interfaces, wall=None):
     for key in keys:
         connection = correlator.current.get(key) or correlator.flows[key]["connection"]
         flow = correlator.flows.get(key)
-        inside_ip = (connection.get("inside") or "").rsplit(":", 1)[0] if connection.get("inside") else ""
+        inside_ip = split_host_port(connection.get("inside") or "")[0] if connection.get("inside") else ""
         signatures = []
         if flow:
             for group in flow["alerts"].values():
@@ -506,9 +505,9 @@ def ips_drops(correlator, seen, since, blocklists=None, reputation=None):
             continue
         connection = flow["connection"]
         inside = connection.get("inside")
-        inside_ip = inside.rsplit(":", 1)[0] if inside else None
+        inside_ip, inside_port = split_host_port(inside) if inside else (None, "")
         started_by_remote = bool(connection.get("remote_started"))
-        port = (inside.rsplit(":", 1)[1] if inside and ":" in inside else key[2]) if started_by_remote else key[4]
+        port = (inside_port or key[2]) if started_by_remote else key[4]
         entry = entries.setdefault(remote, {
             "lists": threat_lists_for(remote, blocklists, reputation) + [IDS_LIST],
             "inbound": 0, "outbound": 0, "targets": [], "inside": [], "services": [], "bytes": 0,

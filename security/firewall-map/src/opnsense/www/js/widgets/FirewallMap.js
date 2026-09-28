@@ -3,6 +3,9 @@
  * All rights reserved.
  */
 
+// A cap far above any widget: the map fits its content (see _fitToContent).
+const AUTO_HEIGHT = 10000;
+
 export default class FirewallMap extends BaseWidget {
     static FIREWALL_WIDE = ['geo_provider', 'geo_key', 'geo_update_days', 'abuseipdb_key', 'threat_lists'];
 
@@ -18,6 +21,10 @@ export default class FirewallMap extends BaseWidget {
         this.loadingRenderer = null;
         this.configurable = true;
         this.geoSettings = null;
+        // set when the widget is removed: work still under way must not create anything after it
+        this.closed = false;
+        this.manualHeight = parseInt(config?.widget?.manual_height, 10) || null;
+        this.heightManaged = false;
     }
 
     _settingsError(message) {
@@ -50,9 +57,6 @@ export default class FirewallMap extends BaseWidget {
         if (!geo?.provider) {
             return {};
         }
-        const keySource = geo.database?.key_source;
-        const keyHint = keySource === 'plugin' ? this.translations.key_set
-            : keySource === 'alias' ? this.translations.key_from_alias : this.translations.key_none;
         return {
             geo_provider: {
                 id: `${this.id}-option-geo-provider`,
@@ -70,7 +74,6 @@ export default class FirewallMap extends BaseWidget {
                 id: `${this.id}-option-geo-key`,
                 title: this.translations.geo_key,
                 type: 'text',
-                placeholder: keyHint,
                 default: '',
             },
             geo_update_days: {
@@ -85,7 +88,6 @@ export default class FirewallMap extends BaseWidget {
                 id: `${this.id}-option-abuseipdb-key`,
                 title: this.translations.abuseipdb_key,
                 type: 'text',
-                placeholder: geo.abuseipdb_configured ? this.translations.key_set_abuse : this.translations.abuseipdb_none,
                 default: '',
             },
             threat_lists: {
@@ -101,10 +103,23 @@ export default class FirewallMap extends BaseWidget {
         };
     }
 
+    /** Help under the key fields, saying what is stored now (hints used to hide in placeholders). */
+    _keyHelp() {
+        const geo = this.geoSettings || {};
+        const source = geo.database?.key_source;
+        return {
+            'geo-key': source === 'plugin' ? this.translations.key_set
+                : source === 'alias' ? this.translations.key_from_alias : this.translations.key_none,
+            'abuseipdb-key': geo.abuseipdb_configured ? this.translations.key_set_abuse : this.translations.abuseipdb_none,
+            'threat-lists': this.translations.threat_lists_help,
+        };
+    }
+
     /**
-     * The dashboard's options dialog only renders selects and text inputs. Once it is on screen,
-     * show "Lookup hostnames" as a checkbox (backed by its select) and show the license key field
-     * only while a MaxMind provider is selected.
+     * The dashboard's options dialog only renders selects and text inputs. Once it is on screen:
+     * yes/no options become checkboxes (backed by their selects), help text goes under the key
+     * fields, the per-user and firewall-wide options get their own headings, and the license key
+     * field shows only while a MaxMind provider is selected.
      */
     _enhanceOptionsDialog() {
         if (this.enhancingDialog) {
@@ -124,7 +139,7 @@ export default class FirewallMap extends BaseWidget {
                 return;
             }
             this.enhancingDialog = false;
-            // yes/no options render as checkboxes backed by their (hidden) selects
+            const containerOf = (option) => $(`#${this.id}-option-${option}`).closest('.widget-option-container');
             for (const [option, label] of [
                 ['blocks', this.translations.blocks],
                 ['hostnames', this.translations.hostnames],
@@ -132,7 +147,7 @@ export default class FirewallMap extends BaseWidget {
                 ['follow', this.translations.follow],
             ]) {
                 const $select = $(`#${this.id}-option-${option}`);
-                const $container = $select.closest('.widget-option-container');
+                const $container = containerOf(option);
                 $container.css({marginTop: '8px', marginBottom: '2px'});
                 $container.find('.bootstrap-select').hide();
                 const $checkbox = $('<input type="checkbox" style="margin: 0 6px 0 0;">')
@@ -143,8 +158,14 @@ export default class FirewallMap extends BaseWidget {
                         .append($checkbox, document.createTextNode(label)),
                 );
             }
+            const heading = (text) => $('<h4 style="margin: 14px 0 4px; font-size: 1.1em;"></h4>').text(text);
+            containerOf('heavy-top').before(heading(this.translations.display_heading));
+            containerOf('geo-provider').before(heading(this.translations.firewall_heading));
+            for (const [option, help] of Object.entries(this._keyHelp())) {
+                containerOf(option).append($('<div class="help-block" style="margin: 2px 0 0; font-size: .9em;"></div>').text(help));
+            }
             const $provider = $(`#${this.id}-option-geo-provider`);
-            const $key = $(`#${this.id}-option-geo-key`).closest('.widget-option-container');
+            const $key = containerOf('geo-key');
             const toggleKey = () => $key.toggle(($provider.val() || '') !== 'dbip');
             $provider.on('change', toggleKey);
             toggleKey();
@@ -155,6 +176,7 @@ export default class FirewallMap extends BaseWidget {
     /**
      * Firewall-wide values belong to the plugin, not to this user's dashboard layout: drop any copy
      * the dashboard saved with the layout, so the dialog always starts from the server's values.
+     * A height the user chose is kept with the widget's options (see _recordManualResize).
      */
     async getWidgetConfig() {
         if (this.config?.widget) {
@@ -162,7 +184,16 @@ export default class FirewallMap extends BaseWidget {
                 delete this.config.widget[key];
             }
         }
-        return super.getWidgetConfig();
+        const config = await super.getWidgetConfig();
+        if (this.manualHeight) {
+            config.manual_height = this.manualHeight;
+        }
+        return config;
+    }
+
+    setWidgetConfig(config) {
+        const {manual_height: _, ...rest} = config ?? {};
+        super.setWidgetConfig(this.manualHeight ? {...rest, manual_height: this.manualHeight} : rest);
     }
 
     async getWidgetOptions() {
@@ -171,13 +202,14 @@ export default class FirewallMap extends BaseWidget {
             await this._loadGeoSettings();
         }
         this._enhanceOptionsDialog();
+        const defaults = window.FirewallMapRenderer?.DEFAULT_OPTIONS || {};
         return {
             heavy_top: {
                 id: `${this.id}-option-heavy-top`,
                 title: this.translations.heavy_top,
                 type: 'select',
                 options: choices([['0', this.translations.none], ['3', '3'], ['5', '5'], ['10', '10']]),
-                default: '5',
+                default: String(defaults.heavyTop ?? 5),
             },
             heavy_rate: {
                 id: `${this.id}-option-heavy-rate`,
@@ -187,14 +219,14 @@ export default class FirewallMap extends BaseWidget {
                     ['100000', '100 KB/s'], ['500000', '500 KB/s'], ['1000000', '1 MB/s'],
                     ['5000000', '5 MB/s'], ['10000000', '10 MB/s'],
                 ]),
-                default: '1000000',
+                default: String(defaults.heavyRate ?? 1000000),
             },
             max_arcs: {
                 id: `${this.id}-option-max-arcs`,
                 title: this.translations.max_arcs,
                 type: 'select',
                 options: choices([['50', '50'], ['100', '100'], ['150', '150']]),
-                default: '100',
+                default: String(defaults.maxArcs ?? 100),
             },
             labels: {
                 id: `${this.id}-option-labels`,
@@ -216,7 +248,7 @@ export default class FirewallMap extends BaseWidget {
                 type: 'select',
                 options: choices(['1', '2', '3', '5', '10'].map(
                     (value) => [value, value === '1' ? this.translations.every_attempt : `${value} ${this.translations.attempts}`])),
-                default: '3',
+                default: String(defaults.blockMin ?? 3),
             },
             hostnames: {
                 id: `${this.id}-option-hostnames`,
@@ -245,86 +277,86 @@ export default class FirewallMap extends BaseWidget {
 
     async _settings() {
         const config = await this.getWidgetConfig();
-        return {
-            heavyTop: parseInt(config.heavy_top, 10),
-            heavyRate: parseInt(config.heavy_rate, 10),
-            maxArcs: parseInt(config.max_arcs, 10),
-            labels: config.labels !== '0',
-            hostnames: config.hostnames === '1',
-            asn: config.asn !== '0',
-            blocks: config.blocks !== '0',
-            blockMin: parseInt(config.block_min ?? '3', 10) || 3,
-            follow: config.follow === '1',
-        };
+        // the renderer script parses the options; without it there is no map to configure
+        return window.FirewallMapRenderer ? window.FirewallMapRenderer.parseSettings(config) : null;
+    }
+
+    /** Curated feeds picked in the dialog become URL table aliases; returns the names that failed. */
+    async _installFeeds(selected) {
+        const install = (this.threatTables?.tables || []).filter((table) =>
+            table.curated && !table.installed && selected.includes(table.name));
+        const failed = [];
+        for (const feed of install) {
+            try {
+                const saved = await this.ajaxCall('/api/firewall/alias/add_item', JSON.stringify({alias: {
+                    enabled: '1', name: feed.name, type: 'urltable', content: feed.url, updatefreq: '1',
+                    description: `Firewall Map+ threat feed: ${feed.label}`,
+                }}), 'POST');
+                if (saved.result !== 'saved') {
+                    throw new Error(JSON.stringify(saved.validations || saved));
+                }
+            } catch (error) {
+                failed.push(feed.name);
+                this._settingsError(`${feed.label}: ${error?.message || error?.statusText || error}`);
+            }
+        }
+        if (install.length > failed.length) {
+            try {
+                await this.ajaxCall('/api/firewall/alias/reconfigure', JSON.stringify({}), 'POST');
+            } catch (error) {
+                this._settingsError(error?.statusText || String(error));
+            }
+        }
+        return failed;
+    }
+
+    /** Send only what the administrator changed, so an unrelated save never overwrites another's choices. */
+    async _saveFirewallWide(values) {
+        const geo = this.geoSettings;
+        const update = {};
+        if (values.geo_provider !== geo.provider) {
+            update.provider = values.geo_provider;
+        }
+        if (String(values.geo_update_days) !== String(geo.update_days)) {
+            update.update_days = values.geo_update_days;
+        }
+        if ((values.geo_key || '').trim()) {
+            update.license_key = values.geo_key.trim();
+        }
+        if ((values.abuseipdb_key || '').trim()) {
+            update.abuseipdb_key = values.abuseipdb_key.trim();
+        }
+        // a curated feed whose alias could not be created is not saved as a threat list
+        const failed = await this._installFeeds(values.threat_lists || []);
+        const lists = (values.threat_lists || []).filter((name) => !failed.includes(name)).join(',');
+        // without the table list (lookup failed) the selection cannot be trusted
+        if ((this.threatTables?.tables || []).length && lists !== (geo.threat_lists || '')) {
+            update.threat_lists = lists;
+        }
+        if (!Object.keys(update).length) {
+            return;
+        }
+        try {
+            const result = await this.ajaxCall('/api/firewallmap/settings/set', JSON.stringify(update), 'POST');
+            if (result.result !== 'saved') {
+                console.error('Firewall Map+: settings not saved', result);
+                this._settingsError((result.validations || []).join(' ') || result.result);
+            }
+        } catch (error) {
+            console.error('Firewall Map+: settings not saved', error);
+            this._settingsError(error?.statusText || String(error));
+        }
+        await this._loadGeoSettings();
     }
 
     async onWidgetOptionsChanged(values) {
         if (this.geoSettings?.provider && values && 'geo_provider' in values) {
-            const geo = this.geoSettings;
-            // send only what the administrator changed, so an unrelated save never overwrites
-            // another administrator's firewall-wide choices
-            const update = {};
-            if (values.geo_provider !== geo.provider) {
-                update.provider = values.geo_provider;
-            }
-            if (String(values.geo_update_days) !== String(geo.update_days)) {
-                update.update_days = values.geo_update_days;
-            }
-            if ((values.geo_key || '').trim()) {
-                update.license_key = values.geo_key.trim();
-            }
-            if ((values.abuseipdb_key || '').trim()) {
-                update.abuseipdb_key = values.abuseipdb_key.trim();
-            }
-            const values_lists = values.threat_lists || [];
-            const lists = values_lists.join(',');
-            // without the table list (lookup failed) the selection cannot be trusted
-            if ((this.threatTables?.tables || []).length && lists !== (geo.threat_lists || '')) {
-                update.threat_lists = lists;
-            }
             // firewall-wide values are saved to the plugin, never into this user's dashboard layout
+            const firewallWide = {...values};
             for (const key of FirewallMap.FIREWALL_WIDE) {
                 delete values[key];
             }
-            // curated feeds picked here are created as URL table aliases before they are used
-            const install = (this.threatTables?.tables || []).filter((table) =>
-                table.curated && !table.installed && (values_lists || []).includes(table.name));
-            for (const feed of install) {
-                try {
-                    const saved = await this.ajaxCall('/api/firewall/alias/add_item', JSON.stringify({alias: {
-                        enabled: '1', name: feed.name, type: 'urltable', content: feed.url, updatefreq: '1',
-                        description: `Firewall Map+ threat feed: ${feed.label}`,
-                    }}), 'POST');
-                    if (saved.result !== 'saved') {
-                        throw new Error(JSON.stringify(saved.validations || saved));
-                    }
-                } catch (error) {
-                    this._settingsError(`${feed.label}: ${error?.message || error?.statusText || error}`);
-                }
-            }
-            if (install.length) {
-                try {
-                    await this.ajaxCall('/api/firewall/alias/reconfigure', JSON.stringify({}), 'POST');
-                } catch (error) {
-                    this._settingsError(error?.statusText || String(error));
-                }
-            }
-            if (!Object.keys(update).length) {
-                this.settings = await this._settings();
-                this.renderer?.setSettings(this.settings);
-                return;
-            }
-            try {
-                const result = await this.ajaxCall('/api/firewallmap/settings/set', JSON.stringify(update), 'POST');
-                if (result.result !== 'saved') {
-                    console.error('Firewall Map+: settings not saved', result);
-                    this._settingsError((result.validations || []).join(' ') || result.result);
-                }
-            } catch (error) {
-                console.error('Firewall Map+: settings not saved', error);
-                this._settingsError(error?.statusText || String(error));
-            }
-            await this._loadGeoSettings();
+            await this._saveFirewallWide(firewallWide);
         }
         this.settings = await this._settings();
         this.renderer?.setSettings(this.settings);
@@ -335,35 +367,15 @@ export default class FirewallMap extends BaseWidget {
     }
 
     getMarkup() {
-        // Colours are applied from the active theme in _applyTheme() once the widget is in the page.
+        // Colours are applied from the active theme once the widget is in the page.
         return $(`
             <div id="${this.id}-firewall-map" style="position: relative; height: 430px; overflow: hidden; border-radius: 6px; isolation: isolate;">
                 <div id="${this.id}-firewall-map-grid" aria-hidden="true" style="pointer-events: none; position: absolute; inset: 0; z-index: 0; background-size: 36px 36px;"></div>
                 <div id="${this.id}-firewall-map-canvas" style="position: absolute; inset: 0; z-index: 1; text-align: left;"></div>
-                <div id="${this.id}-firewall-map-status" style="position: absolute; left: 12px; bottom: 9px; z-index: 2; font-size: .82em; letter-spacing: .02em; pointer-events: none;"></div>
+                <div id="${this.id}-firewall-map-status" style="position: absolute; left: 12px; right: 150px; bottom: 9px; z-index: 2; font-size: .82em; letter-spacing: .02em; pointer-events: none; text-align: left;"></div>
                 <div id="${this.id}-firewall-map-credit" style="position: absolute; right: 10px; bottom: 9px; z-index: 2; font-size: .75em; opacity: .7;"></div>
             </div>
         `);
-    }
-
-    /**
-     * Read the dashboard theme's own colours (themes don't expose CSS variables): the widget
-     * background, body text, the link colour (theme accent) and the success colour (green).
-     */
-    _readTheme() {
-        return window.FirewallMapRenderer.readTheme(document.getElementById(`${this.id}-firewall-map`));
-    }
-
-    _applyTheme(theme) {
-        const rgba = (color, alpha) => `rgba(${color.join(', ')}, ${alpha})`;
-        $(`#${this.id}-firewall-map`).css({
-            background: `rgb(${theme.background.join(', ')})`,
-            boxShadow: `inset 0 0 0 1px ${rgba(theme.accent, theme.dark ? 0.3 : 0.18)}`,
-        });
-        const line = rgba(theme.text, theme.dark ? 0.07 : 0.05);
-        $(`#${this.id}-firewall-map-grid`).css('background-image',
-            `linear-gradient(${line} 1px, transparent 1px), linear-gradient(90deg, ${line} 1px, transparent 1px)`);
-        $(`#${this.id}-firewall-map-status`).css('color', rgba(theme.text, 0.75));
     }
 
     async _loadRenderer() {
@@ -386,33 +398,81 @@ export default class FirewallMap extends BaseWidget {
         return renderer;
     }
 
-    _hasWebGL() {
-        try {
-            const canvas = document.createElement('canvas');
-            return !!(canvas.getContext('webgl2') || canvas.getContext('webgl'));
-        } catch (_) {
-            return false;
-        }
-    }
-
     _status(message) {
         $(`#${this.id}-firewall-map-status`).text(message || '');
     }
 
+    /** The status line's words, in this widget's translations. */
+    _text() {
+        const t = this.translations;
+        return {...t, starting: t.collector_starting, unavailable: t.data_unavailable, downloading: t.database_downloading};
+    }
+
+    _gridItem() {
+        return document.querySelector(`.widget-${this.id}`)?.closest('.grid-stack-item') ?? null;
+    }
+
+    /**
+     * The dashboard caps a widget at the height saved with the layout, so a map that grows with a
+     * wider column (the side menu is collapsed) was cut off. Fit the map instead, unless the user
+     * dragged the widget shorter: that height is kept with its options and the rest scrolls.
+     */
+    _fitToContent() {
+        const node = this._gridItem()?.gridstackNode;
+        if (node) {
+            this.heightManaged = true;
+            node.sizeToContent = this.manualHeight ?? AUTO_HEIGHT;
+            this.config.callbacks?.updateGrid?.();
+        }
+    }
+
+    /** The grid sets sizeToContent to the new height when the user finishes a resize. */
+    _recordManualResize() {
+        const item = this._gridItem();
+        const node = item?.gridstackNode;
+        const cap = this.manualHeight ?? AUTO_HEIGHT;
+        if (!this.heightManaged || !node || !Number.isInteger(node.sizeToContent) || node.sizeToContent === cap) {
+            return;
+        }
+        const content = item.querySelector('.grid-stack-item-content');
+        const clipped = content && content.scrollHeight - content.clientHeight > 1;
+        this.manualHeight = clipped ? node.sizeToContent : null;
+        node.sizeToContent = this.manualHeight ?? AUTO_HEIGHT;
+        this.setWidgetConfig(this.config.widget ?? {});
+        $('#save-grid').show();
+    }
+
     async onMarkupRendered() {
         $(`#${this.id}-title`).html(`<b>${this.translations.dashboard_title}</b>`);
-        if (!this._hasWebGL()) {
+        this._fitToContent();
+        let renderer;
+        try {
+            renderer = await this._loadRenderer();
+        } catch (error) {
+            console.error('Firewall Map+: renderer initialisation failed', error);
+            this._status(`${this.translations.renderer_failed}: ${error?.message || error}`);
+            return;
+        }
+        if (!renderer.host.hasWebGL()) {
             this._status(this.translations.webgl_unavailable);
             return;
         }
+        const settings = await this._settings();
+        // removed while the renderer or the settings loaded: create nothing
+        if (this.closed) {
+            return;
+        }
         try {
-            const renderer = await this._loadRenderer();
-            const container = $(`#${this.id}-firewall-map-canvas`)[0];
-            const theme = this._readTheme();
-            this._applyTheme(theme);
-            this.settings = await this._settings();
+            const frame = document.getElementById(`${this.id}-firewall-map`);
+            const theme = renderer.readTheme(frame);
+            renderer.host.applyTheme(frame, theme, {
+                grid: document.getElementById(`${this.id}-firewall-map-grid`),
+                overlays: [document.getElementById(`${this.id}-firewall-map-status`)],
+            });
+            this.settings = settings;
+            const container = document.getElementById(`${this.id}-firewall-map-canvas`);
             // no toggle on the widget: panning pauses follow mode for a minute instead of ending it
-            this.renderer = renderer.create(container, {theme, settings: this.settings, followResumeMs: 60000});
+            this.renderer = renderer.create(container, {theme, settings, text: this.translations, followResumeMs: 60000});
             // deck.gl positions its canvas absolutely without left/top, so pin it explicitly
             // rather than relying on the static position (the dashboard centres widget text).
             $(container).children('canvas').css({left: 0, top: 0});
@@ -425,50 +485,33 @@ export default class FirewallMap extends BaseWidget {
     }
 
     async onWidgetTick() {
-        if (!this.renderer || this.polling) {
+        if (!this.renderer || this.polling || this.closed) {
             return;
         }
         this.polling = true;
         try {
-            const query = `?blocks_min=${this.settings?.blockMin ?? 3}${this.settings?.hostnames ? '&hostnames=1' : ''}`;
-            const snapshot = await this.ajaxCall(`/api/firewallmap/flow/snapshot${query}`);
-            if (snapshot.status === 'starting') {
-                this._status(this.translations.collector_starting);
+            const host = window.FirewallMapRenderer.host;
+            const snapshot = await this.ajaxCall(`/api/firewallmap/flow/snapshot${window.FirewallMapRenderer.snapshotQuery(this.settings)}`);
+            // removed while the request was under way
+            if (!this.renderer) {
                 return;
             }
-            if (snapshot.status === 'no_database') {
-                // no locations without a geolocation database: keep the map empty and say why
-                this.renderer.render({flows: [], locations: []});
-                this._status(snapshot.reason === 'maxmind_key_missing' ? this.translations.key_missing
-                    : snapshot.error ? `${this.translations.database_failed}: ${snapshot.error}`
-                    : this.translations.database_downloading);
-                return;
-            }
-            if (snapshot.status !== 'ok') {
-                console.error('Firewall Map+: collector reported', snapshot);
-                this._status(this.translations.data_unavailable);
+            const problem = host.problemText(snapshot, this._text());
+            if (problem) {
+                if (snapshot.status === 'no_database') {
+                    // no locations without a geolocation database: keep the map empty and say why
+                    this.renderer.render({flows: [], locations: []});
+                } else if (snapshot.status !== 'starting') {
+                    console.error('Firewall Map+: collector reported', snapshot);
+                }
+                this._status(problem);
                 return;
             }
             this.renderer.render(snapshot);
-            // DB-IP Lite is CC BY 4.0: credit it while it is the source
-            $(`#${this.id}-firewall-map-credit`).html(snapshot.provider === 'dbip'
-                ? '<a href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a>' : '');
-            const count = snapshot.flows?.length || 0;
-            let status = count ? `${count} ${this.translations.active_flows}` : this.translations.no_flows;
-            if (this.settings?.blocks) {
-                const shown = (snapshot.blocks || []).length;
-                const below = snapshot.blocks_below || 0;
-                if (shown || below) {
-                    status += ` · ${shown} ${this.translations.blocked_sources}`;
-                    if (below) {
-                        status += ` · ${below} ${this.translations.below_threshold}`;
-                    }
-                }
-            }
-            if (snapshot.carp === 'backup') {
-                status += ` · ${this.translations.carp_backup}`;
-            }
-            this._status(status);
+            $(`#${this.id}-firewall-map-credit`).html(host.creditHtml(snapshot.provider));
+            const parts = host.statusParts(snapshot, snapshot, this.settings, this._text());
+            // the parts are HTML-escaped: set them as HTML, not text
+            $(`#${this.id}-firewall-map-status`).html(parts.join(' · '));
         } catch (error) {
             console.error('Firewall Map+: flow update failed', error);
             this._status(this.translations.data_unavailable);
@@ -478,17 +521,21 @@ export default class FirewallMap extends BaseWidget {
     }
 
     onWidgetResize(elem, width) {
-        // Keep a world-map aspect ratio (80N to 56S at full width) instead of a fixed height,
-        // and let the dashboard size the cell to it.
+        this._recordManualResize();
+        // Keep a world-map aspect ratio (80N to 56S at full width) instead of a fixed height; the
+        // widget fits it (see _fitToContent), so the status line is never cut off.
         const map = document.getElementById(`${this.id}-firewall-map`);
-        if (map && width) {
+        const changed = Boolean(map && width && this.lastWidth !== width);
+        if (changed) {
+            this.lastWidth = width;
             map.style.height = `${Math.round(Math.min(640, Math.max(240, width * 0.6)))}px`;
+            this.renderer?.resize();
         }
-        this.renderer?.resize();
-        return true;
+        return changed;
     }
 
     onWidgetClose() {
+        this.closed = true;
         this.renderer?.destroy();
         this.renderer = null;
         super.onWidgetClose();

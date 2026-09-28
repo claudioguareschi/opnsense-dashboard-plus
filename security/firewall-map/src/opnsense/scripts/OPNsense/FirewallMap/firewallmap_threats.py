@@ -198,37 +198,84 @@ def inside_names():
         return {}
 
 
-def listing(db, status=None):
-    counts = dict(db.execute("SELECT status, count(*) FROM threats GROUP BY status").fetchall())
-    counts = {name: counts.get(name, 0) for name in STATUSES}
-    if status == "counts":
-        return {"status": "ok", "rows": [], "counts": counts}
+PAGE_SIZE = 100
+MAX_PAGE_SIZE = 500
+MAX_QUERY = 200
+
+
+def _stored_rows(db, status=None):
+    """Every entry of one status (or all), most recent activity first, with its data decoded."""
     sql = "SELECT address, first_seen, last_seen, samples, data, status, note, status_changed FROM threats"
     parameters = ()
     if status in STATUSES:
         sql += " WHERE status = ?"
         parameters = (status,)
-    rows = []
     for address, first, last, samples, data, current, note, changed in db.execute(sql + " ORDER BY last_seen DESC", parameters):
         try:
             data = json.loads(data)
         except ValueError:
             data = {}
-        row = {"address": address, "first_seen": first, "last_seen": last, "samples": samples,
-               "status": current, "note": note or "", "status_changed": changed, **data}
-        # name each inbound target's service (entries recorded before ports were kept have none)
-        row["target_services"] = {}
-        for target in data.get("targets", []):
-            protocol, port = str(target).split("|")[0], str(target).split("|")[-1]
-            row["target_services"][target] = service_name(protocol, port or None)
-        remote = row.setdefault("remote", {})
-        if not remote.get("country_code"):
-            # entries recorded before the code was kept: take it from the local geolocation cache
-            code = cached_country(db, address)
-            if code:
-                remote["country_code"] = code
-        rows.append(row)
-    return {"status": "ok", "rows": rows, "counts": counts, "names": inside_names()}
+        yield {"address": address, "first_seen": first, "last_seen": last, "samples": samples,
+               "status": current, "note": note or "", "status_changed": changed, **(data if isinstance(data, dict) else {})}
+
+
+def search_text(row, names):
+    """What the queue shows for an entry, lower-cased: the text a search should find it by.
+
+    Only displayed values count, never the JSON key names (searching "status" must not match
+    every entry).
+    """
+    remote = row.get("remote") or {}
+    parts = [row["address"], row.get("note"), *(row.get("lists") or []),
+             *(name.replace("FWMAP_", "").replace("_", " ") for name in row.get("lists") or []),
+             *(remote.get(key) for key in ("hostname", "org", "country", "country_code", "city")),
+             *(row.get("services") or [])]
+    for address in row.get("inside") or []:
+        parts += [address, names.get(address)]
+    for target in row.get("targets") or []:
+        protocol, address, port = (str(target).split("|") + ["", "", ""])[:3]
+        parts += [address, names.get(address), f"{protocol}/{port}" if port else protocol]
+    for connection in row.get("connections") or []:
+        parts += [connection.get(key) for key in ("inside", "inside_name", "remote", "public", "rule", "interface")]
+    return " ".join(str(part) for part in parts if part).lower()
+
+
+def matching(db, status, query, names=None):
+    """Entries of `status` whose displayed text contains every word of `query`."""
+    names = inside_names() if names is None else names
+    words = str(query or "").lower().split()
+    for row in _stored_rows(db, status):
+        if not words or all(word in search_text(row, names) for word in words):
+            yield row
+
+
+def _decorate(db, row):
+    # name each inbound target's service (entries recorded before ports were kept have none)
+    row["target_services"] = {}
+    for target in row.get("targets", []):
+        protocol, port = str(target).split("|")[0], str(target).split("|")[-1]
+        row["target_services"][target] = service_name(protocol, port or None)
+    remote = row.setdefault("remote", {})
+    if not remote.get("country_code"):
+        # entries recorded before the code was kept: take it from the local geolocation cache
+        code = cached_country(db, row["address"])
+        if code:
+            remote["country_code"] = code
+    return row
+
+
+def listing(db, status=None, offset=0, limit=PAGE_SIZE, query=None):
+    """One page of the queue: `total` counts every entry matching the status and search."""
+    counts = dict(db.execute("SELECT status, count(*) FROM threats GROUP BY status").fetchall())
+    counts = {name: counts.get(name, 0) for name in STATUSES}
+    if status == "counts":
+        return {"status": "ok", "rows": [], "counts": counts}
+    names = inside_names()
+    rows = list(matching(db, status, query, names))
+    offset = max(0, int(offset or 0))
+    limit = max(1, min(int(limit or PAGE_SIZE), MAX_PAGE_SIZE))
+    page = [_decorate(db, row) for row in rows[offset:offset + limit]]
+    return {"status": "ok", "rows": page, "total": len(rows), "offset": offset, "counts": counts, "names": names}
 
 
 def set_status(db, address, status, note=None, now=None):
@@ -257,35 +304,65 @@ def decode_note(value):
         return None
 
 
-def bulk_status(db, current, status, now=None):
-    """Move every entry with one status to another (e.g. dismiss all new); reversible."""
+def _addresses(db, status, query):
+    return [row["address"] for row in matching(db, status, query)] if query else None
+
+
+def bulk_status(db, current, status, query=None, now=None):
+    """Move every entry with one status (and matching the search, when there is one) to another,
+    e.g. dismiss all new entries; reversible."""
     if current not in STATUSES or status not in STATUSES or current == status:
         return {"result": "failed", "error": "unknown status"}
     now = time.time() if now is None else now
-    cursor = db.execute("UPDATE threats SET status = ?, status_changed = ?, data = json_remove(data, '$.seen_after_block') "
-                        "WHERE status = ?", (status, now, current))
-    return {"result": "saved", "changed": cursor.rowcount}
+    clear = "json_remove(data, '$.seen_after_block')"
+    addresses = _addresses(db, current, query)
+    if addresses is None:
+        cursor = db.execute(f"UPDATE threats SET status = ?, status_changed = ?, data = {clear} WHERE status = ?",
+                            (status, now, current))
+        return {"result": "saved", "changed": cursor.rowcount}
+    changed = 0
+    for address in addresses:
+        changed += db.execute(f"UPDATE threats SET status = ?, status_changed = ?, data = {clear} "
+                              "WHERE status = ? AND address = ?", (status, now, current, address)).rowcount
+    return {"result": "saved", "changed": changed}
 
 
-def purge(db, status):
-    """Delete the entries of one status for good (only dismissed or reviewed ones)."""
+def purge(db, status, query=None):
+    """Delete the entries of one status (and matching the search) for good; only dismissed or reviewed ones."""
     if status not in ("dismissed", "reviewed"):
         return {"result": "failed", "error": "only dismissed or reviewed entries can be deleted"}
-    cursor = db.execute("DELETE FROM threats WHERE status = ?", (status,))
-    return {"result": "deleted", "deleted": cursor.rowcount}
+    addresses = _addresses(db, status, query)
+    if addresses is None:
+        return {"result": "deleted", "deleted": db.execute("DELETE FROM threats WHERE status = ?", (status,)).rowcount}
+    deleted = 0
+    for address in addresses:
+        deleted += db.execute("DELETE FROM threats WHERE status = ? AND address = ?", (status, address)).rowcount
+    return {"result": "deleted", "deleted": deleted}
+
+
+def decode_query(value):
+    """A search sent as base64url ("-" for none), bounded in length."""
+    if not value or value == "-":
+        return None
+    text = decode_note(value)
+    return text[:MAX_QUERY] if text else None
 
 
 def main(arguments, path=DATABASE):
     command = arguments[0] if arguments else "list"
+    argument = lambda index: arguments[index] if len(arguments) > index else None  # noqa: E731
     db = connect(path)
     if command == "set" and len(arguments) >= 3:
         note = decode_note(arguments[3]) if len(arguments) > 3 and arguments[3] != "-" else None
         return set_status(db, arguments[1], arguments[2], note)
     if command == "bulk" and len(arguments) >= 3:
-        return bulk_status(db, arguments[1], arguments[2])
+        return bulk_status(db, arguments[1], arguments[2], decode_query(argument(3)))
     if command == "purge" and len(arguments) >= 2:
-        return purge(db, arguments[1])
-    return listing(db, arguments[1] if len(arguments) > 1 else None)
+        return purge(db, arguments[1], decode_query(argument(2)))
+    offset = argument(2)
+    limit = argument(3)
+    return listing(db, argument(1), int(offset) if offset and offset.isdigit() else 0,
+                   int(limit) if limit and limit.isdigit() else PAGE_SIZE, decode_query(argument(4)))
 
 
 if __name__ == "__main__":

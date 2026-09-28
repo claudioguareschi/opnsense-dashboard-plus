@@ -103,6 +103,31 @@ class ThreatQueueTest(unittest.TestCase):
             self.assertEqual(THREATS.purge(db, "dismissed")["deleted"], 1)
             self.assertEqual(THREATS.listing(db)["rows"], [])
 
+    def test_search_pages_and_filtered_bulk(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(THREATS, "inside_names", lambda: {"192.168.1.2": "mail"}):
+            db = THREATS.connect(os.path.join(directory, "cache.db"))
+            seen = {}
+            for index in range(5):
+                entry = self.observe(self.INBOUND)["108.188.77.155"]
+                entry["remote"] = {"country": "Russia" if index < 2 else "Brazil"}
+                seen[f"108.188.77.{index}"] = entry
+            THREATS.record(db, seen, now=100.0)
+            # key names never match: every entry has a status, none displays the word
+            self.assertEqual(THREATS.listing(db, "new", query="status")["total"], 0)
+            self.assertEqual(THREATS.listing(db, "new", query="russia")["total"], 2)
+            # inside host names count, as displayed
+            self.assertEqual(THREATS.listing(db, "new", query="mail")["total"], 5)
+            page = THREATS.listing(db, "new", offset=2, limit=2)
+            self.assertEqual((page["total"], len(page["rows"]), page["offset"]), (5, 2, 2))
+            # a bulk action with a search touches only what the search shows
+            self.assertEqual(THREATS.bulk_status(db, "new", "dismissed", query="russia")["changed"], 2)
+            self.assertEqual(THREATS.listing(db, "counts")["counts"]["new"], 3)
+            self.assertEqual(THREATS.purge(db, "dismissed", query="brazil")["deleted"], 0)
+            self.assertEqual(THREATS.purge(db, "dismissed", query="russia")["deleted"], 2)
+            # the command line carries the search as base64url
+            encoded = __import__("base64").urlsafe_b64encode(b"brazil").decode().rstrip("=")
+            self.assertEqual(THREATS.main(["list", "new", "0", "1", encoded], path=os.path.join(directory, "cache.db"))["total"], 3)
+
     def test_rejects_bad_input(self):
         with tempfile.TemporaryDirectory() as directory:
             db = THREATS.connect(os.path.join(directory, "cache.db"))

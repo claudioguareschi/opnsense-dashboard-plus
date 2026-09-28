@@ -141,6 +141,25 @@ def requested(marker, seconds, now=None):
         return False
 
 
+def host_port(address, port):
+    """"192.0.2.1:443", "[2001:db8::1]:443", or the bare address without a port."""
+    if not port:
+        return address
+    return f"[{address}]:{port}" if ":" in str(address) else f"{address}:{port}"
+
+
+def split_host_port(text):
+    """(address, port or "") from host_port()'s form; a bare address has no port."""
+    text = str(text or "")
+    if text.startswith("["):
+        address, _, rest = text[1:].partition("]")
+        return address, rest.lstrip(":")
+    if text.count(":") == 1:
+        address, _, port = text.partition(":")
+        return address, port
+    return text, ""
+
+
 def connection_target(protocol, address, port):
     """'tcp|192.168.1.2|443': what a remote side connected to (an inside host or the firewall)."""
     return f"{protocol}|{address}|{'' if is_icmp(protocol) else port or ''}"
