@@ -269,9 +269,9 @@ export function continuePhases(previous, arcs, seconds) {
   return arcs;
 }
 
-// radius, in screen pixels, of the clear circle around the firewall's house icon: arches, pulses
-// and endpoints stay out of it and the map shows through (the icon is 15px)
-export const HOME_CLEARANCE = 14;
+// radius, in screen pixels, of the circle around the firewall's house icon that arches, pulses
+// and endpoints stay out of, just enough to keep the 15px icon uncovered
+export const HOME_CLEARANCE = 10;
 
 /** Map units (degrees of longitude, and mercatorY) per screen pixel at a deck.gl zoom. */
 export function unitsPerPixel(zoom) {
