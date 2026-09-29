@@ -86,10 +86,10 @@ export default class DashboardPlusInterfaces extends DashboardPlusWidget(BaseWid
         const media = this._media(intf);
         const addresses = [intf.addr4, intf.addr6].filter(Boolean);
         const icon = this._tunnelType(intf) !== null ? 'fa-exchange' : 'fa-sitemap';
-        return `<div class="flextable-row dashboard-plus-row" role="row" data-sort-id="${escapeHtml(intf.identifier)}" style="row-gap: 0.15em; align-items: start;">
+        return `<div class="flextable-row dashboard-plus-row" role="row" data-sort-id="${escapeHtml(intf.identifier)}" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}" style="row-gap: 0.15em; align-items: start; cursor: grab;">
             <div role="cell" style="grid-row: 1 / span 2;"><i class="fa ${icon}" aria-hidden="true"></i></div>
-            <div role="cell" class="dashboard-plus-ellipsis dashboard-plus-interface-name" draggable="true" title="${escapeHtml(`${intf.identifier} · ${this.translations.drag_to_reorder}`)}" style="cursor: grab;">
-                <a href="/interfaces.php?if=${encodeURIComponent(intf.identifier)}">${escapeHtml(intf.description)}</a>
+            <div role="cell" class="dashboard-plus-ellipsis dashboard-plus-interface-name">
+                <a href="/interfaces.php?if=${encodeURIComponent(intf.identifier)}" title="${escapeHtml(intf.identifier)}">${escapeHtml(intf.description)}</a>
             </div>
             <div role="cell" class="dashboard-plus-nowrap" style="text-align: right;">
                 <i class="fa ${link.icon}" title="${escapeHtml(link.title)}" style="color: ${link.color};"></i> ${escapeHtml(media.type)}
@@ -112,8 +112,7 @@ export default class DashboardPlusInterfaces extends DashboardPlusWidget(BaseWid
         renderTitle(this);
         this.currentConfig = await this.getWidgetConfig();
         makeSortable($(`#${this._tableId()}`), {
-            itemSelector: '.flextable-row',
-            handleSelector: '.dashboard-plus-interface-name',
+            itemSelector: '.flextable-row[data-sort-id]',
             placeholderClass: 'flextable-row dashboard-plus-row',
             label: this.translations.drag_to_reorder,
             onReorder: order => {

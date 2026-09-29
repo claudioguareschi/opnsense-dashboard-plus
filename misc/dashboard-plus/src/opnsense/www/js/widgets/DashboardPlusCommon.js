@@ -39,14 +39,16 @@ export function mergeOrder(order, selected) {
 /*
  * Drag-to-reorder for the rows or panels of a widget.
  *   itemSelector:   the elements being reordered (direct children of $container)
- *   handleSelector: the part of an item that starts a drag
+ *   handleSelector: the part of an item that starts a drag; omitted, the whole item does. A
+ *                   press anywhere on a handle never starts a drag of the widget panel itself,
+ *                   which the dashboard allows from any point of a widget in edit mode.
  *   placeholderClass: extra classes for the drop placeholder, so it inherits the row styles
  *   onReorder(ids): called with the item ids (data-sort-id) in their new order
  */
 export function makeSortable($container, {itemSelector, handleSelector, placeholderClass = '', label = '', onReorder}) {
     let $dragged = null;
     let $placeholder = null;
-    const handle = `${itemSelector} ${handleSelector}`;
+    const handle = handleSelector ? `${itemSelector} ${handleSelector}` : itemSelector;
     const clear = () => {
         delete $container[0].dataset.dragging;
         $dragged?.css({opacity: '', outline: ''});
@@ -68,6 +70,8 @@ export function makeSortable($container, {itemSelector, handleSelector, placehol
                 background: 'rgba(217, 79, 0, 0.08)'
             });
         event.originalEvent.dataTransfer.effectAllowed = 'move';
+        // Firefox starts a drag only when it carries data
+        event.originalEvent.dataTransfer.setData('text/plain', $dragged.attr('data-sort-id') ?? '');
         event.stopPropagation();
     });
     $container.on('dragover', event => {

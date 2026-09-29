@@ -62,9 +62,9 @@ export default class DashboardPlusInterfaceStatistics extends DashboardPlusWidge
             // FreeBSD counts collisions for the interface as a whole, not per direction.
             collisions: () => `<div class="dashboard-plus-number dashboard-plus-small" role="cell">${number('collisions').toLocaleString()}<br>&nbsp;</div>`
         };
-        return `<div class="flextable-row dashboard-plus-row" role="row" data-sort-id="${escapeHtml(id)}">
-            <div class="dashboard-plus-ellipsis dashboard-plus-ifstats-name" role="cell" draggable="true" title="${escapeHtml(`${intf.name} · ${this.translations.drag_to_reorder}`)}" style="cursor: grab;">
-                <a href="/interfaces.php?if=${encodeURIComponent(id)}">${escapeHtml(intf.name)}</a>
+        return `<div class="flextable-row dashboard-plus-row" role="row" data-sort-id="${escapeHtml(id)}" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}" style="cursor: grab;">
+            <div class="dashboard-plus-ellipsis dashboard-plus-ifstats-name" role="cell">
+                <a href="/interfaces.php?if=${encodeURIComponent(id)}" title="${escapeHtml(intf.name)}">${escapeHtml(intf.name)}</a>
             </div>
             <div class="dashboard-plus-muted dashboard-plus-small dashboard-plus-nowrap">${escapeHtml(this.translations.in)}<br>${escapeHtml(this.translations.out)}</div>
             ${fields.map(field => cells[field]()).join('')}
@@ -90,8 +90,7 @@ export default class DashboardPlusInterfaceStatistics extends DashboardPlusWidge
         renderTitle(this);
         this.currentConfig = await this.getWidgetConfig();
         makeSortable($(`#${this._tableId()}`), {
-            itemSelector: '.flextable-row',
-            handleSelector: '.dashboard-plus-ifstats-name',
+            itemSelector: '.flextable-row[data-sort-id]',
             placeholderClass: 'flextable-row dashboard-plus-row',
             label: this.translations.drag_to_reorder,
             onReorder: order => {

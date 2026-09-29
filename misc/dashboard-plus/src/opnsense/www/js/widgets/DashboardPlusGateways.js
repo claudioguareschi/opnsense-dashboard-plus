@@ -93,9 +93,9 @@ export default class DashboardPlusGateways extends DashboardPlusWidget(BaseWidge
         const defaultMarker = gateway.defaultgw
             ? `<i class="fa fa-globe dashboard-plus-side-icon" aria-label="${escapeHtml(this.translations.default_gateway)}" title="${escapeHtml(this.translations.default_gateway)}"></i>`
             : '';
-        return `<div class="flextable-row dashboard-plus-row" role="row" data-sort-id="${escapeHtml(gateway.uuid)}">
+        return `<div class="flextable-row dashboard-plus-row" role="row" data-sort-id="${escapeHtml(gateway.uuid)}" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}" style="cursor: grab;">
             <div role="cell">${icon}</div>
-            <div role="cell" class="dashboard-plus-gateway-name dashboard-plus-named" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}" style="cursor: grab; line-height: 1.35;">
+            <div role="cell" class="dashboard-plus-gateway-name dashboard-plus-named" style="line-height: 1.35;">
                 <div>
                     <div class="dashboard-plus-ellipsis"><a href="/ui/routing/configuration#edit=${encodeURIComponent(gateway.uuid)}" target="_blank" rel="noopener noreferrer">${escapeHtml(gateway.name)}</a></div>
                     <div class="dashboard-plus-ellipsis dashboard-plus-muted dashboard-plus-small">${escapeHtml(gateway.gateway || '—')}</div>
@@ -135,8 +135,7 @@ export default class DashboardPlusGateways extends DashboardPlusWidget(BaseWidge
         renderTitle(this);
         this.currentConfig = await this.getWidgetConfig();
         makeSortable($(`#${this._tableId()}`), {
-            itemSelector: '.flextable-row',
-            handleSelector: '.dashboard-plus-gateway-name',
+            itemSelector: '.flextable-row[data-sort-id]',
             placeholderClass: 'flextable-row dashboard-plus-row',
             label: this.translations.drag_to_reorder,
             onReorder: order => {
