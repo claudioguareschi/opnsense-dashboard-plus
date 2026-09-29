@@ -89,14 +89,18 @@ export default class DashboardPlusGateways extends DashboardPlusWidget(BaseWidge
         const icon = gateway.disabled
             ? `<i class="fa fa-times-circle-o" style="font-size: 1.3em; color: #777777;" title="${escapeHtml(this.translations.disabled)}"></i>`
             : `<i class="fa fa-check-circle-o" style="font-size: 1.3em;" title="${escapeHtml(this.translations.enabled)}"></i>`;
+        // the default-gateway globe sits beside both lines, centred like the status icon
         const defaultMarker = gateway.defaultgw
-            ? ` <i class="fa fa-globe" aria-label="${escapeHtml(this.translations.default_gateway)}" title="${escapeHtml(this.translations.default_gateway)}"></i>`
+            ? `<i class="fa fa-globe dashboard-plus-side-icon" aria-label="${escapeHtml(this.translations.default_gateway)}" title="${escapeHtml(this.translations.default_gateway)}"></i>`
             : '';
         return `<div class="flextable-row dashboard-plus-row" role="row" data-sort-id="${escapeHtml(gateway.uuid)}">
             <div role="cell">${icon}</div>
-            <div role="cell" class="dashboard-plus-gateway-name" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}" style="cursor: grab; line-height: 1.35;">
-                <div class="dashboard-plus-ellipsis"><a href="/ui/routing/configuration#edit=${encodeURIComponent(gateway.uuid)}" target="_blank" rel="noopener noreferrer">${escapeHtml(gateway.name)}</a>${defaultMarker}</div>
-                <div class="dashboard-plus-ellipsis dashboard-plus-muted dashboard-plus-small">${escapeHtml(gateway.gateway || '—')}</div>
+            <div role="cell" class="dashboard-plus-gateway-name dashboard-plus-named" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}" style="cursor: grab; line-height: 1.35;">
+                <div>
+                    <div class="dashboard-plus-ellipsis"><a href="/ui/routing/configuration#edit=${encodeURIComponent(gateway.uuid)}" target="_blank" rel="noopener noreferrer">${escapeHtml(gateway.name)}</a></div>
+                    <div class="dashboard-plus-ellipsis dashboard-plus-muted dashboard-plus-small">${escapeHtml(gateway.gateway || '—')}</div>
+                </div>
+                ${defaultMarker}
             </div>
             ${fields.map(field => `<div role="cell" class="dashboard-plus-number dashboard-plus-small">${metric(values[field])}</div>`).join('')}
             <div role="cell" style="text-align: center;">
