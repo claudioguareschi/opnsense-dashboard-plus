@@ -159,8 +159,6 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
       threat: members.some((member) => member.threat),
       contained: !members.some((member) => member.threat) && members.some((member) => member.contained),
       ids: members[0].ids_flow || null,
-      homeStart: Boolean(origin.local),
-      homeEnd: Boolean(dest.local),
       initiated: initiatedBy(members),
       direction,
       activity,
@@ -210,7 +208,6 @@ export function buildBlocks(data) {
       return target ? {
         ...block,
         path: blockPath(block, target),
-        homeEnd: Boolean(target.local),
         period: BLOCK_PULSE_PERIOD,
         phase: hash(block.source),
       } : null;
@@ -287,18 +284,22 @@ function pointAt(path, t) {
   return [ax + (bx - ax) * fraction, ay + (by - ay) * fraction];
 }
 
-/** How many samples in from one end the path leaves a circle of this radius around that end. */
-function exitIndex(path, radius, fromEnd) {
+/** How many samples in from one end the path leaves the clear circles around the homes. */
+function exitIndex(path, homes, radius, fromEnd) {
   const last = path.length - 1;
-  const point = (index) => path[fromEnd ? last - index : index];
-  const [homeX, homeLat] = point(0);
-  const homeY = mercatorY(homeLat);
-  let inside = 0;
+  const nearest = (index) => {
+    const [x, lat] = path[fromEnd ? last - index : index];
+    const y = mercatorY(lat);
+    return Math.min(...homes.map(([homeX, homeY]) => Math.hypot(x - homeX, y - homeY)));
+  };
+  let inside = nearest(0);
+  if (inside >= radius) {
+    return 0;
+  }
   for (let index = 1; index <= last; index++) {
-    const [x, lat] = point(index);
-    const distance = Math.hypot(x - homeX, mercatorY(lat) - homeY);
+    const distance = nearest(index);
     if (distance >= radius) {
-      return index - 1 + (radius - inside) / (distance - inside || 1);
+      return index - 1 + Math.max(0, Math.min(1, (radius - inside) / (distance - inside || 1)));
     }
     inside = distance;
   }
@@ -306,15 +307,19 @@ function exitIndex(path, radius, fromEnd) {
 }
 
 /**
- * The part of a path drawn on screen: the ends at the firewall stop a fixed number of pixels
- * short of it, so the house icon stays clear of arches and pulses at every zoom. The result
- * has as many samples as the path, so pulsePosition works on it unchanged; null when the whole
- * arch lies inside the clear circle (a place right next to home at this zoom).
+ * The part of a path drawn on screen: the ends stop a fixed number of pixels short of any home
+ * (the firewall's own locations, given as [lon, mercatorY]), so the house icons stay clear of
+ * arches and pulses at every zoom. The result has as many samples as the path, so
+ * pulsePosition works on it unchanged; null when the whole arch lies inside the clear circles
+ * (a place right next to home at this zoom).
  */
-export function clearOfHome(path, homeStart, homeEnd, radius) {
+export function clearOfHomes(path, homes, radius) {
   const last = path.length - 1;
-  const from = homeStart ? exitIndex(path, radius, false) : 0;
-  const to = homeEnd ? last - exitIndex(path, radius, true) : last;
+  if (!homes.length) {
+    return path;
+  }
+  const from = exitIndex(path, homes, radius, false);
+  const to = last - exitIndex(path, homes, radius, true);
   if (from === 0 && to === last) {
     return path;
   }

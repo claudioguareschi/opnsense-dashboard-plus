@@ -1,7 +1,7 @@
 /* The deck.gl map: layers for arcs, blocked sources, IDS markers and labels, fades and pulses. */
 import {Deck, MapView, WebMercatorViewport} from '@deck.gl/core';
 import {GeoJsonLayer, IconLayer, PathLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
-import {IDS_ARC_FADE_SECONDS, buildArcs, continuePhases, buildBlocks, clearOfHome, HOME_CLEARANCE, idsArcData, mercatorY, pulsePosition, pulses, unitsPerPixel} from './arcs.js';
+import {IDS_ARC_FADE_SECONDS, buildArcs, continuePhases, buildBlocks, clearOfHomes, HOME_CLEARANCE, idsArcData, mercatorY, pulsePosition, pulses, unitsPerPixel} from './arcs.js';
 import {createFollow} from './follow.js';
 import {plain} from './format.js';
 import {DEFAULT_OPTIONS} from './options.js';
@@ -21,6 +21,8 @@ const THREAT_THROB_PERIOD = 0.9;
 // city labels appear once the map is zoomed this far past the fitted world view
 const LABEL_ZOOM_STEP = 1.2;
 const MAX_LABELS = 40;
+// places considered for a label, busiest first (most are off screen when zoomed in)
+const MAX_LABEL_CANDIDATES = 600;
 const LABEL_FONT_SIZE = 11;
 // approximate glyph width for placing labels before they are drawn
 const LABEL_CHAR_WIDTH = 6.2;
@@ -292,6 +294,7 @@ export function createFirewallMap(container, options = {}) {
   let arcsDrawn = [];
   let blocksDrawn = [];
   let endpointsDrawn = [];
+  let homesDrawn = [];
   // stable colour per category across refreshes (first seen keeps its colour)
   const categoryColors = new Map();
   let categoryKey = '';
@@ -469,24 +472,37 @@ export function createFirewallMap(container, options = {}) {
   }
 
   // one label per place, busiest places first
+  // one label per place: busiest allowed traffic first, then blocked sources and alerts by hits
   function labels(data) {
     const seen = new Map();
-    for (const flow of data.flows || []) {
-      const location = locationIndex.get(flow.dest);
-      const text = location?.city || location?.region || location?.country;
-      if (!text) {
-        continue;
+    const add = (place, rank, weight) => {
+      const text = place?.city || place?.region || place?.country;
+      if (!text || !Number.isFinite(place.lat) || !Number.isFinite(place.lon)) {
+        return;
       }
-      const key = `${location.lat},${location.lon}`;
+      const key = `${place.lat},${place.lon}`;
       const current = seen.get(key);
-      seen.set(key, {text, lat: location.lat, lon: location.lon, rate: (current?.rate || 0) + (flow.rate || 0)});
+      if (!current || rank < current.rank) {
+        seen.set(key, {text, lat: place.lat, lon: place.lon, rank, weight});
+      } else if (rank === current.rank) {
+        current.weight += weight;
+      }
+    };
+    for (const flow of data.flows || []) {
+      add(locationIndex.get(flow.dest), 0, flow.rate || 0);
     }
-    return [...seen.values()].sort((a, b) => b.rate - a.rate).slice(0, MAX_LABELS);
+    if (settings.blocks) {
+      (data.blocks || []).forEach((block) => add(block, 1, block.hits || 0));
+    }
+    (data.alerts || []).forEach((alert) => add(alert, 1, alert.count || 1));
+    return [...seen.values()].sort((a, b) => a.rank - b.rank || b.weight - a.weight).slice(0, MAX_LABEL_CANDIDATES);
   }
 
   /**
    * Greedy screen-space placement: busiest places first, each label tries above, below,
-   * right and left of its point and is dropped when every spot overlaps a placed label.
+   * right and left of its point and is dropped when every spot overlaps a placed label or a
+   * house. Only places on screen count towards MAX_LABELS, and places hidden inside a house's
+   * circle get none.
    */
   function placeLabels(candidates) {
     const width = container.clientWidth;
@@ -496,13 +512,18 @@ export function createFirewallMap(container, options = {}) {
     }
     const viewport = new WebMercatorViewport({...viewState, width, height});
     const placed = [];
-    // labels keep out of the clear circle around the house
-    const boxes = locationsShown.filter((location) => location.local).map((home) => {
-      const [x, y] = viewport.project([home.lon, home.lat]);
-      return [x - HOME_CLEARANCE, y - HOME_CLEARANCE, x + HOME_CLEARANCE, y + HOME_CLEARANCE];
-    });
+    // labels keep out of the clear circle around each house
+    const homePixels = homesDrawn.map((home) => viewport.project([home.lon, home.lat]));
+    const boxes = homePixels.map(([x, y]) => [x - HOME_CLEARANCE, y - HOME_CLEARANCE, x + HOME_CLEARANCE, y + HOME_CLEARANCE]);
     for (const label of candidates) {
+      if (placed.length >= MAX_LABELS) {
+        break;
+      }
       const [px, py] = viewport.project([label.lon, label.lat]);
+      if (px < 0 || py < 0 || px > width || py > height ||
+          homePixels.some(([x, y]) => Math.hypot(px - x, py - y) < HOME_CLEARANCE)) {
+        continue;
+      }
       const w = label.text.length * LABEL_CHAR_WIDTH + 2 * LABEL_PADDING;
       const h = LABEL_FONT_SIZE + 2 * LABEL_PADDING;
       const spots = [[0, -(h / 2 + 5)], [0, h / 2 + 5], [w / 2 + 6, 0], [-(w / 2 + 6), 0]];
@@ -658,7 +679,7 @@ export function createFirewallMap(container, options = {}) {
     return [
       new IconLayer({
         id: HOME_LAYER,
-        data: locationsShown.filter((location) => location.local),
+        data: homesDrawn,
         getPosition: (location) => [location.lon, location.lat],
         iconAtlas: homeIconAtlas(),
         iconMapping: HOME_ICON_MAPPING,
@@ -684,11 +705,23 @@ export function createFirewallMap(container, options = {}) {
     const radius = HOME_CLEARANCE * unitsPerPixel(key / 20);
     clearKey = key;
     cleared = {arcs, blocks: blockArcs, locations: locationsShown};
+    // a firewall can have several home locations (one per WAN address); ones closer together
+    // than the circle share one house
+    const locals = locationsShown.filter((location) => location.local);
+    const homes = locals.map((home) => [home.lon, mercatorY(home.lat)]);
+    const within = ([x, y], points) => points.some(([homeX, homeY]) => Math.hypot(x - homeX, y - homeY) < radius);
+    const drawnPoints = [];
+    homesDrawn = [];
+    locals.forEach((home, index) => {
+      if (!within(homes[index], drawnPoints)) {
+        drawnPoints.push(homes[index]);
+        homesDrawn.push(home);
+      }
+    });
     for (const item of [...arcs, ...blockArcs]) {
-      item.shown = clearOfHome(item.path, item.homeStart, item.homeEnd, radius);
+      item.shown = clearOfHomes(item.path, homes, radius);
     }
-    const homes = locationsShown.filter((location) => location.local).map((home) => [home.lon, mercatorY(home.lat)]);
-    const nearHome = (location) => homes.some(([x, y]) => Math.hypot(location.lon - x, mercatorY(location.lat) - y) < radius);
+    const nearHome = (location) => within([location.lon, mercatorY(location.lat)], homes);
     // new arrays only when something changed, so deck.gl keeps its geometry between frames
     arcsDrawn = arcs.filter(drawn);
     blocksDrawn = blockArcs.filter(drawn);
@@ -760,6 +793,7 @@ export function createFirewallMap(container, options = {}) {
       }),
     ];
     labelCandidates = labels(data);
+    clearHome();  // labels are placed around the houses of this data
     labelLayer = buildLabelLayer();
     const layerList = compose();
     if ((arcs.length || blockArcs.length || animating(performance.now())) && frame === null) {
