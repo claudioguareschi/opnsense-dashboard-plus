@@ -124,7 +124,7 @@ const TABLE_STYLE = `
     /* an icon beside a two-line name cell, dropped when the column is too narrow for both */
     .dashboard-plus-row .dashboard-plus-named { container-type: inline-size; display: flex; align-items: center; gap: 0.6em; }
     .dashboard-plus-row .dashboard-plus-named > :first-child { min-width: 0; }
-    .dashboard-plus-row .dashboard-plus-side-icon { flex: none; font-size: 1.3em; }
+    .dashboard-plus-row .dashboard-plus-side-icon { flex: none; font-size: 1em; opacity: 0.7; }
     @container (max-width: 6em) { .dashboard-plus-row .dashboard-plus-side-icon { display: none; } }
     .dashboard-plus-pill { display: inline-block; padding: 0.2em 0.7em; border-radius: 999px; font-size: 0.88em; font-weight: 600; white-space: nowrap; }
 `;
