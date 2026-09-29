@@ -1,7 +1,7 @@
 /* The deck.gl map: layers for arcs, blocked sources, IDS markers and labels, fades and pulses. */
 import {Deck, MapView, WebMercatorViewport} from '@deck.gl/core';
 import {GeoJsonLayer, IconLayer, PathLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
-import {IDS_ARC_FADE_SECONDS, buildArcs, continuePhases, buildBlocks, clearOfHome, HOME_CLEARANCE, idsArcData, pulsePosition, pulses, unitsPerPixel} from './arcs.js';
+import {IDS_ARC_FADE_SECONDS, buildArcs, continuePhases, buildBlocks, clearOfHome, HOME_CLEARANCE, idsArcData, mercatorY, pulsePosition, pulses, unitsPerPixel} from './arcs.js';
 import {createFollow} from './follow.js';
 import {plain} from './format.js';
 import {DEFAULT_OPTIONS} from './options.js';
@@ -117,8 +117,7 @@ function homeIconAtlas() {
   }
   return homeAtlas;
 }
-const HOME_BADGE = 'firewall-map-home-badge';
-const HOME_BADGE_RADIUS = 11;
+const HOME_LAYER = 'firewall-map-home';
 const HOME_ICON_MAPPING = {home: {x: 0, y: 0, width: 48, height: 48, anchorY: 24, mask: true}};
 
 // Mercator world is 512px wide at zoom 0. The whole-world view is centred on longitude 0, so the
@@ -241,7 +240,7 @@ export function createFirewallMap(container, options = {}) {
     if (!object || !layer) {
       return null;
     }
-    if ((layer.id === 'firewall-map-endpoints' || layer.id === HOME_BADGE) && object.local) {
+    if ((layer.id === 'firewall-map-endpoints' || layer.id === HOME_LAYER) && object.local) {
       return card.firewall(object, (lastData.flows || []).filter((flow) => flow.origin === object.id));
     }
     if (layer.id === 'firewall-map-endpoints') {
@@ -289,6 +288,10 @@ export function createFirewallMap(container, options = {}) {
   let fadeKey = 'steady';
   // the zoom (to 1/20 of a step) the arch ends were last cleared of the house icon for
   let clearKey = null;
+  let cleared = {};
+  let arcsDrawn = [];
+  let blocksDrawn = [];
+  let endpointsDrawn = [];
   // stable colour per category across refreshes (first seen keeps its colour)
   const categoryColors = new Map();
   let categoryKey = '';
@@ -416,7 +419,7 @@ export function createFirewallMap(container, options = {}) {
   function pulseLayer(seconds) {
     return new ScatterplotLayer({
       id: 'firewall-map-pulses',
-      data: pulseItems,
+      data: pulseItems.filter((item) => drawn(item.arc)),
       getPosition: (item) => pulsePosition(item.arc, seconds, item.reverse),
       getRadius: (item) => item.arc.heavy ? 3.4 : 2.4,
       radiusUnits: 'pixels',
@@ -426,7 +429,7 @@ export function createFirewallMap(container, options = {}) {
   }
 
   function blockPulseLayers(seconds) {
-    const active = blockArcs.filter((block) => block.activity > 0);
+    const active = blockArcs.filter((block) => block.activity > 0 && drawn(block));
     return [
       new ScatterplotLayer({
         id: 'firewall-map-block-pulses',
@@ -493,7 +496,11 @@ export function createFirewallMap(container, options = {}) {
     }
     const viewport = new WebMercatorViewport({...viewState, width, height});
     const placed = [];
-    const boxes = [];
+    // labels keep out of the clear circle around the house
+    const boxes = locationsShown.filter((location) => location.local).map((home) => {
+      const [x, y] = viewport.project([home.lon, home.lat]);
+      return [x - HOME_CLEARANCE, y - HOME_CLEARANCE, x + HOME_CLEARANCE, y + HOME_CLEARANCE];
+    });
     for (const label of candidates) {
       const [px, py] = viewport.project([label.lon, label.lat]);
       const w = label.text.length * LABEL_CHAR_WIDTH + 2 * LABEL_PADDING;
@@ -537,7 +544,7 @@ export function createFirewallMap(container, options = {}) {
     return [
       new PathLayer({
         id: 'firewall-map-arcs',
-        data: arcs,
+        data: arcsDrawn,
         getPath: (arc) => arc.shown || arc.path,
         getWidth: (arc) => arc.heavy ? HEAVY_WIDTH : LINK_WIDTH,
         widthUnits: 'pixels',
@@ -550,7 +557,7 @@ export function createFirewallMap(container, options = {}) {
       }),
       new PathLayer({
         id: 'firewall-map-blocks',
-        data: blockArcs,
+        data: blocksDrawn,
         getPath: (block) => block.shown || block.path,
         getWidth: (block) => block.threat ? 2.4 : 1.4,
         widthUnits: 'pixels',
@@ -588,7 +595,7 @@ export function createFirewallMap(container, options = {}) {
       new ScatterplotLayer({
         // detection marker at the middle of an IDS connection's own arc
         id: 'firewall-map-ids-markers',
-        data: arcs.filter((arc) => arc.ids).map((arc) => ({arc, position: arc.path[Math.floor(arc.path.length / 2)]})),
+        data: arcs.filter((arc) => arc.ids && drawn(arc)).map((arc) => ({arc, position: arc.path[Math.floor(arc.path.length / 2)]})),
         getPosition: (item) => item.position,
         getRadius: 5,
         radiusUnits: 'pixels',
@@ -603,7 +610,7 @@ export function createFirewallMap(container, options = {}) {
       }),
       new TextLayer({
         id: 'firewall-map-ids-marks',
-        data: arcs.filter((arc) => arc.ids).map((arc) => ({arc, position: arc.path[Math.floor(arc.path.length / 2)]})),
+        data: arcs.filter((arc) => arc.ids && drawn(arc)).map((arc) => ({arc, position: arc.path[Math.floor(arc.path.length / 2)]})),
         getPosition: (item) => item.position,
         getText: () => '!',
         getSize: 10,
@@ -631,7 +638,7 @@ export function createFirewallMap(container, options = {}) {
       }),
       new ScatterplotLayer({
         id: 'firewall-map-endpoints',
-        data: locationsShown.filter((location) => !location.local),
+        data: endpointsDrawn,
         getPosition: (location) => [location.lon, location.lat],
         getRadius: 2.5,
         radiusUnits: 'pixels',
@@ -645,55 +652,51 @@ export function createFirewallMap(container, options = {}) {
     ];
   }
 
-  // the firewall's own location, drawn above the arches, pulses and nearby endpoints: a disc in
-  // the map's background colour with a thin ring keeps the house readable however busy it gets
+  // the firewall's own location, drawn above the arches and pulses, which keep out of a clear
+  // circle around it (see clearHome); the whole icon square is pickable for the firewall card
   function homeLayers() {
-    const homes = locationsShown.filter((location) => location.local);
-    const opacity = (location) => endpointFader.opacity(location, frameNow);
     return [
-      new ScatterplotLayer({
-        id: HOME_BADGE,
-        data: homes,
-        getPosition: (location) => [location.lon, location.lat],
-        getRadius: HOME_BADGE_RADIUS,
-        radiusUnits: 'pixels',
-        stroked: true,
-        filled: true,
-        getFillColor: (location) => faded(rgb(colors.background.slice(0, 3), 245), opacity(location)),
-        getLineColor: (location) => faded(rgb(colors.endpoint.slice(0, 3), 170), opacity(location)),
-        lineWidthUnits: 'pixels',
-        getLineWidth: 1.5,
-        pickable: true,
-        updateTriggers: {getFillColor: [colors.background, fadeKey], getLineColor: [colors.endpoint, fadeKey]},
-      }),
       new IconLayer({
-        id: 'firewall-map-home',
-        data: homes,
+        id: HOME_LAYER,
+        data: locationsShown.filter((location) => location.local),
         getPosition: (location) => [location.lon, location.lat],
         iconAtlas: homeIconAtlas(),
         iconMapping: HOME_ICON_MAPPING,
         getIcon: () => 'home',
         getSize: 15,
         sizeUnits: 'pixels',
-        getColor: (location) => faded(colors.endpoint, opacity(location)),
-        pickable: false,
+        alphaCutoff: 0,
+        getColor: (location) => faded(colors.endpoint, endpointFader.opacity(location, frameNow)),
+        pickable: true,
         updateTriggers: {getColor: [colors.endpoint, fadeKey]},
       }),
     ];
   }
 
-  // arches and pulses stop short of the house icon by a fixed number of pixels, so the cleared
-  // part of each path follows the zoom; new arches are cleared on their first frame
+  // arches and pulses stop short of the house icon by a fixed number of pixels, and endpoints
+  // inside that circle are not drawn, so the cleared part follows the zoom; new items are
+  // cleared on their first frame
   function clearHome() {
     const key = Math.round(viewState.zoom * 20);
+    if (key === clearKey && cleared.arcs === arcs && cleared.blocks === blockArcs && cleared.locations === locationsShown) {
+      return;
+    }
     const radius = HOME_CLEARANCE * unitsPerPixel(key / 20);
     clearKey = key;
+    cleared = {arcs, blocks: blockArcs, locations: locationsShown};
     for (const item of [...arcs, ...blockArcs]) {
-      if (item.clearKey !== key) {
-        item.shown = clearOfHome(item.path, item.homeStart, item.homeEnd, radius);
-        item.clearKey = key;
-      }
+      item.shown = clearOfHome(item.path, item.homeStart, item.homeEnd, radius);
     }
+    const homes = locationsShown.filter((location) => location.local).map((home) => [home.lon, mercatorY(home.lat)]);
+    const nearHome = (location) => homes.some(([x, y]) => Math.hypot(location.lon - x, mercatorY(location.lat) - y) < radius);
+    // new arrays only when something changed, so deck.gl keeps its geometry between frames
+    arcsDrawn = arcs.filter(drawn);
+    blocksDrawn = blockArcs.filter(drawn);
+    endpointsDrawn = locationsShown.filter((location) => !location.local && !nearHome(location));
+  }
+
+  function drawn(item) {
+    return item.shown !== null;
   }
 
   function animating(now) {

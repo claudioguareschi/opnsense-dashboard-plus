@@ -269,11 +269,9 @@ export function continuePhases(previous, arcs, seconds) {
   return arcs;
 }
 
-// clear space, in screen pixels, kept between the firewall's house icon and the arches and pulses
-// that end there (the icon is 15px, the widest pulse 3.4px in radius)
-export const HOME_CLEARANCE = 13;
-// an arch loses at most this share of its samples at each end, so a short one still shows
-const MAX_CLEARED_SHARE = 0.4;
+// radius, in screen pixels, of the clear circle around the firewall's house icon: arches, pulses
+// and endpoints stay out of it and the map shows through (the icon is 15px)
+export const HOME_CLEARANCE = 14;
 
 /** Map units (degrees of longitude, and mercatorY) per screen pixel at a deck.gl zoom. */
 export function unitsPerPixel(zoom) {
@@ -295,23 +293,23 @@ function exitIndex(path, radius, fromEnd) {
   const point = (index) => path[fromEnd ? last - index : index];
   const [homeX, homeLat] = point(0);
   const homeY = mercatorY(homeLat);
-  const limit = last * MAX_CLEARED_SHARE;
   let inside = 0;
-  for (let index = 1; index <= limit; index++) {
+  for (let index = 1; index <= last; index++) {
     const [x, lat] = point(index);
     const distance = Math.hypot(x - homeX, mercatorY(lat) - homeY);
     if (distance >= radius) {
-      return Math.min(limit, index - 1 + (radius - inside) / (distance - inside || 1));
+      return index - 1 + (radius - inside) / (distance - inside || 1);
     }
     inside = distance;
   }
-  return limit;
+  return last;
 }
 
 /**
  * The part of a path drawn on screen: the ends at the firewall stop a fixed number of pixels
  * short of it, so the house icon stays clear of arches and pulses at every zoom. The result
- * has as many samples as the path, so pulsePosition works on it unchanged.
+ * has as many samples as the path, so pulsePosition works on it unchanged; null when the whole
+ * arch lies inside the clear circle (a place right next to home at this zoom).
  */
 export function clearOfHome(path, homeStart, homeEnd, radius) {
   const last = path.length - 1;
@@ -319,6 +317,9 @@ export function clearOfHome(path, homeStart, homeEnd, radius) {
   const to = homeEnd ? last - exitIndex(path, radius, true) : last;
   if (from === 0 && to === last) {
     return path;
+  }
+  if (to - from < 0.5) {
+    return null;
   }
   const shown = [];
   for (let step = 0; step <= last; step++) {
