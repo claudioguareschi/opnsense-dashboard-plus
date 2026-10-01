@@ -173,6 +173,11 @@ signed; `publish.sh` replaces older versions and signs the whole catalogue.
 
 ## Changelog
 
+- **os-dashboard-plus 0.1_47**: QuickAssist endpoints of one model in the same state are one row
+  with a count (e.g. "Intel QAT C62x ×3 (Active)"); the DNS row shows what the firewall resolves
+  through: the local resolver (Unbound recursive or forwarding with its forwarders, Dnsmasq, BIND),
+  else the resolv.conf servers, or "Not set".
+
 - **os-dashboard-plus 0.1_46**: QuickAssist shows every started QAT device as active when qat_ocf
   is enabled (qat_ocf is one provider for all devices, not one per qatN); down, asym-only and
   user-mode-only devices show inactive.
