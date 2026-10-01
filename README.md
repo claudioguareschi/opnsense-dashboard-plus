@@ -195,6 +195,11 @@ signed; `publish.sh` replaces older versions and signs the whole catalogue.
 
 ## Changelog
 
+- **os-firewall-map 0.1_79**: one switch, *Maintain blocklist aliases*, keeps the `FWMAP_*` alias of
+  each selected feed and `FWMAP_AbuseIPDB` (on after upgrade where feed aliases exist); the map
+  downloads the curated feeds itself, so they flag traffic with or without an alias; cleaner
+  settings (no star, shorter help, checkboxes level with their labels).
+
 - **os-firewall-map 0.1_78**: a Threats target on the firewall itself names its interface
   ("198.13.91.163 · WAN"); "+ N other targets" opens the card, which lists every target.
 
