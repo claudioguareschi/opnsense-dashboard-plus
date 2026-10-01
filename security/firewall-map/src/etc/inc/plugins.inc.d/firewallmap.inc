@@ -33,6 +33,8 @@ function firewallmap_cron()
         ['autocron' => ['/usr/local/sbin/configctl -d firewallmap geodb update', '17', '4']],
         /* at most once a day; skipped without an AbuseIPDB key */
         ['autocron' => ['/usr/local/sbin/configctl -d firewallmap abuseipdb update', '43', '4']],
+        /* the curated feeds in use, at most once a day */
+        ['autocron' => ['/usr/local/sbin/configctl -d firewallmap feeds update', '51', '4']],
         /* keeps threat history fed after a reboot; a no-op unless the widget is in use */
         ['autocron' => ['/usr/local/sbin/configctl -d firewallmap ensure', '*/10']],
     ];

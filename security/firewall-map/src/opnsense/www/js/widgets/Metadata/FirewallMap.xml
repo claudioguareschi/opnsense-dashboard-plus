@@ -42,19 +42,14 @@
             <geo_key>MaxMind license key</geo_key>
             <geo_update>Update frequency</geo_update>
             <abuseipdb_key>AbuseIPDB API key</abuseipdb_key>
-            <abuseipdb_pf>Maintain FWMAP_AbuseIPDB alias</abuseipdb_pf>
-            <abuseipdb_pf_help>Creates an external PF alias and refreshes it from the downloaded 100%-confidence blacklist. No firewall rule is added; use the alias in rules on the interfaces you choose.</abuseipdb_pf_help>
-            <abuseipdb_pf_status>Alias maintenance</abuseipdb_pf_status>
-            <abuseipdb_pending>blacklist refresh pending</abuseipdb_pending>
-            <enabled>enabled</enabled>
-            <disabled>disabled</disabled>
+            <blocklist_aliases>Maintain blocklist aliases</blocklist_aliases>
+            <blocklist_aliases_help>Keeps an FWMAP_* alias for each selected feed and for the AbuseIPDB blacklist, for use in your own rules. No rules are added.</blocklist_aliases_help>
             <key_set_abuse>Key saved (enter a new one to replace it, "-" to remove it)</key_set_abuse>
             <abuseipdb_none>Optional: enables abuse reports when investigating an address</abuseipdb_none>
             <threat_lists>Threat lists</threat_lists>
-            <threat_lists_help>With none selected, the lists marked ★ are used: well-known feed tables and URL aliases that a block rule uses.</threat_lists_help>
+            <threat_lists_help>Used to flag traffic on the map. With none selected: feed tables and the aliases your block rules use.</threat_lists_help>
             <display_heading>Display (your dashboard)</display_heading>
             <firewall_heading>Firewall-wide (administrators)</firewall_heading>
-            <feed_will_install>(feed, added when saved)</feed_will_install>
             <days>days</days>
             <key_set>Key saved (enter a new one to replace it, "-" to use the GeoIP alias key)</key_set>
             <key_from_alias>Using the key from the GeoIP alias (enter one to override)</key_from_alias>

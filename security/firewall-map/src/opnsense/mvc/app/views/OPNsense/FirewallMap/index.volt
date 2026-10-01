@@ -229,8 +229,8 @@
     .fwmap-q-bar .fwmap-q-menu { padding: 6px 10px; }
     .fwmap-q-footer { float: left; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 28px; text-align: left;
         font-size: 1em; padding-top: 8px; }
-    .fwmap-q-record { font-weight: normal; margin: 0; }
-    .fwmap-q-record input { width: 18px; height: 18px; vertical-align: -4px; margin-right: 8px; }
+    .fwmap-q-record { display: inline-flex; align-items: center; font-weight: normal; margin: 0; }
+    .fwmap-q-record input { width: 18px; height: 18px; margin: 0 8px 0 0; flex: none; }
     .fwmap-q-source { opacity: .75; }
 
     /* details panel: header, verdict pill, diagram, cards, action bar. Base size 13/14 of the page text */

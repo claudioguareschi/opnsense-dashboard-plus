@@ -3,13 +3,14 @@
 """Threat lists for Firewall Map+: blocklist pf tables, curated feeds and AbuseIPDB verdicts."""
 
 import ipaddress
+import os
 import subprocess
 import sys
 import threading
 from array import array
 from bisect import bisect_left
 
-from fwmap_common import ABUSEIPDB_BLACKLIST, CONFIG_XML, PFCTL, REPUTATION_KIND, REPUTATION_MAX_AGE
+from fwmap_common import ABUSEIPDB_BLACKLIST, CONFIG_XML, PFCTL, REPUTATION_KIND, REPUTATION_MAX_AGE, STATE_DIR
 from fwmap_pf import blocked_rule_tables, config_aliases, pf_tables
 
 
@@ -53,7 +54,9 @@ def is_feed_table(table, aliases):
     return lowered.startswith(BLOCKLIST_TABLE_PREFIXES)
 
 
-# curated public feeds this plugin can add as daily URL table aliases
+# curated public feeds: downloaded by firewallmap_feeds.py for the map, and added as daily URL
+# table aliases when "Maintain blocklist aliases" is on
+FEED_DIR = f"{STATE_DIR}/feeds"
 FEEDS = [
     {"name": "FWMAP_Spamhaus_DROP", "label": "Spamhaus DROP", "url": "https://www.spamhaus.org/drop/drop.txt",
      "about": "Hijacked and criminal netblocks"},
@@ -66,6 +69,18 @@ FEEDS = [
      "about": "Combined attack sources (DROP, Feodo, DShield...). Also lists private and bogon ranges: "
               "do not use it to block LAN traffic."},
 ]
+
+
+FEED_NAMES = {feed["name"] for feed in FEEDS}
+
+
+def feed_file(name):
+    return f"{FEED_DIR}/{name}.txt"
+
+
+def downloaded_feeds():
+    """Curated feeds with a local copy (firewallmap_feeds.py)."""
+    return {feed["name"] for feed in FEEDS if os.path.exists(feed_file(feed["name"]))}
 
 
 def threat_list_candidates(config=CONFIG_XML, tables=None, aliases=None):
@@ -100,7 +115,9 @@ def chosen_threat_lists(setting, config=CONFIG_XML):
     """The administrator's choice when set, otherwise the automatic selection."""
     names = {name.strip() for name in (setting or "").split(",") if name.strip()}
     tables = set(pf_tables())
-    chosen = (names & tables) if names else blocklist_tables(config, list(tables))
+    # a curated feed counts from its downloaded copy, with or without its alias
+    available = tables | downloaded_feeds()
+    chosen = (names & available) if names else blocklist_tables(config, list(tables))
     # The same cache is indexed below under one stable, friendly badge; reading its PF alias too
     # would duplicate both work and the badge whenever optional alias maintenance is enabled.
     chosen.discard(ABUSEIPDB_TABLE)
@@ -171,6 +188,14 @@ class BlocklistIndex:
         try:
             contents = {}
             for table in sorted(tables):
+                if table in FEED_NAMES:
+                    # a curated feed's own download, rather than its alias table (which may not exist)
+                    try:
+                        with open(feed_file(table)) as handle:
+                            contents[table] = handle.read().split()[:BLOCKLIST_MAX_ENTRIES]
+                        continue
+                    except OSError:
+                        pass
                 try:
                     output = subprocess.run(
                         [PFCTL, "-t", table, "-T", "show"], capture_output=True, check=False, text=True, timeout=20,

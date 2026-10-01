@@ -70,7 +70,7 @@ def alias_settings(path=CONFIG_XML):
         root = ElementTree.parse(path).getroot()
     except (OSError, ElementTree.ParseError):
         return False, False
-    enabled = (root.findtext("./OPNsense/FirewallMap/general/abuseipdb_alias") or "").strip() == "1"
+    enabled = (root.findtext("./OPNsense/FirewallMap/general/blocklist_aliases") or "").strip() == "1"
     defined = any((alias.findtext("name") or "").strip() == PF_TABLE
                   for alias in root.iterfind("./OPNsense/Firewall/Alias/aliases/alias"))
     return enabled, defined

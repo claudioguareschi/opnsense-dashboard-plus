@@ -112,7 +112,7 @@ class AbuseAliasTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             config = os.path.join(directory, "config.xml")
             with open(config, "w") as handle:
-                handle.write("<opnsense><OPNsense><FirewallMap><general><abuseipdb_alias>1</abuseipdb_alias>"
+                handle.write("<opnsense><OPNsense><FirewallMap><general><blocklist_aliases>1</blocklist_aliases>"
                              "</general></FirewallMap><Firewall><Alias><aliases><alias><name>FWMAP_AbuseIPDB</name>"
                              "</alias></aliases></Alias></Firewall></OPNsense></opnsense>")
             self.assertEqual(ABUSEIPDB.alias_settings(config), (True, True))

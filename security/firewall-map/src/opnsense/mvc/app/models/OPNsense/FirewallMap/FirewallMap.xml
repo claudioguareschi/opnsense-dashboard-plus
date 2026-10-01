@@ -33,10 +33,11 @@
                 <Required>Y</Required>
                 <Default>1</Default>
             </record_threats>
-            <abuseipdb_alias type="BooleanField">
+            <!-- FWMAP_* aliases for the chosen curated feeds and the AbuseIPDB blacklist; no rules -->
+            <blocklist_aliases type="BooleanField">
                 <Required>Y</Required>
                 <Default>0</Default>
-            </abuseipdb_alias>
+            </blocklist_aliases>
             <update_days type="IntegerField">
                 <Required>Y</Required>
                 <Default>3</Default>

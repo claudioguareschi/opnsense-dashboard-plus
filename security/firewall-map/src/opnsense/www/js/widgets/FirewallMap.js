@@ -7,7 +7,7 @@
 const AUTO_HEIGHT = 10000;
 
 export default class FirewallMap extends BaseWidget {
-    static FIREWALL_WIDE = ['geo_provider', 'geo_key', 'geo_update_days', 'abuseipdb_key', 'abuseipdb_pf', 'threat_lists'];
+    static FIREWALL_WIDE = ['geo_provider', 'geo_key', 'geo_update_days', 'abuseipdb_key', 'threat_lists', 'blocklist_aliases'];
 
     constructor(config) {
         super(config);
@@ -90,22 +90,20 @@ export default class FirewallMap extends BaseWidget {
                 type: 'text',
                 default: '',
             },
-            abuseipdb_pf: {
-                id: `${this.id}-option-abuseipdb-pf`,
-                title: this.translations.abuseipdb_pf,
-                type: 'select',
-                options: choices([['0', this.translations.none], ['1', this.translations.abuseipdb_pf]]),
-                default: geo.abuseipdb_alias === '1' ? '1' : '0',
-            },
             threat_lists: {
                 id: `${this.id}-option-threat-lists`,
                 title: this.translations.threat_lists,
                 type: 'select_multiple',
                 // nothing selected means automatic (feed tables and URL aliases used by block rules)
-                options: choices((this.threatTables?.tables || []).map((table) => [table.name,
-                    `${table.label || table.name}${table.curated && !table.installed ? ` ${this.translations.feed_will_install}` : ''}`
-                    + `${(this.threatTables.automatic || []).includes(table.name) ? ' ★' : ''}`])),
+                options: choices((this.threatTables?.tables || []).map((table) => [table.name, table.label || table.name])),
                 default: (geo.threat_lists || '').split(',').filter(Boolean),
+            },
+            blocklist_aliases: {
+                id: `${this.id}-option-blocklist-aliases`,
+                title: this.translations.blocklist_aliases,
+                type: 'select',
+                options: choices([['0', this.translations.none], ['1', this.translations.blocklist_aliases]]),
+                default: geo.blocklist_aliases === '1' ? '1' : '0',
             },
         };
     }
@@ -114,14 +112,12 @@ export default class FirewallMap extends BaseWidget {
     _keyHelp() {
         const geo = this.geoSettings || {};
         const source = geo.database?.key_source;
-        const list = geo.abuseipdb_blacklist || {};
-        const counts = list.updated ? `${Number(list.count || 0).toLocaleString()} (${Number(list.count_v4 || 0).toLocaleString()} IPv4, ${Number(list.count_v6 || 0).toLocaleString()} IPv6)` : this.translations.abuseipdb_pending;
         return {
             'geo-key': source === 'plugin' ? this.translations.key_set
                 : source === 'alias' ? this.translations.key_from_alias : this.translations.key_none,
             'abuseipdb-key': geo.abuseipdb_configured ? this.translations.key_set_abuse : this.translations.abuseipdb_none,
-            'abuseipdb-pf': `${this.translations.abuseipdb_pf_help} ${this.translations.abuseipdb_pf_status}: ${geo.abuseipdb_alias === '1' ? this.translations.enabled : this.translations.disabled}; ${counts}.`,
             'threat-lists': this.translations.threat_lists_help,
+            'blocklist-aliases': this.translations.blocklist_aliases_help,
         };
     }
 
@@ -155,17 +151,18 @@ export default class FirewallMap extends BaseWidget {
                 ['hostnames', this.translations.hostnames],
                 ['asn', this.translations.asn],
                 ['follow', this.translations.follow],
-                ['abuseipdb-pf', this.translations.abuseipdb_pf],
+                ['blocklist-aliases', this.translations.blocklist_aliases],
             ]) {
                 const $select = $(`#${this.id}-option-${option}`);
                 const $container = containerOf(option);
                 $container.css({marginTop: '8px', marginBottom: '2px'});
                 $container.find('.bootstrap-select').hide();
-                const $checkbox = $('<input type="checkbox" style="margin: 0 6px 0 0;">')
+                // flex keeps the box on the text's line whatever the theme's checkbox margins are
+                const $checkbox = $('<input type="checkbox" style="margin: 0 8px 0 0; flex: none; position: static;">')
                     .prop('checked', $select.val() === '1')
                     .on('change', (event) => $select.val(event.target.checked ? '1' : '0'));
                 $container.children('div').first().empty().append(
-                    $('<label style="font-weight: bold; cursor: pointer; margin: 0; line-height: 20px;"></label>')
+                    $('<label style="display: flex; align-items: center; font-weight: bold; cursor: pointer; margin: 0; line-height: 20px;"></label>')
                         .append($checkbox, document.createTextNode(label)),
                 );
             }
@@ -293,34 +290,6 @@ export default class FirewallMap extends BaseWidget {
     }
 
     /** Curated feeds picked in the dialog become URL table aliases; returns the names that failed. */
-    async _installFeeds(selected) {
-        const install = (this.threatTables?.tables || []).filter((table) =>
-            table.curated && !table.installed && selected.includes(table.name));
-        const failed = [];
-        for (const feed of install) {
-            try {
-                const saved = await this.ajaxCall('/api/firewall/alias/add_item', JSON.stringify({alias: {
-                    enabled: '1', name: feed.name, type: 'urltable', content: feed.url, updatefreq: '1',
-                    description: `Firewall Map+ threat feed: ${feed.label}`,
-                }}), 'POST');
-                if (saved.result !== 'saved') {
-                    throw new Error(JSON.stringify(saved.validations || saved));
-                }
-            } catch (error) {
-                failed.push(feed.name);
-                this._settingsError(`${feed.label}: ${error?.message || error?.statusText || error}`);
-            }
-        }
-        if (install.length > failed.length) {
-            try {
-                await this.ajaxCall('/api/firewall/alias/reconfigure', JSON.stringify({}), 'POST');
-            } catch (error) {
-                this._settingsError(error?.statusText || String(error));
-            }
-        }
-        return failed;
-    }
-
     /** Send only what the administrator changed, so an unrelated save never overwrites another's choices. */
     async _saveFirewallWide(values) {
         const geo = this.geoSettings;
@@ -337,12 +306,11 @@ export default class FirewallMap extends BaseWidget {
         if ((values.abuseipdb_key || '').trim()) {
             update.abuseipdb_key = values.abuseipdb_key.trim();
         }
-        if (String(values.abuseipdb_pf) !== String(geo.abuseipdb_alias === '1' ? '1' : '0')) {
-            update.abuseipdb_alias = values.abuseipdb_pf === '1' ? '1' : '0';
+        if (String(values.blocklist_aliases) !== String(geo.blocklist_aliases === '1' ? '1' : '0')) {
+            update.blocklist_aliases = values.blocklist_aliases === '1' ? '1' : '0';
         }
-        // a curated feed whose alias could not be created is not saved as a threat list
-        const failed = await this._installFeeds(values.threat_lists || []);
-        const lists = (values.threat_lists || []).filter((name) => !failed.includes(name)).join(',');
+        // curated feeds are downloaded by the plugin; their aliases follow "Maintain blocklist aliases"
+        const lists = (values.threat_lists || []).join(',');
         // without the table list (lookup failed) the selection cannot be trusted
         if ((this.threatTables?.tables || []).length && lists !== (geo.threat_lists || '')) {
             update.threat_lists = lists;

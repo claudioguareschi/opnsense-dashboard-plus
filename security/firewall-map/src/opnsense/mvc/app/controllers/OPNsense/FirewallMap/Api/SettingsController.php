@@ -29,7 +29,7 @@ namespace OPNsense\FirewallMap\Api;
 use OPNsense\Base\ApiControllerBase;
 use OPNsense\Core\Backend;
 use OPNsense\Core\Config;
-use OPNsense\Firewall\Alias;
+use OPNsense\FirewallMap\BlocklistAliases;
 use OPNsense\FirewallMap\FirewallMap;
 
 /**
@@ -38,9 +38,6 @@ use OPNsense\FirewallMap\FirewallMap;
  */
 class SettingsController extends ApiControllerBase
 {
-    private const ABUSE_ALIAS = 'FWMAP_AbuseIPDB';
-    private const ABUSE_ALIAS_DESCRIPTION = 'Firewall Map+ AbuseIPDB blacklist (100% confidence; no rules added)';
-
     private function status()
     {
         $status = json_decode((new Backend())->configdRun('firewallmap geodb status'), true);
@@ -58,64 +55,9 @@ class SettingsController extends ApiControllerBase
             'abuseipdb_blacklist' => json_decode((string)@file_get_contents('/var/db/firewallmap/abuseipdb.json'), true) ?: [],
             'threat_lists' => (string)$general->threat_lists,
             'record_threats' => (string)$general->record_threats,
-            'abuseipdb_alias' => (string)$general->abuseipdb_alias,
+            'blocklist_aliases' => (string)$general->blocklist_aliases,
             'database' => $this->status(),
         ];
-    }
-
-    /**
-     * Add or remove the external alias FWMAP_AbuseIPDB. Firewall Map+ only fills its table
-     * (firewallmap_abuseipdb.py sync); the administrator decides which rules use it.
-     * Returns [alias model, changed, error].
-     */
-    private function reconcileAbuseAlias(bool $enabled): array
-    {
-        $model = new Alias();
-        $found = null;
-        $foundUuid = null;
-        foreach ($model->aliases->alias->iterateItems() as $uuid => $alias) {
-            if ((string)$alias->name === self::ABUSE_ALIAS) {
-                $found = $alias;
-                $foundUuid = $uuid;
-                break;
-            }
-        }
-        /* an alias of that name made by someone else is never filled or removed */
-        $ours = $found !== null && (string)$found->type === 'external' &&
-            (string)$found->description === self::ABUSE_ALIAS_DESCRIPTION;
-        if ($enabled) {
-            if ($found !== null && !$ours) {
-                return [$model, false, sprintf(
-                    gettext('An alias named %s already exists and was not created by Firewall Map+.'),
-                    self::ABUSE_ALIAS
-                )];
-            }
-            if ($found !== null) {
-                return [$model, false, null];
-            }
-            $model->aliases->alias->add()->setNodes([
-                'enabled' => '1',
-                'name' => self::ABUSE_ALIAS,
-                'type' => 'external',
-                'description' => self::ABUSE_ALIAS_DESCRIPTION,
-            ]);
-        } else {
-            if (!$ours) {
-                return [$model, false, null];
-            }
-            if (!empty($model->whereUsed(self::ABUSE_ALIAS))) {
-                return [$model, false, sprintf(
-                    gettext('%s is used in firewall rules or other aliases: remove it there first.'),
-                    self::ABUSE_ALIAS
-                )];
-            }
-            $model->aliases->alias->del($foundUuid);
-        }
-        $messages = [];
-        foreach ($model->performValidation() as $message) {
-            $messages[] = $message->getMessage();
-        }
-        return [$model, true, empty($messages) ? null : implode(' ', $messages)];
     }
 
     public function setAction()
@@ -127,7 +69,9 @@ class SettingsController extends ApiControllerBase
         $general = $model->general;
         $ensure = false;
         $fetchBlacklist = false;
-        $aliasBefore = (string)$general->abuseipdb_alias;
+        /* the aliases follow the switch, the chosen lists and whether an AbuseIPDB key exists */
+        $aliasesBefore = [(string)$general->blocklist_aliases, (string)$general->threat_lists, (string)$general->abuseipdb_key !== ''];
+        $listsBefore = (string)$general->threat_lists;
         /* the database is only re-checked when something that decides which one to fetch changed */
         $databaseBefore = [(string)$general->provider, (string)$general->update_days, (string)$general->license_key];
         foreach (['provider', 'update_days'] as $field) {
@@ -139,8 +83,8 @@ class SettingsController extends ApiControllerBase
             $general->record_threats = $this->request->getPost('record_threats') === '1' ? '1' : '0';
             $ensure = $general->record_threats == '1';
         }
-        if ($this->request->hasPost('abuseipdb_alias')) {
-            $general->abuseipdb_alias = $this->request->getPost('abuseipdb_alias') === '1' ? '1' : '0';
+        if ($this->request->hasPost('blocklist_aliases')) {
+            $general->blocklist_aliases = $this->request->getPost('blocklist_aliases') === '1' ? '1' : '0';
         }
         if ($this->request->hasPost('threat_lists')) {
             $general->threat_lists = (string)$this->request->getPost('threat_lists');
@@ -171,9 +115,17 @@ class SettingsController extends ApiControllerBase
         if (!empty($messages)) {
             return ['result' => 'failed', 'validations' => $messages];
         }
-        [$aliasModel, $aliasChanged, $aliasError] = $this->reconcileAbuseAlias((string)$general->abuseipdb_alias === '1');
-        if ($aliasError !== null) {
-            return ['result' => 'failed', 'validations' => [$aliasError]];
+        $aliasesAfter = [(string)$general->blocklist_aliases, (string)$general->threat_lists, (string)$general->abuseipdb_key !== ''];
+        $aliasChanged = false;
+        if ($aliasesAfter !== $aliasesBefore) {
+            [$aliasModel, $aliasChanged, $aliasError] = BlocklistAliases::reconcile(
+                (string)$general->blocklist_aliases === '1',
+                (string)$general->threat_lists,
+                (string)$general->abuseipdb_key !== ''
+            );
+            if ($aliasError !== null) {
+                return ['result' => 'failed', 'validations' => [$aliasError]];
+            }
         }
         $model->serializeToConfig();
         if ($aliasChanged) {
@@ -182,12 +134,12 @@ class SettingsController extends ApiControllerBase
         Config::getInstance()->save();
         /* Reload in place: preserve live flow/alert history while rebuilding the chosen list index. */
         (new Backend())->configdRun('firewallmap reload');
-        if ((string)$general->abuseipdb_alias !== $aliasBefore || $aliasChanged) {
-            /* Apply the alias definition without creating or changing any firewall rule. */
-            (new Backend())->configdRun('filter reload skip_alias');
-            (new Backend())->configdRun('template reload OPNsense/Filter');
-            (new Backend())->configdRun('filter refresh_aliases');
-            (new Backend())->configdRun('firewallmap abuseipdb sync');
+        if ($aliasChanged || $aliasesAfter[0] !== $aliasesBefore[0]) {
+            /* alias definitions only: no firewall rule is created or changed */
+            BlocklistAliases::apply();
+        }
+        if ((string)$general->threat_lists !== $listsBefore) {
+            (new Backend())->configdRun('firewallmap feeds update', true);
         }
         if ($fetchBlacklist) {
             (new Backend())->configdRun('firewallmap abuseipdb refresh', true);

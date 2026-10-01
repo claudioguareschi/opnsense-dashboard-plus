@@ -33,7 +33,7 @@ class GeoDatabaseTest(unittest.TestCase):
                 handle.write("<opnsense><OPNsense><FirewallMap><general><provider>dbip</provider>"
                              "<license_key/><update_days>7</update_days></general></FirewallMap></OPNsense></opnsense>")
             self.assertEqual(GEODB.settings(path), {"provider": "dbip", "license_key": "", "update_days": 7,
-                             "threat_lists": "", "record_threats": "1", "abuseipdb_alias": "0"})
+                             "threat_lists": "", "record_threats": "1", "blocklist_aliases": "0"})
             self.assertEqual(GEODB.settings(os.path.join(directory, "none.xml"))["provider"], "auto")
 
     def test_automatic_provider_prefers_maxmind_with_a_key(self):

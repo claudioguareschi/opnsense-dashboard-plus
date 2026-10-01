@@ -91,19 +91,22 @@ sample every 20 seconds) even with no map open; switch this off in the Threats f
 Threat lists only **mark** traffic; no firewall rule is added or changed unless you use an alias in
 a rule yourself. Choose them in the widget settings (administrators):
 
-- Curated feeds, created as URL-table aliases the first time you select them: Spamhaus DROP,
-  abuse.ch Feodo Tracker, Emerging Threats compromised hosts, FireHOL level 1.
+- Curated feeds, downloaded daily by Firewall Map+: Spamhaus DROP, abuse.ch Feodo Tracker,
+  Emerging Threats compromised hosts, FireHOL level 1.
 - Any URL-table or external alias of your own (e.g. CrowdSec).
 - With an AbuseIPDB API key: the AbuseIPDB blacklist (up to 10,000 IPv4 and IPv6 addresses at
   100% confidence, one download a day) and the verdicts of your *Investigate* lookups (flagged at
   75% or more; a separate cache).
 - `FWMAP_Watchlist`, filled by *Mark as threat*.
 
-**FWMAP_AbuseIPDB alias** (widget settings, off by default) creates an external alias holding the
-same downloaded blacklist, IPv4 and IPv6 in one table. It is refreshed after each download and at
-boot; there is no second download. Firewall Map+ adds no rule: use the alias in your own block
-rules, on the interfaces you choose. Turning the option off removes the alias, but only once no
-rule uses it. Uninstalling the plugin leaves the alias in place (rules may still refer to it).
+**Maintain blocklist aliases** (widget settings) keeps a `FWMAP_*` alias for each selected curated
+feed (a daily URL table) and, with a key, `FWMAP_AbuseIPDB` (filled from the downloaded blacklist,
+IPv4 and IPv6, after each download and at boot). Firewall Map+ adds no rules: use the aliases in
+your own block rules, on the interfaces you choose. The map itself works from its own daily copy of
+each selected feed, so the lists count for flagging with the switch off too. Turning it off, or
+deselecting a feed, removes the aliases Firewall Map+ made, but only once no rule uses them; aliases
+of your own are never touched. On upgrade the switch starts on where `FWMAP_*` feed aliases
+already exist. Uninstalling leaves the aliases in place (rules may still refer to them).
 
 ### IPv6
 
@@ -125,8 +128,8 @@ Per-user display settings are in the widget's settings dialog: busiest-arc highl
 arcs, city labels, blocked traffic and its minimum hits, hostname lookups and network (ASN) names.
 Administrators also see the firewall-wide settings there: geolocation service (automatic, MaxMind
 GeoLite2, MaxMind GeoIP2 City, DB-IP Lite), MaxMind license key (taken from a MaxMind GeoIP alias
-when present), database update frequency, AbuseIPDB API key, optional `FWMAP_AbuseIPDB` alias
-maintenance and threat lists. Keys are write-only and never displayed or logged.
+when present), database update frequency, AbuseIPDB API key, threat lists and *Maintain blocklist
+aliases*. Keys are write-only and never displayed or logged.
 
 ### What leaves the firewall
 
