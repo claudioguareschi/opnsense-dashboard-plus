@@ -33,4 +33,9 @@ for PACKAGE in "$@"; do
     cp "${PACKAGE}" "${DIR}/"
 done
 pkg repo "${DIR}" "rsa:${KEY}"
+# pkg 2.x writes the catalogue as *.pkg, older pkg as *.tzst; a client may ask for either name,
+# so a leftover *.tzst must never keep serving an old catalogue
+for ARCHIVE in packagesite data; do
+    cp "${DIR}/${ARCHIVE}.pkg" "${DIR}/${ARCHIVE}.tzst"
+done
 ls -1 "${DIR}"
