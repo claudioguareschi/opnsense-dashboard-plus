@@ -192,6 +192,11 @@ signed; `publish.sh` replaces older versions and signs the whole catalogue.
 
 ## Changelog
 
+- **os-firewall-map 0.1_76**: IPv6 throughout (states, filter log, threat lists, AbuseIPDB,
+  GeoIP, investigations, the UI); the review queue becomes **Threats**, with tabs by what happened
+  (*Passed / reached host* first, then *Blocked by firewall*, *Dropped by IPS*); optional
+  `FWMAP_AbuseIPDB` alias filled from the AbuseIPDB blacklist (no rule is added).
+
 - **os-dashboard-plus 0.1_47**: QuickAssist endpoints of one model in the same state are one row
   with a count (e.g. "Intel QAT C62x ×3 (Active)"); the DNS row shows what the firewall resolves
   through: the local resolver (Unbound recursive or forwarding with its forwarders, Dnsmasq, BIND),
