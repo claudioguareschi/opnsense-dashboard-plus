@@ -453,6 +453,26 @@ def collect_dns(resolv_conf, sockstat_output, unbound_conf):
     return dns
 
 
+def dns_display_lines(dns):
+    """The DNS description as untranslated display lines, for API consumers other than the widget."""
+    lines = []
+    if dns["resolver"]:
+        details = ["local"]
+        if not dns["running"]:
+            details.append("not running")
+        elif dns["mode"] == "recursive":
+            details.append("recursive")
+        line = "%s (%s)" % (dns["resolver"], ", ".join(details))
+        if dns["running"] and dns["mode"] == "forwarding":
+            line += ", forwarding to " + ", ".join(dns["forwarders"]) + (" over TLS" if dns["tls"] else "")
+        lines.append(line)
+        if dns["servers"]:
+            lines.append("Fallback: " + ", ".join(dns["servers"]))
+    else:
+        lines.extend(dns["servers"])
+    return lines
+
+
 def read_text(*paths):
     """Concatenate the readable files among paths; missing files are skipped."""
     parts = []
@@ -543,6 +563,11 @@ def collect():
     )
     cpu_algorithms = collect_cpu_crypto(dmesg_output)
     crypto_hardware = collect_crypto_hardware("AESNI" in feature_tokens, cpu_algorithms, accelerator["devices"])
+    dns = collect_dns(
+        read_text(RESOLV_CONF),
+        run([SOCKSTAT, "-46l", "-p", "53"]),
+        read_text(UNBOUND_CONF, *sorted(glob.glob(UNBOUND_INCLUDES))),
+    )
     frequency = collect_cpu_frequency()
 
     return {
@@ -573,11 +598,8 @@ def collect():
         "crypto_hardware": crypto_hardware,
         "ipsec": collect_ipsec_status(crypto_hardware),
         "accelerated_algorithms": collect_accelerated_algorithms(crypto_hardware),
-        "dns": collect_dns(
-            read_text(RESOLV_CONF),
-            run([SOCKSTAT, "-46l", "-p", "53"]),
-            read_text(UNBOUND_CONF, *sorted(glob.glob(UNBOUND_INCLUDES))),
-        ),
+        "dns": dns,
+        "dns_servers": dns_display_lines(dns),
         "mitigations": {
             "pti": pti,
             "mds": mds,

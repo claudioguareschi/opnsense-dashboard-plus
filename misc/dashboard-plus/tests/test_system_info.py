@@ -291,6 +291,18 @@ forward-zone:
         empty = SYSTEM_INFO.collect_dns("search example.org\n", "", "")
         self.assertEqual((empty["resolver"], empty["servers"]), ("", []))
 
+    def test_dns_display_lines(self):
+        recursive = SYSTEM_INFO.collect_dns(self.RESOLV_LOCAL, self.SOCKSTAT_UNBOUND, "")
+        self.assertEqual(SYSTEM_INFO.dns_display_lines(recursive), ["Unbound (local, recursive)"])
+        unbound = 'forward-zone:\n  name: "."\n  forward-addr: 1.1.1.1\n  forward-addr: 9.9.9.9\n'
+        forwarding = SYSTEM_INFO.collect_dns(self.RESOLV_LOCAL, self.SOCKSTAT_UNBOUND, unbound)
+        self.assertEqual(
+            SYSTEM_INFO.dns_display_lines(forwarding), ["Unbound (local), forwarding to 1.1.1.1, 9.9.9.9"]
+        )
+        upstream = SYSTEM_INFO.collect_dns("nameserver 1.1.1.1\n", "", "")
+        self.assertEqual(SYSTEM_INFO.dns_display_lines(upstream), ["1.1.1.1"])
+        self.assertEqual(SYSTEM_INFO.dns_display_lines(SYSTEM_INFO.collect_dns("", "", "")), [])
+
 
 if __name__ == "__main__":
     unittest.main()
