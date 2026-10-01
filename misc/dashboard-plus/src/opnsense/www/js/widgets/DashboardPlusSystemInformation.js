@@ -78,8 +78,38 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
     _cryptoHardware(providers) {
         return this._list((providers || []).map(provider => {
             const state = this.translations[provider.state] || this.translations.inactive;
-            return `${provider.feature}: ${provider.provider} (${state})`;
+            const count = provider.count > 1 ? ` ×${provider.count}` : '';
+            return `${provider.feature}: ${provider.provider}${count} (${state})`;
         }));
+    }
+
+    /* What the firewall itself resolves through: its local resolver, else the resolv.conf servers. */
+    _dns(dns) {
+        if (!dns) {
+            return this._value(null);
+        }
+        const t = this.translations;
+        const servers = dns.servers || [];
+        const lines = [];
+        if (dns.resolver) {
+            const details = [t.dns_local];
+            if (!dns.running) {
+                details.push(t.dns_not_running);
+            } else if (dns.mode === 'recursive') {
+                details.push(t.dns_recursive);
+            }
+            let line = `${dns.resolver} (${details.join(', ')})`;
+            if (dns.running && dns.mode === 'forwarding') {
+                line += `, ${t.dns_forwarding_to} ${dns.forwarders.join(', ')}${dns.tls ? ` ${t.dns_over_tls}` : ''}`;
+            }
+            lines.push(escapeHtml(line));
+            if (servers.length > 0) {
+                lines.push(`${escapeHtml(t.dns_fallback)}: ${escapeHtml(servers.join(', '))}`);
+            }
+        } else {
+            lines.push(...servers.map(server => escapeHtml(server)));
+        }
+        return lines.length > 0 ? lines.join('<br>') : escapeHtml(t.not_set);
     }
 
     /* The system script reports states as codes; show them in the UI language. */
@@ -164,7 +194,7 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
             [this.translations.mds, this._value(this._state(mitigations.mds))],
             [this.translations.uptime, `<span id="${this.id}-uptime">${this._value(time?.uptime)}</span>`],
             [this.translations.datetime, `<span id="${this.id}-datetime">${this._value(time?.datetime)}</span>`],
-            [this.translations.dns_servers, this._list(details.dns_servers)]
+            [this.translations.dns_servers, this._dns(details.dns)]
         );
         return rows.map(([label, value]) => [escapeHtml(label), value]);
     }

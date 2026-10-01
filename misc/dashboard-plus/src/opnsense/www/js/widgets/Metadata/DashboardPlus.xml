@@ -36,7 +36,14 @@
             <mds>MDS Mitigation</mds>
             <uptime>Uptime</uptime>
             <datetime>Current Date/Time</datetime>
-            <dns_servers>DNS Servers</dns_servers>
+            <dns_servers>DNS</dns_servers>
+            <dns_local>local</dns_local>
+            <dns_recursive>recursive</dns_recursive>
+            <dns_forwarding_to>forwarding to</dns_forwarding_to>
+            <dns_over_tls>over TLS</dns_over_tls>
+            <dns_not_running>not running</dns_not_running>
+            <dns_fallback>Fallback</dns_fallback>
+            <not_set>Not set</not_set>
             <unavailable>Unavailable</unavailable>
             <enabled>Enabled</enabled>
             <disabled>Disabled</disabled>

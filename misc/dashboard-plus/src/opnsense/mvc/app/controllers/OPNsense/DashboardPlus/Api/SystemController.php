@@ -42,8 +42,6 @@ class SystemController extends ApiControllerBase
             return ['status' => 'failed'];
         }
 
-        $nameservers = json_decode($backend->configdRun('system list nameservers'), true);
-        $result['dns_servers'] = is_array($nameservers) ? array_values($nameservers) : [];
         $result['user'] = $this->getUserName();
         $result['status'] = 'ok';
 

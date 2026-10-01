@@ -2,6 +2,7 @@
 
 """Collect static system information for the Dashboard Plus widget."""
 
+import glob
 import json
 import re
 import subprocess
@@ -14,6 +15,10 @@ SYSCTL = "/sbin/sysctl"
 DMESG = "/sbin/dmesg"
 MOUNT = "/sbin/mount"
 BECTL = "/sbin/bectl"
+SOCKSTAT = "/usr/bin/sockstat"
+RESOLV_CONF = "/etc/resolv.conf"
+UNBOUND_CONF = "/var/unbound/unbound.conf"
+UNBOUND_INCLUDES = "/var/unbound/etc/*.conf"
 
 QAT_DEVICES = {
     0x0435: ("Intel QAT DH895XCC", "discrete", False),
@@ -347,14 +352,24 @@ def collect_crypto_hardware(cpu_has_aesni, cpu_algorithms, qat_devices):
             "state": "available" if cpu_algorithms and qat_active else "active" if cpu_algorithms else "inactive",
             "algorithms": cpu_algorithms,
         })
+    # Several endpoints of one model (the three of a C62x, an adapter's devices, VFs) in
+    # the same state are one row with a count; a device in another state keeps its own row.
+    grouped = {}
     for device in qat_devices:
-        providers.append({
+        state = "active" if device["ocf_active"] else "inactive"
+        key = (device["model"], state)
+        if key in grouped:
+            grouped[key]["count"] += 1
+            continue
+        grouped[key] = {
             "feature": "QuickAssist",
             "provider": device["model"],
             "active": device["ocf_active"],
-            "state": "active" if device["ocf_active"] else "inactive",
+            "state": state,
             "algorithms": device["algorithms"],
-        })
+            "count": 1,
+        }
+    providers.extend(grouped.values())
     return providers
 
 
@@ -371,6 +386,83 @@ def collect_accelerated_algorithms(providers):
 def collect_ipsec_status(providers):
     """Report whether IPsec has an active hardware crypto provider (a state code the UI translates)."""
     return "active" if any(provider["active"] for provider in providers) else "unavailable"
+
+
+def parse_resolv_nameservers(text):
+    """Return the nameserver addresses of a resolv.conf in order."""
+    servers = []
+    for line in text.splitlines():
+        fields = line.split("#", 1)[0].split()
+        if len(fields) >= 2 and fields[0] == "nameserver":
+            servers.append(fields[1])
+    return servers
+
+
+def parse_dns_listeners(sockstat_output):
+    """Return the commands listening on port 53, in order of appearance."""
+    commands = []
+    for line in sockstat_output.splitlines():
+        fields = line.split()
+        if len(fields) >= 6 and fields[5].endswith(":53") and fields[1] not in commands:
+            commands.append(fields[1])
+    return commands
+
+
+def parse_unbound_forwarders(text):
+    """Return the forward-addr entries of Unbound's root forward zone and whether it uses TLS."""
+    addresses = []
+    tls = False
+    zone = None
+    for line in text.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        key, _, value = line.partition(":")
+        key, value = key.strip(), value.strip().strip('"')
+        if key in ("forward-zone", "server", "stub-zone", "remote-control", "auth-zone"):
+            zone = "" if key == "forward-zone" else None
+        elif zone is not None and key == "name":
+            zone = value
+        elif zone == "." and key == "forward-addr":
+            address = value.split("#", 1)[0].split("@", 1)[0]
+            if address and address not in addresses:
+                addresses.append(address)
+        elif zone == "." and key == "forward-tls-upstream":
+            tls = value.lower() == "yes"
+    return addresses, tls
+
+
+DNS_RESOLVERS = {"unbound": "Unbound", "dnsmasq": "Dnsmasq", "named": "BIND"}
+
+
+def collect_dns(resolv_conf, sockstat_output, unbound_conf):
+    """Describe how the firewall itself resolves names: a local resolver or upstream servers."""
+    nameservers = parse_resolv_nameservers(resolv_conf)
+    local = [server for server in nameservers if server in ("127.0.0.1", "::1")]
+    servers = [server for server in nameservers if server not in local]
+    dns = {"resolver": "", "running": False, "mode": "", "forwarders": [], "tls": False, "servers": servers}
+    if not local:
+        return dns
+    listeners = parse_dns_listeners(sockstat_output)
+    command = listeners[0] if listeners else ""
+    dns["resolver"] = DNS_RESOLVERS.get(command, command) or "local"
+    dns["running"] = bool(command)
+    if command == "unbound":
+        forwarders, tls = parse_unbound_forwarders(unbound_conf)
+        dns.update(mode="forwarding" if forwarders else "recursive", forwarders=forwarders, tls=tls)
+    return dns
+
+
+def read_text(*paths):
+    """Concatenate the readable files among paths; missing files are skipped."""
+    parts = []
+    for path in paths:
+        try:
+            with open(path, encoding="utf-8", errors="replace") as handle:
+                parts.append(handle.read())
+        except OSError:
+            pass
+    return "\n".join(parts)
 
 
 def boot_method(kernel_method, efi_runtime, mount_output):
@@ -481,6 +573,11 @@ def collect():
         "crypto_hardware": crypto_hardware,
         "ipsec": collect_ipsec_status(crypto_hardware),
         "accelerated_algorithms": collect_accelerated_algorithms(crypto_hardware),
+        "dns": collect_dns(
+            read_text(RESOLV_CONF),
+            run([SOCKSTAT, "-46l", "-p", "53"]),
+            read_text(UNBOUND_CONF, *sorted(glob.glob(UNBOUND_INCLUDES))),
+        ),
         "mitigations": {
             "pti": pti,
             "mds": mds,
