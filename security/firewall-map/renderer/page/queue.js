@@ -31,7 +31,18 @@ function queueItem(row, names) {
   const ports = row.service_ports || {};
   const serviceFor = (protocol, port) => Object.keys(ports).find((name) => ports[name] === `${port}/${protocol}`)
     || (port ? `${String(protocol).toUpperCase()}/${port}` : 'ICMP');
-  const targets = (row.targets || []).map((target) => {
+  const disposition = ['passed', 'firewall_blocked', 'ips_dropped'].includes(row.disposition) ? row.disposition : 'passed';
+  // the per-connection snapshot the collector took from PF (and Suricata) for this address. The
+  // card leads with a connection that shows the disposition: an address that got through once and
+  // was blocked later is filed under Passed, so its headline is the connection that passed.
+  const wanted = {passed: 'pass', firewall_blocked: 'block'}[disposition];
+  const conns = [...(row.connections || [])].sort((a, b) => (b.decision === wanted) - (a.decision === wanted));
+  const lead = conns[0];
+  const leadTarget = lead && lead.remote_started ? (() => {
+    const [ip, port] = splitHostPort(lead.inside || lead.public || '');
+    return `${lead.protocol}|${ip}|${port}`;
+  })() : null;
+  const targets = [...(row.targets || [])].sort((a, b) => (b === leadTarget) - (a === leadTarget)).map((target) => {
     const [protocol, ip, port] = String(target).split('|');
     const firewall = !privateAddress(ip) && !insideAddresses.has(ip);
     return {ip, port, protocol, name: firewall ? 'firewall' : names.get(ip), firewall,
@@ -56,7 +67,6 @@ function queueItem(row, names) {
   const lines = flowSummary(pseudo, remote, TEXT).map(escapeHtml);
   const address = escapeHtml(row.address);
   const status = ['new', 'reviewed', 'blocked', 'dismissed'].includes(row.status) ? row.status : 'new';
-  const disposition = ['passed', 'firewall_blocked', 'ips_dropped'].includes(row.disposition) ? row.disposition : 'passed';
   const inbound = pseudo.initiated !== 'local';
   // the local side: the port-forward target, the inside host, or the firewall itself
   const target = targets[0];
@@ -86,16 +96,13 @@ function queueItem(row, names) {
     }
   }
   const cc = saved.country_code || live.country_code || countryCodeOf(remote.country);
-  // the per-connection snapshot the collector took from PF (and Suricata) for this address
-  const conns = row.connections || [];
-  const lead = conns[0];
   if (lead && lead.inside && !inbound) {
     const [leadIp] = splitHostPort(lead.inside);
     localIcon = 'laptop';
     localName = lead.inside_name || names.get(leadIp) || leadIp;
     localLines = [lead.inside, conns.length > 1 ? `+ ${conns.length - 1} ${conns.length > 2 ? T.more_connections : T.more_connection}` : ''];
   }
-  const rule = conns.find((item) => item.rule)?.rule;
+  const rule = lead ? lead.rule || conns.find((item) => item.decision === lead.decision && item.rule)?.rule : null;
   // the firewall's decision and Suricata's action side by side, whatever the source of the record
   const decision = (item) => [
     item.decision === 'pass' ? pill('ok', T.fw_passed) : item.decision === 'block' ? pill('blocked', T.fw_blocked)
@@ -267,7 +274,7 @@ export async function showQueue() {
   const render = () => {
     $tabs.html(VIEWS.map((status) => `<li class="${status === view.status ? 'active' : ''}" role="presentation">`
       + `<a href="#" role="tab" aria-selected="${status === view.status}" data-status="${status}">${escapeHtml(T[`status_${status}`])}`
-      + `${status !== 'all' && view.counts[status] ? ` <span class="badge">${escapeHtml(view.counts[status])}</span>` : ''}</a></li>`).join(''));
+      + `${view.counts[status] ? ` <span class="badge">${escapeHtml(view.counts[status])}</span>` : ''}</a></li>`).join(''));
     const names = insideNames(view.names);
     $list.html(view.rows.length ? view.rows.map((row) => queueItem(row, names)).join('')
       + (view.total > view.rows.length ? `<div class="fwmap-q-moreitems"><button type="button" class="btn btn-default fwmap-q-showmore">`

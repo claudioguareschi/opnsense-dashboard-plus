@@ -1281,7 +1281,22 @@
 		const insideAddresses = new Set(row.inside || []);
 		const ports = row.service_ports || {};
 		const serviceFor = (protocol, port) => Object.keys(ports).find((name) => ports[name] === `${port}/${protocol}`) || (port ? `${String(protocol).toUpperCase()}/${port}` : "ICMP");
-		const targets = (row.targets || []).map((target) => {
+		const disposition = [
+			"passed",
+			"firewall_blocked",
+			"ips_dropped"
+		].includes(row.disposition) ? row.disposition : "passed";
+		const wanted = {
+			passed: "pass",
+			firewall_blocked: "block"
+		}[disposition];
+		const conns = [...row.connections || []].sort((a, b) => (b.decision === wanted) - (a.decision === wanted));
+		const lead = conns[0];
+		const leadTarget = lead && lead.remote_started ? (() => {
+			const [ip, port] = splitHostPort(lead.inside || lead.public || "");
+			return `${lead.protocol}|${ip}|${port}`;
+		})() : null;
+		const targets = [...row.targets || []].sort((a, b) => (b === leadTarget) - (a === leadTarget)).map((target) => {
 			const [protocol, ip, port] = String(target).split("|");
 			const firewall = !privateAddress(ip) && !insideAddresses.has(ip);
 			return {
@@ -1319,11 +1334,6 @@
 			"blocked",
 			"dismissed"
 		].includes(row.status) ? row.status : "new";
-		const disposition = [
-			"passed",
-			"firewall_blocked",
-			"ips_dropped"
-		].includes(row.disposition) ? row.disposition : "passed";
 		const inbound = pseudo.initiated !== "local";
 		const target = targets[0];
 		const inside = pseudo.inside[0];
@@ -1346,15 +1356,13 @@
 			if (pseudo.inside.length > 1) localLines.push(`+ ${pseudo.inside.length - 1} ${T.other_hosts}`);
 		}
 		const cc = saved.country_code || live.country_code || countryCodeOf(remote.country);
-		const conns = row.connections || [];
-		const lead = conns[0];
 		if (lead && lead.inside && !inbound) {
 			const [leadIp] = splitHostPort(lead.inside);
 			localIcon = "laptop";
 			localName = lead.inside_name || names.get(leadIp) || leadIp;
 			localLines = [lead.inside, conns.length > 1 ? `+ ${conns.length - 1} ${conns.length > 2 ? T.more_connections : T.more_connection}` : ""];
 		}
-		const rule = conns.find((item) => item.rule)?.rule;
+		const rule = lead ? lead.rule || conns.find((item) => item.decision === lead.decision && item.rule)?.rule : null;
 		const decision = (item) => [item.decision === "pass" ? pill("ok", T.fw_passed) : item.decision === "block" ? pill("blocked", T.fw_blocked) : `<span class="fwmap-q-muted">${escapeHtml(T.fw_not_seen)}</span>`, item.ips_dropped ? pill("contained", T.ips_dropped_short) : ""].filter(Boolean).join(" ");
 		const connTable = conns.length ? `<table class="fwmap-q-conns"><thead><tr><th>${escapeHtml(T.connection_col)}</th><th>${escapeHtml(T.decision)}</th><th>${escapeHtml(T.rule)}</th><th>${escapeHtml(T.interface)}</th><th>${escapeHtml(T.transferred)}</th><th>${escapeHtml(T.started)}</th><th>IDS</th></tr></thead><tbody>` + conns.map((item) => {
 			const insideText = `${item.inside_name ? `${item.inside_name} ` : ""}${item.inside || T.this_firewall}`;
@@ -1498,7 +1506,7 @@
 		$body.append($("<div class=\"fwmap-q-toolbar\"></div>").append($tabs, $bulk, $searchBox), $list);
 		const emptyText = () => view.query ? T.queue_no_match : T[`queue_empty_${view.status}`] || T.queue_empty;
 		const render = () => {
-			$tabs.html(VIEWS.map((status) => `<li class="${status === view.status ? "active" : ""}" role="presentation"><a href="#" role="tab" aria-selected="${status === view.status}" data-status="${status}">${escapeHtml(T[`status_${status}`])}${status !== "all" && view.counts[status] ? ` <span class="badge">${escapeHtml(view.counts[status])}</span>` : ""}</a></li>`).join(""));
+			$tabs.html(VIEWS.map((status) => `<li class="${status === view.status ? "active" : ""}" role="presentation"><a href="#" role="tab" aria-selected="${status === view.status}" data-status="${status}">${escapeHtml(T[`status_${status}`])}${view.counts[status] ? ` <span class="badge">${escapeHtml(view.counts[status])}</span>` : ""}</a></li>`).join(""));
 			const names = insideNames(view.names);
 			$list.html(view.rows.length ? view.rows.map((row) => queueItem(row, names)).join("") + (view.total > view.rows.length ? `<div class="fwmap-q-moreitems"><button type="button" class="btn btn-default fwmap-q-showmore">${escapeHtml(T.show_more.replace("%s", Math.min(QUEUE_PAGE, view.total - view.rows.length)))}</button> <span class="fwmap-q-muted">${escapeHtml(T.showing.replace("%s", view.rows.length).replace("%t", view.total))}</span></div>` : "") : `<div class="text-muted fwmap-empty fwmap-q-empty">${ic("check")} ${escapeHtml(emptyText())}</div>`);
 			const count = view.query ? view.total : view.counts[view.status] || 0;

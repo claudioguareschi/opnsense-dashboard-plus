@@ -143,6 +143,28 @@ class ThreatQueueTest(unittest.TestCase):
             self.assertEqual(THREATS.set_status(db, "2606:4700:4700::1111", "reviewed")["result"], "saved")
             self.assertEqual(THREATS.listing(db, "reviewed")["rows"][0]["address"], "2606:4700:4700::1111")
 
+    def test_blocked_attempts_after_a_pass_stay_behind_the_passed_facts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = THREATS.connect(os.path.join(directory, "cache.db"))
+            passed = self.observe(self.INBOUND)
+            passed["108.188.77.155"]["connections"] = [
+                {"key": "pass", "decision": "pass", "seen": 100, "inside": "192.168.1.2:80"}]
+            THREATS.record(db, passed, now=100.0)
+            blocked = {"108.188.77.155": {
+                "lists": ["FWMAP_FireHOL_L1"], "inbound": 1, "outbound": 0, "inside": [], "bytes": 0,
+                "youngest": None, "service_ports": {}, "disposition": "firewall_blocked",
+                "targets": [f"tcp|198.13.91.163|{port}" for port in range(1000, 1000 + THREATS.MAX_ITEMS)],
+                "services": [f"TCP/{port}" for port in range(1000, 1000 + THREATS.MAX_ITEMS)],
+                "connections": [{"key": f"block{n}", "decision": "block", "seen": 200 + n}
+                                for n in range(THREATS.MAX_CONNECTIONS)],
+            }}
+            THREATS.record(db, blocked, now=200.0)
+            row = THREATS.listing(db, "passed")["rows"][0]
+            self.assertEqual(row["disposition"], "passed")
+            self.assertEqual((row["targets"][0], row["services"][0]), ("tcp|192.168.1.2|80", "HTTP"))
+            self.assertEqual(row["connections"][0]["key"], "pass")
+            self.assertEqual(row["lists"], ["FWMAP_FireHOL_L1", "AbuseIPDB blacklist"])
+
     def test_old_dropped_status_migrates_to_ips_disposition(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "cache.db")

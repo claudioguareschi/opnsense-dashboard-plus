@@ -145,10 +145,15 @@ def _record(db, seen, now):
             data = json.loads(row[0])
         except ValueError:
             data = {}
+        stored = row[3] or "passed"
+        # a blocked attempt from an address that once got through adds its facts after the ones
+        # that got through, so the bounded lists (and the card's headline) keep the passed traffic
+        weaker = rank.get(disposition, -1) < rank.get(stored, -1)
+        ranked = (lambda old, new: merge(new, old)) if weaker else merge
         data["lists"] = merge(data.get("lists", []), entry["lists"])
-        data["targets"] = merge(data.get("targets", []), entry["targets"])
-        data["inside"] = merge(data.get("inside", []), entry["inside"])
-        data["services"] = merge(data.get("services", []), entry["services"])
+        data["targets"] = ranked(data.get("targets", []), entry["targets"])
+        data["inside"] = ranked(data.get("inside", []), entry["inside"])
+        data["services"] = ranked(data.get("services", []), entry["services"])
         data["service_ports"] = {**data.get("service_ports", {}), **entry["service_ports"]}
         data["service_ports"] = {name: port for name, port in data["service_ports"].items() if name in data["services"]}
         data["inbound"] = bool(data.get("inbound")) or entry["inbound"] > 0
@@ -160,7 +165,7 @@ def _record(db, seen, now):
         if entry.get("ids"):
             data["ids"] = entry["ids"]  # the latest Suricata picture for this address
         status = row[1]
-        disposition = max((row[3] or "passed", disposition), key=lambda value: rank.get(value, -1))
+        disposition = max((stored, disposition), key=lambda value: rank.get(value, -1))
         # only a connection opened after the block reopens it; existing and closing states
         # (TIME_WAIT lingers for a minute or more) are not new traffic
         youngest = entry.get("youngest")
@@ -176,14 +181,16 @@ MAX_CONNECTIONS = 8
 
 
 def merge_connections(old, new):
-    """Keep the latest picture of each connection; IDS-linked ones first, then the most recent."""
+    """Keep the latest picture of each connection: IDS-linked ones first, then those PF let through
+    (a flood of blocked attempts must not push them out), then the most recent."""
     merged = {item["key"]: item for item in old if isinstance(item, dict) and item.get("key")}
     for item in new:
         previous = merged.get(item["key"], {})
         if previous.get("ids") and not item.get("ids"):
             item = {**item, "ids": previous["ids"]}
         merged[item["key"]] = item
-    ordered = sorted(merged.values(), key=lambda item: (not item.get("ids"), -(item.get("seen") or 0)))
+    ordered = sorted(merged.values(), key=lambda item: (not item.get("ids"), item.get("decision") == "block",
+                                                         -(item.get("seen") or 0)))
     return ordered[:MAX_CONNECTIONS]
 
 
