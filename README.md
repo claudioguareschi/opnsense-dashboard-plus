@@ -173,6 +173,10 @@ signed; `publish.sh` replaces older versions and signs the whole catalogue.
 
 ## Changelog
 
+- **os-dashboard-plus 0.1_46**: QuickAssist shows every started QAT device as active when qat_ocf
+  is enabled (qat_ocf is one provider for all devices, not one per qatN); down, asym-only and
+  user-mode-only devices show inactive.
+
 - **os-firewall-map 0.1_6**: saved threat-list choices reload the live collector in place and
   appear in Reputation without waiting for its periodic refresh; compact, consistent spacing for
   checkbox rows in the widget Options dialog.
