@@ -1,6 +1,7 @@
 """Unit tests for Suricata alerts and connection matching (fwmap_ids)."""
 
 import json
+import ipaddress
 import os
 import sys
 import tempfile
@@ -27,6 +28,8 @@ class AlertTest(unittest.TestCase):
                          ("94.154.43.203", 80, 2, "tcp"))
         self.assertIsNone(IDS.parse_alert('{"event_type":"anomaly"}'))
         self.assertIsNone(IDS.parse_alert('{"event_type":"alert", broken'))
+        ipv6 = IDS.parse_alert(self.LINE.replace("94.154.43.203", "2001:4860:4860:0:0:0:0:8888"))
+        self.assertEqual(ipv6["src"], "2001:4860:4860::8888")
 
     def test_tracks_per_remote_address_and_flags(self):
         alerts = IDS.AlertTracker()
@@ -77,6 +80,28 @@ class CorrelationTest(unittest.TestCase):
         self.assertEqual(flow["alerts"]["1"][1]["count"], 2)
         self.assertEqual(correlator.diagnostics()["current"], 2)
         self.assertEqual(correlator.diagnostics()["correlated_share"], 1.0)
+
+    def test_routed_ipv6_alert_matches_the_public_inside_host(self):
+        state = ("all tcp 2606:4700:4701::20[52114] -> 2001:4860:4860::8888[443] ESTABLISHED:ESTABLISHED\n"
+                 "   age 00:00:05, expires in 23:59:37, 2:3 pkts, 128:512 bytes, rlabel routed6\n"
+                 "   id: 0e creatorid: 02\n   origif: igb1\n")
+        local = {"2606:4700:4700::1111"}
+        networks = [(ipaddress.ip_network("2606:4700:4701::/64"), "vlan03"),
+                    (ipaddress.ip_network("2606:4700:4700::/64"), "igb1")]
+        alert = self.alert("2606:4700:4701::20", 52114, "2001:4860:4860::8888", 443)
+        correlator = IDS.Correlator()
+        correlator.observe_states(PF.parse_states(state), local, 1000.0, networks=networks)
+        correlator.add_alert(alert, 1000.0)
+        correlator.resolve(local, 1000.0, networks)
+        (key,) = correlator.current
+        self.assertEqual(key, ("tcp", "2606:4700:4701::20", "52114", "2001:4860:4860::8888", "443"))
+        self.assertEqual(correlator.diagnostics()["current"], 1)
+
+        alerts = IDS.AlertTracker()
+        alerts.add(alert, local, networks=networks)
+        summary = alerts.summary("2001:4860:4860::8888", now=1000.0)
+        self.assertTrue(summary["outbound"])
+        self.assertEqual(summary["targets"], ["[2606:4700:4701::20]:52114/tcp"])
 
     def test_port_forward_recent_blocked_and_unmatched(self):
         correlator = IDS.Correlator()
@@ -162,14 +187,27 @@ class CorrelationTest(unittest.TestCase):
         merged = THREATS.merge_connections([item], [{**item, "ids": [], "seen": 2000}])
         self.assertEqual((len(merged), merged[0]["seen"], bool(merged[0]["ids"])), (1, 2000, True))
 
+    def test_flagged_firewall_block_has_its_own_disposition(self):
+        correlator = IDS.Correlator()
+        correlator.observe_block(BLOCKS.parse_block(BLOCK_LINE), 1000.0)
+        with mock.patch.object(IDS, "threat_lists_for", return_value=["AbuseIPDB blacklist"]):
+            entries = IDS.firewall_blocks(correlator, {}, 900.0)
+        entry = entries["45.56.79.53"]
+        self.assertEqual(entry["disposition"], "firewall_blocked")
+        self.assertEqual(entry["targets"], ["tcp|198.13.91.163|23"])
+        self.assertEqual(entry["lists"], ["AbuseIPDB blacklist"])
+
     def test_ips_drop_to_a_port_forward_is_a_full_record(self):
         with tempfile.TemporaryDirectory() as directory:
             rules = os.path.join(directory, "rules.debug")
             with open(rules, "w") as handle:
                 handle.write("rdr on igb1 inet proto tcp from {any} to {(igb1)} port {443} -> $MailServer port 443 # NAT HTTPS Forward Rule\n"
+                             "rdr on igb1 inet6 proto tcp from {any} to {(igb1)} port {8443} -> 2606:4700:4701::20 port 443 # IPv6 HTTPS Forward\n"
                              "rdr on vlan02 inet proto tcp from {!<zone>} to {(self)} port {443} -> 127.0.0.1 port 8000 # portal\n")
             forwards = PF.port_forwards(rules, table_lookup=lambda name: {"MailServer": "192.168.1.2"}.get(name))
             self.assertEqual(PF.forward_target(forwards, "tcp", "443"), ("192.168.1.2:443", "NAT HTTPS Forward Rule"))
+            self.assertEqual(PF.forward_target(forwards, "tcp", "8443"),
+                             ("[2606:4700:4701::20]:443", "IPv6 HTTPS Forward"))
             correlator = IDS.Correlator()
             correlator.forwards = forwards
             alert = self.alert("94.154.43.203", 51234, "198.13.91.163", 443, signature="ET EXPLOIT something")
@@ -182,15 +220,15 @@ class CorrelationTest(unittest.TestCase):
                              ("alert", "192.168.1.2:443", None, 900, "suricata"))
             entries = IDS.ips_drops(correlator, {}, 0.0)
             entry = entries["94.154.43.203"]
-            self.assertEqual((entry["status_hint"], entry["targets"], entry["inbound"]), ("dropped", ["tcp|192.168.1.2|443"], 1))
+            self.assertEqual((entry["disposition"], entry["targets"], entry["inbound"]), ("ips_dropped", ["tcp|192.168.1.2|443"], 1))
             (snap,) = IDS.connection_snapshot("94.154.43.203", correlator, {"192.168.1.2": "mail"}, {})
             self.assertEqual((snap["inside_name"], snap["ips_dropped"], snap["decision"]), ("mail", True, None))
             db = THREATS.connect(os.path.join(directory, "cache.db"))
             THREATS.record(db, entries, now=1000.0)
-            self.assertEqual(THREATS.listing(db)["rows"][0]["status"], "dropped")
-            # the same address later getting through reopens it for review
-            THREATS.record(db, {"94.154.43.203": {**entry, "status_hint": None}}, now=1100.0)
-            self.assertEqual(THREATS.listing(db)["rows"][0]["status"], "new")
+            self.assertEqual(THREATS.listing(db)["rows"][0]["disposition"], "ips_dropped")
+            # a passed state outranks containment and becomes the primary operational disposition
+            THREATS.record(db, {"94.154.43.203": {**entry, "disposition": "passed"}}, now=1100.0)
+            self.assertEqual(THREATS.listing(db)["rows"][0]["disposition"], "passed")
 
     def test_ipv6_endpoints_keep_their_ports_apart(self):
         key = PF.outside_key("tcp", "2001:db8::1", "443", "2001:db8::2", "51234")

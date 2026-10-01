@@ -142,7 +142,7 @@
     #fwmap-review-count:empty { display: none; }
     #fwmap-review-count { background: var(--fwmap-danger); color: var(--fwmap-on-danger); }
 
-    /* review queue */
+    /* threat history */
     .bootstrap-dialog.fwmap-q-dialog .modal-dialog { width: min(1320px, 94vw); max-width: none; }
     .bootstrap-dialog.fwmap-q-dialog .modal-header { background: var(--fwmap-panel, #fff) !important; color: var(--fwmap-text, #222);
         border-bottom: 2px solid var(--fwmap-accent); padding: 14px 20px; border-radius: 6px 6px 0 0; }
@@ -181,8 +181,10 @@
     .fwmap-q-ip { font-size: 1.5em; font-weight: 600; letter-spacing: -.01em; }
     .fwmap-q-badge { font-size: .8em; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 1px 9px; border-radius: 10px;
         background: rgba(128, 128, 128, .2); }
-    .fwmap-q-badge-new { background: var(--fwmap-danger); color: var(--fwmap-on-danger); }
-    .fwmap-q-badge-blocked, .fwmap-q-badge-dropped { background: var(--fwmap-contained); color: var(--fwmap-on-contained); }
+    .fwmap-q-disposition-passed { background: var(--fwmap-danger); color: var(--fwmap-on-danger); }
+    .fwmap-q-disposition-firewall_blocked { background: var(--fwmap-blocked); color: var(--fwmap-on-blocked); }
+    .fwmap-q-disposition-ips_dropped { background: var(--fwmap-contained); color: var(--fwmap-on-contained); }
+    .fwmap-q-workflow { font-size: .8em; opacity: .65; text-transform: uppercase; }
     .fwmap-q-hostname { font-size: .93em; opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
     .fwmap-q-org { margin-top: 3px; font-size: 1.07em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fwmap-q-country { font-size: 1.07em; margin-top: 2px; }
@@ -486,8 +488,8 @@
         target: {{ lang._('Target')|json_encode }},
         this_firewall_title: {{ lang._('This firewall')|json_encode }},
         tried: {{ lang._('Tried')|json_encode }},
-        review_queue: {{ lang._('Review queue')|json_encode }},
-        review_intro: {{ lang._('Allowed traffic to or from flagged addresses')|json_encode }},
+        review_queue: {{ lang._('Threats')|json_encode }},
+        review_intro: {{ lang._('Flagged traffic organized by observed firewall and IPS disposition')|json_encode }},
         record_threats: {{ lang._('Record in the background')|json_encode }},
         record_threats_hint: {{ lang._('Keep recording while the map is closed, as long as the widget is on a dashboard. Setting a status never changes firewall rules.')|json_encode }},
         queue_search: {{ lang._('Filter by address, network, list, host…')|json_encode }},
@@ -498,6 +500,13 @@
         status_dismissed: {{ lang._('Dismissed')|json_encode }},
         status_blocked: {{ lang._('Blocked')|json_encode }},
         status_all: {{ lang._('All')|json_encode }},
+        status_passed: {{ lang._('Passed / reached host')|json_encode }},
+        status_firewall_blocked: {{ lang._('Blocked by firewall')|json_encode }},
+        status_ips_dropped: {{ lang._('Dropped by IPS')|json_encode }},
+        disposition_passed: {{ lang._('Passed · reached host')|json_encode }},
+        disposition_firewall_blocked: {{ lang._('Blocked at firewall')|json_encode }},
+        disposition_ips_dropped: {{ lang._('Dropped by IPS')|json_encode }},
+        passed_attention: {{ lang._('need attention')|json_encode }},
         mark_reviewed: {{ lang._('Mark reviewed')|json_encode }},
         dismiss: {{ lang._('Dismiss')|json_encode }},
         reopen: {{ lang._('Reopen')|json_encode }},
@@ -523,12 +532,12 @@
         delete_shown: {{ lang._('Delete %s shown')|json_encode }},
         queue_no_match: {{ lang._('No entries match this search.')|json_encode }},
         queue_empty: {{ lang._('Nothing here.')|json_encode }},
-        queue_empty_new: {{ lang._('No new entries: no flagged traffic got through since the last review.')|json_encode }},
+        queue_empty_passed: {{ lang._('No unreviewed flagged traffic reached a host.')|json_encode }},
+        queue_empty_firewall_blocked: {{ lang._('No unreviewed flagged traffic was blocked by PF.')|json_encode }},
+        queue_empty_ips_dropped: {{ lang._('No unreviewed flagged traffic was dropped by IPS.')|json_encode }},
         queue_empty_reviewed: {{ lang._('No entries marked reviewed yet.')|json_encode }},
-        queue_empty_blocked: {{ lang._('No entries blocked from here yet.')|json_encode }},
-        queue_empty_dropped: {{ lang._('Suricata has not dropped traffic from a flagged address.')|json_encode }},
         queue_empty_dismissed: {{ lang._('No dismissed entries.')|json_encode }},
-        queue_empty_all: {{ lang._('The review queue is empty.')|json_encode }},
+        queue_empty_all: {{ lang._('Threat history is empty.')|json_encode }},
         too_many_states: {{ lang._('The state table is too large to map ({count} states). The map resumes below {limit}.')|json_encode }},
         resize_hint: {{ lang._('Drag or use the arrow keys to resize; double-click or Home to reset')|json_encode }},
         // the renderer's words: legend, hover cards and flow sentences ({name} is filled in)
@@ -629,8 +638,8 @@
                 <span></span> <a href="#" style="color:inherit" title="{{ lang._('Remove') }}" aria-label="{{ lang._('Remove') }}">&times;</a>
             </span>
             <button id="fwmap-reset" class="btn btn-default btn-sm fwmap-tool-btn" type="button" title="{{ lang._('Reset filters') }}" aria-label="{{ lang._('Reset filters') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></button>
-            <button id="fwmap-review" class="btn btn-default btn-sm fwmap-tool-btn" type="button" style="display:none" title="{{ lang._('Review queue') }}">
-                <svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span class="fwmap-tool-text">{{ lang._('Review') }}</span> <span class="badge" id="fwmap-review-count"></span>
+            <button id="fwmap-review" class="btn btn-default btn-sm fwmap-tool-btn" type="button" style="display:none" title="{{ lang._('Threats') }}">
+                <svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span class="fwmap-tool-text">{{ lang._('Threats') }}</span> <span class="badge" id="fwmap-review-count"></span>
             </button>
         </div>
         <div id="fwmap-map">

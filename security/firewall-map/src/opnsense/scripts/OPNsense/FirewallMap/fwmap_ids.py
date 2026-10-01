@@ -9,9 +9,11 @@ from datetime import datetime
 
 from fwmap_blocklists import IDS_LIST, threat_fields, threat_lists_for
 from fwmap_blocks import MAX_BLOCK_SOURCES
-from fwmap_common import connection_target, host_port, split_host_port, location_fields, public_ipv4, service_name, service_port_label
+from fwmap_common import (connection_target, host_port, location_fields, normalize_ip, public_ip,
+                          service_name, service_port_label, split_host_port)
 from fwmap_leases import describe_inside
-from fwmap_pf import flow_endpoints, forward_target, inside_endpoint, lan_rule_index, orientation, outside_key, rule_for, state_outside
+from fwmap_pf import (flow_endpoints, forward_target, inside_address, inside_endpoint, lan_rule_index,
+                      orientation, outside_key, rule_for, state_outside)
 
 
 # Suricata's alert log (EVE JSON); read locally, only alert events
@@ -101,23 +103,23 @@ class Correlator:
         self.unmatched_samples = []
         self.forwards = []
 
-    def observe_states(self, records, local_addresses, now, descriptions=None):
+    def observe_states(self, records, local_addresses, now, descriptions=None, networks=None):
         current = {}
         ambiguous = set()
         lan_rules = lan_rule_index(records)
         for record in records:
-            pair = flow_endpoints(record, local_addresses)
+            pair = flow_endpoints(record, local_addresses, networks)
             if pair is None:
                 continue
             key = state_outside(record, pair)
             if key is None:
                 continue
-            inside = inside_endpoint(record)
-            rule = rule_for(record, pair, lan_rules)
+            inside = inside_endpoint(record, networks, local_addresses)
+            rule = rule_for(record, pair, lan_rules, networks, local_addresses)
             connection = make_connection(
                 key,
                 inside=host_port(inside["address"], inside["port"]) if inside else None,
-                remote_started=orientation(record, pair[1])[0],
+                remote_started=orientation(record, pair[1], networks, local_addresses)[0],
                 bytes_in=record.get("bytes_in", 0),
                 bytes_out=record.get("bytes_out", 0),
                 age=record.get("age"),
@@ -162,9 +164,13 @@ class Correlator:
             del self.flows[min(self.flows, key=lambda key: self.flows[key]["last"])]
 
     @staticmethod
-    def alert_key(alert, local_addresses):
+    def alert_key(alert, local_addresses, networks=None):
         src, dst = alert["src"], alert["dst"]
-        if src in local_addresses or not public_ipv4(src):
+        if inside_address(src, networks, local_addresses):
+            return outside_key(alert["protocol"], src, alert["src_port"], dst, alert["dst_port"])
+        if inside_address(dst, networks, local_addresses):
+            return outside_key(alert["protocol"], dst, alert["dst_port"], src, alert["src_port"])
+        if src in local_addresses or not public_ip(src):
             return outside_key(alert["protocol"], src, alert["src_port"], dst, alert["dst_port"])
         return outside_key(alert["protocol"], dst, alert["dst_port"], src, alert["src_port"])
 
@@ -190,11 +196,11 @@ class Correlator:
         self.pending.append((now, alert))
         return None
 
-    def resolve(self, local_addresses, now):
+    def resolve(self, local_addresses, now, networks=None):
         """Try pending alerts against what PF and the firewall log have shown; give up after a while."""
         still = []
         for received, alert in self.pending:
-            key = self.alert_key(alert, local_addresses)
+            key = self.alert_key(alert, local_addresses, networks)
             if key in self.current:
                 kind = "ambiguous" if key in self.ambiguous_keys else "current"
                 connection = self.current[key]
@@ -348,8 +354,8 @@ def parse_alert(line):
     at = eve_time(event.get("timestamp"))
     return {
         "time": at,
-        "src": event.get("src_ip"),
-        "dst": event.get("dest_ip"),
+        "src": normalize_ip(event.get("src_ip")),
+        "dst": normalize_ip(event.get("dest_ip")),
         "src_port": event.get("src_port"),
         "dst_port": event.get("dest_port"),
         "protocol": str(event.get("proto") or "").lower(),
@@ -376,14 +382,18 @@ class AlertTracker:
         self.max_sources = max_sources
         self.sources = {}
 
-    def add(self, alert, local_addresses, now=None):
+    def add(self, alert, local_addresses, now=None, networks=None):
         at = alert["time"] if alert["time"] is not None else (now or time.time())
         src, dst = alert["src"], alert["dst"]
         # the remote side is the public address that is not this firewall; internal-only alerts
         # have no place on the map
-        if public_ipv4(src) and src not in local_addresses:
+        if inside_address(src, networks, local_addresses) and public_ip(dst):
+            remote, local, inbound = dst, src, False
+        elif inside_address(dst, networks, local_addresses) and public_ip(src):
             remote, local, inbound = src, dst, True
-        elif public_ipv4(dst) and dst not in local_addresses:
+        elif public_ip(src) and src not in local_addresses:
+            remote, local, inbound = src, dst, True
+        elif public_ip(dst) and dst not in local_addresses:
             remote, local, inbound = dst, src, False
         else:
             return
@@ -409,7 +419,7 @@ class AlertTracker:
             signature["last"] = max(signature["last"], at)
             signature["action"] = alert["action"]
         port = alert["dst_port"] if inbound else alert["src_port"]
-        target = f'{local}:{port}/{alert["protocol"]}' if port else f'{local}/{alert["protocol"]}'
+        target = f'{host_port(local, port)}/{alert["protocol"]}' if port else f'{local}/{alert["protocol"]}'
         if target in entry["targets"] or len(entry["targets"]) < MAX_SIGNATURES_PER_SOURCE:
             entry["targets"][target] = entry["targets"].get(target, 0) + 1
 
@@ -423,11 +433,11 @@ class AlertTracker:
             return False
         return min(item["severity"] for item in entry["signatures"].values()) <= ALERT_FLAG_SEVERITY
 
-    def feed(self, lines, local_addresses, correlator=None, now=None):
+    def feed(self, lines, local_addresses, correlator=None, now=None, networks=None):
         for line in lines:
             alert = parse_alert(line)
             if alert:
-                self.add(alert, local_addresses)
+                self.add(alert, local_addresses, networks=networks)
                 if correlator is not None:
                     correlator.add_alert(alert, now if now is not None else time.time())
 
@@ -464,9 +474,11 @@ def connection_snapshot(address, correlator, names, interfaces, wall=None):
     wall = time.time() if wall is None else wall
     keys = [key for key in correlator.current if key[3] == address]
     keys += [key for key in correlator.flows if key[3] == address and key not in correlator.current]
+    keys += [key for key in correlator.blocked if key[3] == address and key not in correlator.flows]
     result = []
     for key in keys:
-        connection = correlator.current.get(key) or correlator.flows[key]["connection"]
+        connection = correlator.current.get(key) or (correlator.flows.get(key) or {}).get("connection") \
+            or correlator.blocked[key]
         flow = correlator.flows.get(key)
         inside_ip = split_host_port(connection.get("inside") or "")[0] if connection.get("inside") else ""
         signatures = []
@@ -490,7 +502,7 @@ def connection_snapshot(address, correlator, names, interfaces, wall=None):
             "bytes_out": connection.get("bytes_out"),
             "started": round(wall - age) if age is not None else None,
             "seen": round(wall),
-            "kind": flow["kind"] if flow else "current",
+            "kind": flow["kind"] if flow else ("current" if key in correlator.current else "blocked"),
             # the firewall's decision and Suricata's are separate facts
             "decision": connection.get("decision"),
             "ips_dropped": any(item.get("action") == "blocked" for item in signatures),
@@ -500,6 +512,39 @@ def connection_snapshot(address, correlator, names, interfaces, wall=None):
     # the busiest first, IDS-linked ones always kept
     result.sort(key=lambda item: (not item["ids"], -((item["bytes_in"] or 0) + (item["bytes_out"] or 0))))
     return result[:MAX_SNAPSHOT_CONNECTIONS]
+
+
+def firewall_blocks(correlator, seen, since, blocklists=None, reputation=None):
+    """Flagged sources PF blocked since the last history recording."""
+    entries = {}
+    for key, connection in correlator.blocked.items():
+        remote = key[3]
+        if remote in seen or (connection.get("seen") or 0) < since:
+            continue
+        lists = threat_lists_for(remote, blocklists, reputation)
+        if not lists:
+            continue
+        inside = connection.get("inside")
+        inside_ip, inside_port = split_host_port(inside) if inside else (None, "")
+        port = inside_port or key[2]
+        service = service_name(key[0], port)
+        entry = entries.setdefault(remote, {
+            "lists": lists, "inbound": 0, "outbound": 0, "targets": [], "inside": [],
+            "services": [], "bytes": 0, "youngest": None, "service_ports": {},
+            "disposition": "firewall_blocked",
+        })
+        entry["inbound"] += 1
+        target = connection_target(key[0], inside_ip or key[1], port)
+        if target not in entry["targets"]:
+            entry["targets"].append(target)
+        if inside_ip and inside_ip not in entry["inside"]:
+            entry["inside"].append(inside_ip)
+        if service not in entry["services"]:
+            entry["services"].append(service)
+            label = service_port_label(key[0], port)
+            if label:
+                entry["service_ports"][service] = label
+    return entries
 
 
 def ips_drops(correlator, seen, since, blocklists=None, reputation=None):
@@ -523,7 +568,7 @@ def ips_drops(correlator, seen, since, blocklists=None, reputation=None):
         entry = entries.setdefault(remote, {
             "lists": threat_lists_for(remote, blocklists, reputation) + [IDS_LIST],
             "inbound": 0, "outbound": 0, "targets": [], "inside": [], "services": [], "bytes": 0,
-            "youngest": None, "service_ports": {}, "status_hint": "dropped",
+            "youngest": None, "service_ports": {}, "disposition": "ips_dropped",
         })
         entry["inbound" if started_by_remote else "outbound"] += 1
         if started_by_remote:

@@ -31,15 +31,15 @@ use OPNsense\Base\ApiControllerBase;
 use OPNsense\Core\Backend;
 
 /**
- * On-demand registry, routing and reputation lookups for one public IPv4 address.
+ * On-demand registry, routing and reputation lookups for one public IPv4 or IPv6 address.
  * Administrators only (see ACL): the lookups send the address to RDAP, RIPEstat and AbuseIPDB.
  */
 class InvestigateController extends ApiControllerBase
 {
     public function addressAction($address = null)
     {
-        if (!is_string($address) || filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
-            return ['status' => 'failed', 'error' => 'not an IPv4 address'];
+        if (!is_string($address) || filter_var($address, FILTER_VALIDATE_IP) === false) {
+            return ['status' => 'failed', 'error' => 'not an IP address'];
         }
         $result = json_decode((new Backend())->configdpRun('firewallmap investigate', [$address]) ?? '', true);
         return is_array($result) ? $result : ['status' => 'failed', 'error' => 'no response'];

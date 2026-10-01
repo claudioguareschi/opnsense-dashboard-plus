@@ -1,5 +1,5 @@
 /* The details panel for what was clicked on the map or in the IDS list. */
-import {escapeHtml, flagHtml, formatBytes, formatRate, listLabel, plain, splitHostPort} from '../src/format.js';
+import {escapeHtml, flagHtml, formatBytes, formatRate, hostPort, listLabel, plain, splitHostPort} from '../src/format.js';
 import {idsOutcome} from '../src/summaries.js';
 import {ABUSEIPDB_BLACKLIST_LIST, ABUSEIPDB_LOOKUP_LIST, state, T} from './context.js';
 import {ic} from './icons.js';
@@ -116,7 +116,7 @@ function flowModel(flow, context) {
       [T.rule, escapeHtml(flow.rule || '')],
       [T.egress, escapeHtml(flow.egress || '')],
       ['NAT', inside && outbound ? escapeHtml(`${T.yes} (${inside.ip} → ${flow.origin})`)
-        : target && !target.firewall ? escapeHtml(`${T.port_forward} (${flow.origin} → ${target.ip}${target.port ? `:${target.port}` : ''})`) : escapeHtml(T.no)],
+        : target && !target.firewall ? escapeHtml(`${T.port_forward} (${flow.origin} → ${hostPort(target.ip, target.port)})`) : escapeHtml(T.no)],
     ]),
     ids: idsCard(flow.ids, null),
     reputation: reputationCard({...item, address, lists: flow.lists, abuseipdb: flow.abuseipdb}),

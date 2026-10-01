@@ -52,7 +52,7 @@ export function palette(theme = DEFAULT_THEME) {
 }
 
 /**
- * The palette as CSS custom properties, so the page, the review queue and the hover cards use
+ * The palette as CSS custom properties, so the page, Threats and the hover cards use
  * the same status colours as the map, in light and dark themes alike.
  */
 export function cssVariables(colors) {

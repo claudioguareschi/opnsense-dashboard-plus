@@ -1,14 +1,13 @@
 #!/usr/local/bin/python3
 
-"""Threat review queue for Firewall Map+.
+"""Threat history for Firewall Map+, organized by observed disposition.
 
     firewallmap_threats.py list [status]                  JSON list, newest activity first
     firewallmap_threats.py set <address> <status> [note]  note is base64url-encoded UTF-8
 
-The collector records every permitted connection (a firewall state exists) to or from an
-address in a threat list, AbuseIPDB's blacklist, a cached AbuseIPDB verdict or the
-FWMAP_Watchlist alias. The operator reviews each address and sets its status; nothing here
-changes firewall rules.
+The collector records passed states, firewall blocks and IPS drops for flagged addresses.
+Disposition is evidence from PF/state/log/IPS data; operator workflow (open, reviewed,
+dismissed or manually blocked) is kept separately in ``status``.
 """
 
 import base64
@@ -26,7 +25,9 @@ from fwmap_leases import lease_names  # noqa: E402
 from fwmap_pf import flow_endpoints, inside_endpoint, orientation  # noqa: E402
 
 DATABASE = CACHE_DB
-STATUSES = ("new", "reviewed", "dismissed", "blocked", "dropped")
+STATUSES = ("new", "reviewed", "dismissed", "blocked")
+DISPOSITIONS = ("passed", "firewall_blocked", "ips_dropped")
+VIEWS = (*DISPOSITIONS, "all", "reviewed", "dismissed")
 KEEP_SECONDS = 90 * 86400
 KEEP_ROWS = 5000
 MAX_ITEMS = 8  # per list kept for one address (targets, inside hosts, services, lists)
@@ -42,8 +43,15 @@ def connect(path=DATABASE):
     db.execute("PRAGMA synchronous=NORMAL")
     db.execute(
         "CREATE TABLE IF NOT EXISTS threats (address TEXT PRIMARY KEY, first_seen REAL, last_seen REAL, "
-        "samples INTEGER, data TEXT, status TEXT DEFAULT 'new', note TEXT DEFAULT '', status_changed REAL)"
+        "samples INTEGER, data TEXT, status TEXT DEFAULT 'new', note TEXT DEFAULT '', status_changed REAL, "
+        "disposition TEXT DEFAULT 'passed')"
     )
+    columns = {row[1] for row in db.execute("PRAGMA table_info(threats)")}
+    if "disposition" not in columns:
+        db.execute("ALTER TABLE threats ADD COLUMN disposition TEXT DEFAULT 'passed'")
+    # Releases before disposition tabs used status=dropped for IPS evidence.
+    db.execute("UPDATE threats SET disposition = 'ips_dropped', status = 'new' WHERE status = 'dropped'")
+    db.execute("CREATE INDEX IF NOT EXISTS threats_view ON threats(status, disposition, last_seen DESC)")
     return db
 
 
@@ -56,11 +64,11 @@ def merge(old, new):
     return result[:MAX_ITEMS]
 
 
-def observe(records, lists_for, local_addresses):
+def observe(records, lists_for, local_addresses, networks=None):
     """Group the current states that touch a flagged address: {remote: summary}."""
     seen = {}
     for record in records:
-        pair = flow_endpoints(record, local_addresses)
+        pair = flow_endpoints(record, local_addresses, networks)
         if pair is None:
             continue
         remote = pair[1]
@@ -73,8 +81,8 @@ def observe(records, lists_for, local_addresses):
         })
         if record.get("age") is not None:
             entry["youngest"] = record["age"] if entry["youngest"] is None else min(entry["youngest"], record["age"])
-        inside = inside_endpoint(record)
-        remote_started, service_port = orientation(record, remote)
+        inside = inside_endpoint(record, networks, local_addresses)
+        remote_started, service_port = orientation(record, remote, networks, local_addresses)
         if remote_started:
             entry["inbound"] += 1
             target = remote_target(record, remote, pair[0], inside, service_port)
@@ -110,21 +118,28 @@ BLOCK_SLACK_SECONDS = 30
 
 
 def _record(db, seen, now):
+    rank = {"firewall_blocked": 0, "ips_dropped": 1, "passed": 2}
     for address, entry in seen.items():
-        row = db.execute("SELECT data, status, status_changed FROM threats WHERE address = ?", (address,)).fetchone()
+        row = db.execute("SELECT data, status, status_changed, disposition FROM threats WHERE address = ?",
+                         (address,)).fetchone()
+        disposition = entry.get("disposition") or "passed"
+        if disposition not in DISPOSITIONS:
+            disposition = "passed"
         if row is None:
             data = {**entry, "inbound": entry["inbound"] > 0, "outbound": entry["outbound"] > 0,
                     "peak_bytes": entry["bytes"]}
             data.pop("bytes")
             data.pop("youngest")
-            status = data.pop("status_hint", None) or "new"
+            data.pop("status_hint", None)
+            data.pop("disposition", None)
+            status = "new"
             data["connections"] = merge_connections([], entry.get("connections") or [])
             data["remote"] = entry.get("remote") or {}
             if not data.get("ids"):
                 data.pop("ids", None)
             db.execute(
-                "INSERT INTO threats (address, first_seen, last_seen, samples, data, status, note, status_changed) "
-                "VALUES (?, ?, ?, 1, ?, ?, '', NULL)", (address, now, now, json.dumps(data), status))
+                "INSERT INTO threats (address, first_seen, last_seen, samples, data, status, note, status_changed, disposition) "
+                "VALUES (?, ?, ?, 1, ?, ?, '', NULL, ?)", (address, now, now, json.dumps(data), status, disposition))
             continue
         try:
             data = json.loads(row[0])
@@ -145,8 +160,7 @@ def _record(db, seen, now):
         if entry.get("ids"):
             data["ids"] = entry["ids"]  # the latest Suricata picture for this address
         status = row[1]
-        if status == "dropped" and not entry.get("status_hint"):
-            status = "new"  # traffic from an address the IPS had dropped got through: needs review
+        disposition = max((row[3] or "passed", disposition), key=lambda value: rank.get(value, -1))
         # only a connection opened after the block reopens it; existing and closing states
         # (TIME_WAIT lingers for a minute or more) are not new traffic
         youngest = entry.get("youngest")
@@ -154,8 +168,8 @@ def _record(db, seen, now):
                 and now - youngest > (row[2] or 0) + BLOCK_SLACK_SECONDS):
             data["seen_after_block"] = True
             status = "new"
-        db.execute("UPDATE threats SET last_seen = ?, samples = samples + 1, data = ?, status = ? WHERE address = ?",
-                   (now, json.dumps(data), status, address))
+        db.execute("UPDATE threats SET last_seen = ?, samples = samples + 1, data = ?, status = ?, disposition = ? "
+                   "WHERE address = ?", (now, json.dumps(data), status, disposition, address))
 
 
 MAX_CONNECTIONS = 8
@@ -176,8 +190,10 @@ def merge_connections(old, new):
 def prune(db, now=None):
     now = time.time() if now is None else now
     db.execute("DELETE FROM threats WHERE last_seen < ?", (now - KEEP_SECONDS,))
-    db.execute("DELETE FROM threats WHERE address NOT IN (SELECT address FROM threats ORDER BY last_seen DESC LIMIT ?)",
-               (KEEP_ROWS,))
+    # over the row limit, blocked and dropped attempts go first: a flood of them (scanners hitting
+    # block rules) must not push out the flagged traffic that got through
+    db.execute("DELETE FROM threats WHERE address NOT IN (SELECT address FROM threats "
+               "ORDER BY disposition = 'passed' DESC, last_seen DESC LIMIT ?)", (KEEP_ROWS,))
 
 
 def cached_country(db, address):
@@ -203,20 +219,27 @@ MAX_PAGE_SIZE = 500
 MAX_QUERY = 200
 
 
-def _stored_rows(db, status=None):
-    """Every entry of one status (or all), most recent activity first, with its data decoded."""
-    sql = "SELECT address, first_seen, last_seen, samples, data, status, note, status_changed FROM threats"
-    parameters = ()
-    if status in STATUSES:
-        sql += " WHERE status = ?"
-        parameters = (status,)
-    for address, first, last, samples, data, current, note, changed in db.execute(sql + " ORDER BY last_seen DESC", parameters):
+def _view_clause(view):
+    if view in DISPOSITIONS:
+        return "status = 'new' AND disposition = ?", (view,)
+    if view in ("reviewed", "dismissed"):
+        return "status = ?", (view,)
+    return "status != 'dismissed'", ()
+
+
+def _stored_rows(db, view=None):
+    """Every entry of a disposition/workflow view, most recent activity first."""
+    clause, parameters = _view_clause(view)
+    sql = ("SELECT address, first_seen, last_seen, samples, data, status, note, status_changed, disposition "
+           f"FROM threats WHERE {clause} ORDER BY last_seen DESC")
+    for address, first, last, samples, data, current, note, changed, disposition in db.execute(sql, parameters):
         try:
             data = json.loads(data)
         except ValueError:
             data = {}
         yield {"address": address, "first_seen": first, "last_seen": last, "samples": samples,
-               "status": current, "note": note or "", "status_changed": changed, **(data if isinstance(data, dict) else {})}
+               "status": current, "disposition": disposition or "passed", "note": note or "",
+               "status_changed": changed, **(data if isinstance(data, dict) else {})}
 
 
 def search_text(row, names):
@@ -240,11 +263,11 @@ def search_text(row, names):
     return " ".join(str(part) for part in parts if part).lower()
 
 
-def matching(db, status, query, names=None):
-    """Entries of `status` whose displayed text contains every word of `query`."""
+def matching(db, view, query, names=None):
+    """Entries of `view` whose displayed text contains every word of `query`."""
     names = inside_names() if names is None else names
     words = str(query or "").lower().split()
-    for row in _stored_rows(db, status):
+    for row in _stored_rows(db, view):
         if not words or all(word in search_text(row, names) for word in words):
             yield row
 
@@ -264,14 +287,20 @@ def _decorate(db, row):
     return row
 
 
-def listing(db, status=None, offset=0, limit=PAGE_SIZE, query=None):
-    """One page of the queue: `total` counts every entry matching the status and search."""
-    counts = dict(db.execute("SELECT status, count(*) FROM threats GROUP BY status").fetchall())
-    counts = {name: counts.get(name, 0) for name in STATUSES}
-    if status == "counts":
+def listing(db, view=None, offset=0, limit=PAGE_SIZE, query=None):
+    """One page of threat history; tab counts use indexed disposition/workflow columns."""
+    counts = {
+        disposition: db.execute(
+            "SELECT count(*) FROM threats WHERE status = 'new' AND disposition = ?", (disposition,)
+        ).fetchone()[0] for disposition in DISPOSITIONS
+    }
+    counts.update({status: db.execute("SELECT count(*) FROM threats WHERE status = ?", (status,)).fetchone()[0]
+                   for status in ("reviewed", "dismissed")})
+    counts["all"] = db.execute("SELECT count(*) FROM threats WHERE status != 'dismissed'").fetchone()[0]
+    if view == "counts":
         return {"status": "ok", "rows": [], "counts": counts}
     names = inside_names()
-    rows = list(matching(db, status, query, names))
+    rows = list(matching(db, view, query, names))
     offset = max(0, int(offset or 0))
     limit = max(1, min(int(limit or PAGE_SIZE), MAX_PAGE_SIZE))
     page = [_decorate(db, row) for row in rows[offset:offset + limit]]
@@ -280,9 +309,9 @@ def listing(db, status=None, offset=0, limit=PAGE_SIZE, query=None):
 
 def set_status(db, address, status, note=None, now=None):
     try:
-        address = str(ipaddress.IPv4Address(address))
+        address = str(ipaddress.ip_address(address))
     except ValueError:
-        return {"result": "failed", "error": "not an IPv4 address"}
+        return {"result": "failed", "error": "not an IP address"}
     if status not in STATUSES:
         return {"result": "failed", "error": "unknown status"}
     now = time.time() if now is None else now
@@ -294,7 +323,7 @@ def set_status(db, address, status, note=None, now=None):
     else:
         cursor = db.execute(f"UPDATE threats SET status = ?, status_changed = ?, note = ?, data = {clear} WHERE address = ?",
                             (status, now, note[:MAX_NOTE], address))
-    return {"result": "saved"} if cursor.rowcount else {"result": "failed", "error": "not in the review queue"}
+    return {"result": "saved"} if cursor.rowcount else {"result": "failed", "error": "not in threat history"}
 
 
 def decode_note(value):
@@ -304,26 +333,27 @@ def decode_note(value):
         return None
 
 
-def _addresses(db, status, query):
-    return [row["address"] for row in matching(db, status, query)] if query else None
+def _addresses(db, view, query):
+    return [row["address"] for row in matching(db, view, query)] if query else None
 
 
 def bulk_status(db, current, status, query=None, now=None):
     """Move every entry with one status (and matching the search, when there is one) to another,
     e.g. dismiss all new entries; reversible."""
-    if current not in STATUSES or status not in STATUSES or current == status:
+    if current not in VIEWS or status not in STATUSES:
         return {"result": "failed", "error": "unknown status"}
     now = time.time() if now is None else now
     clear = "json_remove(data, '$.seen_after_block')"
     addresses = _addresses(db, current, query)
     if addresses is None:
-        cursor = db.execute(f"UPDATE threats SET status = ?, status_changed = ?, data = {clear} WHERE status = ?",
-                            (status, now, current))
+        clause, parameters = _view_clause(current)
+        cursor = db.execute(f"UPDATE threats SET status = ?, status_changed = ?, data = {clear} WHERE {clause}",
+                            (status, now, *parameters))
         return {"result": "saved", "changed": cursor.rowcount}
     changed = 0
     for address in addresses:
         changed += db.execute(f"UPDATE threats SET status = ?, status_changed = ?, data = {clear} "
-                              "WHERE status = ? AND address = ?", (status, now, current, address)).rowcount
+                              "WHERE address = ?", (status, now, address)).rowcount
     return {"result": "saved", "changed": changed}
 
 

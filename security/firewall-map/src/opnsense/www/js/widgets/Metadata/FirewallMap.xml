@@ -42,6 +42,12 @@
             <geo_key>MaxMind license key</geo_key>
             <geo_update>Update frequency</geo_update>
             <abuseipdb_key>AbuseIPDB API key</abuseipdb_key>
+            <abuseipdb_pf>Maintain FWMAP_AbuseIPDB alias</abuseipdb_pf>
+            <abuseipdb_pf_help>Creates an external PF alias and refreshes it from the downloaded 100%-confidence blacklist. No firewall rule is added; use the alias in rules on the interfaces you choose.</abuseipdb_pf_help>
+            <abuseipdb_pf_status>Alias maintenance</abuseipdb_pf_status>
+            <abuseipdb_pending>blacklist refresh pending</abuseipdb_pending>
+            <enabled>enabled</enabled>
+            <disabled>disabled</disabled>
             <key_set_abuse>Key saved (enter a new one to replace it, "-" to remove it)</key_set_abuse>
             <abuseipdb_none>Optional: enables abuse reports when investigating an address</abuseipdb_none>
             <threat_lists>Threat lists</threat_lists>

@@ -7,7 +7,7 @@ import re
 import subprocess
 import xml.etree.ElementTree as ElementTree
 
-from fwmap_common import CONFIG_XML, PFCTL, RULES_DEBUG, private_ipv4, public_ipv4
+from fwmap_common import CONFIG_XML, PFCTL, RULES_DEBUG, host_port, normalize_ip, private_ip, public_ip
 
 
 IFCONFIG = "/sbin/ifconfig"
@@ -15,21 +15,29 @@ COUNTERS = re.compile(r"(?P<packets_in>\d+):(?P<packets_out>\d+) pkts,\s+(?P<byt
 AGE = re.compile(r"\bage (?:(?P<days>\d+)d)?(?P<h>\d+):(?P<m>\d+):(?P<s>\d+)")
 RLABEL = re.compile(r"\brlabel ([^,\s]+)")
 STATE_ID = re.compile(r"\bid: (?P<id>[0-9a-f]+) creatorid: (?P<creator>[0-9a-f]+)")
-ENDPOINT = re.compile(r"^(?P<address>.+?)(?::(?P<port>\d+))?$")
 
 
 def endpoint(value):
-    """Split a PF endpoint while keeping address parsing deliberately IPv4-only."""
+    """Split the endpoint syntax emitted by pfctl for both address families.
+
+    PF renders IPv4 ports as ``192.0.2.1:443`` and IPv6 ports as
+    ``2001:db8::1[443]``. Bracketed ``[2001:db8::1]:443`` is accepted too because it is
+    the unambiguous representation used by the API and UI.
+    """
     value = value.strip("()")
-    # fast path for the common "a.b.c.d:port" / "a.b.c.d" forms (no regex: this runs per state)
-    if value.count(":") <= 1:
-        address, _, port = value.partition(":")
-        if address and (not port or port.isdigit()):
-            return {"address": address, "port": port or None}
-    match = ENDPOINT.match(value)
-    if not match:
-        return {"address": None, "port": None}
-    return {"address": match.group("address"), "port": match.group("port")}
+    if value.startswith("[") and "]" in value:
+        address, _, rest = value[1:].partition("]")
+        return {"address": normalize_ip(address), "port": rest.lstrip(":") or None}
+    if value.count(":") > 1:
+        address, marker, rest = value.partition("[")
+        return {"address": normalize_ip(address), "port": rest.rstrip("]") or None} if marker else {
+            "address": normalize_ip(value), "port": None,
+        }
+    # IPv4 (the common case, kept free of parsing: this runs per state); pfctl prints it canonical
+    address, _, port = value.partition(":")
+    if address and (not port or port.isdigit()):
+        return {"address": address, "port": port or None}
+    return {"address": None, "port": None}
 
 
 def _state_header(line):
@@ -45,7 +53,7 @@ def _state_header(line):
     left = endpoint(parts[2])
     right = endpoint(parts[arrow + 1])
     translated = arrow > 3 and parts[3].startswith("(")
-    if not translated and not public_ipv4(left["address"]) and not public_ipv4(right["address"]):
+    if not translated and not public_ip(left["address"]) and not public_ip(right["address"]):
         # LAN-internal state (or the LAN side of a NAT pair): never drawn, skip its details
         return None
     return {
@@ -110,7 +118,48 @@ def parse_states(output):
     return records
 
 
-def flow_endpoints(record, local_addresses):
+def _network_device(address, networks, exclude_device=None):
+    """Interface whose configured network contains address, optionally excluding one device."""
+    try:
+        parsed = ipaddress.ip_address(address)
+    except (TypeError, ValueError):
+        return None
+    for network, device in networks or []:
+        if device != exclude_device and network.version == parsed.version and parsed in network:
+            return device
+    return None
+
+
+def inside_address(address, networks=None, local_addresses=None, exclude_device=None):
+    """Whether address belongs to the protected side, including a routed public subnet.
+
+    RFC1918/ULA addresses retain their historic meaning. A globally routed address is inside only
+    when it belongs to a configured interface network other than the state's outside interface.
+    """
+    if private_ip(address):
+        return True
+    return (address not in (local_addresses or set())
+            and _network_device(address, networks, exclude_device) is not None)
+
+
+def _origin_address(record, local_addresses, networks):
+    """Best same-family firewall address to use as the map origin for a routed state."""
+    inside = inside_endpoint(record, networks, local_addresses)
+    if inside is None:
+        return None
+    other = record["dst"] if inside is record["src"] else record["src"]
+    try:
+        version = ipaddress.ip_address(other["address"]).version
+    except (TypeError, ValueError):
+        return None
+    same_family = [address for address in local_addresses
+                   if ipaddress.ip_address(address).version == version]
+    on_egress = [address for address in same_family
+                 if _network_device(address, networks) == record.get("origif")]
+    return min(on_egress or same_family, default=None)
+
+
+def flow_endpoints(record, local_addresses, networks=None):
     """Return (firewall public address, remote address) or None for non-map traffic.
 
     NAT states carry the firewall's public address explicitly; other states are kept
@@ -119,30 +168,52 @@ def flow_endpoints(record, local_addresses):
     src = record["src"]["address"]
     dst = record["dst"]["address"]
     nat = record["nat"]["address"] if record["nat"] else None
-    if nat and public_ipv4(nat):
+    if nat and public_ip(nat):
         local = nat
     elif src in local_addresses:
         local = src
     elif dst in local_addresses:
         local = dst
-    elif nat and private_ipv4(src) and public_ipv4(dst) and local_addresses:
+    elif nat and private_ip(src) and public_ip(dst) and local_addresses:
         # outbound NAT to a tunnel address (e.g. a WireGuard or IPsec egress): draw it from the
         # firewall's own location, the egress interface tells which path it took
-        local = min(local_addresses)
+        try:
+            version = ipaddress.ip_address(dst).version
+            local = min(address for address in local_addresses if ipaddress.ip_address(address).version == version)
+        except (TypeError, ValueError):
+            return None
         return local, dst
     else:
-        return None
+        # With a routed prefix there is no NAT and neither state endpoint is an address assigned
+        # to the firewall. Identify the protected endpoint from the interface networks, then draw
+        # the flow from a same-family firewall address while retaining the host as `inside`.
+        if not networks:
+            return None
+        inside = inside_endpoint(record, networks, local_addresses)
+        if inside is None or not public_ip(inside["address"]):
+            return None
+        remote_side = record["dst"] if inside is record["src"] else record["src"]
+        if not public_ip(remote_side["address"]):
+            return None
+        local = _origin_address(record, local_addresses, networks)
+        return (local, remote_side["address"]) if local else None
     remote = dst if local == src else src
-    if not public_ipv4(remote) or remote == local or remote in local_addresses:
+    if not public_ip(remote) or remote == local or remote in local_addresses:
         return None
     return local, remote
 
 
-def inside_endpoint(record):
-    """The LAN endpoint behind a NAT state (the private one among source, destination and NAT)."""
+def inside_endpoint(record, networks=None, local_addresses=None):
+    """The protected endpoint behind NAT or within a directly routed interface prefix."""
     for side in (record["nat"], record["src"], record["dst"]):
-        if side and private_ipv4(side["address"]):
+        if side and private_ip(side["address"]):
             return side
+    # Public prefixes are unambiguous only when pfctl supplied the state's outside interface.
+    outside = record.get("origif")
+    if outside:
+        for side in (record["src"], record["dst"]):
+            if inside_address(side["address"], networks, local_addresses, outside):
+                return side
     return None
 
 
@@ -159,13 +230,13 @@ def lan_rule_index(records):
         if not rule or record["nat"]:
             continue
         src, dst = record["src"], record["dst"]
-        if private_ipv4(src["address"]) and public_ipv4(dst["address"]):
+        if private_ip(src["address"]) and public_ip(dst["address"]):
             index[(record["protocol"], src["address"], src["port"], dst["address"], dst["port"])] = rule
     return index
 
 
-def rule_for(record, pair, lan_rules):
-    inside = inside_endpoint(record)
+def rule_for(record, pair, lan_rules, networks=None, local_addresses=None):
+    inside = inside_endpoint(record, networks, local_addresses)
     if inside and lan_rules:
         far = record["src"] if record["src"]["address"] == pair[1] else record["dst"]
         rule = lan_rules.get((record["protocol"], inside["address"], inside["port"], far["address"], far["port"]))
@@ -174,7 +245,7 @@ def rule_for(record, pair, lan_rules):
     return record.get("rule")
 
 
-def orientation(record, remote):
+def orientation(record, remote, networks=None, local_addresses=None):
     """(remote started it, the service's port) for one state.
 
     A state normally starts at its initiator. When the opening packet passed the other CARP
@@ -184,7 +255,7 @@ def orientation(record, remote):
     if record["src"]["address"] == remote:
         return True, record["dst"]["port"]
     # behind outbound NAT the source port that matters is the inside host's, not the translated one
-    source, target = (inside_endpoint(record) or record["src"])["port"], record["dst"]["port"]
+    source, target = (inside_endpoint(record, networks, local_addresses) or record["src"])["port"], record["dst"]["port"]
     # the client side must look ephemeral: keeps NFS (reserved port to 2049) and IKE (500 to 4500) outbound
     if (record["protocol"] in ("tcp", "udp") and source and target and source.isdigit() and target.isdigit()
             and int(source) < 1024 and int(target) >= 10000):
@@ -193,7 +264,7 @@ def orientation(record, remote):
 
 
 def interface_networks(output):
-    """[(IPv4Network, device)] for every IPv4 address configured on an interface."""
+    """[(IPv4Network/IPv6Network, device)] for addresses configured on interfaces."""
     networks = []
     device = None
     for line in output.splitlines():
@@ -208,20 +279,28 @@ def interface_networks(output):
                 networks.append((ipaddress.ip_network(f"{match.group(1)}/{prefix}", strict=False), device))
             except ValueError:
                 continue
+        match6 = re.search(r"\binet6\s+([^\s%]+)(?:%\S+)?\s+prefixlen\s+(\d+)", line)
+        if match6 and device:
+            try:
+                networks.append((ipaddress.ip_network(f"{match6.group(1)}/{match6.group(2)}", strict=False), device))
+            except ValueError:
+                continue
     # most specific first, so a host matches its own subnet before a wider one
     networks.sort(key=lambda item: -item[0].prefixlen)
     return networks
 
 
 def host_info():
-    """Return (public IPv4 addresses on this firewall, CARP role or None, interface networks)."""
+    """Return (public IP addresses on this firewall, CARP role or None, interface networks)."""
     try:
         output = subprocess.run(
             [IFCONFIG, "-a"], capture_output=True, check=False, text=True, timeout=2,
         ).stdout
     except (OSError, subprocess.TimeoutExpired):
         return set(), None, []
-    addresses = {address for address in re.findall(r"\binet\s+(\d+(?:\.\d+){3})", output) if public_ipv4(address)}
+    candidates = re.findall(r"\binet\s+(\d+(?:\.\d+){3})", output)
+    candidates += re.findall(r"\binet6\s+([^\s%]+)", output)
+    addresses = {str(ipaddress.ip_address(address)) for address in candidates if public_ip(address)}
     roles = set(re.findall(r"\bcarp: (MASTER|BACKUP|INIT)\b", output))
     if not roles:
         role = None
@@ -297,7 +376,7 @@ def interface_names(path=CONFIG_XML):
 
 
 PORT_FORWARD = re.compile(
-    r"^rdr (?:pass )?on (?P<iface>\S+) inet proto (?P<proto>\{[^}]*\}|\S+) from .*? to .*? port \{?(?P<ports>[\d:, ]+)\}?"
+    r"^rdr (?:pass )?on (?P<iface>\S+) inet6? proto (?P<proto>\{[^}]*\}|\S+) from .*? to .*? port \{?(?P<ports>[\d:, ]+)\}?"
     r" -> (?P<target>\S+)(?: port (?P<tport>\d+))?(?:.*?# (?P<descr>.*))?$")
 
 
@@ -323,7 +402,11 @@ def port_forwards(path=RULES_DEBUG, table_lookup=None):
                 target = match["target"]
                 if target.startswith("$"):
                     target = table_lookup(target[1:])
-                if not target or not private_ipv4(target):
+                try:
+                    parsed_target = ipaddress.ip_address(target)
+                except (TypeError, ValueError):
+                    continue
+                if parsed_target.is_loopback or parsed_target.is_unspecified or parsed_target.is_multicast:
                     continue  # captive portal and other redirects to the firewall itself
                 ports = []
                 for part in re.split(r"[ ,]+", match["ports"].strip()):
@@ -347,7 +430,7 @@ def forward_target(forwards, protocol, port):
     port = int(port)
     for forward in forwards or []:
         if protocol in forward["protocols"] and any(low <= port <= high for low, high in forward["ports"]):
-            return f'{forward["target"]}:{forward["target_port"] or port}', forward["description"]
+            return host_port(forward["target"], forward["target_port"] or port), forward["description"]
     return None, None
 
 
@@ -367,12 +450,12 @@ def state_outside(record, pair):
         public = record["src"]
     else:
         public = nat if nat else record["dst"]
-    if public["address"] != local:
+    if nat and public["address"] != local:
         return None  # NAT to a tunnel address: Suricata on WAN never sees this tuple
     far = record["src"] if record["src"]["address"] == remote else record["dst"]
     if far["address"] != remote:
         return None
-    return outside_key(record["protocol"], local, public["port"], remote, far["port"])
+    return outside_key(record["protocol"], public["address"], public["port"], remote, far["port"])
 
 
 # Walking the state table costs about 2 kB of memory and 20 µs per state; above this many states

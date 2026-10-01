@@ -58,3 +58,21 @@ export function splitHostPort(text) {
   const match = /^([^:]+):(\d+)$/.exec(value);
   return match ? [match[1], match[2]] : [value, ''];
 }
+
+/** Combine an address and port without making an IPv6 endpoint ambiguous. */
+export function hostPort(address, port) {
+  if (!port) {
+    return String(address ?? '');
+  }
+  const value = String(address ?? '');
+  return value.includes(':') ? `[${value}]:${port}` : `${value}:${port}`;
+}
+
+/** Display-only local-address classification for saved targets. */
+export function privateAddress(value) {
+  const address = String(value ?? '').toLowerCase().split('%')[0];
+  if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|127\.|169\.254\.)/.test(address)) {
+    return true;
+  }
+  return address === '::1' || /^(fc|fd|fe[89ab])/.test(address);
+}

@@ -28,11 +28,15 @@
                 <Mask>/^[A-Za-z0-9_.,-]{0,4096}$/</Mask>
                 <ValidationMessage>Choose threat lists from the offered tables.</ValidationMessage>
             </threat_lists>
-            <!-- keep a review queue of permitted traffic to flagged addresses, even with the map closed -->
+            <!-- keep threat history even with the map closed -->
             <record_threats type="BooleanField">
                 <Required>Y</Required>
                 <Default>1</Default>
             </record_threats>
+            <abuseipdb_alias type="BooleanField">
+                <Required>Y</Required>
+                <Default>0</Default>
+            </abuseipdb_alias>
             <update_days type="IntegerField">
                 <Required>Y</Required>
                 <Default>3</Default>

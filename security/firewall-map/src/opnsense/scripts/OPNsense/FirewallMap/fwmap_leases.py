@@ -8,61 +8,72 @@ import time
 import xml.etree.ElementTree as ElementTree
 from concurrent.futures import ThreadPoolExecutor
 
-from fwmap_common import CONFIG_XML, private_ipv4, service_name
+from fwmap_common import CONFIG_XML, service_name
 
 
 HOSTNAME_TTL = 6 * 3600
 HOSTNAME_LOOKUPS_PER_SAMPLE = 8
 MAX_HOSTNAMES = 5000
 KEA_LEASES = "/var/db/kea/kea-leases4.csv"
+KEA6_LEASES = "/var/db/kea/kea-leases6.csv"
 DNSMASQ_LEASES = "/var/db/dnsmasq.leases"
 
 
-def lease_names(kea=KEA_LEASES, dnsmasq=DNSMASQ_LEASES, config=CONFIG_XML, now=None):
-    """IPv4 -> hostname from DHCP: Kea reservations win over Kea leases, then dnsmasq leases."""
+def lease_names(kea=KEA_LEASES, dnsmasq=DNSMASQ_LEASES, config=CONFIG_XML, now=None, kea6=KEA6_LEASES):
+    """IP -> hostname from DHCP: Kea reservations win over Kea leases, then dnsmasq leases."""
     now = time.time() if now is None else now
     leases = {}
-    try:
-        with open(kea, errors="replace") as handle:
-            header = handle.readline().strip().split(",")
-            column = {name: index for index, name in enumerate(header)}
-            for line in handle:
-                fields = line.rstrip("\n").split(",")
-                try:
-                    address = fields[column["address"]]
-                    name = fields[column["hostname"]].strip().rstrip(".")
-                    expire = int(fields[column["expire"]] or 0)
-                except (KeyError, IndexError, ValueError):
-                    continue
-                # Kea appends lease updates: the latest line for an address wins, and an expired,
-                # released or nameless latest line clears the name
-                if name and expire >= now:
-                    leases[address] = name
-                else:
-                    leases.pop(address, None)
-    except OSError:
-        pass
+    for path in (kea, kea6):
+        try:
+            with open(path, errors="replace") as handle:
+                header = handle.readline().strip().split(",")
+                column = {name: index for index, name in enumerate(header)}
+                for line in handle:
+                    fields = line.rstrip("\n").split(",")
+                    try:
+                        address = str(ipaddress.ip_address(fields[column["address"]]))
+                        name = fields[column["hostname"]].strip().rstrip(".")
+                        expire = int(fields[column["expire"]] or 0)
+                    except (KeyError, IndexError, ValueError):
+                        continue
+                    # Kea appends lease updates: the latest line for an address wins, and an
+                    # expired, released or nameless latest line clears the name.
+                    if name and expire >= now:
+                        leases[address] = name
+                    else:
+                        leases.pop(address, None)
+        except OSError:
+            pass
     try:
         with open(dnsmasq, errors="replace") as handle:
             for line in handle:
                 fields = line.split()
-                if len(fields) >= 4 and fields[3] != "*" and private_ipv4(fields[2]):
-                    leases.setdefault(fields[2], fields[3])
+                if len(fields) >= 4 and fields[3] != "*":
+                    try:
+                        leases.setdefault(str(ipaddress.ip_address(fields[2])), fields[3])
+                    except ValueError:
+                        continue
     except OSError:
         pass
     try:
         root = ElementTree.parse(config).getroot()
-        for reservation in root.iterfind(".//Kea/dhcp4/reservations/reservation"):
-            address, name = reservation.findtext("ip_address"), reservation.findtext("hostname")
-            if address and name:
-                leases[address.strip()] = name.strip()
+        for family in ("dhcp4", "dhcp6"):
+            for reservation in root.iterfind(f".//Kea/{family}/reservations/reservation"):
+                address, name = reservation.findtext("ip_address"), reservation.findtext("hostname")
+                if address and name:
+                    try:
+                        leases[str(ipaddress.ip_address(address.strip()))] = name.strip()
+                    except ValueError:
+                        continue
     except (OSError, ElementTree.ParseError):
         pass
     return leases
 
 
 def describe_inside(address, names, networks, interfaces):
-    device = next((device for network, device in networks if ipaddress.ip_address(address) in network), None)
+    parsed = ipaddress.ip_address(address)
+    device = next((device for network, device in networks
+                   if network.version == parsed.version and parsed in network), None)
     return {
         "ip": address,
         "name": names.get(address),

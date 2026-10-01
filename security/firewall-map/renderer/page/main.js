@@ -260,7 +260,7 @@ function createRenderer() {
   host().applyTheme($map[0], theme, {
     grid: document.getElementById('fwmap-grid'),
     overlays: [document.getElementById('fwmap-status'), document.getElementById('fwmap-legend')],
-    // the side panel, the zoom buttons and the review queue dialog (outside the layout) share the palette
+    // the side panel, the zoom buttons and the Threats dialog (outside the layout) share the palette
     root: document.body,
   });
   state.follow = readFollow();

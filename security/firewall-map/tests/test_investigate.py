@@ -33,7 +33,18 @@ class InvestigateTest(unittest.TestCase):
 
     def test_rejects_private_and_invalid_addresses(self):
         self.assertEqual(INVESTIGATE.investigate("192.168.1.1", store=object(), fetchers={})["status"], "failed")
+        self.assertEqual(INVESTIGATE.investigate("fd12:3456::1", store=object(), fetchers={})["status"], "failed")
         self.assertEqual(INVESTIGATE.investigate("8.8.8.8; rm -rf /", store=object(), fetchers={})["status"], "failed")
+
+    def test_ipv6_lookup_urls_are_encoded(self):
+        address = "2001:4860:4860::8888"
+        with mock.patch.object(INVESTIGATE, "fetch_json", return_value={}) as fetch:
+            sources = INVESTIGATE.lookups(address, "key")
+            sources["rdap"]()
+            sources["ripestat"]()
+            sources["abuseipdb"]()
+        urls = [call.args[0] for call in fetch.call_args_list]
+        self.assertTrue(all("2001%3A4860%3A4860%3A%3A8888" in url for url in urls))
 
     def test_caches_and_reports_errors_per_source(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -60,6 +71,12 @@ class InvestigateTest(unittest.TestCase):
 
 
 class AbuseBlacklistTest(unittest.TestCase):
+    def setUp(self):
+        # update() loads the PF table after a download; keep the real config.xml and pfctl out of it
+        patcher = mock.patch.object(ABUSEIPDB, "alias_settings", return_value=(False, True))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_downloads_parses_and_rate_limits(self):
         with tempfile.TemporaryDirectory() as directory, \
                 mock.patch.object(ABUSEIPDB, "LIST_FILE", os.path.join(directory, "list.txt")), \
@@ -68,11 +85,12 @@ class AbuseBlacklistTest(unittest.TestCase):
 
             def fetch(key):
                 calls.append(key)
-                return "94.154.43.203\n10.0.0.1\nnot-an-ip\n204.76.203.231\n"
+                return "94.154.43.203\n10.0.0.1\nnot-an-ip\n204.76.203.231\n2001:4860:4860::8888\n"
             self.assertEqual(ABUSEIPDB.update(key="", fetch=fetch)["reason"], "no key")
-            self.assertEqual(ABUSEIPDB.update(key="k", fetch=fetch, now=1000.0), {"result": "ok", "count": 2})
+            self.assertEqual(ABUSEIPDB.update(key="k", fetch=fetch, now=1000.0), {"result": "ok", "count": 3})
             with open(ABUSEIPDB.LIST_FILE) as handle:
-                self.assertEqual(handle.read().split(), ["94.154.43.203", "204.76.203.231"])
+                self.assertEqual(handle.read().split(),
+                                 ["94.154.43.203", "204.76.203.231", "2001:4860:4860::8888"])
             self.assertEqual(ABUSEIPDB.update(key="k", fetch=fetch, now=2000.0)["reason"], "recent")
             self.assertEqual(ABUSEIPDB.update(force=True, key="k", fetch=fetch, now=2000.0)["result"], "ok")
             self.assertEqual(len(calls), 2)
@@ -88,6 +106,42 @@ class AbuseBlacklistTest(unittest.TestCase):
             self.assertEqual(result["error"], "failed with <key>")
             with open(ABUSEIPDB.STATUS_FILE) as handle:
                 self.assertNotIn("secret", handle.read())
+
+class AbuseAliasTest(unittest.TestCase):
+    def test_alias_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = os.path.join(directory, "config.xml")
+            with open(config, "w") as handle:
+                handle.write("<opnsense><OPNsense><FirewallMap><general><abuseipdb_alias>1</abuseipdb_alias>"
+                             "</general></FirewallMap><Firewall><Alias><aliases><alias><name>FWMAP_AbuseIPDB</name>"
+                             "</alias></aliases></Alias></Firewall></OPNsense></opnsense>")
+            self.assertEqual(ABUSEIPDB.alias_settings(config), (True, True))
+            self.assertEqual(ABUSEIPDB.alias_settings(os.path.join(directory, "missing.xml")), (False, False))
+
+    def test_pf_table_sync(self):
+        with tempfile.TemporaryDirectory() as directory:
+            list_file = os.path.join(directory, "list.txt")
+            run = mock.Mock(return_value=mock.Mock(returncode=0, stderr=""))
+            with mock.patch.object(ABUSEIPDB, "LIST_FILE", list_file):
+                # on, but nothing downloaded yet: the table is left alone and no file is created
+                self.assertFalse(ABUSEIPDB.sync_pf_table((True, True), run=run)["loaded"])
+                self.assertFalse(os.path.exists(list_file))
+                run.assert_not_called()
+                with open(list_file, "w") as handle:
+                    handle.write("192.0.2.1\n2001:db8::1\n")
+                self.assertEqual(ABUSEIPDB.sync_pf_table((True, True), run=run), {"enabled": True, "loaded": True})
+                self.assertEqual(run.call_args.args[0],
+                                 [COMMON.PFCTL, "-t", "FWMAP_AbuseIPDB", "-T", "replace", "-f", list_file])
+                # off with the alias still defined (in use by a rule, or the administrator's own): untouched
+                run.reset_mock()
+                ABUSEIPDB.sync_pf_table((False, True), run=run)
+                run.assert_not_called()
+                # off and the alias gone: the leftover table is dropped
+                ABUSEIPDB.sync_pf_table((False, False), run=run)
+                self.assertEqual(run.call_args.args[0], [COMMON.PFCTL, "-q", "-t", "FWMAP_AbuseIPDB", "-T", "kill"])
+                run.return_value = mock.Mock(returncode=1, stderr="pfctl: Table does not exist.")
+                self.assertEqual(ABUSEIPDB.sync_pf_table((True, True), run=run),
+                                 {"enabled": True, "loaded": False, "error": "pfctl: Table does not exist."})
 
 
 if __name__ == "__main__":

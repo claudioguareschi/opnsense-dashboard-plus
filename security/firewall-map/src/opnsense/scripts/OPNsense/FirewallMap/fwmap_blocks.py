@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 
 from fwmap_blocklists import threat_fields
-from fwmap_common import location_fields, public_ipv4, service_name
+from fwmap_common import location_fields, normalize_ip, public_ip, service_name
 
 
 FILTER_LOG = "/var/log/filter/latest.log"
@@ -121,8 +121,8 @@ def parse_block(line):
         "rule": fields[3] or fields[0],
         "interface": fields[4],
         "protocol": protocol,
-        "source": source,
-        "destination": destination,
+        "source": normalize_ip(source),
+        "destination": normalize_ip(destination),
         "port": ports[1] or None,
         "source_port": ports[0] or None,
     }
@@ -144,7 +144,7 @@ class BlockTracker:
         self.sources = {}
 
     def add(self, event, now):
-        if not public_ipv4(event["source"]):
+        if not public_ip(event["source"]):
             return
         # dict order doubles as recency order: a hit moves the source to the end, so the least
         # recently hit source is always first and eviction is O(1)

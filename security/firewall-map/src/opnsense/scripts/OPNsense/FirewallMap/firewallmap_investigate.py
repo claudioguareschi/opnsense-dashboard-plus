@@ -1,6 +1,6 @@
 #!/usr/local/bin/python3
 
-"""On-demand investigation of one public IPv4 address for Firewall Map+.
+"""On-demand investigation of one public IPv4 or IPv6 address for Firewall Map+.
 
     firewallmap_investigate.py <address>
 
@@ -133,9 +133,9 @@ def lookups(address, key):
 
 def investigate(address, store=None, key=None, fetchers=None, now=None):
     try:
-        parsed = ipaddress.IPv4Address(address)
+        parsed = ipaddress.ip_address(address)
     except ValueError:
-        return {"status": "failed", "error": "not an IPv4 address"}
+        return {"status": "failed", "error": "not an IP address"}
     if not parsed.is_global or parsed.is_multicast:
         return {"status": "failed", "error": "not a public address"}
     address = str(parsed)

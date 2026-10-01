@@ -8,5 +8,7 @@ fi
 /usr/local/sbin/configctl -d firewallmap geodb update > /dev/null 2>&1
 # fetch the AbuseIPDB blacklist when a key is set (skipped if it was fetched in the last 20 hours)
 /usr/local/sbin/configctl -d firewallmap abuseipdb update > /dev/null 2>&1
-# keep the threat review queue fed (only while the widget is on a dashboard)
+# Refresh the optional external AbuseIPDB alias from the same local cache. No rule is added.
+/usr/local/sbin/configctl -d firewallmap abuseipdb sync > /dev/null 2>&1
+# keep threat history fed (only while the widget is on a dashboard)
 /usr/local/sbin/configctl -d firewallmap ensure > /dev/null 2>&1

@@ -30,12 +30,13 @@ use OPNsense\Base\ApiControllerBase;
 use OPNsense\Core\Backend;
 
 /**
- * Review queue of permitted traffic to or from flagged addresses (administrators only, see ACL).
- * Setting a status never changes firewall rules.
+ * Threat history organized by observed disposition (administrators only, see ACL).
+ * Workflow status and notes never change firewall rules.
  */
 class ThreatsController extends ApiControllerBase
 {
-    private const STATUSES = ['new', 'reviewed', 'dismissed', 'blocked', 'dropped'];
+    private const STATUSES = ['new', 'reviewed', 'dismissed', 'blocked'];
+    private const VIEWS = ['passed', 'firewall_blocked', 'ips_dropped', 'all', 'reviewed', 'dismissed'];
 
     /** Free text travels as base64url so configd only ever sees [A-Za-z0-9_-]; "-" means none. */
     private function encodeText($text, $length)
@@ -47,7 +48,7 @@ class ThreatsController extends ApiControllerBase
     /** One page of a tab; `q` searches what the queue displays, `offset` and `limit` page it. */
     public function listAction($status = null)
     {
-        $status = in_array($status, self::STATUSES, true) || $status === 'counts' ? $status : 'all';
+        $status = in_array($status, self::VIEWS, true) || $status === 'counts' ? $status : 'all';
         $offset = max(0, (int)($this->request->get('offset') ?? 0));
         $limit = max(1, min(500, (int)($this->request->get('limit') ?? 100)));
         $query = $this->encodeText($this->request->get('q') ?? '', 200);
@@ -65,8 +66,8 @@ class ThreatsController extends ApiControllerBase
         }
         $address = (string)$this->request->getPost('address');
         $status = (string)$this->request->getPost('status');
-        if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
-            return ['result' => 'failed', 'error' => 'not an IPv4 address'];
+        if (filter_var($address, FILTER_VALIDATE_IP) === false) {
+            return ['result' => 'failed', 'error' => 'not an IP address'];
         }
         if (!in_array($status, self::STATUSES, true)) {
             return ['result' => 'failed', 'error' => 'unknown status'];
@@ -92,7 +93,7 @@ class ThreatsController extends ApiControllerBase
         }
         $from = (string)$this->request->getPost('from');
         $to = (string)$this->request->getPost('to');
-        if (!in_array($from, self::STATUSES, true) || !in_array($to, self::STATUSES, true)) {
+        if (!in_array($from, self::VIEWS, true) || !in_array($to, self::STATUSES, true)) {
             return ['result' => 'failed', 'error' => 'unknown status'];
         }
         $query = $this->encodeText($this->request->getPost('query') ?? '', 200);

@@ -1,5 +1,5 @@
 /* Actions on an address: states, aliases, the watchlist, GeoIP countries. They change the firewall. */
-import {escapeHtml, plain} from '../src/format.js';
+import {escapeHtml, hostPort, plain} from '../src/format.js';
 import {confirmAction, errorText, getJSON, notify, notifyFailure, postJSON} from './api.js';
 import {T, WATCHLIST} from './context.js';
 
@@ -8,7 +8,7 @@ export async function showStates(address) {
     const result = await postJSON('/api/diagnostics/firewall/query_states', {searchPhrase: address, rowCount: 100, current: 1});
     const count = (result.rows || []).length;
     const rows = (result.rows || []).map((row) => `<tr><td>${escapeHtml(row.interface)}</td><td>${escapeHtml(row.proto)}</td>`
-      + `<td>${escapeHtml(row.src_addr)}:${escapeHtml(row.src_port)}</td><td>${escapeHtml(row.dst_addr)}:${escapeHtml(row.dst_port)}</td>`
+      + `<td>${escapeHtml(hostPort(row.src_addr, row.src_port))}</td><td>${escapeHtml(hostPort(row.dst_addr, row.dst_port))}</td>`
       + `<td>${escapeHtml(row.state)}</td><td>${escapeHtml(row.bytes ?? '')}</td></tr>`).join('');
     BootstrapDialog.show({
       title: escapeHtml(`${T.states_for} ${address}`), size: BootstrapDialog.SIZE_WIDE,

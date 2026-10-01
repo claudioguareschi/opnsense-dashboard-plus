@@ -1,6 +1,7 @@
 """Unit tests for PF state parsing and flow endpoints (fwmap_pf)."""
 
 import json
+import ipaddress
 import os
 import sys
 import tempfile
@@ -10,7 +11,7 @@ from datetime import datetime
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from support import BLOCKLISTS, CACHE, COLLECTOR, COMMON, LEASES, PF, NAT_OUT, nat_state  # noqa: E402
+from support import BLOCKLISTS, CACHE, COLLECTOR, COMMON, LEASES, PF, THREATS, NAT_OUT, nat_state  # noqa: E402
 
 
 class ParseTest(unittest.TestCase):
@@ -34,6 +35,19 @@ class ParseTest(unittest.TestCase):
 """
         record = PF.parse_states(output)[0]
         self.assertEqual(PF.flow_endpoints(record, {"198.13.91.163"}), ("198.13.91.163", "45.56.79.53"))
+
+    def test_parses_and_maps_ipv6_state(self):
+        output = """all tcp 2606:4700:4700:0:0:0:0:1111[443] <- 2001:4860:4860:0:0:0:0:8888[51234] ESTABLISHED:ESTABLISHED
+   age 00:00:05, expires in 23:59:48, 2:3 pkts, 128:512 bytes
+   id: 0abc creatorid: 0123
+   origif: wg0
+"""
+        record = PF.parse_states(output)[0]
+        self.assertEqual(record["src"], {"address": "2001:4860:4860::8888", "port": "51234"})
+        self.assertEqual(record["dst"], {"address": "2606:4700:4700::1111", "port": "443"})
+        self.assertEqual(record["origif"], "wg0")
+        self.assertEqual(PF.flow_endpoints(record, {"2606:4700:4700::1111"}),
+                         ("2606:4700:4700::1111", "2001:4860:4860::8888"))
 
     def test_excludes_firewall_to_firewall_state(self):
         record = {
@@ -86,9 +100,11 @@ class InsideTest(unittest.TestCase):
     NAT_OUT = NAT_OUT
     IFCONFIG = """igb1: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
 \tinet 152.44.11.230 netmask 0xffffff00 broadcast 152.44.11.255
+\tinet6 2606:4700:4700::1111 prefixlen 64
 vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
 \tinet 192.168.30.248 netmask 0xffffff00 broadcast 192.168.30.255
 \tinet 192.168.30.250 netmask 0xffffffff vhid 30
+\tinet6 fd12:3456:789a:30::1 prefixlen 64
 """
 
     def test_parses_origif_and_inside_host(self):
@@ -108,10 +124,12 @@ vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
 
     def test_maps_inside_host_to_interface_and_name(self):
         networks = PF.interface_networks(self.IFCONFIG)
-        self.assertEqual(networks[0][0].prefixlen, 32)
+        self.assertIn(("192.168.30.250/32", "vlan03"), [(str(network), device) for network, device in networks])
         described = LEASES.describe_inside("192.168.30.30", {"192.168.30.30": "nas"}, networks,
                                               {"vlan03": "VLAN30_IOT"})
         self.assertEqual(described, {"ip": "192.168.30.30", "name": "nas", "interface": "VLAN30_IOT"})
+        self.assertEqual(LEASES.describe_inside("fd12:3456:789a:30::20", {}, networks,
+                                                {"vlan03": "VLAN30_IOT"})["interface"], "VLAN30_IOT")
 
     def test_tracker_reports_inside_hosts_and_egress(self):
         tracker = COLLECTOR.FlowTracker(smoothing=1.0)
@@ -120,6 +138,29 @@ vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
         flow = tracker.flows[("198.13.91.163", "34.209.15.107")]
         self.assertEqual(flow["inside"], ["192.168.30.30"])
         self.assertEqual(flow["egress"], "igb1")
+
+    def test_routed_ipv6_host_is_mapped_recorded_and_kept_as_inside(self):
+        state = ("all tcp 2606:4700:4701::20[52114] -> 2001:4860:4860::8888[443] ESTABLISHED:ESTABLISHED\n"
+                 "   age 00:00:05, expires in 23:59:37, 2:3 pkts, 128:512 bytes, rlabel routed6\n"
+                 "   id: 0e creatorid: 02\n   origif: igb1\n")
+        local = {"2606:4700:4700::1111"}
+        networks = [(ipaddress.ip_network("2606:4700:4701::/64"), "vlan03"),
+                    (ipaddress.ip_network("2606:4700:4700::/64"), "igb1")]
+        record = PF.parse_states(state)[0]
+        pair = PF.flow_endpoints(record, local, networks)
+        self.assertEqual(pair, ("2606:4700:4700::1111", "2001:4860:4860::8888"))
+        self.assertEqual(PF.inside_endpoint(record, networks, local)["address"], "2606:4700:4701::20")
+        self.assertEqual(PF.state_outside(record, pair),
+                         ("tcp", "2606:4700:4701::20", "52114", "2001:4860:4860::8888", "443"))
+
+        tracker = COLLECTOR.FlowTracker(smoothing=1.0)
+        tracker.update([record], local, now=0.0, networks=networks)
+        flow = tracker.flows[pair]
+        self.assertEqual((flow["inside"], flow["initiated"]), (["2606:4700:4701::20"], "local"))
+
+        seen = THREATS.observe([record], lambda address: ["IPv6 test"] if address == pair[1] else [],
+                               local, networks)
+        self.assertEqual(seen[pair[1]]["inside"], ["2606:4700:4701::20"])
 
     def test_reads_kea_and_dnsmasq_leases(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -133,9 +174,22 @@ vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
                              "192.168.30.82,cc,03,3600,9999999999,30,0,0,,0\n")
             dnsmasq = os.path.join(directory, "dnsmasq.leases")
             with open(dnsmasq, "w") as handle:
-                handle.write("9999999999 cc:cc 192.168.40.5 tv *\n9999999999 dd:dd 192.168.40.6 printer *\n")
-            names = LEASES.lease_names(kea, dnsmasq, os.path.join(directory, "none.xml"), now=1000)
-            self.assertEqual(names, {"192.168.30.80": "homeassistant", "192.168.40.5": "tv", "192.168.40.6": "printer"})
+                handle.write("9999999999 cc:cc 192.168.40.5 tv *\n9999999999 dd:dd 192.168.40.6 printer *\n"
+                             "9999999999 ee:ee 2606:4700:4700::99 workstation6 *\n")
+            kea6 = os.path.join(directory, "kea6.csv")
+            with open(kea6, "w") as handle:
+                handle.write("address,duid,valid_lifetime,expire,subnet_id,pref_lifetime,lease_type,iaid,prefix_len,fqdn_fwd,fqdn_rev,hostname,state\n"
+                             "fd12:3456:789a:30:0:0:0:80,aa,3600,9999999999,30,3600,0,1,128,0,0,sensor6,0\n")
+            config = os.path.join(directory, "config.xml")
+            with open(config, "w") as handle:
+                handle.write("<opnsense><OPNsense><Kea><dhcp6><reservations><reservation>"
+                             "<ip_address>fd12:3456:789a:30::81</ip_address><hostname>reserved6</hostname>"
+                             "</reservation></reservations></dhcp6></Kea></OPNsense></opnsense>")
+            names = LEASES.lease_names(kea, dnsmasq, config, now=1000, kea6=kea6)
+            self.assertEqual(names, {"192.168.30.80": "homeassistant", "192.168.40.5": "tv",
+                                     "192.168.40.6": "printer", "2606:4700:4700::99": "workstation6",
+                                     "fd12:3456:789a:30::80": "sensor6",
+                                     "fd12:3456:789a:30::81": "reserved6"})
 
 
 class InitiatorTest(unittest.TestCase):

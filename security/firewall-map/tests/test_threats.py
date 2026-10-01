@@ -1,7 +1,8 @@
-"""Unit tests for the threat review queue."""
+"""Unit tests for persisted threat history and disposition views."""
 
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 import time
@@ -53,7 +54,7 @@ class ThreatQueueTest(unittest.TestCase):
             encoded = __import__("base64").urlsafe_b64encode(note.encode()).decode().rstrip("=")
             self.assertEqual(THREATS.main(["set", "108.188.77.155", "blocked", encoded], path=os.path.join(directory, "cache.db")),
                              {"result": "saved"})
-            self.assertEqual(THREATS.listing(db, "blocked")["rows"][0]["note"], note)
+            self.assertEqual(THREATS.listing(db, "all")["rows"][0]["note"], note)
             # a status change alone keeps the note
             THREATS.set_status(db, "108.188.77.155", "blocked")
             self.assertEqual(THREATS.listing(db)["rows"][0]["note"], note)
@@ -65,7 +66,8 @@ class ThreatQueueTest(unittest.TestCase):
             THREATS.record(db, self.observe(self.INBOUND), now=400.0)
             row = THREATS.listing(db)["rows"][0]
             self.assertEqual((row["status"], row["seen_after_block"]), ("new", True))
-            self.assertEqual(THREATS.listing(db)["counts"], {"new": 1, "reviewed": 0, "dismissed": 0, "blocked": 0, "dropped": 0})
+            self.assertEqual(THREATS.listing(db)["counts"], {"passed": 1, "firewall_blocked": 0,
+                             "ips_dropped": 0, "reviewed": 0, "dismissed": 0, "all": 1})
             self.assertEqual(THREATS.listing(db, "counts")["rows"], [])
             THREATS.set_status(db, "108.188.77.155", "reviewed")
             self.assertNotIn("seen_after_block", THREATS.listing(db)["rows"][0])
@@ -73,6 +75,9 @@ class ThreatQueueTest(unittest.TestCase):
     def test_multicast_is_not_a_remote_endpoint(self):
         self.assertFalse(COMMON.public_ipv4("224.0.0.18"))
         self.assertTrue(COMMON.public_ipv4("9.9.9.9"))
+        self.assertTrue(COMMON.public_ip("2606:4700:4700::1111"))
+        self.assertTrue(COMMON.private_ip("fd00::1"))
+        self.assertFalse(COMMON.public_ip("ff02::1"))
 
     def test_remote_identity_is_kept(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -97,7 +102,7 @@ class ThreatQueueTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             db = THREATS.connect(os.path.join(directory, "cache.db"))
             THREATS.record(db, self.observe(self.INBOUND + self.OUTBOUND), now=100.0)
-            self.assertEqual(THREATS.bulk_status(db, "new", "dismissed")["changed"], 1)
+            self.assertEqual(THREATS.bulk_status(db, "passed", "dismissed")["changed"], 1)
             self.assertEqual(THREATS.listing(db)["counts"]["dismissed"], 1)
             self.assertEqual(THREATS.purge(db, "new")["result"], "failed")
             self.assertEqual(THREATS.purge(db, "dismissed")["deleted"], 1)
@@ -113,20 +118,44 @@ class ThreatQueueTest(unittest.TestCase):
                 seen[f"108.188.77.{index}"] = entry
             THREATS.record(db, seen, now=100.0)
             # key names never match: every entry has a status, none displays the word
-            self.assertEqual(THREATS.listing(db, "new", query="status")["total"], 0)
-            self.assertEqual(THREATS.listing(db, "new", query="russia")["total"], 2)
+            self.assertEqual(THREATS.listing(db, "passed", query="status")["total"], 0)
+            self.assertEqual(THREATS.listing(db, "passed", query="russia")["total"], 2)
             # inside host names count, as displayed
-            self.assertEqual(THREATS.listing(db, "new", query="mail")["total"], 5)
-            page = THREATS.listing(db, "new", offset=2, limit=2)
+            self.assertEqual(THREATS.listing(db, "passed", query="mail")["total"], 5)
+            page = THREATS.listing(db, "passed", offset=2, limit=2)
             self.assertEqual((page["total"], len(page["rows"]), page["offset"]), (5, 2, 2))
             # a bulk action with a search touches only what the search shows
-            self.assertEqual(THREATS.bulk_status(db, "new", "dismissed", query="russia")["changed"], 2)
-            self.assertEqual(THREATS.listing(db, "counts")["counts"]["new"], 3)
+            self.assertEqual(THREATS.bulk_status(db, "passed", "dismissed", query="russia")["changed"], 2)
+            self.assertEqual(THREATS.listing(db, "counts")["counts"]["passed"], 3)
             self.assertEqual(THREATS.purge(db, "dismissed", query="brazil")["deleted"], 0)
             self.assertEqual(THREATS.purge(db, "dismissed", query="russia")["deleted"], 2)
             # the command line carries the search as base64url
             encoded = __import__("base64").urlsafe_b64encode(b"brazil").decode().rstrip("=")
-            self.assertEqual(THREATS.main(["list", "new", "0", "1", encoded], path=os.path.join(directory, "cache.db"))["total"], 3)
+            self.assertEqual(THREATS.main(["list", "passed", "0", "1", encoded], path=os.path.join(directory, "cache.db"))["total"], 3)
+
+    def test_ipv6_persistence_key_and_status_action(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = THREATS.connect(os.path.join(directory, "cache.db"))
+            entry = self.observe(self.INBOUND)["108.188.77.155"]
+            THREATS.record(db, {"2606:4700:4700::1111": entry}, now=100.0)
+            row = THREATS.listing(db, "passed")["rows"][0]
+            self.assertEqual((row["address"], row["disposition"]), ("2606:4700:4700::1111", "passed"))
+            self.assertEqual(THREATS.set_status(db, "2606:4700:4700::1111", "reviewed")["result"], "saved")
+            self.assertEqual(THREATS.listing(db, "reviewed")["rows"][0]["address"], "2606:4700:4700::1111")
+
+    def test_old_dropped_status_migrates_to_ips_disposition(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "cache.db")
+            db = sqlite3.connect(path)
+            db.execute("CREATE TABLE threats (address TEXT PRIMARY KEY, first_seen REAL, last_seen REAL, "
+                       "samples INTEGER, data TEXT, status TEXT, note TEXT, status_changed REAL)")
+            db.execute("INSERT INTO threats VALUES (?, 1, 2, 1, ?, 'dropped', '', NULL)",
+                       ("2001:4860:4860::8888", json.dumps({})))
+            db.commit()
+            db.close()
+            migrated = THREATS.connect(path)
+            self.assertEqual(migrated.execute("SELECT status, disposition FROM threats").fetchone(),
+                             ("new", "ips_dropped"))
 
     def test_rejects_bad_input(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -141,6 +170,17 @@ class ThreatQueueTest(unittest.TestCase):
             THREATS.record(db, self.observe(self.INBOUND), now=0.0)
             THREATS.prune(db, now=THREATS.KEEP_SECONDS + 1)
             self.assertEqual(THREATS.listing(db)["rows"], [])
+
+    def test_prune_keeps_passed_entries_over_blocked_floods(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = THREATS.connect(os.path.join(directory, "cache.db"))
+            rows = [("198.51.100.1", "passed", 1.0)] + [(f"203.0.113.{n}", "firewall_blocked", 10.0 + n) for n in range(3)]
+            db.executemany("INSERT INTO threats (address, first_seen, last_seen, samples, data, disposition) "
+                           "VALUES (?, ?, ?, 1, '{}', ?)", [(a, t, t, d) for a, d, t in rows])
+            with mock.patch.object(THREATS, "KEEP_ROWS", 2):
+                THREATS.prune(db, now=20.0)
+            self.assertEqual({row[0] for row in db.execute("SELECT address FROM threats")},
+                             {"198.51.100.1", "203.0.113.2"})
 
     def test_widget_in_use(self):
         dashboard = __import__("base64").b64encode(json.dumps({"widgets": [{"id": "firewallmap"}]}).encode()).decode()

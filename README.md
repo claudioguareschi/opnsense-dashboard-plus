@@ -5,7 +5,7 @@ Two community plugins for [OPNsense](https://opnsense.org) 26.7, published as si
 | Package | What it adds |
 |---|---|
 | **os-dashboard-plus** | Enhanced dashboard widgets: System Information+, Traffic Graph+, System Metrics+, Thermal Sensors+, Interface Statistics+, Gateways+, Interfaces+ and Firewall Logs+. |
-| **os-firewall-map** (Firewall Map+) | The firewall's live traffic on a world map, as a dashboard widget and a full-size page, with plain-language details, threat lists, Suricata alerts and a review queue. |
+| **os-firewall-map** (Firewall Map+) | The firewall's live traffic (IPv4 and IPv6) on a world map, as a dashboard widget and a full-size page, with plain-language details, threat lists, Suricata alerts and a Threats panel. |
 
 These are not official OPNsense plugins. They do not modify the OPNsense core.
 
@@ -68,17 +68,23 @@ flagged traffic got through*, or *Blocked*), then one sentence per address, for 
   an alias, add its country to a GeoIP alias, and *Mark as threat* (adds it to the
   `FWMAP_Watchlist` host alias).
 
-### Review queue (administrators)
+### Threats (administrators)
 
-**Review queue** on the full-size page lists every **allowed** connection to or from a flagged
-address, with who the address belongs to, what it reached and from which inside host, services,
-first and last seen, volume, threat lists and Suricata signatures. For each entry you can
-investigate, add a note, and mark it *reviewed*, *dismissed* or *blocked*. *Block…* adds the address
-to an alias you choose; it blocks only if a firewall rule uses that alias, and if traffic is seen
-again afterwards the entry reopens with a warning. Entries are kept for 90 days.
+**Threats** on the full-size page lists traffic to or from flagged addresses, sorted into tabs by
+what actually happened. **Passed / reached host** (the default) holds what got through: a PF state
+shows the firewall allowed it, so this is what to look at. **Blocked by firewall** (from the filter
+log) and **Dropped by IPS** (Suricata drops) are kept as evidence without piling up as work.
+**All**, **Reviewed** and **Dismissed** complete the set.
 
-While the widget is on a dashboard the queue keeps being fed in the background (a light sample
-every 20 seconds) even with no map open; switch this off in the queue's footer.
+Each entry shows every threat list the address is on, who it belongs to and where, what it
+reached and from which inside host, services, first and last seen, volume and Suricata
+signatures. You can investigate, add a note, mark it reviewed or dismissed, and *Block…* adds the
+address (IPv4 or IPv6) to an alias you choose; it blocks only if a firewall rule uses that alias.
+When history is full, blocked and dropped entries are removed before passed ones. Entries are kept
+for 90 days.
+
+While the widget is on a dashboard, threat history keeps being fed in the background (a light
+sample every 20 seconds) even with no map open; switch this off in the Threats footer.
 
 ### Threat lists
 
@@ -88,9 +94,22 @@ a rule yourself. Choose them in the widget settings (administrators):
 - Curated feeds, created as URL-table aliases the first time you select them: Spamhaus DROP,
   abuse.ch Feodo Tracker, Emerging Threats compromised hosts, FireHOL level 1.
 - Any URL-table or external alias of your own (e.g. CrowdSec).
-- With an AbuseIPDB API key: the AbuseIPDB blacklist (about 10,000 addresses at 100% confidence,
-  downloaded once a day) and the verdicts of your *Investigate* lookups.
+- With an AbuseIPDB API key: the AbuseIPDB blacklist (up to 10,000 IPv4 and IPv6 addresses at
+  100% confidence, one download a day) and the verdicts of your *Investigate* lookups (flagged at
+  75% or more; a separate cache).
 - `FWMAP_Watchlist`, filled by *Mark as threat*.
+
+**FWMAP_AbuseIPDB alias** (widget settings, off by default) creates an external alias holding the
+same downloaded blacklist, IPv4 and IPv6 in one table. It is refreshed after each download and at
+boot; there is no second download. Firewall Map+ adds no rule: use the alias in your own block
+rules, on the interfaces you choose. Turning the option off removes the alias, but only once no
+rule uses it. Uninstalling the plugin leaves the alias in place (rules may still refer to it).
+
+### IPv6
+
+Everything works for IPv4 and IPv6: PF states and the filter log, routed IPv6 prefixes behind the
+firewall, threat lists (separate compact IPv4 and IPv6 indexes), AbuseIPDB, GeoIP and ASN lookups,
+investigations, the Threats panel and *Block…*. An address with a port reads `[2001:db8::1]:443`.
 
 ### Suricata (Intrusion Detection)
 
@@ -106,8 +125,8 @@ Per-user display settings are in the widget's settings dialog: busiest-arc highl
 arcs, city labels, blocked traffic and its minimum hits, hostname lookups and network (ASN) names.
 Administrators also see the firewall-wide settings there: geolocation service (automatic, MaxMind
 GeoLite2, MaxMind GeoIP2 City, DB-IP Lite), MaxMind license key (taken from a MaxMind GeoIP alias
-when present), database update frequency, AbuseIPDB API key and threat lists. Keys are write-only
-and never displayed or logged.
+when present), database update frequency, AbuseIPDB API key, optional `FWMAP_AbuseIPDB` alias
+maintenance and threat lists. Keys are write-only and never displayed or logged.
 
 ### What leaves the firewall
 

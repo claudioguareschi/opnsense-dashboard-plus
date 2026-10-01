@@ -26,6 +26,15 @@ class BlockTest(unittest.TestCase):
         self.assertIsNone(BLOCKS.parse_block(self.LINE.replace(",block,in,", ",pass,in,")))
         self.assertIsNone(BLOCKS.parse_block(self.LINE.replace(",block,in,", ",block,out,")))
 
+    def test_parses_inbound_ipv6_block(self):
+        line = ('<134>1 2026-09-25T21:27:07-04:00 fw filterlog 31386 - [meta sequenceId="2"] '
+                '15,,,tracker,igb1,match,block,in,6,0x00,0x12345,64,tcp,6,40,'
+                '2001:4860:4860:0:0:0:0:8888,2606:4700:4700:0:0:0:0:1111,51234,443,0,S,1,,1024,,')
+        event = BLOCKS.parse_block(line)
+        self.assertEqual(event["source"], "2001:4860:4860::8888")
+        self.assertEqual(event["destination"], "2606:4700:4700::1111")
+        self.assertEqual((event["protocol"], event["port"]), ("tcp", "443"))
+
     def test_block_snapshot_names_services(self):
         class Geo:
             def resolve(self, addresses):

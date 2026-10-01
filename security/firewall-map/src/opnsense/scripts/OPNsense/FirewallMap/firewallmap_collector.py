@@ -46,7 +46,8 @@ from fwmap_common import (  # noqa: E402
     secure_umask, service_name, service_port_label, write_json, write_text,
 )
 from fwmap_ids import (  # noqa: E402
-    ALERT_BACKLOG_BYTES, EVE_LOG, AlertTracker, Correlator, alert_snapshot, connection_snapshot, ips_drops,
+    ALERT_BACKLOG_BYTES, EVE_LOG, AlertTracker, Correlator, alert_snapshot, connection_snapshot, firewall_blocks,
+    ips_drops,
 )
 from fwmap_leases import HostnameResolver, describe_inside, describe_target, lease_names  # noqa: E402
 from fwmap_pf import (  # noqa: E402
@@ -59,7 +60,7 @@ HOSTNAME_REQUEST_SECONDS = 30
 IDLE_SECONDS = 300
 ACTIVE_VIEWER_SECONDS = 10
 IDLE_INTERVAL = 5.0
-# with nobody watching, the review queue is still fed from a slow sample (states outlive this)
+# with nobody watching, threat history is still fed from a slow sample (states outlive this)
 BACKGROUND_INTERVAL = 20.0
 THREAT_RECORD_SECONDS = 20.0
 THREAT_PRUNE_SECONDS = 3600.0
@@ -116,12 +117,12 @@ class FlowTracker:
         return (0, 0, 0)
 
     @staticmethod
-    def _add(total, record, pair, current, delta, rule):
+    def _add(total, record, pair, current, delta, rule, networks=None, local_addresses=None):
         """Fold one state into its flow's totals for this sample."""
         # PF counts initiator->responder first; src is the initiator in parse_states()
-        remote_initiated, service_port = orientation(record, pair[1])
+        remote_initiated, service_port = orientation(record, pair[1], networks, local_addresses)
         weight = delta[0] + delta[1] + 1
-        inside_side = inside_endpoint(record)
+        inside_side = inside_endpoint(record, networks, local_addresses)
         if remote_initiated:
             total["remote_started"] += weight
             # what the remote side connected to: a port-forward target or the firewall itself
@@ -148,13 +149,13 @@ class FlowTracker:
         total["states"] += 1
         total["protocols"].add(record["protocol"])
 
-    def _totals(self, records, local_addresses, elapsed):
+    def _totals(self, records, local_addresses, elapsed, networks=None):
         """{(local, remote): totals} for this sample, and the counters to diff the next one against."""
         counters = {}
         totals = {}
         lan_rules = lan_rule_index(records)
         for record in records:
-            pair = flow_endpoints(record, local_addresses)
+            pair = flow_endpoints(record, local_addresses, networks)
             if pair is None or record.get("id") is None:
                 continue
             src_is_remote = record["src"]["address"] == pair[1]
@@ -170,7 +171,7 @@ class FlowTracker:
                 "ports": {}, "oldest": 0, "bytes_toward": 0, "bytes_away": 0, "rules": {},
             })
             self._add(total, record, pair, current, self._delta(record, current, elapsed),
-                      rule_for(record, pair, lan_rules))
+                      rule_for(record, pair, lan_rules, networks, local_addresses), networks, local_addresses)
         return totals, counters
 
     def _update_flow(self, flow, total, elapsed, now):
@@ -195,9 +196,9 @@ class FlowTracker:
         if total["toward"] + total["away"] > 0:
             flow["last_active"] = now
 
-    def update(self, records, local_addresses, now):
+    def update(self, records, local_addresses, now, networks=None):
         elapsed = (now - self.sampled_at) if self.sampled_at is not None else None
-        totals, self.counters = self._totals(records, local_addresses, elapsed)
+        totals, self.counters = self._totals(records, local_addresses, elapsed, networks)
         self.sampled_at = now
         # a flow disappears together with its last PF state
         for pair in list(self.flows):
@@ -334,7 +335,7 @@ def recording_wanted(values=None, path=CONFIG_XML):
 
 
 class ThreatRecorder:
-    """Feeds the review queue; a database problem never stops the collector.
+    """Feeds threat history; a database problem never stops the collector.
 
     Reads what it needs from the running Collector (threat lists, reputation, geolocation,
     host names, Suricata history and names), so a new source of facts needs no new parameter.
@@ -369,18 +370,18 @@ class ThreatRecorder:
             if self.db is None:
                 self.db = threats.connect(self.path)
             seen = threats.observe(records, lambda address: threat_lists_for(address, blocklists, reputation, correlator),
-                                   collector.local_addresses)
+                                   collector.local_addresses, collector.networks)
+            seen.update(ips_drops(correlator, seen, self.last_wall, blocklists, reputation))
+            seen.update(firewall_blocks(correlator, seen, self.last_wall, blocklists, reputation))
             if collector.geo is not None and seen:
                 collector.geo.resolve(list(seen))
             for address, entry in seen.items():
                 entry["remote"] = self._identity(address, collector)
                 entry["ids"] = collector.alerts.summary(address)
-            seen.update(ips_drops(correlator, seen, self.last_wall, blocklists, reputation))
-            for address, entry in seen.items():
                 entry["connections"] = connection_snapshot(address, correlator, collector.leases, collector.interfaces)
             self.last_wall = time.time()
             threats.record(self.db, seen)
-            # hourly by age; at once when a burst of flagged addresses overfills the queue
+            # hourly by age; at once when a burst of flagged addresses overfills history
             over = self.db.execute("SELECT count(*) FROM threats").fetchone()[0] > threats.KEEP_ROWS
             if over or self.pruned is None or now - self.pruned >= THREAT_PRUNE_SECONDS:
                 threats.prune(self.db)
@@ -453,7 +454,7 @@ class Collector:
     """The sampling loop, one iteration at a time.
 
     Each iteration refreshes what is due (host addresses, settings, metadata, threat lists),
-    then either feeds the review queue only (nobody is watching: background) or also writes
+    then either feeds threat history only (nobody is watching: background) or also writes
     the map summary. Both paths share the same ingest and record steps.
     """
 
@@ -541,13 +542,13 @@ class Collector:
                 self.blocks.add(event, at)
             # blocked attempts stay matchable for late alerts even with no map open
             self.correlator.observe_block(event, wall, self.descriptions)
-        self.correlator.observe_states(records, self.local_addresses, wall, self.descriptions)
+        self.correlator.observe_states(records, self.local_addresses, wall, self.descriptions, self.networks)
         if foreground and not self.eve_loaded:
             self.eve_loaded = True
             # older alerts can only be address history: their connections are not indexed yet
-            self.alerts.feed(self.eve.backlog(ALERT_BACKLOG_BYTES), self.local_addresses)
-        self.alerts.feed(self.eve.lines(), self.local_addresses, self.correlator, wall)
-        self.correlator.resolve(self.local_addresses, wall)
+            self.alerts.feed(self.eve.backlog(ALERT_BACKLOG_BYTES), self.local_addresses, networks=self.networks)
+        self.alerts.feed(self.eve.lines(), self.local_addresses, self.correlator, wall, self.networks)
+        self.correlator.resolve(self.local_addresses, wall, self.networks)
         self.alerts.expire(wall)
 
     def publish_snapshot(self, now):
@@ -616,7 +617,7 @@ class Collector:
         wall = time.time()
         self.refresh_metadata(now)
         if not background:
-            self.tracker.update(records, self.local_addresses, now)
+            self.tracker.update(records, self.local_addresses, now, self.networks)
         self.ingest(records, now, wall, foreground=not background)
         # while the map is open the queue is always fed; the setting and the widget only decide
         # whether recording continues in the background
@@ -692,7 +693,7 @@ def main(arguments):
     if arguments == ["tables"]:
         print(json.dumps(tables_report()))
     elif arguments == ["ensure"]:
-        # periodic (cron) and after boot: keep the review queue fed while the widget is in use
+        # periodic (cron) and after boot: keep threat history fed while the widget is in use
         if recording_wanted():
             subprocess.run([RC_SCRIPT, "onestart"], capture_output=True, check=False, timeout=10)
     elif arguments == ["reload"]:

@@ -1,0 +1,5 @@
+#!/bin/sh
+
+# PF starts with an empty FWMAP_AbuseIPDB table; load it from the cached blacklist
+# (does nothing unless the option is on)
+configctl -dq firewallmap abuseipdb sync

@@ -1,5 +1,5 @@
-/* The review queue: permitted traffic to or from flagged addresses, recorded by the collector. */
-import {escapeHtml, flagHtml, formatBytes, listLabel, plain, splitHostPort} from '../src/format.js';
+/* Threat history: flagged traffic organized by what the firewall or IPS actually did. */
+import {escapeHtml, flagHtml, formatBytes, listLabel, plain, privateAddress, splitHostPort} from '../src/format.js';
 import {flowSummary} from '../src/summaries.js';
 import {addAddressToAlias, chooseAlias, killStates, showStates} from './actions.js';
 import {confirmAction, getJSON, notifyFailure, postJSON} from './api.js';
@@ -9,7 +9,7 @@ import {ic} from './icons.js';
 import {investigate} from './investigate.js';
 import {ago, idsLines, pill} from './parts.js';
 
-const STATUSES = ['new', 'reviewed', 'blocked', 'dropped', 'dismissed'];
+const VIEWS = ['passed', 'firewall_blocked', 'ips_dropped', 'all', 'reviewed', 'dismissed'];
 const QUEUE_PAGE = 100;
 
 // inside host names from the live map, for addresses recorded in the queue
@@ -26,13 +26,14 @@ function insideNames(extra = {}) {
 }
 
 function queueItem(row, names) {
+  const insideAddresses = new Set(row.inside || []);
   // the same sentence as on the map, rebuilt from what the queue recorded
   const ports = row.service_ports || {};
   const serviceFor = (protocol, port) => Object.keys(ports).find((name) => ports[name] === `${port}/${protocol}`)
     || (port ? `${String(protocol).toUpperCase()}/${port}` : 'ICMP');
   const targets = (row.targets || []).map((target) => {
     const [protocol, ip, port] = String(target).split('|');
-    const firewall = !/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(ip);
+    const firewall = !privateAddress(ip) && !insideAddresses.has(ip);
     return {ip, port, protocol, name: firewall ? 'firewall' : names.get(ip), firewall,
       service: (row.target_services || {})[target] || serviceFor(protocol, port)};
   });
@@ -54,7 +55,8 @@ function queueItem(row, names) {
   };
   const lines = flowSummary(pseudo, remote, TEXT).map(escapeHtml);
   const address = escapeHtml(row.address);
-  const status = STATUSES.includes(row.status) ? row.status : 'new';
+  const status = ['new', 'reviewed', 'blocked', 'dismissed'].includes(row.status) ? row.status : 'new';
+  const disposition = ['passed', 'firewall_blocked', 'ips_dropped'].includes(row.disposition) ? row.disposition : 'passed';
   const inbound = pseudo.initiated !== 'local';
   // the local side: the port-forward target, the inside host, or the firewall itself
   const target = targets[0];
@@ -128,7 +130,8 @@ function queueItem(row, names) {
     <div class="fwmap-q-top">
       <div class="fwmap-q-who">
         <div class="fwmap-q-ipline"><span class="fwmap-q-ip">${address}</span>
-          <span class="fwmap-q-badge fwmap-q-badge-${status}">${escapeHtml(T[`status_${status}`])}</span></div>
+          <span class="fwmap-q-badge fwmap-q-disposition-${disposition}">${escapeHtml(T[`disposition_${disposition}`])}</span>
+          ${status !== 'new' ? `<span class="fwmap-q-workflow">${escapeHtml(T[`status_${status}`])}</span>` : ''}</div>
         ${remote.hostname ? `<div class="fwmap-q-hostname" title="${escapeHtml(remote.hostname)}">${escapeHtml(remote.hostname)}</div>` : ''}
         ${org ? `<div class="fwmap-q-org">${escapeHtml(org)}</div>` : ''}
         ${remote.country ? `<div class="fwmap-q-country">${flagHtml(cc)}${escapeHtml(remote.country)}</div>` : ''}
@@ -202,7 +205,7 @@ export async function refreshQueueCount() {
   }
   try {
     const result = await getJSON('/api/firewallmap/threats/list/counts');
-    $('#fwmap-review-count').text(result.counts?.new || '');
+    $('#fwmap-review-count').text(result.counts?.passed || '');
   } catch (_) {
     $('#fwmap-review-count').text('');
   }
@@ -235,10 +238,10 @@ function blacklistStatus(settings) {
     .append($('<span></span>').text(`${T.blacklist_short}: ${text}`));
 }
 
-/** The review queue dialog. The server pages and searches it: the queue can hold thousands of entries. */
+/** The Threats dialog. The server pages and searches it: history can hold thousands of entries. */
 export async function showQueue() {
   // seq: only the answer to the latest request is drawn (quick tab switches, typing)
-  const view = {status: 'new', rows: [], total: 0, counts: {}, names: {}, query: '', seq: 0};
+  const view = {status: 'passed', rows: [], total: 0, counts: {}, names: {}, query: '', seq: 0};
   const $body = $('<div></div>');
   const settings = state.pluginSettings || {};
   const $record = $(`<label class="fwmap-q-record" title="${escapeHtml(T.record_threats_hint)}"><input type="checkbox"> ${escapeHtml(T.record_threats)}</label>`);
@@ -262,7 +265,7 @@ export async function showQueue() {
   const emptyText = () => (view.query ? T.queue_no_match : T[`queue_empty_${view.status}`] || T.queue_empty);
 
   const render = () => {
-    $tabs.html([...STATUSES, 'all'].map((status) => `<li class="${status === view.status ? 'active' : ''}" role="presentation">`
+    $tabs.html(VIEWS.map((status) => `<li class="${status === view.status ? 'active' : ''}" role="presentation">`
       + `<a href="#" role="tab" aria-selected="${status === view.status}" data-status="${status}">${escapeHtml(T[`status_${status}`])}`
       + `${status !== 'all' && view.counts[status] ? ` <span class="badge">${escapeHtml(view.counts[status])}</span>` : ''}</a></li>`).join(''));
     const names = insideNames(view.names);
@@ -275,7 +278,7 @@ export async function showQueue() {
     // act on what the search shows and say so.
     const count = view.query ? view.total : view.counts[view.status] || 0;
     const bulk = [];
-    if (view.status === 'new' && count) {
+    if (['passed', 'firewall_blocked', 'ips_dropped'].includes(view.status) && count) {
       const label = view.query ? T.dismiss_shown : T.dismiss_all;
       bulk.push(`<button type="button" class="btn btn-default fwmap-q-bulk" data-to="dismissed">${ic('eye-off')}<span>${escapeHtml(label.replace('%s', count))}</span></button>`);
     }
@@ -300,8 +303,8 @@ export async function showQueue() {
       view.total = result.total ?? view.rows.length;
       view.counts = result.counts || {};
       view.names = result.names || {};
-      $('.fwmap-q-newcount b').text(view.counts.new || 0);
-      $('#fwmap-review-count').text(view.counts.new || '');
+      $('.fwmap-q-newcount b').text(view.counts.passed || 0);
+      $('#fwmap-review-count').text(view.counts.passed || '');
     } catch (error) {
       if (seq === view.seq) {
         notifyFailure(error);
@@ -416,13 +419,13 @@ export async function showQueue() {
   BootstrapDialog.show({
     title: `<div class="fwmap-q-titlebar">${ic('list-box', 'fwmap-q-title-ic')}<div><div class="fwmap-q-title">${escapeHtml(T.review_queue)}</div>`
       + `<div class="fwmap-q-subtitle">${escapeHtml(T.review_intro)}</div></div>`
-      + `<span class="fwmap-q-newcount"><b></b> ${escapeHtml(T.new_short)}</span></div>`,
+      + `<span class="fwmap-q-newcount"><b></b> ${escapeHtml(T.passed_attention)}</span></div>`,
     size: BootstrapDialog.SIZE_WIDE, message: $body, cssClass: 'fwmap-q-dialog',
     buttons: [{label: T.close, action: (dialog) => dialog.close()}],
     onshown: (dialog) => {
       dialog.getModalFooter().prepend($footer);
       // the list can load before the header exists
-      $('.fwmap-q-newcount b').text(view.counts.new ?? '');
+      $('.fwmap-q-newcount b').text(view.counts.passed ?? '');
     },
     onhidden: () => refreshQueueCount(),
   });

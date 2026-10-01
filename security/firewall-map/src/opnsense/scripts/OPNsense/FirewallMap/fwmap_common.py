@@ -2,7 +2,7 @@
 
 """Shared by the Firewall Map+ scripts: paths, service names, address helpers and file writing.
 
-Kept free of heavy imports, since the dashboard's snapshot reader and the review queue load it
+Kept free of heavy imports, since the dashboard's snapshot reader and threat history load it
 on every request.
 """
 
@@ -13,7 +13,7 @@ import os
 import tempfile
 import time
 
-# ephemeral files (the snapshot, markers) and state that outlives a reboot (caches, the review queue)
+# ephemeral files (the snapshot, markers) and state that outlives a reboot (caches, threat history)
 RUN_DIR = "/var/run/firewallmap"
 STATE_DIR = "/var/db/firewallmap"
 OUTPUT_FILE = f"{RUN_DIR}/flows.json"
@@ -79,23 +79,38 @@ def service_name(protocol, port):
 
 
 @functools.lru_cache(maxsize=65536)
-def public_ipv4(value):
+def public_ip(value):
     try:
         address = ipaddress.ip_address(value)
     except (TypeError, ValueError):
         return False
     # multicast (e.g. CARP advertisements to 224.0.0.18) counts as global in ipaddress, not here
-    return address.version == 4 and address.is_global and not address.is_multicast
+    return address.is_global and not address.is_multicast
 
 
 @functools.lru_cache(maxsize=65536)
-def private_ipv4(value):
+def private_ip(value):
     try:
         address = ipaddress.ip_address(value)
     except (TypeError, ValueError):
         return False
     # carrier-grade NAT space (Tailscale, some VPN tunnels) is inside space too
-    return address.version == 4 and (address.is_private or address in CGNAT) and not address.is_loopback
+    return (address.is_private or (address.version == 4 and address in CGNAT)) and not address.is_loopback
+
+
+@functools.lru_cache(maxsize=65536)
+def normalize_ip(value):
+    """Canonical address text, or the original value when it is not an address."""
+    try:
+        return str(ipaddress.ip_address(str(value).split("%", 1)[0]))
+    except (TypeError, ValueError):
+        return value
+
+
+# Kept for callers outside this package that imported the old helpers. New code uses the
+# family-neutral names; these aliases can be removed in a future major release.
+public_ipv4 = public_ip
+private_ipv4 = private_ip
 
 
 def write_text(path, text):

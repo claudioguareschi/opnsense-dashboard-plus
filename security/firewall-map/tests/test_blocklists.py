@@ -27,12 +27,15 @@ class BlocklistTest(unittest.TestCase):
     def test_longest_prefix_lookup_across_tables(self):
         index = BLOCKLISTS.BlocklistIndex()
         index.index = BLOCKLISTS.BlocklistIndex.build({
-            "spamhaus_drop": ["45.56.0.0/16", "   203.0.113.7", "!10.0.0.0/8", "2001:db8::/32"],
-            "crowdsec_blacklists": ["45.56.79.53"],
+            "spamhaus_drop": ["45.56.0.0/16", "   203.0.113.7", "!10.0.0.0/8", "2606:4700::/32"],
+            "crowdsec_blacklists": ["45.56.79.53", "2606:4700:4700::1111", "2606:4700:4700::/48"],
         })
         self.assertEqual(index.lookup("45.56.79.53"), ["crowdsec_blacklists", "spamhaus_drop"])
         self.assertEqual(index.lookup("203.0.113.7"), ["spamhaus_drop"])
         self.assertEqual(index.lookup("10.1.2.3"), [])
+        self.assertEqual(index.lookup("2606:4700:4700::1111"), ["crowdsec_blacklists", "spamhaus_drop"])
+        self.assertEqual(index.lookup("2606:4700:4700::2222"), ["crowdsec_blacklists", "spamhaus_drop"])
+        self.assertEqual(index.lookup("2606:4701::1"), [])
         self.assertEqual(index.lookup("not-an-ip"), [])
 
     def test_busy_blocklist_refresh_is_retried(self):
@@ -59,6 +62,11 @@ class BlocklistTest(unittest.TestCase):
                              {"crowdsec_blacklists"})
             # a URL alias used only by pass rules (an allowlist) is not a threat list
             self.assertEqual(BLOCKLISTS.blocklist_tables(config, tables, blocked=set()), {"crowdsec_blacklists"})
+
+    def test_builtin_abuse_cache_is_not_indexed_again_through_its_alias(self):
+        with mock.patch.object(BLOCKLISTS, "pf_tables", return_value=["FWMAP_AbuseIPDB", "Other"]), \
+                mock.patch.object(BLOCKLISTS, "blocklist_tables", return_value={"FWMAP_AbuseIPDB", "Other"}):
+            self.assertEqual(BLOCKLISTS.chosen_threat_lists(""), {"Other"})
 
     def test_threat_list_candidates_offer_feeds_not_lan_aliases(self):
         with tempfile.TemporaryDirectory() as directory:

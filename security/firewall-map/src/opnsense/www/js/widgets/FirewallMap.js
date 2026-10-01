@@ -7,7 +7,7 @@
 const AUTO_HEIGHT = 10000;
 
 export default class FirewallMap extends BaseWidget {
-    static FIREWALL_WIDE = ['geo_provider', 'geo_key', 'geo_update_days', 'abuseipdb_key', 'threat_lists'];
+    static FIREWALL_WIDE = ['geo_provider', 'geo_key', 'geo_update_days', 'abuseipdb_key', 'abuseipdb_pf', 'threat_lists'];
 
     constructor(config) {
         super(config);
@@ -90,6 +90,13 @@ export default class FirewallMap extends BaseWidget {
                 type: 'text',
                 default: '',
             },
+            abuseipdb_pf: {
+                id: `${this.id}-option-abuseipdb-pf`,
+                title: this.translations.abuseipdb_pf,
+                type: 'select',
+                options: choices([['0', this.translations.none], ['1', this.translations.abuseipdb_pf]]),
+                default: geo.abuseipdb_alias === '1' ? '1' : '0',
+            },
             threat_lists: {
                 id: `${this.id}-option-threat-lists`,
                 title: this.translations.threat_lists,
@@ -107,10 +114,13 @@ export default class FirewallMap extends BaseWidget {
     _keyHelp() {
         const geo = this.geoSettings || {};
         const source = geo.database?.key_source;
+        const list = geo.abuseipdb_blacklist || {};
+        const counts = list.updated ? `${Number(list.count || 0).toLocaleString()} (${Number(list.count_v4 || 0).toLocaleString()} IPv4, ${Number(list.count_v6 || 0).toLocaleString()} IPv6)` : this.translations.abuseipdb_pending;
         return {
             'geo-key': source === 'plugin' ? this.translations.key_set
                 : source === 'alias' ? this.translations.key_from_alias : this.translations.key_none,
             'abuseipdb-key': geo.abuseipdb_configured ? this.translations.key_set_abuse : this.translations.abuseipdb_none,
+            'abuseipdb-pf': `${this.translations.abuseipdb_pf_help} ${this.translations.abuseipdb_pf_status}: ${geo.abuseipdb_alias === '1' ? this.translations.enabled : this.translations.disabled}; ${counts}.`,
             'threat-lists': this.translations.threat_lists_help,
         };
     }
@@ -145,6 +155,7 @@ export default class FirewallMap extends BaseWidget {
                 ['hostnames', this.translations.hostnames],
                 ['asn', this.translations.asn],
                 ['follow', this.translations.follow],
+                ['abuseipdb-pf', this.translations.abuseipdb_pf],
             ]) {
                 const $select = $(`#${this.id}-option-${option}`);
                 const $container = containerOf(option);
@@ -325,6 +336,9 @@ export default class FirewallMap extends BaseWidget {
         }
         if ((values.abuseipdb_key || '').trim()) {
             update.abuseipdb_key = values.abuseipdb_key.trim();
+        }
+        if (String(values.abuseipdb_pf) !== String(geo.abuseipdb_alias === '1' ? '1' : '0')) {
+            update.abuseipdb_alias = values.abuseipdb_pf === '1' ? '1' : '0';
         }
         // a curated feed whose alias could not be created is not saved as a threat list
         const failed = await this._installFeeds(values.threat_lists || []);

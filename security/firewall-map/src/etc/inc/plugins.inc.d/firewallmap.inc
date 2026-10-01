@@ -33,7 +33,7 @@ function firewallmap_cron()
         ['autocron' => ['/usr/local/sbin/configctl -d firewallmap geodb update', '17', '4']],
         /* at most once a day; skipped without an AbuseIPDB key */
         ['autocron' => ['/usr/local/sbin/configctl -d firewallmap abuseipdb update', '43', '4']],
-        /* keeps the threat review queue fed after a reboot; a no-op unless the widget is in use */
+        /* keeps threat history fed after a reboot; a no-op unless the widget is in use */
         ['autocron' => ['/usr/local/sbin/configctl -d firewallmap ensure', '*/10']],
     ];
 }
@@ -42,7 +42,7 @@ function firewallmap_xmlrpc_sync()
 {
     /*
      * System > High Availability: the plugin settings, including the MaxMind and AbuseIPDB
-     * keys, copy to the peer like any other service. The review queue, caches and downloaded
+     * keys, copy to the peer like any other service. Threat history, caches and downloaded
      * databases stay local to each firewall.
      */
     return [[

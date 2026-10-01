@@ -10,7 +10,7 @@ from datetime import datetime
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from support import GEODB  # noqa: E402
+from support import CACHE, GEODB  # noqa: E402
 
 
 class GeoDatabaseTest(unittest.TestCase):
@@ -32,7 +32,8 @@ class GeoDatabaseTest(unittest.TestCase):
             with open(path, "w") as handle:
                 handle.write("<opnsense><OPNsense><FirewallMap><general><provider>dbip</provider>"
                              "<license_key/><update_days>7</update_days></general></FirewallMap></OPNsense></opnsense>")
-            self.assertEqual(GEODB.settings(path), {"provider": "dbip", "license_key": "", "update_days": 7, "threat_lists": "", "record_threats": "1"})
+            self.assertEqual(GEODB.settings(path), {"provider": "dbip", "license_key": "", "update_days": 7,
+                             "threat_lists": "", "record_threats": "1", "abuseipdb_alias": "0"})
             self.assertEqual(GEODB.settings(os.path.join(directory, "none.xml"))["provider"], "auto")
 
     def test_automatic_provider_prefers_maxmind_with_a_key(self):
@@ -42,6 +43,19 @@ class GeoDatabaseTest(unittest.TestCase):
         with mock.patch.object(GEODB, "alias_license_key", lambda path=None: "alias"):
             self.assertEqual(GEODB.effective_provider({"provider": "auto", "license_key": ""}), "maxmind")
             self.assertEqual(GEODB.effective_provider({"provider": "dbip", "license_key": "k"}), "dbip")
+
+    def test_maxmind_city_and_asn_receive_ipv6(self):
+        calls = []
+        values = {
+            ("location", "latitude"): "37.4", ("location", "longitude"): "-122.1",
+            ("country", "iso_code"): "US",
+        }
+        asn = {("autonomous_system_number",): "13335", ("autonomous_system_organization",): "Cloudflare"}
+        with mock.patch.object(CACHE, "mmdb_lookup", side_effect=lambda database, address: calls.append((database, address)) or (values if database == "city" else asn)), \
+                mock.patch.object(CACHE.os.path, "exists", lambda path: True):
+            result = CACHE.lookup_location("2606:4700:4700::1111", "city", "asn")
+        self.assertEqual(calls, [("city", "2606:4700:4700::1111"), ("asn", "2606:4700:4700::1111")])
+        self.assertEqual((result["country"], result["asn"], result["as_org"]), ("US", 13335, "Cloudflare"))
 
 
 class GeoDatabaseUpdateTest(unittest.TestCase):

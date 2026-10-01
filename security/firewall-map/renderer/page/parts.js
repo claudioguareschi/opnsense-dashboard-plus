@@ -1,4 +1,4 @@
-/* Building blocks of the details panel and the review queue. */
+/* Building blocks of the details panel and Threats. */
 import {escapeHtml, plain} from '../src/format.js';
 import {idsSummary} from '../src/summaries.js';
 import {T} from './context.js';

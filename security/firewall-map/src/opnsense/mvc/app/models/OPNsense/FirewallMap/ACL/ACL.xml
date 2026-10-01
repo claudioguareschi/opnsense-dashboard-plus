@@ -13,7 +13,7 @@
             queue (including deleting reviewed or dismissed entries). The privilege key stays as
             it is so existing user and group assignments keep working; the name says what it grants.
         -->
-        <name>Firewall Map+: settings, investigations and review queue</name>
+        <name>Firewall Map+: settings, investigations and threats</name>
         <patterns>
             <pattern>api/firewallmap/settings/*</pattern>
             <pattern>api/firewallmap/investigate/*</pattern>

@@ -21,6 +21,7 @@ BLOCKLIST_MAX_TOTAL = 1000000
 # addresses an operator marked, and AbuseIPDB's daily blacklist, always count as threats
 WATCHLIST_TABLE = "FWMAP_Watchlist"
 ABUSEIPDB_LIST = "AbuseIPDB blacklist"
+ABUSEIPDB_TABLE = "FWMAP_AbuseIPDB"
 REPUTATION_LIST = "AbuseIPDB (looked up)"
 REPUTATION_THRESHOLD = 75
 REPUTATION_REFRESH_SECONDS = 60
@@ -100,21 +101,25 @@ def chosen_threat_lists(setting, config=CONFIG_XML):
     names = {name.strip() for name in (setting or "").split(",") if name.strip()}
     tables = set(pf_tables())
     chosen = (names & tables) if names else blocklist_tables(config, list(tables))
+    # The same cache is indexed below under one stable, friendly badge; reading its PF alias too
+    # would duplicate both work and the badge whenever optional alias maintenance is enabled.
+    chosen.discard(ABUSEIPDB_TABLE)
     if WATCHLIST_TABLE in tables:
         chosen.add(WATCHLIST_TABLE)
     return chosen
 
 
 class BlocklistIndex:
-    """Longest-prefix lookup of IPv4 addresses in blocklist pf tables.
+    """Longest-prefix lookup of IPv4 and IPv6 addresses in blocklist PF tables.
 
-    Compact: per prefix length a sorted array of network addresses with a parallel array of
-    table bitmasks, searched with bisect. Rebuilt in a background thread and swapped in whole,
-    so the sampling loop never waits for large tables.
+    Compact: IPv4 uses one 32-bit array per prefix. IPv6 uses parallel 64-bit high/low arrays,
+    avoiding Python's much larger arbitrary-precision integers for large feeds. Both carry a
+    parallel array of table bitmasks and are searched with bisect. The complete dual-family index
+    is rebuilt in a background thread and swapped atomically, so sampling never waits for it.
     """
 
     def __init__(self):
-        self.index = ([], {})  # (table names, {prefixlen: (networks, masks)})
+        self.index = ([], {4: {}, 6: {}})
         self.refreshing = False
 
     # one bit per table in a 64-bit mask
@@ -128,7 +133,7 @@ class BlocklistIndex:
                   f"(more than {BlocklistIndex.MAX_TABLES}): {', '.join(names[BlocklistIndex.MAX_TABLES:])}",
                   file=sys.stderr)
             names = names[:BlocklistIndex.MAX_TABLES]
-        by_prefix = {}
+        by_family = {4: {}, 6: {}}
         total = 0
         for bit, table in enumerate(names):
             if total >= max_total:
@@ -137,22 +142,29 @@ class BlocklistIndex:
                 break
             for entry in contents[table]:
                 entry = entry.strip()
-                if not entry or entry.startswith("!") or ":" in entry:
+                if not entry or entry.startswith("!"):
                     continue
                 try:
-                    network = ipaddress.IPv4Network(entry, strict=False)
+                    network = ipaddress.ip_network(entry, strict=False)
                 except ValueError:
                     continue
-                bucket = by_prefix.setdefault(network.prefixlen, {})
+                bucket = by_family[network.version].setdefault(network.prefixlen, {})
                 key = int(network.network_address)
                 bucket[key] = bucket.get(key, 0) | (1 << bit)
                 total += 1
                 if total >= max_total:
                     break
-        compact = {}
-        for prefixlen, bucket in by_prefix.items():
+        compact = {4: {}, 6: {}}
+        for prefixlen, bucket in by_family[4].items():
             keys = sorted(bucket)
-            compact[prefixlen] = (array("I", keys), array("Q", (bucket[key] for key in keys)))
+            compact[4][prefixlen] = (array("I", keys), array("Q", (bucket[key] for key in keys)))
+        for prefixlen, bucket in by_family[6].items():
+            keys = sorted(bucket)
+            compact[6][prefixlen] = (
+                array("Q", (key >> 64 for key in keys)),
+                array("Q", (key & 0xFFFFFFFFFFFFFFFF for key in keys)),
+                array("Q", (bucket[key] for key in keys)),
+            )
         return names, compact
 
     def _refresh(self, tables):
@@ -189,16 +201,28 @@ class BlocklistIndex:
 
     def lookup(self, address):
         try:
-            value = int(ipaddress.IPv4Address(address))
+            parsed = ipaddress.ip_address(address)
         except ValueError:
             return []
         names, compact = self.index
+        value = int(parsed)
         mask = 0
-        for prefixlen, (networks, masks) in compact.items():
-            key = value & ((0xFFFFFFFF << (32 - prefixlen)) & 0xFFFFFFFF if prefixlen else 0)
-            position = bisect_left(networks, key)
-            if position < len(networks) and networks[position] == key:
-                mask |= masks[position]
+        bits = parsed.max_prefixlen
+        for prefixlen, bucket in compact.get(parsed.version, {}).items():
+            key = value & (((1 << bits) - 1) ^ ((1 << (bits - prefixlen)) - 1) if prefixlen else 0)
+            if parsed.version == 4:
+                networks, masks = bucket
+                position = bisect_left(networks, key)
+                if position < len(networks) and networks[position] == key:
+                    mask |= masks[position]
+            else:
+                high, low, masks = bucket
+                high_key, low_key = key >> 64, key & 0xFFFFFFFFFFFFFFFF
+                start = bisect_left(high, high_key)
+                end = bisect_left(high, high_key + 1, lo=start)
+                position = bisect_left(low, low_key, lo=start, hi=end)
+                if position < end and low[position] == low_key:
+                    mask |= masks[position]
         return [name for bit, name in enumerate(names) if mask & (1 << bit)]
 
 

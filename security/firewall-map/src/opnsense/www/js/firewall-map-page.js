@@ -51,6 +51,18 @@
 		const match = /^([^:]+):(\d+)$/.exec(value);
 		return match ? [match[1], match[2]] : [value, ""];
 	}
+	/** Combine an address and port without making an IPv6 endpoint ambiguous. */
+	function hostPort(address, port) {
+		if (!port) return String(address ?? "");
+		const value = String(address ?? "");
+		return value.includes(":") ? `[${value}]:${port}` : `${value}:${port}`;
+	}
+	/** Display-only local-address classification for saved targets. */
+	function privateAddress(value) {
+		const address = String(value ?? "").toLowerCase().split("%")[0];
+		if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|127\.|169\.254\.)/.test(address)) return true;
+		return address === "::1" || /^(fc|fd|fe[89ab])/.test(address);
+	}
 	//#endregion
 	//#region src/options.js
 	var DEFAULT_OPTIONS = {
@@ -263,7 +275,7 @@
 				current: 1
 			});
 			const count = (result.rows || []).length;
-			const rows = (result.rows || []).map((row) => `<tr><td>${escapeHtml(row.interface)}</td><td>${escapeHtml(row.proto)}</td><td>${escapeHtml(row.src_addr)}:${escapeHtml(row.src_port)}</td><td>${escapeHtml(row.dst_addr)}:${escapeHtml(row.dst_port)}</td><td>${escapeHtml(row.state)}</td><td>${escapeHtml(row.bytes ?? "")}</td></tr>`).join("");
+			const rows = (result.rows || []).map((row) => `<tr><td>${escapeHtml(row.interface)}</td><td>${escapeHtml(row.proto)}</td><td>${escapeHtml(hostPort(row.src_addr, row.src_port))}</td><td>${escapeHtml(hostPort(row.dst_addr, row.dst_port))}</td><td>${escapeHtml(row.state)}</td><td>${escapeHtml(row.bytes ?? "")}</td></tr>`).join("");
 			BootstrapDialog.show({
 				title: escapeHtml(`${T.states_for} ${address}`),
 				size: BootstrapDialog.SIZE_WIDE,
@@ -636,7 +648,7 @@
 	}
 	function reputationCard(item) {
 		const listed = new Set(item.lists || []);
-		const lists = [...new Set([...state.snapshot?.threat_lists || [], ...listed])];
+		const lists = [.../* @__PURE__ */ new Set([...state.snapshot?.threat_lists || [], ...listed])];
 		const address = item.address;
 		const score = item.abuseipdb ?? state.abuseScores.get(address);
 		const blacklisted = listed.has(ABUSEIPDB_BLACKLIST_LIST);
@@ -721,7 +733,7 @@
 				[T.interface, escapeHtml(inside?.interface || target?.interface || flow.egress || "")],
 				[T.rule, escapeHtml(flow.rule || "")],
 				[T.egress, escapeHtml(flow.egress || "")],
-				["NAT", inside && outbound ? escapeHtml(`${T.yes} (${inside.ip} → ${flow.origin})`) : target && !target.firewall ? escapeHtml(`${T.port_forward} (${flow.origin} → ${target.ip}${target.port ? `:${target.port}` : ""})`) : escapeHtml(T.no)]
+				["NAT", inside && outbound ? escapeHtml(`${T.yes} (${inside.ip} → ${flow.origin})`) : target && !target.firewall ? escapeHtml(`${T.port_forward} (${flow.origin} → ${hostPort(target.ip, target.port)})`) : escapeHtml(T.no)]
 			]),
 			ids: idsCard(flow.ids, null),
 			reputation: reputationCard({
@@ -1251,11 +1263,12 @@
 	}
 	//#endregion
 	//#region page/queue.js
-	var STATUSES = [
-		"new",
+	var VIEWS = [
+		"passed",
+		"firewall_blocked",
+		"ips_dropped",
+		"all",
 		"reviewed",
-		"blocked",
-		"dropped",
 		"dismissed"
 	];
 	var QUEUE_PAGE = 100;
@@ -1265,11 +1278,12 @@
 		return names;
 	}
 	function queueItem(row, names) {
+		const insideAddresses = new Set(row.inside || []);
 		const ports = row.service_ports || {};
 		const serviceFor = (protocol, port) => Object.keys(ports).find((name) => ports[name] === `${port}/${protocol}`) || (port ? `${String(protocol).toUpperCase()}/${port}` : "ICMP");
 		const targets = (row.targets || []).map((target) => {
 			const [protocol, ip, port] = String(target).split("|");
-			const firewall = !/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(ip);
+			const firewall = !privateAddress(ip) && !insideAddresses.has(ip);
 			return {
 				ip,
 				port,
@@ -1299,7 +1313,17 @@
 		};
 		const lines = flowSummary(pseudo, remote, TEXT).map(escapeHtml);
 		const address = escapeHtml(row.address);
-		const status = STATUSES.includes(row.status) ? row.status : "new";
+		const status = [
+			"new",
+			"reviewed",
+			"blocked",
+			"dismissed"
+		].includes(row.status) ? row.status : "new";
+		const disposition = [
+			"passed",
+			"firewall_blocked",
+			"ips_dropped"
+		].includes(row.disposition) ? row.disposition : "passed";
 		const inbound = pseudo.initiated !== "local";
 		const target = targets[0];
 		const inside = pseudo.inside[0];
@@ -1349,7 +1373,8 @@
     <div class="fwmap-q-top">
       <div class="fwmap-q-who">
         <div class="fwmap-q-ipline"><span class="fwmap-q-ip">${address}</span>
-          <span class="fwmap-q-badge fwmap-q-badge-${status}">${escapeHtml(T[`status_${status}`])}</span></div>
+          <span class="fwmap-q-badge fwmap-q-disposition-${disposition}">${escapeHtml(T[`disposition_${disposition}`])}</span>
+          ${status !== "new" ? `<span class="fwmap-q-workflow">${escapeHtml(T[`status_${status}`])}</span>` : ""}</div>
         ${remote.hostname ? `<div class="fwmap-q-hostname" title="${escapeHtml(remote.hostname)}">${escapeHtml(remote.hostname)}</div>` : ""}
         ${org ? `<div class="fwmap-q-org">${escapeHtml(org)}</div>` : ""}
         ${remote.country ? `<div class="fwmap-q-country">${flagHtml(cc)}${escapeHtml(remote.country)}</div>` : ""}
@@ -1417,7 +1442,7 @@
 		if (document.hidden) return;
 		try {
 			const result = await getJSON("/api/firewallmap/threats/list/counts");
-			$("#fwmap-review-count").text(result.counts?.new || "");
+			$("#fwmap-review-count").text(result.counts?.passed || "");
 		} catch (_) {
 			$("#fwmap-review-count").text("");
 		}
@@ -1443,10 +1468,10 @@
 		}
 		return $("<div class=\"fwmap-q-source\"></div>").attr("title", T.blacklist).append(`${ic("layers")} `).append($("<span></span>").text(`${T.blacklist_short}: ${text}`));
 	}
-	/** The review queue dialog. The server pages and searches it: the queue can hold thousands of entries. */
+	/** The Threats dialog. The server pages and searches it: history can hold thousands of entries. */
 	async function showQueue() {
 		const view = {
-			status: "new",
+			status: "passed",
 			rows: [],
 			total: 0,
 			counts: {},
@@ -1473,12 +1498,16 @@
 		$body.append($("<div class=\"fwmap-q-toolbar\"></div>").append($tabs, $bulk, $searchBox), $list);
 		const emptyText = () => view.query ? T.queue_no_match : T[`queue_empty_${view.status}`] || T.queue_empty;
 		const render = () => {
-			$tabs.html([...STATUSES, "all"].map((status) => `<li class="${status === view.status ? "active" : ""}" role="presentation"><a href="#" role="tab" aria-selected="${status === view.status}" data-status="${status}">${escapeHtml(T[`status_${status}`])}${status !== "all" && view.counts[status] ? ` <span class="badge">${escapeHtml(view.counts[status])}</span>` : ""}</a></li>`).join(""));
+			$tabs.html(VIEWS.map((status) => `<li class="${status === view.status ? "active" : ""}" role="presentation"><a href="#" role="tab" aria-selected="${status === view.status}" data-status="${status}">${escapeHtml(T[`status_${status}`])}${status !== "all" && view.counts[status] ? ` <span class="badge">${escapeHtml(view.counts[status])}</span>` : ""}</a></li>`).join(""));
 			const names = insideNames(view.names);
 			$list.html(view.rows.length ? view.rows.map((row) => queueItem(row, names)).join("") + (view.total > view.rows.length ? `<div class="fwmap-q-moreitems"><button type="button" class="btn btn-default fwmap-q-showmore">${escapeHtml(T.show_more.replace("%s", Math.min(QUEUE_PAGE, view.total - view.rows.length)))}</button> <span class="fwmap-q-muted">${escapeHtml(T.showing.replace("%s", view.rows.length).replace("%t", view.total))}</span></div>` : "") : `<div class="text-muted fwmap-empty fwmap-q-empty">${ic("check")} ${escapeHtml(emptyText())}</div>`);
 			const count = view.query ? view.total : view.counts[view.status] || 0;
 			const bulk = [];
-			if (view.status === "new" && count) {
+			if ([
+				"passed",
+				"firewall_blocked",
+				"ips_dropped"
+			].includes(view.status) && count) {
 				const label = view.query ? T.dismiss_shown : T.dismiss_all;
 				bulk.push(`<button type="button" class="btn btn-default fwmap-q-bulk" data-to="dismissed">${ic("eye-off")}<span>${escapeHtml(label.replace("%s", count))}</span></button>`);
 			}
@@ -1499,8 +1528,8 @@
 				view.total = result.total ?? view.rows.length;
 				view.counts = result.counts || {};
 				view.names = result.names || {};
-				$(".fwmap-q-newcount b").text(view.counts.new || 0);
-				$("#fwmap-review-count").text(view.counts.new || "");
+				$(".fwmap-q-newcount b").text(view.counts.passed || 0);
+				$("#fwmap-review-count").text(view.counts.passed || "");
 			} catch (error) {
 				if (seq === view.seq) notifyFailure(error);
 			}
@@ -1590,7 +1619,8 @@
 			], escapeHtml(`${T.block_title}: ${address}`), (name) => {
 				confirmAction(`${T.add_confirm} ${address} → ${name}? ${T.block_hint}`, () => act(async () => {
 					await addAddressToAlias(name, address);
-					await setThreat(address, "blocked", [plain(rowOf(address).note || ""), `→ ${name} (${(/* @__PURE__ */ new Date()).toLocaleString()})`].filter(Boolean).join("\n"));
+					const note = [plain(rowOf(address).note || ""), `→ ${name} (${(/* @__PURE__ */ new Date()).toLocaleString()})`].filter(Boolean).join("\n");
+					await setThreat(address, "blocked", note);
 				}));
 			});
 		}).on("click", ".fwmap-q-investigate", (event) => {
@@ -1605,7 +1635,7 @@
 		});
 		const $footer = $("<div class=\"fwmap-q-footer\"></div>").append($record).append(blacklistStatus(settings));
 		BootstrapDialog.show({
-			title: `<div class="fwmap-q-titlebar">${ic("list-box", "fwmap-q-title-ic")}<div><div class="fwmap-q-title">${escapeHtml(T.review_queue)}</div><div class="fwmap-q-subtitle">${escapeHtml(T.review_intro)}</div></div><span class="fwmap-q-newcount"><b></b> ${escapeHtml(T.new_short)}</span></div>`,
+			title: `<div class="fwmap-q-titlebar">${ic("list-box", "fwmap-q-title-ic")}<div><div class="fwmap-q-title">${escapeHtml(T.review_queue)}</div><div class="fwmap-q-subtitle">${escapeHtml(T.review_intro)}</div></div><span class="fwmap-q-newcount"><b></b> ${escapeHtml(T.passed_attention)}</span></div>`,
 			size: BootstrapDialog.SIZE_WIDE,
 			message: $body,
 			cssClass: "fwmap-q-dialog",
@@ -1615,7 +1645,7 @@
 			}],
 			onshown: (dialog) => {
 				dialog.getModalFooter().prepend($footer);
-				$(".fwmap-q-newcount b").text(view.counts.new ?? "");
+				$(".fwmap-q-newcount b").text(view.counts.passed ?? "");
 			},
 			onhidden: () => refreshQueueCount()
 		});
@@ -1887,11 +1917,11 @@
 	/** Suricata counts in the status line, each a one-click filter; connections and address history apart. */
 	function idsLinks(snapshot) {
 		const idsFlows = (snapshot.ids_flows || []).filter((flow) => flow.kind !== "blocked").length;
-		const idsAddresses = new Set([
+		const idsAddresses = (/* @__PURE__ */ new Set([
 			...(snapshot.alerts || []).map((alert) => alert.source),
 			...(snapshot.flows || []).filter((flow) => flow.ids).map((flow) => flow.dest),
 			...(snapshot.blocks || []).filter((block) => block.ids).map((block) => block.source)
-		]).size;
+		])).size;
 		const link = (filter, text) => `<a href="#" class="fwmap-status-ids${state.filters.traffic === filter ? " active" : ""}" data-filter="${filter}" aria-pressed="${state.filters.traffic === filter}">${escapeHtml(text)}</a>`;
 		const links = [];
 		if (idsFlows) links.push(link("ids_flows", `${idsFlows} ${idsFlows === 1 ? T.ids_flow : T.ids_flows}`));
