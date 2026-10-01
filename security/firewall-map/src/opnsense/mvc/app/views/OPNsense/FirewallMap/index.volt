@@ -466,6 +466,7 @@
         sample: {{ lang._('sample')|json_encode }},
         other_target: {{ lang._('other target')|json_encode }},
         other_targets: {{ lang._('other targets')|json_encode }},
+        targets_seen: {{ lang._('Targets')|json_encode }},
         other_hosts: {{ lang._('more inside')|json_encode }},
         more_details: {{ lang._('More details')|json_encode }},
         services_seen: {{ lang._('Services seen')|json_encode }},

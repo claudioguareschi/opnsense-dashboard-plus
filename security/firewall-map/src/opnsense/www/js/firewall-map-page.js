@@ -1340,6 +1340,7 @@
 		let localIcon = "shield";
 		let localName = T.this_firewall_title;
 		let localLines = [];
+		let otherTargets = "";
 		let service = row.services?.[0] ? `${row.services[0]}${ports[row.services[0]] ? ` · ${ports[row.services[0]].split("/").reverse().join("/").toUpperCase()}` : ""}` : "";
 		if (inbound && target) {
 			service = `${target.service}${target.port ? ` · ${target.protocol.toUpperCase()}/${target.port}` : ""}`;
@@ -1347,8 +1348,11 @@
 				localIcon = "server";
 				localName = target.name || target.ip;
 				localLines = [target.name ? target.ip : "", T.port_forward];
-			} else localLines = [target.ip];
-			if (targets.length > 1) localLines.push(`+ ${targets.length - 1} ${targets.length > 2 ? T.other_targets : T.other_target}`);
+			} else {
+				const via = (row.connections || []).find((item) => item.interface && splitHostPort(item.public || "")[0] === target.ip);
+				localLines = [via ? `${target.ip} · ${via.interface}` : target.ip];
+			}
+			if (targets.length > 1) otherTargets = `+ ${targets.length - 1} ${targets.length > 2 ? T.other_targets : T.other_target}`;
 		} else if (!inbound && inside) {
 			localIcon = "laptop";
 			localName = inside.name || inside.ip;
@@ -1398,7 +1402,8 @@
           </div>
           ${ic(localIcon, "fwmap-q-end")}
           <div class="fwmap-q-local"><div class="fwmap-q-local-name">${escapeHtml(localName)}</div>
-            ${localLines.filter(Boolean).map((line, index) => `<div class="${index ? "fwmap-q-muted" : ""}">${escapeHtml(line)}</div>`).join("")}</div>
+            ${localLines.filter(Boolean).map((line, index) => `<div class="${index ? "fwmap-q-muted" : ""}">${escapeHtml(line)}</div>`).join("")}
+            ${otherTargets ? `<a href="#" class="fwmap-q-expand fwmap-q-muted" aria-expanded="${expanded}">${escapeHtml(otherTargets)}</a>` : ""}</div>
         </div>
         <div class="fwmap-q-meta">
           <span>${ic("calendar")} ${escapeHtml(T.first_seen)} ${escapeHtml(ago(row.first_seen))} ${escapeHtml(T.ago)}</span>
@@ -1415,6 +1420,7 @@
     </div>
     ${row.seen_after_block ? `<div class="fwmap-q-warning">${ic("alert")} ${escapeHtml(T.seen_after_block)}</div>` : ""}
     ${expanded ? `<div class="fwmap-q-more">${lines.map((line) => `<div>${line}</div>`).join("")}
+      ${targets.length > 1 ? `<div class="fwmap-q-muted">${escapeHtml(T.targets_seen)}: ${targets.map((item) => escapeHtml(`${item.firewall ? T.this_firewall : item.name || item.ip} (${hostPort(item.ip, item.port)}${item.service ? `, ${item.service}` : ""})`)).join(" · ")}</div>` : ""}
       ${(row.services || []).length ? `<div class="fwmap-q-muted">${escapeHtml(T.services_seen)}: ${(row.services || []).map(escapeHtml).join(", ")}</div>` : ""}
       ${connTable || `<div class="fwmap-q-muted">${escapeHtml(T.no_snapshot)}</div>`}</div>` : ""}
     ${row.note ? `<div class="fwmap-q-note">${escapeHtml(row.note)}</div>` : ""}
