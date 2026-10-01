@@ -192,6 +192,9 @@ signed; `publish.sh` replaces older versions and signs the whole catalogue.
 
 ## Changelog
 
+- **os-firewall-map 0.1_77**: a Threats card under *Passed* leads with the connection that got
+  through, not a later blocked attempt; the *All* tab shows its count.
+
 - **os-firewall-map 0.1_76**: IPv6 throughout (states, filter log, threat lists, AbuseIPDB,
   GeoIP, investigations, the UI); the review queue becomes **Threats**, with tabs by what happened
   (*Passed / reached host* first, then *Blocked by firewall*, *Dropped by IPS*); optional
