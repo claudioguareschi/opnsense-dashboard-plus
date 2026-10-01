@@ -35,7 +35,7 @@ System Information
 dev.qat.0.cfg_services: sym;asym
 dev.qat.0.dev_cfg: [GENERAL]
 Device_Capabilities_Mask = 0x0001020f
-dev.qat_ocf.0.%parent: qat0
+dev.qat_ocf.0.%parent: nexus0
 dev.qat_ocf.0.enable: 1
 """
         result = SYSTEM_INFO.collect_qat(pciconf, sysctls, "")["devices"][0]
@@ -76,6 +76,81 @@ dev.qat_ocf.0.enable: 1
         self.assertEqual(result["integration"], "Discrete")
         self.assertTrue(result["ocf_active"])
         self.assertIn("AES-GCM", result["algorithms"])
+
+    C62X_PCICONF = """qat0@pci0:8:0:0: class=0x0b4000 rev=0x04 hdr=0x00 vendor=0x8086 device=0x37c8
+    vendor     = 'Intel Corporation'
+    device     = 'C620 Series Chipset Family QAT'
+qat1@pci0:9:0:0: class=0x0b4000 rev=0x04 hdr=0x00 vendor=0x8086 device=0x37c8
+    vendor     = 'Intel Corporation'
+    device     = 'C620 Series Chipset Family QAT'
+qat2@pci0:10:0:0: class=0x0b4000 rev=0x04 hdr=0x00 vendor=0x8086 device=0x37c8
+    vendor     = 'Intel Corporation'
+    device     = 'C620 Series Chipset Family QAT'
+"""
+
+    @staticmethod
+    def qat_sysctls(devices, ocf_enable="1"):
+        lines = []
+        for unit, (state, services) in enumerate(devices):
+            lines += [
+                f"dev.qat.{unit}.state: {state}",
+                f"dev.qat.{unit}.cfg_services: {services}",
+                f"dev.qat.{unit}.cfg_mode: ks",
+            ]
+        if ocf_enable is not None:
+            lines += ["dev.qat_ocf.0.%desc: QAT engine", "dev.qat_ocf.0.%parent: nexus0", f"dev.qat_ocf.0.enable: {ocf_enable}"]
+        return "\n".join(lines) + "\n"
+
+    def collect_states(self, pciconf, sysctls):
+        return [
+            (device["ocf_active"], bool(device["algorithms"]))
+            for device in SYSTEM_INFO.collect_qat(pciconf, sysctls, "")["devices"]
+        ]
+
+    def test_one_qat_ocf_provider_serves_every_started_c62x_device(self):
+        sysctls = self.qat_sysctls([("up", "sym;dc")] * 3)
+        self.assertEqual(self.collect_states(self.C62X_PCICONF, sysctls), [(True, True)] * 3)
+
+    def test_single_qat_device_with_qat_ocf_is_active(self):
+        pciconf = "\n".join(self.C62X_PCICONF.splitlines()[:3]) + "\n"
+        sysctls = self.qat_sysctls([("up", "sym;dc")])
+        self.assertEqual(self.collect_states(pciconf, sysctls), [(True, True)])
+
+    def test_disabled_or_missing_qat_ocf_leaves_qat_inactive(self):
+        for ocf_enable in ("0", None):
+            sysctls = self.qat_sysctls([("up", "sym;dc")] * 3, ocf_enable)
+            devices = SYSTEM_INFO.collect_qat(self.C62X_PCICONF, sysctls, "")["devices"]
+            self.assertEqual([device["state"] for device in devices], ["up"] * 3)
+            self.assertEqual(self.collect_states(self.C62X_PCICONF, sysctls), [(False, False)] * 3)
+
+    def test_a_down_qat_device_does_not_take_part(self):
+        sysctls = self.qat_sysctls([("up", "sym;dc"), ("down", "sym;dc"), ("up", "sym;dc")])
+        self.assertEqual(
+            self.collect_states(self.C62X_PCICONF, sysctls),
+            [(True, True), (False, False), (True, True)],
+        )
+
+    def test_devices_without_kernel_symmetric_instances_do_not_take_part(self):
+        sysctls = self.qat_sysctls([("up", "dc"), ("up", "asym"), ("up", "cy;dc")])
+        self.assertEqual(
+            self.collect_states(self.C62X_PCICONF, sysctls),
+            [(False, False), (False, False), (True, True)],
+        )
+        user_only = sysctls.replace("dev.qat.2.cfg_mode: ks", "dev.qat.2.cfg_mode: us")
+        self.assertEqual(self.collect_states(self.C62X_PCICONF, user_only)[2], (False, False))
+        both_modes = sysctls.replace("dev.qat.2.cfg_mode: ks", "dev.qat.2.cfg_mode: ks;us")
+        self.assertEqual(self.collect_states(self.C62X_PCICONF, both_modes)[2], (True, True))
+
+    def test_qat_virtual_function_takes_part_like_a_physical_device(self):
+        pciconf = """qat0@pci0:3:0:1: class=0x0b4000 rev=0x00 hdr=0x00 vendor=0x8086 device=0x4941
+    vendor     = 'Intel Corporation'
+    device     = '4xxx Series QAT VF'
+"""
+        sysctls = self.qat_sysctls([("up", "sym;asym")])
+        device = SYSTEM_INFO.collect_qat(pciconf, sysctls, "")["devices"][0]
+        self.assertEqual(device["integration"], "Virtual function")
+        self.assertTrue(device["ocf_active"])
+        self.assertIn("AES-GCM", device["algorithms"])
 
     def test_unclaimed_qat_does_not_claim_acceleration(self):
         pciconf = """none3@pci0:1:0:0: class=0x0b4000 card=0x00000000 chip=0x37c88086 rev=0x04 hdr=0x00

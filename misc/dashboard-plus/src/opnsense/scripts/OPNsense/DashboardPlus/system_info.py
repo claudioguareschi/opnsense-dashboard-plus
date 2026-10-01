@@ -252,15 +252,14 @@ def collect_qat(pciconf_output, sysctl_output, slot_output):
     slots = parse_slots(slot_output)
     result = []
 
-    ocf_by_parent = {}
-    ocf_by_unit = {}
-    for key, parent in sysctls.items():
-        match = re.fullmatch(r"dev\.qat_ocf\.(\d+)\.%parent", key)
-        if match:
-            unit = match.group(1)
-            enabled = sysctls.get(f"dev.qat_ocf.{unit}.enable") == "1"
-            ocf_by_parent[parent] = enabled
-            ocf_by_unit[unit] = enabled
+    # qat_ocf is one OpenCrypto provider attached to nexus0, not a per-device
+    # child: when enabled it starts the interrupt-mode crypto instances of every
+    # started qatN.  Its unit number says nothing about which qatN it uses.
+    ocf_enabled = any(
+        value == "1"
+        for key, value in sysctls.items()
+        if re.fullmatch(r"dev\.qat_ocf\.\d+\.enable", key)
+    )
 
     for device in parse_pciconf(pciconf_output):
         description = device.get("device", "")
@@ -282,19 +281,27 @@ def collect_qat(pciconf_output, sysctl_output, slot_output):
             prefix = f"dev.qat.{unit}"
             state = sysctls.get(f"{prefix}.state", "attached")
             services = sysctls.get(f"{prefix}.cfg_services", "")
+            mode = sysctls.get(f"{prefix}.cfg_mode", "")
             hardware_capabilities = qat_hardware_capabilities(sysctl_output, unit)
         else:
             state = "unclaimed"
             services = ""
+            mode = ""
             hardware_capabilities = []
 
         service_capabilities, service_set = qat_capabilities(services)
         capabilities = hardware_capabilities or service_capabilities
+        # A device feeds qat_ocf only when it is started ("up") and has
+        # interrupt-mode kernel symmetric instances, which the driver creates
+        # for the "sym" or "cy" service in kernel ("ks") mode.
+        mode_set = set(filter(None, re.split(r"[;,]", mode.lower())))
         ocf_active = (
-            (ocf_by_parent.get(driver, False) or ocf_by_unit.get(unit, False))
-            and state.lower() in ("up", "started", "attached")
+            ocf_enabled
+            and state.lower() == "up"
+            and "sym" in service_set
+            and (not mode_set or "ks" in mode_set)
         )
-        algorithms = list(QAT_OCF_ALGORITHMS) if ocf_active and service_set.intersection(("sym", "cy")) else []
+        algorithms = list(QAT_OCF_ALGORITHMS) if ocf_active else []
 
         result.append({
             "integration": integration[:1].upper() + integration[1:],
