@@ -302,7 +302,7 @@ files are committed, so rebuild them only after changing the renderer sources. S
 ### Publishing (maintainer)
 
 Both packages share one version (`PLUGIN_VERSION` in each Makefile, no revision) and are released
-together: 0.50, 0.51, ... (pkg compares the parts as numbers, so 0.6 would sort below 0.50).
+together: 0.50, 0.51, ...
 The signed feed lives in the `packages` branch, kept as a single commit. On the machine holding
 the signing key:
 
