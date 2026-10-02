@@ -253,8 +253,12 @@ folders, so `tools/` is never part of a package. `build.sh` fetches the [opnsens
 for the running release and builds each plugin in it unchanged, so the plugin folders can also be
 copied into a fork of opnsense/plugins as they are.
 
-Firewall Map+'s map renderer (`security/firewall-map/renderer`) is built separately with Vite; the
-built bundle is committed. See `renderer/package.json`.
+`build.sh` is the only step needed for either package. The Dashboard Plus widgets are plain
+JavaScript and ship as written. Firewall Map+'s map renderer is the one part with its own build:
+its sources in `security/firewall-map/renderer` are bundled with Vite into
+`firewall-map-renderer.js` and `firewall-map-page.js` (in `src/opnsense/www/js/`), and those built
+files are committed, so rebuild them only after changing the renderer sources. See
+`renderer/package.json`.
 
 ### Publishing (maintainer)
 
