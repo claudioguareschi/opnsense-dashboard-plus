@@ -30,6 +30,23 @@ and `/usr/local/etc/pkg/keys/dashboard-plus-repository.pub`.
 The firewall's live traffic on a world map: a dashboard widget, and a full-size page opened with
 the expand link on the widget (`/ui/firewallmap`).
 
+![Firewall Map+ full-size page with a connection selected](docs/screenshots/firewall-map-page.png)
+
+*The full-size page. The map (left) draws an arc from the firewall (the house) to every remote
+address it is talking to, coloured by who opened the connection: green from inside, orange from
+outside. Red dots are sources the firewall blocked. The filters above the map narrow it by traffic
+type, service, interface, inside host and country; **Threats** opens the review list. On the
+right, **Top talkers** ranks hosts (or countries and networks) with a live sparkline, and the
+details panel below explains whatever you click: here an arc to Ashburn, showing the inside host
+that opened it, the service (HTTPS), the remote network, the firewall's decision and rule,
+transfer totals and rates, with Investigate, States and Kill states actions.*
+
+![Firewall Map+ dashboard widget](docs/screenshots/firewall-map-widget.png)
+
+*The dashboard widget: the same live map in compact form, with a one-line summary of active flows
+and blocked sources. The link in the corner opens the full-size page; its settings dialog holds
+the display options and, for administrators, the firewall-wide settings described below.*
+
 ### What you see
 
 - **Live connections**: an arc from the firewall to every remote address, from PF state counters
@@ -147,20 +164,77 @@ and background recording is on. It uses a few percent of one CPU core while a ma
 ## Dashboard Plus
 
 Eight widgets that sit next to OPNsense's built-in ones in **Add widget**. Everything is read
-locally from the firewall's own API.
+locally from the firewall's own API. Each widget's options are in its settings dialog (gear icon
+on the widget).
 
-| Widget | What it shows |
-|---|---|
-| **System Information+** | Name, hardware (manufacturer, model, serial), firmware (vendor, release date, boot method and boot environment), OPNsense and FreeBSD versions and update status, CPU type and current/maximum frequency, crypto hardware and accelerated algorithms for IPsec, kernel PTI and MDS mitigation state, uptime, date/time and DNS servers. |
-| **Traffic Graph+** | Live traffic per interface or combined, in and out, with a 20-second, 1-minute or 5-minute window, compact or expanded view, a unique colour per interface and a scrollable legend. |
-| **System Metrics+** | CPU and temperature charts with load, gauges for memory, firewall states (with a table), mbufs and swap, and filesystems, each switchable. |
-| **Thermal Sensors+** | The sensors you choose, including per-core readings. |
-| **Interface Statistics+** | Bytes, packets, errors and collisions in and out for the interfaces and fields you choose, drag-to-reorder, refreshed every 1, 5 or 10 seconds. |
-| **Gateways+** | Gateway status, RTT, RTTd and loss with a health indication, the default gateway marked, drag-to-reorder. |
-| **Interfaces+** | Link state and addresses for the interfaces you choose, including IPsec VTI, WireGuard and OpenVPN tunnels, drag-to-reorder. |
-| **Firewall Logs+** | The live firewall log filtered by action (pass, block) and interface, with a configurable number of rows. |
+### System Information+
 
-Each widget's options are in its settings dialog (gear icon on the widget).
+![System Information+](docs/screenshots/system-information.png)
+
+*Name and GUI user; hardware (manufacturer, model, serial number); firmware (vendor, version,
+release date, boot method) and the current and next boot environment; OPNsense and FreeBSD
+versions with update status; CPU model, current and maximum frequency and core/thread layout;
+crypto hardware (AES-NI, QuickAssist) and the algorithms accelerated for IPsec; kernel PTI and MDS
+mitigation state; uptime, date and time; and the DNS resolver the firewall itself uses. No
+settings.*
+
+### System Metrics+
+
+![System Metrics+](docs/screenshots/system-metrics.png)
+
+*CPU usage and temperature as live charts, with the load averages; gauges for memory, firewall
+states (**Show** opens the state table), mbufs and swap, with the exact figures under each gauge;
+and filesystem usage. Settings: which components to show, and the chart window (20 seconds,
+1 minute or 5 minutes).*
+
+### Traffic Graph+
+
+![Traffic Graph+](docs/screenshots/traffic-graph.png)
+
+*Live traffic in and out, one chart per interface or all interfaces combined, each interface in its
+own colour. The icon in the top-left corner switches between the expanded view shown here and a
+compact one. Settings: per-interface or combined display, which interfaces, and the time window
+(20 seconds, 1 minute or 5 minutes).*
+
+### Gateways+
+
+![Gateways+](docs/screenshots/gateways.png)
+
+*Every gateway with its address, RTT, RTT deviation, packet loss and a status badge (online,
+warning, offline, unmonitored); the globe marks the default gateway. Rows can be dragged into any
+order. Settings: which gateways and which metrics to show.*
+
+### Interfaces+
+
+![Interfaces+](docs/screenshots/interfaces.png)
+
+*Link state, IPv4 and IPv6 addresses and media for the interfaces you choose, including IPsec VTI,
+WireGuard and OpenVPN tunnels; rows can be dragged into any order. Settings: which interfaces.*
+
+### Interface Statistics+
+
+![Interface Statistics+](docs/screenshots/interface-statistics.png)
+
+*Bytes, packets, errors and collisions in and out per interface; rows can be dragged into any
+order. Settings: which interfaces, which fields, and the refresh interval (1, 5 or 10 seconds).*
+
+### Thermal Sensors+
+
+![Thermal Sensors+](docs/screenshots/thermal-sensors.png)
+
+*The temperature sensors you choose, including per-core readings, as bars with the current value.
+Settings: which sensors.*
+
+### Firewall Logs+
+
+![Firewall Logs+](docs/screenshots/firewall-logs.png)
+
+*The live firewall log: action, time, source and destination with ports, the interface and the
+rule that matched (click it to open the full firewall log filtered on that entry). Settings: which actions (pass, block or all), which
+interfaces, and how many rows.*
+
+The screenshots come from a test firewall; host names, addresses, interface names and location
+were replaced with example values.
 
 ## Building from source
 
