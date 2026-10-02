@@ -30,7 +30,7 @@ and `/usr/local/etc/pkg/keys/dashboard-plus-repository.pub`.
 The firewall's live traffic on a world map: a dashboard widget, and a full-size page opened with
 the expand link on the widget (`/ui/firewallmap`).
 
-![Firewall Map+ full-size page with a connection selected](docs/screenshots/firewall-map-page.png)
+<img src="docs/screenshots/firewall-map-page.png" alt="Firewall Map+ full-size page with a connection selected" width="1422">
 
 *The full-size page. The map (left) draws an arc from the firewall (the house) to every remote
 address it is talking to, coloured by who opened the connection: green from inside, orange from
@@ -41,7 +41,7 @@ details panel below explains whatever you click: here an arc to Ashburn, showing
 that opened it, the service (HTTPS), the remote network, the firewall's decision and rule,
 transfer totals and rates, with Investigate, States and Kill states actions.*
 
-![Firewall Map+ dashboard widget](docs/screenshots/firewall-map-widget.png)
+<img src="docs/screenshots/firewall-map-widget.png" alt="Firewall Map+ dashboard widget" width="524">
 
 *The dashboard widget: the same live map in compact form, with a one-line summary of active flows
 and blocked sources. The link in the corner opens the full-size page; its settings dialog holds
@@ -169,7 +169,7 @@ on the widget).
 
 ### System Information+
 
-![System Information+](docs/screenshots/system-information.png)
+<img src="docs/screenshots/system-information.png" alt="System Information+" width="524">
 
 *Name and GUI user; hardware (manufacturer, model, serial number); firmware (vendor, version,
 release date, boot method) and the current and next boot environment; OPNsense and FreeBSD
@@ -180,7 +180,7 @@ settings.*
 
 ### System Metrics+
 
-![System Metrics+](docs/screenshots/system-metrics.png)
+<img src="docs/screenshots/system-metrics.png" alt="System Metrics+" width="524">
 
 *CPU usage and temperature as live charts, with the load averages; gauges for memory, firewall
 states (**Show** opens the state table), mbufs and swap, with the exact figures under each gauge;
@@ -189,7 +189,7 @@ and filesystem usage. Settings: which components to show, and the chart window (
 
 ### Traffic Graph+
 
-![Traffic Graph+](docs/screenshots/traffic-graph.png)
+<img src="docs/screenshots/traffic-graph.png" alt="Traffic Graph+" width="524">
 
 *Live traffic in and out, one chart per interface or all interfaces combined, each interface in its
 own colour. The icon in the top-left corner switches between the expanded view shown here and a
@@ -198,7 +198,7 @@ compact one. Settings: per-interface or combined display, which interfaces, and 
 
 ### Gateways+
 
-![Gateways+](docs/screenshots/gateways.png)
+<img src="docs/screenshots/gateways.png" alt="Gateways+" width="524">
 
 *Every gateway with its address, RTT, RTT deviation, packet loss and a status badge (online,
 warning, offline, unmonitored); the globe marks the default gateway. Rows can be dragged into any
@@ -206,28 +206,28 @@ order. Settings: which gateways and which metrics to show.*
 
 ### Interfaces+
 
-![Interfaces+](docs/screenshots/interfaces.png)
+<img src="docs/screenshots/interfaces.png" alt="Interfaces+" width="524">
 
 *Link state, IPv4 and IPv6 addresses and media for the interfaces you choose, including IPsec VTI,
 WireGuard and OpenVPN tunnels; rows can be dragged into any order. Settings: which interfaces.*
 
 ### Interface Statistics+
 
-![Interface Statistics+](docs/screenshots/interface-statistics.png)
+<img src="docs/screenshots/interface-statistics.png" alt="Interface Statistics+" width="524">
 
 *Bytes, packets, errors and collisions in and out per interface; rows can be dragged into any
 order. Settings: which interfaces, which fields, and the refresh interval (1, 5 or 10 seconds).*
 
 ### Thermal Sensors+
 
-![Thermal Sensors+](docs/screenshots/thermal-sensors.png)
+<img src="docs/screenshots/thermal-sensors.png" alt="Thermal Sensors+" width="524">
 
 *The temperature sensors you choose, including per-core readings, as bars with the current value.
 Settings: which sensors.*
 
 ### Firewall Logs+
 
-![Firewall Logs+](docs/screenshots/firewall-logs.png)
+<img src="docs/screenshots/firewall-logs.png" alt="Firewall Logs+" width="524">
 
 *The live firewall log: action, time, source and destination with ports, the interface and the
 rule that matched (click it to open the full firewall log filtered on that entry). Settings: which actions (pass, block or all), which
