@@ -9,6 +9,11 @@ Two community plugins for [OPNsense](https://opnsense.org) 26.7, published as si
 
 These are not official OPNsense plugins. They do not modify the OPNsense core.
 
+<img src="docs/screenshots/dashboard.png" alt="An OPNsense dashboard with Dashboard Plus and Firewall Map+ widgets">
+
+*A dashboard with System Information+, Firewall Map+, Gateways+ and other widgets, next to
+OPNsense's built-in ones (dark theme).*
+
 ## Install
 
 As `root` on the OPNsense console or over SSH:
@@ -51,18 +56,18 @@ the expand link on the widget (`/ui/firewallmap`).
 > Keys are entered by an administrator in the widget's settings dialog (gear icon on the widget).
 > They are write-only: never displayed or logged.
 
-<img src="docs/screenshots/firewall-map-page.png" alt="Firewall Map+ full-size page with a connection selected" width="1422">
+<img src="docs/screenshots/firewall-map-page.png" alt="Firewall Map+ full-size page with a connection selected">
 
 *The full-size page. The map (left) draws an arc from the firewall (the house) to every remote
 address it is talking to, coloured by who opened the connection: green from inside, orange from
 outside. Red dots are sources the firewall blocked. The filters above the map narrow it by traffic
 type, service, interface, inside host and country; **Threats** opens the review list. On the
 right, **Top talkers** ranks hosts (or countries and networks) with a live sparkline, and the
-details panel below explains whatever you click: here an arc to Ashburn, showing the inside host
+details panel below explains whatever you click: here an arc to a Microsoft server in Boydton, Virginia, showing the inside host
 that opened it, the service (HTTPS), the remote network, the firewall's decision and rule,
 transfer totals and rates, with Investigate, States and Kill states actions.*
 
-<img src="docs/screenshots/firewall-map-widget.png" alt="Firewall Map+ dashboard widget" width="524">
+<img src="docs/screenshots/firewall-map-widget.png" alt="Firewall Map+ dashboard widget" width="795">
 
 *The dashboard widget: the same live map in compact form, with a one-line summary of active flows
 and blocked sources. The link in the corner opens the full-size page; its settings dialog holds
@@ -190,7 +195,7 @@ on the widget).
 
 ### System Information+
 
-<img src="docs/screenshots/system-information.png" alt="System Information+" width="524">
+<img src="docs/screenshots/system-information.png" alt="System Information+" width="795">
 
 *Name and GUI user; hardware (manufacturer, model, serial number); firmware (vendor, version,
 release date, boot method) and the current and next boot environment; OPNsense and FreeBSD
@@ -201,7 +206,7 @@ settings.*
 
 ### System Metrics+
 
-<img src="docs/screenshots/system-metrics.png" alt="System Metrics+" width="524">
+<img src="docs/screenshots/system-metrics.png" alt="System Metrics+" width="795">
 
 *CPU usage and temperature as live charts, with the load averages; gauges for memory, firewall
 states (**Show** opens the state table), mbufs and swap, with the exact figures under each gauge;
@@ -210,7 +215,7 @@ and filesystem usage. Settings: which components to show, and the chart window (
 
 ### Traffic Graph+
 
-<img src="docs/screenshots/traffic-graph.png" alt="Traffic Graph+" width="524">
+<img src="docs/screenshots/traffic-graph.png" alt="Traffic Graph+" width="795">
 
 *Live traffic in and out, one chart per interface or all interfaces combined, each interface in its
 own colour. The icon in the top-left corner switches between the expanded view shown here and a
@@ -219,7 +224,7 @@ compact one. Settings: per-interface or combined display, which interfaces, and 
 
 ### Gateways+
 
-<img src="docs/screenshots/gateways.png" alt="Gateways+" width="524">
+<img src="docs/screenshots/gateways.png" alt="Gateways+" width="795">
 
 *Every gateway with its address, RTT, RTT deviation, packet loss and a status badge (online,
 warning, offline, unmonitored); the globe marks the default gateway. Rows can be dragged into any
@@ -227,34 +232,34 @@ order. Settings: which gateways and which metrics to show.*
 
 ### Interfaces+
 
-<img src="docs/screenshots/interfaces.png" alt="Interfaces+" width="524">
+<img src="docs/screenshots/interfaces.png" alt="Interfaces+" width="795">
 
 *Link state, IPv4 and IPv6 addresses and media for the interfaces you choose, including IPsec VTI,
 WireGuard and OpenVPN tunnels; rows can be dragged into any order. Settings: which interfaces.*
 
 ### Interface Statistics+
 
-<img src="docs/screenshots/interface-statistics.png" alt="Interface Statistics+" width="524">
+<img src="docs/screenshots/interface-statistics.png" alt="Interface Statistics+" width="795">
 
 *Bytes, packets, errors and collisions in and out per interface; rows can be dragged into any
 order. Settings: which interfaces, which fields, and the refresh interval (1, 5 or 10 seconds).*
 
 ### Thermal Sensors+
 
-<img src="docs/screenshots/thermal-sensors.png" alt="Thermal Sensors+" width="524">
+<img src="docs/screenshots/thermal-sensors.png" alt="Thermal Sensors+" width="795">
 
 *The temperature sensors you choose, including per-core readings, as bars with the current value.
 Settings: which sensors.*
 
 ### Firewall Logs+
 
-<img src="docs/screenshots/firewall-logs.png" alt="Firewall Logs+" width="524">
+<img src="docs/screenshots/firewall-logs.png" alt="Firewall Logs+" width="795">
 
 *The live firewall log: action, time, source and destination with ports, the interface and the
 rule that matched (click it to open the full firewall log filtered on that entry). Settings: which actions (pass, block or all), which
 interfaces, and how many rows.*
 
-The screenshots come from a test firewall; host names, addresses, interface names and location
+The screenshots come from a live firewall; host names, addresses, interface names and location
 were replaced with example values.
 
 ## Building from source
