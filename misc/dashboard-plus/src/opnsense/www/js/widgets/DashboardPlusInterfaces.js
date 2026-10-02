@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Claudio Guareschi
+ * Copyright (C) 2026 Claudio Guareschi <cguareschi@gmail.com>
  * All rights reserved.
  */
 
