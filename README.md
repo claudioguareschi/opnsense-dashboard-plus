@@ -204,6 +204,8 @@ Eight widgets that sit next to OPNsense's built-in ones in **Add widget**. Every
 locally from the firewall's own API. Each widget's options are in its settings dialog (gear icon
 on the widget).
 
+Since some of these widgets are meant to extend the information provided by the existing OPNsense widgets, their name may collide with the existing ones. For this reason the widgets in this package are marked with a `+` trailing sign in the `Add` widget selection box. This does not imply these widget are better then the OPNsense, they are just a little different and to me a little bit more familiar as I am coming from pfSense (*and very happy to ditch it!*). 
+
 ### System Information+
 
 <img src="docs/screenshots/system-information.png" alt="System Information+" width="795">
