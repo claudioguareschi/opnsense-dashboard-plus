@@ -41,7 +41,7 @@ from support import BLOCKLISTS, BLOCKS, COMMON, IDS, PF, THREATS, BLOCK_LINE, Ge
 class AlertTest(unittest.TestCase):
     LINE = json.dumps({
         "timestamp": "2026-09-26T20:20:01.123456-0400", "event_type": "alert", "src_ip": "94.154.43.203",
-        "src_port": 51234, "dest_ip": "198.13.91.163", "dest_port": 80, "proto": "TCP",
+        "src_port": 51234, "dest_ip": "1.2.3.163", "dest_port": 80, "proto": "TCP",
         "alert": {"action": "allowed", "signature_id": 2001219, "signature": "ET SCAN Potential SSH Scan",
                   "category": "Attempted Information Leak", "severity": 2},
     })
@@ -57,33 +57,33 @@ class AlertTest(unittest.TestCase):
 
     def test_tracks_per_remote_address_and_flags(self):
         alerts = IDS.AlertTracker()
-        alerts.feed([self.LINE, self.LINE, '{"event_type":"flow"}'], {"198.13.91.163"})
+        alerts.feed([self.LINE, self.LINE, '{"event_type":"flow"}'], {"1.2.3.163"})
         summary = alerts.summary("94.154.43.203", now=IDS.parse_alert(self.LINE)["time"] + 60)
         self.assertEqual((summary["count"], summary["severity"], summary["inbound"], summary["last_seconds"]),
                          (2, 2, True, 60))
-        self.assertEqual(summary["targets"], ["198.13.91.163:80/tcp"])
+        self.assertEqual(summary["targets"], ["1.2.3.163:80/tcp"])
         self.assertEqual(summary["signatures"][0]["count"], 2)
         self.assertEqual(BLOCKLISTS.threat_lists_for("94.154.43.203", None, None, alerts), [BLOCKLISTS.IDS_LIST])
         # low severity (3) is shown but does not flag
         low = self.LINE.replace('"severity": 2', '"severity": 3').replace("94.154.43.203", "8.8.8.8")
-        alerts.feed([low], {"198.13.91.163"})
+        alerts.feed([low], {"1.2.3.163"})
         self.assertFalse(alerts.flags("8.8.8.8"))
         self.assertIsNotNone(alerts.summary("8.8.8.8"))
         # outbound alert from an inside host: the remote side is the destination
         outbound = self.LINE.replace('"src_ip": "94.154.43.203"', '"src_ip": "192.168.1.50"').replace(
-            '"dest_ip": "198.13.91.163"', '"dest_ip": "45.56.79.53"')
-        alerts.feed([outbound], {"198.13.91.163"})
+            '"dest_ip": "1.2.3.163"', '"dest_ip": "45.56.79.53"')
+        alerts.feed([outbound], {"1.2.3.163"})
         self.assertTrue(alerts.summary("45.56.79.53")["outbound"])
         alerts.expire(IDS.parse_alert(self.LINE)["time"] + IDS.ALERT_WINDOW_SECONDS + 1)
         self.assertEqual(alerts.sources, {})
 
 
 class CorrelationTest(unittest.TestCase):
-    LOCAL = {"198.13.91.163"}
-    OUTBOUND = ("all tcp 198.13.91.163:13526 (192.168.30.52:52114) -> 162.217.103.70:443       ESTABLISHED:ESTABLISHED\n"
+    LOCAL = {"1.2.3.163"}
+    OUTBOUND = ("all tcp 1.2.3.163:13526 (192.168.30.52:52114) -> 162.217.103.70:443       ESTABLISHED:ESTABLISHED\n"
                 "   age 00:04:00, expires in 23:59:37, 5:9 pkts, 400:9000 bytes, rule 106, rlabel abc123, allow-opts\n"
                 "   id: 0a creatorid: 01\n   origif: igb1\n")
-    INBOUND = ("all tcp 192.168.1.2:443 (198.13.91.163:443) <- 94.154.43.203:51234       ESTABLISHED:ESTABLISHED\n"
+    INBOUND = ("all tcp 192.168.1.2:443 (1.2.3.163:443) <- 94.154.43.203:51234       ESTABLISHED:ESTABLISHED\n"
                "   age 00:00:05, expires in 23:59:37, 5:9 pkts, 400:9000 bytes, rule 7, rlabel fwd1\n   id: 0b creatorid: 01\n")
 
     def alert(self, src, sport, dst, dport, flow_id=1, signature="ET MALWARE Possible C2 Activity", severity=1):
@@ -94,8 +94,8 @@ class CorrelationTest(unittest.TestCase):
     def test_outbound_nat_connection_is_found_by_its_outside_tuple(self):
         correlator = IDS.Correlator()
         correlator.observe_states(PF.parse_states(self.OUTBOUND), self.LOCAL, 1000.0, {"abc123": "IoT to Internet"})
-        correlator.add_alert(self.alert("198.13.91.163", 13526, "162.217.103.70", 443), 1000.0)
-        correlator.add_alert(self.alert("162.217.103.70", 443, "198.13.91.163", 13526), 1000.5)
+        correlator.add_alert(self.alert("1.2.3.163", 13526, "162.217.103.70", 443), 1000.0)
+        correlator.add_alert(self.alert("162.217.103.70", 443, "1.2.3.163", 13526), 1000.5)
         correlator.resolve(self.LOCAL, 1001.0)
         (flow,) = correlator.flows.values()
         self.assertEqual((flow["kind"], flow["connection"]["inside"], flow["connection"]["rule_description"]),
@@ -131,12 +131,12 @@ class CorrelationTest(unittest.TestCase):
         correlator = IDS.Correlator()
         correlator.observe_states(PF.parse_states(self.INBOUND), self.LOCAL, 1000.0)
         correlator.observe_states([], self.LOCAL, 1100.0)  # the connection closed
-        correlator.add_alert(self.alert("94.154.43.203", 51234, "198.13.91.163", 443), 1100.0)
+        correlator.add_alert(self.alert("94.154.43.203", 51234, "1.2.3.163", 443), 1100.0)
         block = BLOCKS.parse_block(BLOCK_LINE)
         correlator.observe_block(block, 1100.0)
         correlator.add_alert(self.alert(block["source"], int(block["source_port"]), block["destination"],
                                         int(block["port"]), flow_id=2), 1100.0)
-        correlator.add_alert(self.alert("45.1.1.1", 4444, "198.13.91.163", 22, flow_id=3), 1100.0)
+        correlator.add_alert(self.alert("45.1.1.1", 4444, "1.2.3.163", 22, flow_id=3), 1100.0)
         correlator.resolve(self.LOCAL, 1101.0)
         self.assertEqual(correlator.stats["pending"], 1)  # the unknown one waits for a later sample
         correlator.resolve(self.LOCAL, 1100.0 + IDS.CORRELATION_RETRY_SECONDS + 1)
@@ -151,18 +151,18 @@ class CorrelationTest(unittest.TestCase):
 
     def test_alert_before_the_state_is_sampled_still_matches(self):
         correlator = IDS.Correlator()
-        correlator.add_alert(self.alert("198.13.91.163", 13526, "162.217.103.70", 443), 1000.0)
+        correlator.add_alert(self.alert("1.2.3.163", 13526, "162.217.103.70", 443), 1000.0)
         correlator.resolve(self.LOCAL, 1000.0)
         correlator.observe_states(PF.parse_states(self.OUTBOUND), self.LOCAL, 1002.0)
         correlator.resolve(self.LOCAL, 1002.0)
         self.assertEqual(correlator.stats["current"], 1)
 
     def test_firewall_own_dns_with_port_translation(self):
-        state = ("all udp 198.13.91.163:21021 (198.13.91.163:15069) -> 104.128.145.3:53       MULTIPLE:SINGLE\n"
+        state = ("all udp 1.2.3.163:21021 (1.2.3.163:15069) -> 104.128.145.3:53       MULTIPLE:SINGLE\n"
                  "   age 00:00:02, expires in 00:00:58, 1:1 pkts, 60:120 bytes\n   id: 0c creatorid: 01\n")
         correlator = IDS.Correlator()
         correlator.observe_states(PF.parse_states(state), self.LOCAL, 1000.0)
-        alert = self.alert("198.13.91.163", 21021, "104.128.145.3", 53, signature="ET DNS Query for .cc TLD", severity=3)
+        alert = self.alert("1.2.3.163", 21021, "104.128.145.3", 53, signature="ET DNS Query for .cc TLD", severity=3)
         alert["protocol"] = "udp"
         correlator.add_alert(alert, 1000.0)
         correlator.resolve(self.LOCAL, 1000.0)
@@ -177,13 +177,13 @@ class CorrelationTest(unittest.TestCase):
                 return {"lat": 1.0, "lon": 2.0, "country": "US", "country_name": "United States"}
         correlator = IDS.Correlator()
         correlator.observe_states(PF.parse_states(self.OUTBOUND), self.LOCAL, 1000.0, {"abc123": "IoT to Internet"})
-        correlator.add_alert(self.alert("198.13.91.163", 13526, "162.217.103.70", 443), 1000.0)
+        correlator.add_alert(self.alert("1.2.3.163", 13526, "162.217.103.70", 443), 1000.0)
         correlator.resolve(self.LOCAL, 1000.0)
         self.assertTrue(correlator.flags("162.217.103.70"))
         self.assertFalse(correlator.flags("8.8.8.8"))
-        (flow,) = correlator.snapshot(Geo(), "198.13.91.163", {"192.168.30.52": "seachartly"}, [], {"igb1": "WAN"}, now=1000.0)
+        (flow,) = correlator.snapshot(Geo(), "1.2.3.163", {"192.168.30.52": "laptop"}, [], {"igb1": "WAN"}, now=1000.0)
         self.assertEqual((flow["inside"], flow["inside_host"]["name"], flow["rule"], flow["interface"], flow["active"]),
-                         ("192.168.30.52:52114", "seachartly", "IoT to Internet", "WAN", True))
+                         ("192.168.30.52:52114", "laptop", "IoT to Internet", "WAN", True))
         self.assertEqual((flow["severity"], flow["count"], flow["kind"]), (1, 1, "current"))
         # history on the address alone no longer turns aggregate arcs red
         self.assertEqual(BLOCKLISTS.threat_lists_for("162.217.103.70", None, None), [])
@@ -201,12 +201,12 @@ class CorrelationTest(unittest.TestCase):
     def test_connection_snapshot_for_the_queue(self):
         correlator = IDS.Correlator()
         correlator.observe_states(PF.parse_states(self.OUTBOUND), self.LOCAL, 1000.0, {"abc123": "IoT to Internet"})
-        correlator.add_alert(self.alert("198.13.91.163", 13526, "162.217.103.70", 443), 1000.0)
+        correlator.add_alert(self.alert("1.2.3.163", 13526, "162.217.103.70", 443), 1000.0)
         correlator.resolve(self.LOCAL, 1000.0)
-        (item,) = IDS.connection_snapshot("162.217.103.70", correlator, {"192.168.30.52": "seachartly"}, {"igb1": "WAN"},
+        (item,) = IDS.connection_snapshot("162.217.103.70", correlator, {"192.168.30.52": "laptop"}, {"igb1": "WAN"},
                                                 wall=1240.0)
         self.assertEqual((item["inside"], item["inside_name"], item["public"], item["remote"], item["rule"], item["started"]),
-                         ("192.168.30.52:52114", "seachartly", "198.13.91.163:13526", "162.217.103.70:443", "IoT to Internet", 1000))
+                         ("192.168.30.52:52114", "laptop", "1.2.3.163:13526", "162.217.103.70:443", "IoT to Internet", 1000))
         self.assertEqual(item["ids"][0]["signature"], "ET MALWARE Possible C2 Activity")
         merged = THREATS.merge_connections([item], [{**item, "ids": [], "seen": 2000}])
         self.assertEqual((len(merged), merged[0]["seen"], bool(merged[0]["ids"])), (1, 2000, True))
@@ -218,7 +218,7 @@ class CorrelationTest(unittest.TestCase):
             entries = IDS.firewall_blocks(correlator, {}, 900.0)
         entry = entries["45.56.79.53"]
         self.assertEqual(entry["disposition"], "firewall_blocked")
-        self.assertEqual(entry["targets"], ["tcp|198.13.91.163|23"])
+        self.assertEqual(entry["targets"], ["tcp|1.2.3.163|23"])
         self.assertEqual(entry["lists"], ["AbuseIPDB blacklist"])
 
     def test_ips_drop_to_a_port_forward_is_a_full_record(self):
@@ -234,7 +234,7 @@ class CorrelationTest(unittest.TestCase):
                              ("[2606:4700:4701::20]:443", "IPv6 HTTPS Forward"))
             correlator = IDS.Correlator()
             correlator.forwards = forwards
-            alert = self.alert("94.154.43.203", 51234, "198.13.91.163", 443, signature="ET EXPLOIT something")
+            alert = self.alert("94.154.43.203", 51234, "1.2.3.163", 443, signature="ET EXPLOIT something")
             alert.update(action="blocked", flow={"bytes_toserver": 900, "bytes_toclient": 60, "start": 990.0})
             correlator.add_alert(alert, 1000.0)
             correlator.resolve(self.LOCAL, 1000.0 + IDS.CORRELATION_RETRY_SECONDS + 1)
@@ -270,10 +270,10 @@ class CorrelationTest(unittest.TestCase):
 class BoundsTest(unittest.TestCase):
     def test_one_connection_cannot_grow_its_alert_history_without_limit(self):
         correlator = IDS.Correlator()
-        key = PF.outside_key("tcp", "198.13.91.163", "443", "94.154.43.203", "51234")
+        key = PF.outside_key("tcp", "1.2.3.163", "443", "94.154.43.203", "51234")
         connection = IDS.make_connection(key)
         for index in range(100):
-            alert = {"time": 1000.0, "src": "94.154.43.203", "dst": "198.13.91.163", "src_port": 51234, "dst_port": 443,
+            alert = {"time": 1000.0, "src": "94.154.43.203", "dst": "1.2.3.163", "src_port": 51234, "dst_port": 443,
                      "protocol": "tcp", "sid": index, "signature": f"s{index}", "category": "", "severity": 3,
                      "action": "allowed", "flow_id": index // 3}
             correlator._attach(key, "current", connection, alert, 1000.0 + index)

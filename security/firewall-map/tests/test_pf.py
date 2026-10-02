@@ -47,18 +47,18 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(record["bytes_out"], 5072)
         self.assertEqual(record["packets_in"], 8)
         self.assertEqual(record["src"]["address"], "45.56.79.53")
-        self.assertEqual(record["dst"]["address"], "198.13.91.163")
+        self.assertEqual(record["dst"]["address"], "1.2.3.163")
         self.assertEqual(record["nat"]["address"], "192.168.1.2")
         self.assertEqual(record["id"], "f501b86a00000000/2ec5c347")
         self.assertEqual(record["age"], 605)
 
     def test_uses_nat_public_address_as_map_origin(self):
-        output = """all tcp 192.168.1.2:443 (198.13.91.163:443) <- 45.56.79.53:35799 ESTABLISHED:ESTABLISHED
+        output = """all tcp 192.168.1.2:443 (1.2.3.163:443) <- 45.56.79.53:35799 ESTABLISHED:ESTABLISHED
    age 00:10:05, expires in 23:59:48, 8:12 pkts, 368:5072 bytes
    id: 01 creatorid: 02
 """
         record = PF.parse_states(output)[0]
-        self.assertEqual(PF.flow_endpoints(record, {"198.13.91.163"}), ("198.13.91.163", "45.56.79.53"))
+        self.assertEqual(PF.flow_endpoints(record, {"1.2.3.163"}), ("1.2.3.163", "45.56.79.53"))
 
     def test_parses_and_maps_ipv6_state(self):
         output = """all tcp 2606:4700:4700:0:0:0:0:1111[443] <- 2001:4860:4860:0:0:0:0:8888[51234] ESTABLISHED:ESTABLISHED
@@ -75,11 +75,11 @@ class ParseTest(unittest.TestCase):
 
     def test_excludes_firewall_to_firewall_state(self):
         record = {
-            "src": {"address": "152.44.11.230", "port": "443"},
-            "dst": {"address": "198.13.91.163", "port": "443"},
+            "src": {"address": "1.2.2.230", "port": "443"},
+            "dst": {"address": "1.2.3.163", "port": "443"},
             "nat": None,
         }
-        self.assertIsNone(PF.flow_endpoints(record, {"152.44.11.230", "198.13.91.163"}))
+        self.assertIsNone(PF.flow_endpoints(record, {"1.2.2.230", "1.2.3.163"}))
 
     def test_parses_mmdblookup_dump(self):
         output = """
@@ -123,7 +123,7 @@ class ParseTest(unittest.TestCase):
 class InsideTest(unittest.TestCase):
     NAT_OUT = NAT_OUT
     IFCONFIG = """igb1: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
-\tinet 152.44.11.230 netmask 0xffffff00 broadcast 152.44.11.255
+\tinet 1.2.2.230 netmask 0xffffff00 broadcast 1.2.2.255
 \tinet6 2606:4700:4700::1111 prefixlen 64
 vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
 \tinet 192.168.30.248 netmask 0xffffff00 broadcast 192.168.30.255
@@ -137,14 +137,14 @@ vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
         self.assertEqual(PF.inside_endpoint(record)["address"], "192.168.30.30")
 
     def test_vpn_egress_is_drawn_from_the_firewall(self):
-        tunnel = self.NAT_OUT.replace("198.13.91.163:19421", "10.74.109.115:19421").replace("origif: igb1", "origif: wg0")
+        tunnel = self.NAT_OUT.replace("1.2.3.163:19421", "10.74.109.115:19421").replace("origif: igb1", "origif: wg0")
         record = PF.parse_states(tunnel)[0]
-        self.assertEqual(PF.flow_endpoints(record, {"198.13.91.163", "152.44.11.230"}),
-                         ("152.44.11.230", "34.209.15.107"))
+        self.assertEqual(PF.flow_endpoints(record, {"1.2.3.163", "1.2.2.230"}),
+                         ("1.2.2.230", "34.209.15.107"))
         self.assertEqual(record["origif"], "wg0")
         lan_side = "all tcp 192.168.30.30:51858 -> 34.209.15.107:8883       ESTABLISHED:ESTABLISHED\n" \
                    "   age 00:00:05, expires in 23:59:37, 1:1 pkts, 1:1 bytes\n   id: 01 creatorid: 02\n"
-        self.assertIsNone(PF.flow_endpoints(PF.parse_states(lan_side)[0], {"198.13.91.163"}))
+        self.assertIsNone(PF.flow_endpoints(PF.parse_states(lan_side)[0], {"1.2.3.163"}))
 
     def test_maps_inside_host_to_interface_and_name(self):
         networks = PF.interface_networks(self.IFCONFIG)
@@ -158,8 +158,8 @@ vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
     def test_tracker_reports_inside_hosts_and_egress(self):
         tracker = COLLECTOR.FlowTracker(smoothing=1.0)
         records = PF.parse_states(self.NAT_OUT)
-        tracker.update(records, {"198.13.91.163"}, now=0.0)
-        flow = tracker.flows[("198.13.91.163", "34.209.15.107")]
+        tracker.update(records, {"1.2.3.163"}, now=0.0)
+        flow = tracker.flows[("1.2.3.163", "34.209.15.107")]
         self.assertEqual(flow["inside"], ["192.168.30.30"])
         self.assertEqual(flow["egress"], "igb1")
 
@@ -217,37 +217,37 @@ vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
 
 
 class InitiatorTest(unittest.TestCase):
-    INBOUND = ("all tcp 192.168.1.2:443 (198.13.91.163:443) <- 94.154.43.203:51234       ESTABLISHED:ESTABLISHED\n"
+    INBOUND = ("all tcp 192.168.1.2:443 (1.2.3.163:443) <- 94.154.43.203:51234       ESTABLISHED:ESTABLISHED\n"
                "   age 00:00:01, expires in 23:59:37, 5:9 pkts, 400:9000 bytes\n   id: 0a creatorid: 01\n   origif: ix0\n")
 
     def test_inbound_port_forward_reports_initiator_and_target(self):
         tracker = COLLECTOR.FlowTracker(smoothing=1.0)
-        tracker.update([], {"198.13.91.163"}, now=0.0)
-        tracker.update(PF.parse_states(self.INBOUND), {"198.13.91.163"}, now=2.0)
-        flow = tracker.flows[("198.13.91.163", "94.154.43.203")]
+        tracker.update([], {"1.2.3.163"}, now=0.0)
+        tracker.update(PF.parse_states(self.INBOUND), {"1.2.3.163"}, now=2.0)
+        flow = tracker.flows[("1.2.3.163", "94.154.43.203")]
         self.assertEqual(flow["initiated"], "remote")
         self.assertEqual(flow["targets"], ["tcp|192.168.1.2|443"])
         self.assertEqual((flow["service_ports"], flow["age"]), ({"HTTPS": "443/tcp"}, 1))
         # the server's replies dominate: the bytes go away from the firewall although the remote started it
         self.assertGreater(flow["rate_out"], flow["rate_in"])
-        target = LEASES.describe_target("tcp|192.168.1.2|443", {"192.168.1.2": "mail"}, [], {}, {"198.13.91.163"})
+        target = LEASES.describe_target("tcp|192.168.1.2|443", {"192.168.1.2": "mail"}, [], {}, {"1.2.3.163"})
         self.assertEqual((target["name"], target["service"]), ("mail", "HTTPS"))
 
     def test_inbound_udp_to_the_firewall_keeps_its_protocol(self):
-        states = ("all udp 198.13.91.163:51820 <- 94.154.43.203:51234       MULTIPLE:MULTIPLE\n"
+        states = ("all udp 1.2.3.163:51820 <- 94.154.43.203:51234       MULTIPLE:MULTIPLE\n"
                   "   age 00:00:01, expires in 00:00:59, 5:9 pkts, 400:900 bytes\n   id: 0b creatorid: 01\n")
         tracker = COLLECTOR.FlowTracker(smoothing=1.0)
-        tracker.update([], {"198.13.91.163"}, now=0.0)
-        tracker.update(PF.parse_states(states), {"198.13.91.163"}, now=2.0)
-        flow = tracker.flows[("198.13.91.163", "94.154.43.203")]
-        self.assertEqual(flow["targets"], ["udp|198.13.91.163|51820"])
-        target = LEASES.describe_target(flow["targets"][0], {}, [], {}, {"198.13.91.163"})
+        tracker.update([], {"1.2.3.163"}, now=0.0)
+        tracker.update(PF.parse_states(states), {"1.2.3.163"}, now=2.0)
+        flow = tracker.flows[("1.2.3.163", "94.154.43.203")]
+        self.assertEqual(flow["targets"], ["udp|1.2.3.163|51820"])
+        target = LEASES.describe_target(flow["targets"][0], {}, [], {}, {"1.2.3.163"})
         self.assertEqual((target["name"], target["service"]), ("firewall", "WireGuard"))
 
     def test_outbound_flows_are_local(self):
         tracker = COLLECTOR.FlowTracker(smoothing=1.0)
-        tracker.update(PF.parse_states(NAT_OUT), {"198.13.91.163"}, now=0.0)
-        self.assertEqual(tracker.flows[("198.13.91.163", "34.209.15.107")]["initiated"], "local")
+        tracker.update(PF.parse_states(NAT_OUT), {"1.2.3.163"}, now=0.0)
+        self.assertEqual(tracker.flows[("1.2.3.163", "34.209.15.107")]["initiated"], "local")
 
     def test_reputation_from_cached_lookups(self):
         with tempfile.TemporaryDirectory() as directory:

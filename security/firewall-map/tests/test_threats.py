@@ -39,14 +39,14 @@ from support import CACHE, COLLECTOR, COMMON, PF, THREATS, NAT_OUT  # noqa: E402
 
 
 class ThreatQueueTest(unittest.TestCase):
-    INBOUND = ("all tcp 192.168.1.2:80 (198.13.91.163:80) <- 108.188.77.155:51234       ESTABLISHED:ESTABLISHED\n"
+    INBOUND = ("all tcp 192.168.1.2:80 (1.2.3.163:80) <- 108.188.77.155:51234       ESTABLISHED:ESTABLISHED\n"
                "   age 00:00:01, expires in 23:59:37, 5:9 pkts, 400:9000 bytes\n   id: 0a creatorid: 01\n")
-    OUTBOUND = ("all tcp 192.168.1.50:50000 (198.13.91.163:50000) -> 8.8.8.8:443       ESTABLISHED:ESTABLISHED\n"
+    OUTBOUND = ("all tcp 192.168.1.50:50000 (1.2.3.163:50000) -> 8.8.8.8:443       ESTABLISHED:ESTABLISHED\n"
                 "   age 00:00:01, expires in 23:59:37, 5:9 pkts, 400:900 bytes\n   id: 0b creatorid: 01\n")
 
     def observe(self, states):
         lists = {"108.188.77.155": ["AbuseIPDB blacklist"]}
-        return THREATS.observe(PF.parse_states(states), lambda address: lists.get(address, []), {"198.13.91.163"})
+        return THREATS.observe(PF.parse_states(states), lambda address: lists.get(address, []), {"1.2.3.163"})
 
     def test_records_only_flagged_addresses_with_target(self):
         seen = self.observe(self.INBOUND + self.OUTBOUND)
@@ -57,7 +57,7 @@ class ThreatQueueTest(unittest.TestCase):
 
     def test_reply_state_from_a_server_counts_as_inbound(self):
         # the SYN passed the other CARP node; the mail server's reply created an outbound NAT state
-        reply = ("all tcp 198.13.91.163:13526 (192.168.1.2:443) -> 108.188.77.155:48824       TIME_WAIT:TIME_WAIT\n"
+        reply = ("all tcp 1.2.3.163:13526 (192.168.1.2:443) -> 108.188.77.155:48824       TIME_WAIT:TIME_WAIT\n"
                  "   age 00:01:01, expires in 00:00:29, 2:1 pkts, 100:40 bytes\n   id: c6 creatorid: a9\n")
         entry = self.observe(reply)["108.188.77.155"]
         self.assertEqual((entry["inbound"], entry["outbound"], entry["targets"], entry["services"]),
@@ -177,7 +177,7 @@ class ThreatQueueTest(unittest.TestCase):
             blocked = {"108.188.77.155": {
                 "lists": ["FWMAP_FireHOL_L1"], "inbound": 1, "outbound": 0, "inside": [], "bytes": 0,
                 "youngest": None, "service_ports": {}, "disposition": "firewall_blocked",
-                "targets": [f"tcp|198.13.91.163|{port}" for port in range(1000, 1000 + THREATS.MAX_ITEMS)],
+                "targets": [f"tcp|1.2.3.163|{port}" for port in range(1000, 1000 + THREATS.MAX_ITEMS)],
                 "services": [f"TCP/{port}" for port in range(1000, 1000 + THREATS.MAX_ITEMS)],
                 "connections": [{"key": f"block{n}", "decision": "block", "seen": 200 + n}
                                 for n in range(THREATS.MAX_CONNECTIONS)],

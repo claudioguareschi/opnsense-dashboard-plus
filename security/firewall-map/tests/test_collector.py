@@ -38,8 +38,8 @@ from support import COLLECTOR, COMMON, PF, SNAPSHOT, THREATS, Geo, nat_state  # 
 
 
 class TrackerTest(unittest.TestCase):
-    LOCAL = {"198.13.91.163"}
-    PAIR = ("198.13.91.163", "45.56.79.53")
+    LOCAL = {"1.2.3.163"}
+    PAIR = ("1.2.3.163", "45.56.79.53")
 
     def test_rate_comes_from_counter_deltas_not_totals(self):
         tracker = COLLECTOR.FlowTracker(smoothing=1.0)
@@ -87,7 +87,7 @@ class TrackerTest(unittest.TestCase):
     def test_visible_flows_are_capped(self):
         tracker = COLLECTOR.FlowTracker(smoothing=1.0)
         for index in range(5):
-            tracker.flows[("198.13.91.163", f"8.8.8.{index}")] = {
+            tracker.flows[("1.2.3.163", f"8.8.8.{index}")] = {
                 "rate": float(index), "rate_in": 0.0, "rate_out": 0.0, "packet_rate": 0.0,
                 "last_active": 0.0, "first_seen": 0.0,
             }
@@ -146,7 +146,7 @@ class CollectorLoopTest(unittest.TestCase):
         patches = {
             "OUTPUT_FILE": self.output,
             "sample_states": lambda: PF.parse_states(nat_state(self.bytes, self.bytes)),
-            "host_info": lambda: ({"198.13.91.163"}, None, []),
+            "host_info": lambda: ({"1.2.3.163"}, None, []),
             "recording_wanted": lambda values=None: True,
             "database_state": lambda values: ("city.mmdb", "asn.mmdb", None),
             "rule_descriptions": dict, "interface_names": dict, "lease_names": lease_names, "port_forwards": list,
@@ -244,7 +244,7 @@ class ThreatRecorderTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             recorder = COLLECTOR.ThreatRecorder(os.path.join(directory, "queue.db"))
             collector = mock.Mock()
-            collector.local_addresses = {"198.13.91.163"}
+            collector.local_addresses = {"1.2.3.163"}
             collector.geo = Geo({"lat": 1.0, "lon": 2.0, "country": "NL", "country_name": "The Netherlands",
                                  "asn": 64500, "as_org": "Example"})
             collector.hostnames.names = {"45.56.79.53": ("scanner.example", 0.0)}

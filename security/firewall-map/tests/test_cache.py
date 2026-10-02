@@ -39,12 +39,12 @@ from support import CACHE, COLLECTOR, COMMON, PF  # noqa: E402
 
 class RobustnessTest(unittest.TestCase):
     def test_parses_translation_after_both_endpoints(self):
-        line = ("all tcp 192.168.1.2:443 (198.13.91.163:443) <- 45.56.79.53:35799 (10.0.0.9:35799)"
+        line = ("all tcp 192.168.1.2:443 (1.2.3.163:443) <- 45.56.79.53:35799 (10.0.0.9:35799)"
                 "       ESTABLISHED:ESTABLISHED\n   age 00:00:05, expires in 23:59:37, 1:1 pkts, 1:1 bytes\n"
                 "   id: 01 creatorid: 02\n")
         record = PF.parse_states(line)[0]
         self.assertEqual(record["src"]["address"], "45.56.79.53")
-        self.assertEqual(record["nat"]["address"], "198.13.91.163")
+        self.assertEqual(record["nat"]["address"], "1.2.3.163")
         self.assertEqual(record["state"], "ESTABLISHED:ESTABLISHED")
 
     def test_cgnat_counts_as_inside(self):
@@ -112,7 +112,7 @@ class CacheResilienceTest(unittest.TestCase):
             self.assertTrue(os.path.exists(path + ".corrupt"))
 
     def test_skipped_state_details_do_not_leak(self):
-        output = ("all tcp 198.13.91.163:1 (192.168.30.30:2) -> 34.209.15.107:8883       ESTABLISHED:ESTABLISHED\n"
+        output = ("all tcp 1.2.3.163:1 (192.168.30.30:2) -> 34.209.15.107:8883       ESTABLISHED:ESTABLISHED\n"
                   "   age 00:00:05, expires in 23:59:37, 1:1 pkts, 1:1 bytes\n   id: 01 creatorid: 02\n"
                   "all tcp 192.168.30.30:5 -> 192.168.40.2:6       ESTABLISHED:ESTABLISHED\n"
                   "   age 00:00:05, expires in 23:59:37, 1:1 pkts, 1:1 bytes\n   id: 03 creatorid: 04\n   origif: vlan03\n")

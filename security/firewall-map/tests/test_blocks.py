@@ -40,12 +40,12 @@ from support import BLOCKS, SNAPSHOT, Geo  # noqa: E402
 class BlockTest(unittest.TestCase):
     LINE = ('<134>1 2026-09-25T21:27:07-04:00 fw filterlog 31386 - [meta sequenceId="1"] '
             '15,,,ecd3a310894625657c6591b80daa956a,igb1,match,block,in,4,0x0,,244,54321,0,none,6,tcp,40,'
-            '45.56.79.53,198.13.91.163,51234,23,0,S,1,,1024,,')
+            '45.56.79.53,1.2.3.163,51234,23,0,S,1,,1024,,')
 
     def test_parses_inbound_block(self):
         event = BLOCKS.parse_block(self.LINE)
         self.assertEqual(event["source"], "45.56.79.53")
-        self.assertEqual(event["destination"], "198.13.91.163")
+        self.assertEqual(event["destination"], "1.2.3.163")
         self.assertEqual((event["protocol"], event["port"], event["interface"]), ("tcp", "23", "igb1"))
         self.assertIsNone(BLOCKS.parse_block(self.LINE.replace(",block,in,", ",pass,in,")))
         self.assertIsNone(BLOCKS.parse_block(self.LINE.replace(",block,in,", ",block,out,")))
@@ -70,7 +70,7 @@ class BlockTest(unittest.TestCase):
         event = BLOCKS.parse_block(self.LINE)
         blocks.add(event, now=0.0)
         blocks.add(event, now=30.0)
-        (block,) = BLOCKS.block_snapshot(blocks, Geo(), {"198.13.91.163"}, "198.13.91.163", 30.0, {}, {})
+        (block,) = BLOCKS.block_snapshot(blocks, Geo(), {"1.2.3.163"}, "1.2.3.163", 30.0, {}, {})
         self.assertEqual(block["services"], [{"name": "Telnet", "port": "23/tcp", "hits": 2}])
         self.assertEqual((block["port_count"], block["seconds"], block["country"]), (1, 30, "The Netherlands"))
 
