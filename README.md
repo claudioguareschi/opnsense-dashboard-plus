@@ -290,7 +290,7 @@ versions and signs the whole catalogue.
   settings (no star, shorter help, checkboxes level with their labels).
 
 - **os-firewall-map 0.1_78**: a Threats target on the firewall itself names its interface
-  ("198.13.91.163 · WAN"); "+ N other targets" opens the card, which lists every target.
+  ("203.0.113.10 · WAN"); "+ N other targets" opens the card, which lists every target.
 
 - **os-firewall-map 0.1_77**: a Threats card under *Passed* leads with the connection that got
   through, not a later blocked attempt; the *All* tab shows its count.
