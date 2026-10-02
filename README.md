@@ -22,6 +22,9 @@ signing key. Then install from **System ▸ Firmware ▸ Plugins** (`os-dashboar
 `os-firewall-map`), or with `pkg install os-firewall-map`. Updates arrive with normal firmware
 updates. The repository contains only these two packages.
 
+Firewall Map+ works best with a free MaxMind GeoLite2 key and a free AbuseIPDB key: see
+[Firewall Map+](#firewall-map) below for where to get them.
+
 To remove it: uninstall the plugins, then delete `/usr/local/etc/pkg/repos/dashboard-plus.conf`
 and `/usr/local/etc/pkg/keys/dashboard-plus-repository.pub`.
 
@@ -29,6 +32,24 @@ and `/usr/local/etc/pkg/keys/dashboard-plus-repository.pub`.
 
 The firewall's live traffic on a world map: a dashboard widget, and a full-size page opened with
 the expand link on the widget (`/ui/firewallmap`).
+
+> [!IMPORTANT]
+> **Get two free keys for the best results.** Firewall Map+ works without them, but it is far more
+> useful with both:
+>
+> - **MaxMind GeoLite2 license key** (free): accurate city-level locations and network (ASN)
+>   names. [Sign up for GeoLite2](https://www.maxmind.com/en/geolite2/signup), then create a key
+>   under **Manage license keys** in your MaxMind account. If the
+>   firewall already has a MaxMind GeoIP alias (**Firewall ▸ Aliases ▸ GeoIP settings**), Firewall
+>   Map+ reads the key from there automatically; otherwise enter it in the widget settings. Without
+>   a key the map falls back to the keyless DB-IP Lite databases, which are less precise.
+> - **AbuseIPDB API key** (free): the AbuseIPDB blacklist for flagging known-bad addresses, and
+>   reputation scores in *Investigate*. [Create an account](https://www.abuseipdb.com/register),
+>   then create a key on the **API** page of your AbuseIPDB account and paste it into the widget
+>   settings.
+>
+> Keys are entered by an administrator in the widget's settings dialog (gear icon on the widget).
+> They are write-only: never displayed or logged.
 
 <img src="docs/screenshots/firewall-map-page.png" alt="Firewall Map+ full-size page with a connection selected" width="1422">
 
