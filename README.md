@@ -122,7 +122,7 @@ flagged traffic got through*, or *Blocked*), then one sentence per address, for 
   an alias, add its country to a GeoIP alias, and *Mark as threat* (adds it to the
   `FWMAP_Watchlist` host alias).
 
-### Threats (administrators)
+### Threats
 
 **Threats** on the full-size page lists traffic to or from flagged addresses, sorted into tabs by
 what actually happened. **Passed / reached host** (the default) holds what got through: a PF state
