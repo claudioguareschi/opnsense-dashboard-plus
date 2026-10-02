@@ -1,20 +1,25 @@
 # Dashboard Plus for OPNsense
 
-Two community plugins for [OPNsense](https://opnsense.org) 26.7, published as signed packages:
+Dashboard plus for [OPNsense](https://opnsense.org) provides a set of informative widgets to complement/extend the widget set provided by the official OPNsense release.
 
 | Package | What it adds |
 |---|---|
 | **os-dashboard-plus** | Enhanced dashboard widgets: System Information+, Traffic Graph+, System Metrics+, Thermal Sensors+, Interface Statistics+, Gateways+, Interfaces+ and Firewall Logs+. |
 | **os-firewall-map** (Firewall Map+) | The firewall's live traffic (IPv4 and IPv6) on a world map, as a dashboard widget and a full-size page, with plain-language details, threat lists, Suricata alerts and a Threats panel. |
 
-These are not official OPNsense plugins. They do not modify the OPNsense core.
+These widgets are not an official OPNsense plugin or endorsed by OPNsense in any way. I created them for personal use and they fit what I need but they are available for whoever can find a use for them. I am still actively developing so there can be bugs or improvement that can be made. This is a work in progress and I welcome suggestions to make these widgets better or more useful.
+
+The widgets do not modify the OPNsense core, they are just visualizations of OPNsense collected data, so they won't change or affect the normal operation of your firewall.
+
+I have been using them for a while and they are stable on my system. Your mileage may vary depending on your configuration. The only testbed I have is my firewall and they work well there.
 
 <img src="docs/screenshots/dashboard.png" alt="An OPNsense dashboard with Dashboard Plus and Firewall Map+ widgets">
 
-*A dashboard with System Information+, Firewall Map+, Gateways+ and other widgets, next to
-OPNsense's built-in ones (dark theme).*
+*This is a sample dashboard with System Information+, Firewall Map+, Gateways+ and other widgets, on OPNsense's built-in dark theme.*
 
 ## Install
+
+This repo provides two installable packages: `os-dashboard-plus` and `os-firewall-map`. I decided to split in 2 packages to allow the firewall map to be installed separately from the rest of the more standard widgets.
 
 As `root` on the OPNsense console or over SSH:
 
@@ -23,9 +28,11 @@ fetch -qo - https://raw.githubusercontent.com/claudioguareschi/opnsense-dashboar
 ```
 
 This adds the package repository (`/usr/local/etc/pkg/repos/dashboard-plus.conf`) and its public
-signing key. Then install from **System ▸ Firmware ▸ Plugins** (`os-dashboard-plus`,
-`os-firewall-map`), or with `pkg install os-firewall-map`. Updates arrive with normal firmware
-updates. The repository contains only these two packages.
+signing key. 
+
+Then install from **System ▸ Firmware ▸ Plugins** (`os-dashboard-plus`,
+`os-firewall-map`), or with `pkg install os-firewall-map` and/or `pkg install os-dashboard-plus`. 
+Updates arrive with normal firmware updates. The repository contains only these two packages.
 
 Firewall Map+ works best with a free MaxMind GeoLite2 key and a free AbuseIPDB key: see
 [Firewall Map+](#firewall-map) below for where to get them.
@@ -58,14 +65,15 @@ the expand link on the widget (`/ui/firewallmap`).
 
 <img src="docs/screenshots/firewall-map-page.png" alt="Firewall Map+ full-size page with a connection selected">
 
-*The full-size page. The map (left) draws an arc from the firewall (the house) to every remote
+*The full-size map draws an arc from the firewall (the house) to every remote
 address it is talking to, coloured by who opened the connection: green from inside, orange from
-outside. Red dots are sources the firewall blocked. The filters above the map narrow it by traffic
-type, service, interface, inside host and country; **Threats** opens the review list. On the
-right, **Top talkers** ranks hosts (or countries and networks) with a live sparkline, and the
-details panel below explains whatever you click: here an arc to a Microsoft server in Boydton, Virginia, showing the inside host
-that opened it, the service (HTTPS), the remote network, the firewall's decision and rule,
-transfer totals and rates, with Investigate, States and Kill states actions.*
+outside. Red dots are sources the firewall blocked. Other coloring methods are selectable. 
+The filters above the map narrow it by traffic type, service, interface, inside host and country; 
+**Threats** opens the review list. On the right, **Top talkers** ranks hosts (or countries and networks) 
+with a live sparkline, and the details panel below explains whatever you click: here an arc to a 
+Microsoft server in Boydton, Virginia, showing the inside host that opened it, the service (HTTPS), 
+the remote network, the firewall's decision and rule, transfer totals and rates, with Investigate, 
+States and Kill states actions.*
 
 <img src="docs/screenshots/firewall-map-widget.png" alt="Firewall Map+ dashboard widget" width="795">
 
