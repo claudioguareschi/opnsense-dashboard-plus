@@ -101,7 +101,7 @@
             <temperature>Temperature</temperature>
             <memory>Memory</memory>
             <states>States</states>
-            <show_states>Show table</show_states>
+            <show_states>Show</show_states>
             <mbufs>Mbufs</mbufs>
             <mbuf_clusters>mbuf clusters</mbuf_clusters>
             <swap>Swap</swap>

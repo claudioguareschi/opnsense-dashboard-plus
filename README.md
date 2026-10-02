@@ -153,7 +153,7 @@ locally from the firewall's own API.
 |---|---|
 | **System Information+** | Name, hardware (manufacturer, model, serial), firmware (vendor, release date, boot method and boot environment), OPNsense and FreeBSD versions and update status, CPU type and current/maximum frequency, crypto hardware and accelerated algorithms for IPsec, kernel PTI and MDS mitigation state, uptime, date/time and DNS servers. |
 | **Traffic Graph+** | Live traffic per interface or combined, in and out, with a 20-second, 1-minute or 5-minute window, compact or expanded view, a unique colour per interface and a scrollable legend. |
-| **System Metrics+** | CPU, temperature, memory, firewall states (with a table), mbufs, swap, filesystems and load, each switchable, with the same time windows. |
+| **System Metrics+** | CPU and temperature charts with load, gauges for memory, firewall states (with a table), mbufs and swap, and filesystems, each switchable. |
 | **Thermal Sensors+** | The sensors you choose, including per-core readings. |
 | **Interface Statistics+** | Bytes, packets, errors and collisions in and out for the interfaces and fields you choose, drag-to-reorder, refreshed every 1, 5 or 10 seconds. |
 | **Gateways+** | Gateway status, RTT, RTTd and loss with a health indication, the default gateway marked, drag-to-reorder. |
@@ -194,6 +194,10 @@ then commit and push that checkout. Every package of the feed must be in the fol
 signed; `publish.sh` replaces older versions and signs the whole catalogue.
 
 ## Changelog
+
+- **os-dashboard-plus 0.1_48**: System Metrics+ shows memory, states, mbufs and swap as one row of
+  compact gauges (two rows when narrow) instead of three charts and a bar; hover a gauge for the
+  exact numbers. CPU and temperature keep their charts.
 
 - **os-firewall-map 0.1_79**: one switch, *Maintain blocklist aliases*, keeps the `FWMAP_*` alias of
   each selected feed and `FWMAP_AbuseIPDB` (on after upgrade where feed aliases exist); the map

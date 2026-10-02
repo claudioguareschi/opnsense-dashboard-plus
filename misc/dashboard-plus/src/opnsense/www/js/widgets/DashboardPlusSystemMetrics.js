@@ -12,14 +12,8 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
         this.tickTimeout = 10;
         this.configurable = true;
         this.cpuSeries = null;
-        this.memorySeries = null;
         this.temperatureSeries = null;
-        this.statesSeries = null;
-        this.mbufSeries = null;
-        this.memoryPercent = null;
         this.temperatureCelsius = null;
-        this.statesPercent = null;
-        this.mbufPercent = null;
         this.charts = [];
         this.windowDuration = 60000;
         this.currentConfig = null;
@@ -85,6 +79,59 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
         return `${kibibytes} KiB`;
     }
 
+    _compactNumber(value) {
+        return new Intl.NumberFormat(undefined, {notation: 'compact', maximumSignificantDigits: 3}).format(value);
+    }
+
+    // Used and total in the unit that suits the total, e.g. "1.8 / 8.0 GiB".
+    _formatKiBPair(usedKiB, totalKiB) {
+        const units = [['GiB', 1024 * 1024], ['MiB', 1024], ['KiB', 1]];
+        const [unit, size] = units.find(([, size]) => totalKiB >= size) || units[units.length - 1];
+        const digits = size === 1 ? 0 : 1;
+        return `${usedKiB > 0 ? (usedKiB / size).toFixed(digits) : 0} / ${(totalKiB / size).toFixed(digits)} ${unit}`;
+    }
+
+    _gaugeMarkup(component, label, extra = '') {
+        // A 270 degree ring; the fill is the same arc drawn with a dash of the used percentage.
+        const arc = 'M 23.13 76.87 A 38 38 0 1 1 76.87 76.87';
+        return `
+            <div data-component="${component}" id="${this.id}-${component}-gauge" style="text-align: center; min-width: 0;">
+                <svg viewBox="0 0 100 92" style="width: 100%; max-width: 96px; display: block; margin: 0 auto;" role="img" aria-label="${label}">
+                    <path d="${arc}" fill="none" stroke="rgba(119,119,119,0.12)" stroke-width="9" stroke-linecap="round"/>
+                    <path class="gauge-fill" d="${arc}" pathLength="100" stroke-dasharray="0 100" fill="none" stroke="#2ca02c" stroke-width="9" stroke-linecap="round" style="transition: stroke-dasharray 0.2s ease;"/>
+                    <text class="gauge-value" x="50" y="57" text-anchor="middle" fill="currentColor" style="font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums;">--</text>
+                </svg>
+                <div style="font-weight: 600; margin-top: -0.4em; white-space: nowrap;">${label}${extra}</div>
+                <div class="gauge-detail" style="font-size: 0.85em; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></div>
+            </div>`;
+    }
+
+    _setGauge(component, percent, detail, tooltip) {
+        const gauge = document.getElementById(`${this.id}-${component}-gauge`);
+        if (!gauge) {
+            return;
+        }
+        const clamped = Math.max(0, Math.min(percent, 100));
+        const fill = gauge.querySelector('.gauge-fill');
+        fill.setAttribute('stroke-dasharray', `${clamped} 100`);
+        fill.setAttribute('stroke', this._usageColor(clamped));
+        gauge.querySelector('.gauge-value').textContent = `${percent.toFixed(0)}%`;
+        gauge.querySelector('.gauge-detail').textContent = detail;
+        gauge.title = tooltip;
+    }
+
+    // One row of gauges, or two when the row is too narrow for all of them.
+    _layoutGauges() {
+        const row = document.getElementById(`${this.id}-gauges`);
+        if (!row) {
+            return;
+        }
+        const visible = [...row.children].filter(gauge => gauge.style.display !== 'none').length;
+        $(row).closest('section').toggle(visible > 0);
+        const columns = visible > 2 && row.clientWidth < visible * 95 ? Math.ceil(visible / 2) : Math.max(visible, 1);
+        row.style.gridTemplateColumns = `repeat(${columns}, 1fr)`;
+    }
+
     _usageColor(percent) {
         return percent >= 80 ? '#d94f00' : percent >= 50 ? '#ff7f0e' : '#2ca02c';
     }
@@ -105,15 +152,16 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
         const markers = {
             cpu: `${this.id}-cpu-chart`,
             temperature: `${this.id}-temperature-chart`,
-            memory: `${this.id}-memory-chart`,
-            states: `${this.id}-states-chart`,
-            mbufs: `${this.id}-mbufs-chart`,
-            swap: `${this.id}-swap-bar`,
+            memory: `${this.id}-memory-gauge`,
+            states: `${this.id}-states-gauge`,
+            mbufs: `${this.id}-mbufs-gauge`,
+            swap: `${this.id}-swap-gauge`,
             filesystems: `${this.id}-filesystems`
         };
         Object.entries(markers).forEach(([component, marker]) => {
-            $(`#${marker}`).closest('section').toggle(components.includes(component));
+            $(`#${marker}`).closest('section, [data-component]').toggle(components.includes(component));
         });
+        this._layoutGauges();
     }
 
     _renderFilesystems(devices) {
@@ -175,48 +223,14 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
                     </div>
                     <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="${this.id}-temperature-chart" style="width: 100%; height: 90px;"></canvas></div>
                 </section>
-                <section>
-                    <div style="width: 95%; margin: 0 auto;">
-                        <div style="display: flex; justify-content: space-between; align-items: baseline; margin: 0 0.25em;">
-                            <h3 style="margin: 0;">${this.translations.memory}</h3>
-                            <span id="${this.id}-memory-current">--</span>
-                        </div>
-                    </div>
-                    <div id="${this.id}-memory-total" style="font-size: 0.9em; margin: 0.25em 0;"></div>
-                    <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="${this.id}-memory-chart" style="width: 100%; height: 90px;"></canvas></div>
-                </section>
-                <section>
-                    <div style="width: 95%; margin: 0 auto;">
-                        <div style="display: grid; grid-template-columns: 1fr auto 1fr; align-items: baseline; margin: 0 0.25em;">
-                            <h3 style="margin: 0; justify-self: start; text-align: left;">${this.translations.states}</h3>
-                            <a href="/ui/diagnostics/firewall/states" style="font-size: 0.9em;">${this.translations.show_states}</a>
-                            <span id="${this.id}-states-current" style="justify-self: end;">--</span>
-                        </div>
-                    </div>
-                    <div id="${this.id}-states-total" style="font-size: 0.9em; margin: 0.25em 0;"></div>
-                    <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="${this.id}-states-chart" style="width: 100%; height: 90px;"></canvas></div>
-                </section>
-                <section>
-                    <div style="width: 95%; margin: 0 auto;">
-                        <div style="display: flex; justify-content: space-between; align-items: baseline; margin: 0 0.25em;">
-                            <h3 style="margin: 0;">${this.translations.mbufs}</h3>
-                            <span id="${this.id}-mbufs-current">--</span>
-                        </div>
-                    </div>
-                    <div id="${this.id}-mbufs-total" style="font-size: 0.9em; margin: 0.25em 0;"></div>
-                    <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="${this.id}-mbufs-chart" style="width: 100%; height: 90px;"></canvas></div>
-                </section>
                 <section style="grid-column: 1 / -1;">
-                    <div style="width: 95%; margin: 0 auto;">
-                        <div style="display: flex; justify-content: space-between; align-items: baseline; margin: 0 0.25em;">
-                            <h3 style="margin: 0;">${this.translations.swap}</h3>
-                            <span id="${this.id}-swap-current">--</span>
-                        </div>
+                    <div id="${this.id}-gauges" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5em; width: 95%; margin: 0 auto;">
+                        ${this._gaugeMarkup('memory', this.translations.memory)}
+                        ${this._gaugeMarkup('states', this.translations.states,
+                            ` <a href="/ui/diagnostics/firewall/states" style="font-weight: normal; font-size: 0.9em;">${this.translations.show_states}</a>`)}
+                        ${this._gaugeMarkup('mbufs', this.translations.mbufs)}
+                        ${this._gaugeMarkup('swap', this.translations.swap)}
                     </div>
-                    <div style="margin: 0.25em 0.5em 0; height: 0.75em; background: rgba(119,119,119,0.12); border-radius: 0.375em; overflow: hidden;">
-                        <div id="${this.id}-swap-bar" style="height: 100%; width: 0; background: #2ca02c; transition: width 0.2s ease;"></div>
-                    </div>
-                    <div id="${this.id}-swap-total" style="font-size: 0.9em; margin: 0.25em 0;"></div>
                 </section>
                 <section style="grid-column: 1 / -1;">
                     <div style="width: 95%; margin: 0 auto;">
@@ -237,47 +251,23 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
         this._applyTimeWindow(this.currentConfig);
         this._applyComponentVisibility(this.currentConfig);
         this.cpuSeries = new TimeSeries();
-        this.memorySeries = new TimeSeries();
         this.temperatureSeries = new TimeSeries();
-        this.statesSeries = new TimeSeries();
-        this.mbufSeries = new TimeSeries();
         this._createChart(
             `${this.id}-cpu-chart`, this.cpuSeries, '#2ca02c', 0,
             {minValue: 0, maxValueScale: 1.15}
         );
         this._createChart(
-            `${this.id}-memory-chart`, this.memorySeries, '#1f77b4', 0,
-            {minValue: 0, maxValue: 100}
-        );
-        this._createChart(
             `${this.id}-temperature-chart`, this.temperatureSeries, '#d62728', 0,
             {minValue: 0, maxValue: 100}
         );
-        this._createChart(
-            `${this.id}-states-chart`, this.statesSeries, '#9467bd', 0,
-            {minValue: 0, maxValue: 100}
-        );
-        this._createChart(
-            `${this.id}-mbufs-chart`, this.mbufSeries, '#ff7f0e', 0,
-            {minValue: 0, maxValue: 100}
-        );
 
-        // One sample per second for every series, paced by the CPU stream. The tick only
-        // refreshes the latest memory, temperature, states and mbuf values.
+        // One sample per second for both series, paced by the CPU stream. The tick only
+        // refreshes the latest temperature.
         this.openEventSource('/api/diagnostics/cpu_usage/stream', event => {
             const cpu = JSON.parse(event.data).total;
             this.cpuSeries.append(Date.now(), cpu);
-            if (this.memoryPercent !== null) {
-                this.memorySeries.append(Date.now(), this.memoryPercent);
-            }
             if (this.temperatureCelsius !== null) {
                 this.temperatureSeries.append(Date.now(), this.temperatureCelsius);
-            }
-            if (this.statesPercent !== null) {
-                this.statesSeries.append(Date.now(), this.statesPercent);
-            }
-            if (this.mbufPercent !== null) {
-                this.mbufSeries.append(Date.now(), this.mbufPercent);
             }
             $(`#${this.id}-cpu-current`).text(`${cpu.toFixed(0)}%`);
         });
@@ -323,6 +313,7 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
         // Resize the backing stores now rather than on Smoothie's next frame, so the charts
         // are not drawn stretched while the column changes width.
         this.charts.forEach(({chart}) => chart.resize());
+        this._layoutGauges();
     }
 
     onWidgetClose() {
@@ -348,11 +339,8 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
             const arc = parseInt(memory.arc_frmt, 10) || 0;
             const pressureUsed = Math.max(0, used - arc);
             const percent = total > 0 ? (pressureUsed / total) * 100 : 0;
-            this.memoryPercent = percent;
-            $(`#${this.id}-memory-current`).text(`${percent.toFixed(0)}%`);
-            $(`#${this.id}-memory-total`).text(
-                `${pressureUsed} MiB / ${this._formatTotalMemory(total)} ${this.translations.used}`
-            );
+            this._setGauge('memory', percent, this._formatKiBPair(pressureUsed * 1024, total * 1024),
+                `${pressureUsed} MiB / ${this._formatTotalMemory(total)} ${this.translations.used}`);
         }
         $(`#${this.id}-cpu-load`).text(`${this.translations.load}: ${time.loadavg || this.translations.unavailable}`);
 
@@ -375,9 +363,9 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
         const stateLimit = parseInt(states?.limit, 10);
         if (Number.isFinite(stateCurrent) && Number.isFinite(stateLimit) && stateLimit > 0) {
             const percent = (stateCurrent / stateLimit) * 100;
-            this.statesPercent = percent;
-            $(`#${this.id}-states-current`).text(`${percent.toFixed(0)}%`);
-            $(`#${this.id}-states-total`).text(`${stateCurrent.toLocaleString()} / ${stateLimit.toLocaleString()} ${this.translations.states.toLowerCase()}`);
+            this._setGauge('states', percent,
+                `${this._compactNumber(stateCurrent)} / ${this._compactNumber(stateLimit)}`,
+                `${stateCurrent.toLocaleString()} / ${stateLimit.toLocaleString()} ${this.translations.states.toLowerCase()}`);
         }
 
         const mbuf = mbufs?.['mbuf-statistics'];
@@ -386,9 +374,9 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
         const mbufLimit = parseInt(mbuf?.['cluster-max'], 10);
         if (Number.isFinite(mbufCurrent) && Number.isFinite(mbufLimit) && mbufLimit > 0) {
             const percent = (mbufCurrent / mbufLimit) * 100;
-            this.mbufPercent = percent;
-            $(`#${this.id}-mbufs-current`).text(`${percent.toFixed(0)}%`);
-            $(`#${this.id}-mbufs-total`).text(`${mbufCurrent.toLocaleString()} / ${mbufLimit.toLocaleString()} ${this.translations.mbuf_clusters}`);
+            this._setGauge('mbufs', percent,
+                `${this._compactNumber(mbufCurrent)} / ${this._compactNumber(mbufLimit)}`,
+                `${mbufCurrent.toLocaleString()} / ${mbufLimit.toLocaleString()} ${this.translations.mbuf_clusters}`);
         }
 
         const swapDevices = Array.isArray(swap?.swap) ? swap.swap : [];
@@ -396,10 +384,8 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
         const swapUsed = swapDevices.reduce((total, device) => total + (parseInt(device.used, 10) || 0), 0);
         if (swapTotal > 0) {
             const percent = (swapUsed / swapTotal) * 100;
-            const color = this._usageColor(percent);
-            $(`#${this.id}-swap-current`).text(`${percent.toFixed(0)}%`);
-            $(`#${this.id}-swap-total`).text(`${this._formatKiB(swapUsed)} / ${this._formatKiB(swapTotal)} ${this.translations.used}`);
-            $(`#${this.id}-swap-bar`).css({width: `${Math.min(percent, 100)}%`, background: color});
+            this._setGauge('swap', percent, this._formatKiBPair(swapUsed, swapTotal),
+                `${this._formatKiB(swapUsed)} / ${this._formatKiB(swapTotal)} ${this.translations.used}`);
         }
 
         this._renderFilesystems(disks?.devices);
