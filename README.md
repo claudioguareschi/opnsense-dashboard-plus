@@ -233,7 +233,7 @@ and filesystem usage. Settings: which components to show, and the chart window (
 *Live traffic in and out, one chart per interface or all interfaces combined, each interface in its
 own colour. The icon in the top-left corner switches between the expanded view shown here and a
 compact one. Settings: per-interface or combined display, which interfaces, and the time window
-(20 seconds, 1 minute or 5 minutes).*
+(20 seconds, 1 minute or 5 minutes).* Rows can be dragged into any order.
 
 ### Gateways+
 
@@ -254,7 +254,7 @@ WireGuard and OpenVPN tunnels; rows can be dragged into any order. Settings: whi
 
 <img src="docs/screenshots/interface-statistics.png" alt="Interface Statistics+" width="795">
 
-*Bytes, packets, errors and collisions in and out per interface; rows can be dragged into any
+*A table showing Bytes, packets, errors and collisions in and out per interface; rows can be dragged into any
 order. Settings: which interfaces, which fields, and the refresh interval (1, 5 or 10 seconds).*
 
 ### Thermal Sensors+
