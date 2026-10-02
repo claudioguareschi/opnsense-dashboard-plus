@@ -299,65 +299,8 @@ versions and signs the whole catalogue.
 
 ## Changelog
 
-- **0.50** (both packages): first beta. Dashboard Plus and Firewall Map+ now share one version
-  number and are released together; the build and publishing scripts moved to `tools/`. No
-  functional change since os-dashboard-plus 0.1_48 and os-firewall-map 0.1_79.
-
-### Before 0.50
-
-- **os-dashboard-plus 0.1_48**: System Metrics+ shows memory, states, mbufs and swap as one row of
-  compact gauges (two rows when narrow) instead of three charts and a bar; hover a gauge for the
-  exact numbers. CPU and temperature keep their charts.
-
-- **os-firewall-map 0.1_79**: one switch, *Maintain blocklist aliases*, keeps the `FWMAP_*` alias of
-  each selected feed and `FWMAP_AbuseIPDB` (on after upgrade where feed aliases exist); the map
-  downloads the curated feeds itself, so they flag traffic with or without an alias; cleaner
-  settings (no star, shorter help, checkboxes level with their labels).
-
-- **os-firewall-map 0.1_78**: a Threats target on the firewall itself names its interface
-  ("203.0.113.10 · WAN"); "+ N other targets" opens the card, which lists every target.
-
-- **os-firewall-map 0.1_77**: a Threats card under *Passed* leads with the connection that got
-  through, not a later blocked attempt; the *All* tab shows its count.
-
-- **os-firewall-map 0.1_76**: IPv6 throughout (states, filter log, threat lists, AbuseIPDB,
-  GeoIP, investigations, the UI); the review queue becomes **Threats**, with tabs by what happened
-  (*Passed / reached host* first, then *Blocked by firewall*, *Dropped by IPS*); optional
-  `FWMAP_AbuseIPDB` alias filled from the AbuseIPDB blacklist (no rule is added).
-
-- **os-dashboard-plus 0.1_47**: QuickAssist endpoints of one model in the same state are one row
-  with a count (e.g. "Intel QAT C62x ×3 (Active)"); the DNS row shows what the firewall resolves
-  through: the local resolver (Unbound recursive or forwarding with its forwarders, Dnsmasq, BIND),
-  else the resolv.conf servers, or "Not set".
-
-- **os-dashboard-plus 0.1_46**: QuickAssist shows every started QAT device as active when qat_ocf
-  is enabled (qat_ocf is one provider for all devices, not one per qatN); down, asym-only and
-  user-mode-only devices show inactive.
-
-- **os-firewall-map 0.1_6**: saved threat-list choices reload the live collector in place and
-  appear in Reputation without waiting for its periodic refresh; compact, consistent spacing for
-  checkbox rows in the widget Options dialog.
-- **os-firewall-map 0.1_5**: a "Firewall Map+" item in System > High Availability > Settings,
-  so the plugin settings (MaxMind and AbuseIPDB keys included) sync to the backup; the review
-  queue, caches and downloaded databases stay local to each firewall.
-- **os-firewall-map 0.1_4**: one outcome colour legend across badges and map (green allowed,
-  grey blocked, amber flagged but stopped, red flagged and let through), "Follow traffic" (off by
-  default; frames the live arcs with proportional padding and smooth fly-to, also a widget
-  setting), IDS arcs fade out a minute after their connection closes, the firewall drawn as a
-  house icon, zoom buttons that follow the theme and stay below the OPNsense menus, and no
-  AbuseIPDB lookup offered for addresses already on the AbuseIPDB blacklist.
-- **os-firewall-map 0.1_3**: Suricata alerts correlated with the exact connection (own arc with a
-  detection marker, history rings, IDS flows vs IDS addresses), a uniform record per flagged
-  connection (both sides, NAT and port-forward target, firewall decision and rule, Suricata action
-  and DNS name) with a "Dropped by IPS" status, a redesigned full-size page (details cards, top
-  talkers with search and an IDS tab, hover cards, one-row filters, zoom buttons), the review queue
-  redesigned with connection snapshots, paging and bulk dismiss/delete, and AbuseIPDB checks in place.
-- **os-firewall-map 0.1_2**: who opened each connection (green inside, orange outside), plain-language
-  summaries with an allowed/blocked verdict, AbuseIPDB blacklist and verdicts, watchlist (*Mark as
-  threat*), review queue, Suricata alerts, fading arcs, resizable panels, curated threat feeds
-  chosen in the widget settings.
-- **os-firewall-map 0.1_1**: first public release.
-- **os-dashboard-plus 0.1_42**: updated package description (no functional change since 0.1_41).
+- **0.50** (both packages): first public beta. Dashboard Plus and Firewall Map+ share one version
+  number and are released together.
 
 ## Licence
 
