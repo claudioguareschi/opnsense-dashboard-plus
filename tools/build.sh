@@ -1,9 +1,9 @@
 #!/bin/sh
 # Build the plugin packages on an OPNsense machine.
 #
-#   ./build.sh                          both plugins, release package names
-#   ./build.sh security/firewall-map    one plugin
-#   DEVEL=1 ./build.sh                  development packages (os-<name>-devel)
+#   tools/build.sh                          both plugins, release package names
+#   tools/build.sh security/firewall-map    one plugin
+#   DEVEL=1 tools/build.sh                  development packages (os-<name>-devel)
 #
 # OPNsense plugins build with the framework of the opnsense/plugins repository (Mk/,
 # Scripts/, Templates/). It is fetched into $WORK at the branch matching this firewall's
@@ -11,7 +11,7 @@
 
 set -eu
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERIES="${SERIES:-$(opnsense-version -a 2>/dev/null || echo master)}"
 WORK="${WORK:-/tmp/opnsense-plugins-framework}"
 UPSTREAM="${UPSTREAM:-https://github.com/opnsense/plugins.git}"

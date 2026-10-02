@@ -1,7 +1,7 @@
 #!/bin/sh
 # Sign the package feed (run on the machine that holds the repository signing key).
 #
-#   ./publish.sh <feed checkout> [package ...]
+#   tools/publish.sh <feed checkout> [package ...]
 #
 # <feed checkout> is a checkout of this repository's `packages` branch. The given release
 # packages (default: everything in ./dist) replace older versions of the same package in
@@ -11,7 +11,7 @@
 
 set -eu
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FEED="${1:?usage: $0 <feed checkout> [package ...]}"
 shift
 SERIES="${SERIES:-$(opnsense-version -a)}"

@@ -169,12 +169,13 @@ On an OPNsense machine of the target release (git is required):
 ```sh
 git clone https://github.com/claudioguareschi/opnsense-dashboard-plus.git
 cd opnsense-dashboard-plus
-./build.sh                       # both plugins; packages in ./dist
-DEVEL=1 ./build.sh security/firewall-map   # a development package
+tools/build.sh                   # both plugins; packages in ./dist
+DEVEL=1 tools/build.sh security/firewall-map   # a development package
 pkg add -f dist/os-firewall-map-devel-*.pkg
 ```
 
-`build.sh` fetches the [opnsense/plugins](https://github.com/opnsense/plugins) build framework
+The build and publishing scripts live in `tools/`; packages are built only from the plugin
+folders, so `tools/` is never part of a package. `build.sh` fetches the [opnsense/plugins](https://github.com/opnsense/plugins) build framework
 for the running release and builds each plugin in it unchanged, so the plugin folders can also be
 copied into a fork of opnsense/plugins as they are.
 
@@ -183,17 +184,27 @@ built bundle is committed. See `renderer/package.json`.
 
 ### Publishing (maintainer)
 
-The signed feed lives in the `packages` branch. On the machine holding the signing key:
+Both packages share one version (`PLUGIN_VERSION` in each Makefile, no revision) and are released
+together: 0.50, 0.51, ... (pkg compares the parts as numbers, so 0.6 would sort below 0.50).
+The signed feed lives in the `packages` branch, kept as a single commit. On the machine holding
+the signing key:
 
 ```sh
-./build.sh
-./publish.sh /path/to/packages-branch-checkout
+tools/build.sh
+tools/publish.sh /path/to/packages-branch-checkout
 ```
 
-then commit and push that checkout. Every package of the feed must be in the folder when it is
-signed; `publish.sh` replaces older versions and signs the whole catalogue.
+then commit and push that checkout, and tag the release commit on `main` as `v<version>`.
+Every package of the feed must be in the folder when it is signed; `publish.sh` replaces older
+versions and signs the whole catalogue.
 
 ## Changelog
+
+- **0.50** (both packages): first beta. Dashboard Plus and Firewall Map+ now share one version
+  number and are released together; the build and publishing scripts moved to `tools/`. No
+  functional change since os-dashboard-plus 0.1_48 and os-firewall-map 0.1_79.
+
+### Before 0.50
 
 - **os-dashboard-plus 0.1_48**: System Metrics+ shows memory, states, mbufs and swap as one row of
   compact gauges (two rows when narrow) instead of three charts and a bar; hover a gauge for the
