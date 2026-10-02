@@ -101,8 +101,11 @@ Hover or click an arc or an endpoint. Each card starts with the verdict (*Allowe
 flagged traffic got through*, or *Blocked*), then one sentence per address, for example:
 
 > *This firewall queried DNS (53/udp) at arin.authdns.ripe.net (RIPE NCC, The Netherlands).*
+
 > *94.154.43.203 (Storm Industries LLC, The Netherlands) reached mail (192.168.1.2) on HTTP (80/tcp) through a port forward.*
+
 > *103.155.198.103 (PT Lintas Jaringan Nusantara, Indonesia) tried SSH (22/tcp) and Telnet (23/tcp) on this firewall: blocked 12× in the last 10 min by "Default deny" on WAN.*
+
 > *⚑ Suricata: ET SCAN Potential SSH Scan (severity 2, Attempted Information Leak), 1× in the last 1 h*
 
 ### Full-size page
