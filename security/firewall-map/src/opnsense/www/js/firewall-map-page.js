@@ -1215,6 +1215,7 @@
 	function render(panel, point) {
 		for (const item of PLOTS) {
 			const row = panel.querySelector(`[data-plot="${item.key}"]`);
+			if (!row) continue;
 			const range = plot(row.querySelector("canvas"), item.key, cssColor(...item.color));
 			const latest = [...samples].reverse().find((entry) => typeof entry[item.key] === "number")?.[item.key];
 			row.querySelector(".fwmap-diag-value").textContent = format(latest ?? point[item.key], item.unit);
@@ -1230,6 +1231,72 @@
 		];
 		panel.querySelector(".fwmap-diag-facts").innerHTML = facts.map(([label, value]) => `<span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b>`).join("");
 	}
+	var POSITION_KEY = "firewallmap.diagnostics.position";
+	function readPosition() {
+		try {
+			return JSON.parse(localStorage.getItem(POSITION_KEY) || "null");
+		} catch (_) {
+			return null;
+		}
+	}
+	function savePosition(position) {
+		try {
+			localStorage.setItem(POSITION_KEY, JSON.stringify(position));
+		} catch (_) {}
+	}
+	/** Keep the panel inside the window; without a saved place, the bottom right of the map. */
+	function placePanel(panel, position) {
+		const map = document.getElementById("fwmap-map").getBoundingClientRect();
+		const width = panel.offsetWidth;
+		const height = panel.offsetHeight;
+		const left = position ? position.left : map.right - width - 12;
+		const top = position ? position.top : map.bottom - height - 60;
+		panel.style.left = `${Math.round(Math.min(Math.max(0, left), window.innerWidth - width))}px`;
+		panel.style.top = `${Math.round(Math.min(Math.max(0, top), window.innerHeight - height))}px`;
+	}
+	/** Drag by the title bar (pointer events, so mouse, pen and touch alike); double-click puts it back. */
+	function draggable(panel) {
+		const head = panel.querySelector(".fwmap-diag-head");
+		let grab = null;
+		head.addEventListener("pointerdown", (event) => {
+			if (event.button !== 0 || event.target.closest("button")) return;
+			grab = {
+				x: event.clientX - panel.offsetLeft,
+				y: event.clientY - panel.offsetTop
+			};
+			head.setPointerCapture(event.pointerId);
+			event.preventDefault();
+		});
+		head.addEventListener("pointermove", (event) => {
+			if (grab) placePanel(panel, {
+				left: event.clientX - grab.x,
+				top: event.clientY - grab.y
+			});
+		});
+		const drop = () => {
+			if (grab) {
+				grab = null;
+				savePosition({
+					left: panel.offsetLeft,
+					top: panel.offsetTop
+				});
+			}
+		};
+		head.addEventListener("pointerup", drop);
+		head.addEventListener("pointercancel", drop);
+		head.addEventListener("dblclick", (event) => {
+			if (!event.target.closest("button")) {
+				try {
+					localStorage.removeItem(POSITION_KEY);
+				} catch (_) {}
+				placePanel(panel, null);
+			}
+		});
+		window.addEventListener("resize", () => placePanel(panel, {
+			left: panel.offsetLeft,
+			top: panel.offsetTop
+		}));
+	}
 	/** Show the panel and start sampling; only called when ?debug=1 is on the URL. */
 	function startDiagnostics() {
 		started = Date.now();
@@ -1239,7 +1306,13 @@
 		panel.innerHTML = `<div class="fwmap-diag-head"><b>Diagnostics</b>
       <button type="button" class="btn btn-default btn-xs fwmap-diag-copy" title="Copy the samples as JSON">Copy</button>
       <button type="button" class="btn btn-default btn-xs fwmap-diag-close" title="Hide until the page is reloaded">&times;</button></div>` + PLOTS.map((item) => `<div class="fwmap-diag-plot" data-plot="${item.key}"><span>${escapeHtml(item.label)}</span><canvas></canvas><b class="fwmap-diag-value"></b><small class="fwmap-diag-range"></small></div>`).join("") + "<div class=\"fwmap-diag-facts\"></div>";
-		document.getElementById("fwmap-map").appendChild(panel);
+		document.body.appendChild(panel);
+		if (!performance.memory) {
+			panel.querySelector("[data-plot=\"heapMb\"]").remove();
+			panel.querySelector(".fwmap-diag-head").insertAdjacentHTML("afterend", "<div class=\"fwmap-diag-note\">JS heap: not reported by this browser (Safari: Web Inspector › Timelines › Memory)</div>");
+		}
+		placePanel(panel, readPosition());
+		draggable(panel);
 		const timer = setInterval(() => render(panel, sample()), SAMPLE_MS);
 		panel.querySelector(".fwmap-diag-close").addEventListener("click", () => {
 			clearInterval(timer);

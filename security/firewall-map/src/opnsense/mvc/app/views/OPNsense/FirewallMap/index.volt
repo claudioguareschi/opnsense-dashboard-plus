@@ -163,12 +163,14 @@
     .fwmap-inv-table { width: 100%; font-size: .9em; table-layout: fixed; }
     .fwmap-inv-table th { font-weight: normal; opacity: .7; padding-right: 8px; vertical-align: top; width: 10em; }
     .fwmap-inv-retry { margin-top: 6px; }
-    /* ?debug=1: the diagnostics panel, translucent over the bottom right of the map */
-    #fwmap-diag { position: absolute; right: 12px; bottom: 60px; z-index: 5; width: 270px; padding: 8px 10px; font-size: 11px;
+    /* ?debug=1: the diagnostics panel, translucent; it starts at the bottom right of the map and can be dragged anywhere */
+    #fwmap-diag { position: fixed; z-index: 1030; width: 270px; padding: 8px 10px; font-size: 11px;
         line-height: 1.35; border: 1px solid rgba(128, 128, 128, .3); border-radius: 6px; color: var(--fwmap-text, inherit);
         background: color-mix(in srgb, var(--fwmap-panel, #fff) 78%, transparent); backdrop-filter: blur(6px);
         -webkit-backdrop-filter: blur(6px); box-shadow: 0 2px 8px rgba(0, 0, 0, .12); font-variant-numeric: tabular-nums; }
-    .fwmap-diag-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .fwmap-diag-head { display: flex; align-items: center; gap: 6px; margin: -8px -10px 4px; padding: 6px 10px 4px; cursor: move;
+        touch-action: none; user-select: none; -webkit-user-select: none; }
+    .fwmap-diag-note { opacity: .65; font-size: 10px; margin-bottom: 4px; }
     .fwmap-diag-head b { flex: 1; }
     .fwmap-diag-plot { display: grid; grid-template-columns: 48px 1fr 54px; grid-template-rows: auto auto; column-gap: 6px;
         align-items: center; margin-bottom: 3px; }
