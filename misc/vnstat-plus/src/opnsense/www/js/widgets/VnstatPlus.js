@@ -61,35 +61,16 @@ export default class VnstatPlus extends BaseWidget {
                 ],
                 default: '300'
             },
-            show_kpi: {
-                id: this._elementId('show-kpi'),
-                title: this.translations.show_kpi,
-                type: 'select',
+            visible_sections: {
+                id: this._elementId('visible-sections'),
+                title: this.translations.visible_sections,
+                type: 'select_multiple',
                 options: [
-                    {value: 'yes', label: 'Yes'},
-                    {value: 'no', label: 'No'}
+                    {value: 'kpi', label: this.translations.kpi_cards},
+                    {value: 'chart', label: this.translations.traffic_overview},
+                    {value: 'history', label: this.translations.history}
                 ],
-                default: 'yes'
-            },
-            show_chart: {
-                id: this._elementId('show-chart'),
-                title: this.translations.show_chart,
-                type: 'select',
-                options: [
-                    {value: 'yes', label: 'Yes'},
-                    {value: 'no', label: 'No'}
-                ],
-                default: 'yes'
-            },
-            show_history: {
-                id: this._elementId('show-history'),
-                title: this.translations.show_history,
-                type: 'select',
-                options: [
-                    {value: 'yes', label: 'Yes'},
-                    {value: 'no', label: 'No'}
-                ],
-                default: 'yes'
+                default: ['kpi', 'chart', 'history']
             },
             bar_range: {
                 id: this._elementId('bar-range'),
@@ -251,9 +232,17 @@ export default class VnstatPlus extends BaseWidget {
         this.excludedInterfaces = config.excluded_interfaces ?? [];
         this.refreshSeconds = Number(config.refresh_interval) || 300;
         this.tickTimeout = this.refreshSeconds;
-        this.showKpi = config.show_kpi !== 'no';
-        this.showChart = config.show_chart !== 'no';
-        this.showHistory = config.show_history !== 'no';
+        let sections = config.visible_sections;
+        if (!sections) {
+            sections = ['kpi', 'chart', 'history']
+                .filter(section => config[`show_${section}`] !== 'no');
+        }
+        if (!Array.isArray(sections)) {
+            sections = String(sections).split(',').map(section => section.trim()).filter(Boolean);
+        }
+        this.showKpi = sections.includes('kpi');
+        this.showChart = sections.includes('chart');
+        this.showHistory = sections.includes('history');
         this.barRange = ['current', '1', '3', '6', '12'].includes(config.bar_range) ? config.bar_range : '3';
         $(`#${this._elementId('range')}`).val(this.barRange);
         this._applyVisibility();
