@@ -21,7 +21,9 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
     }
 
     getGridOptions() {
-        return {sizeToContent: 650};
+        // Keep the toolbar, table header and at least one service row visible when the
+        // dashboard restores or manually resizes the widget.
+        return {sizeToContent: 650, minH: 4};
     }
 
     _elementId(name) {
@@ -33,6 +35,9 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
             return;
         }
         const css = `
+            .dashboard-plus-services {
+                min-height: 12em;
+            }
             .dashboard-plus-services-toolbar {
                 display: flex;
                 align-items: center;
