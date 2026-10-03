@@ -23,9 +23,9 @@
             <msg_no_data>No VNStat data available</msg_no_data>
             <excluded_interfaces>Excluded Interfaces</excluded_interfaces>
             <refresh_interval>Refresh interval (minutes)</refresh_interval>
-            <show_kpi>Show KPI cards</show_kpi>
-            <show_chart>Show traffic overview</show_chart>
-            <show_history>Show history table</show_history>
+            <visible_sections>Visible sections</visible_sections>
+            <kpi_cards>KPI cards</kpi_cards>
+            <traffic_overview>Traffic overview</traffic_overview>
             <bar_range>Overview bar range</bar_range>
             <current_period>Current period</current_period>
             <latest_one>Latest 1 period</latest_one>
