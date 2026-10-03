@@ -120,13 +120,33 @@ def lookup_location(address, city_database, asn_database):
     return location
 
 
+def damaged(error):
+    """True for a database file that is really corrupt, not for a transient error (a full disk, a
+    lock, an I/O hiccup), after which the file is fine to open again later."""
+    code = getattr(error, "sqlite_errorcode", None)
+    if code is not None:
+        return code & 0xFF in (sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB)
+    text = str(error).lower()
+    return "malformed" in text or "not a database" in text
+
+
+def move_aside(path, now=None):
+    """Keep a damaged database for inspection under a dated name, its WAL files with it (a stale
+    WAL left behind could be replayed into the new file)."""
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(time.time() if now is None else now))
+    for suffix in ("", "-wal", "-shm"):
+        if os.path.exists(f"{path}{suffix}"):
+            os.replace(f"{path}{suffix}", f"{path}.corrupt-{stamp}{suffix}")
+
+
 class CacheStore:
     """Small SQLite key/value store with expiry, shared by the collector's caches.
 
     One file, no service: GeoIP results, reverse DNS names and investigation lookups survive
     restarts, are written incrementally and are pruned by age and count. A cache must never
-    take the collector down: a damaged file is moved aside, and any later database error
-    degrades to "not cached" instead of raising.
+    take the collector down: a damaged file is moved aside (with its WAL files, under a dated
+    name), any other error at startup (a full disk, a lock) keeps the file and caches in memory
+    for this run, and a later database error degrades to "not cached" instead of raising.
     """
 
     def __init__(self, path=CACHE_DB):
@@ -134,11 +154,16 @@ class CacheStore:
         self.lock = threading.Lock()
         try:
             self.db = self._open(path)
-        except sqlite3.Error:
-            try:
-                os.replace(path, f"{path}.corrupt")
-                self.db = self._open(path)
-            except (OSError, sqlite3.Error):
+        except sqlite3.Error as error:
+            self.db = None
+            if damaged(error):
+                try:
+                    move_aside(path)
+                    self.db = self._open(path)
+                except (OSError, sqlite3.Error):
+                    self.db = None
+            if self.db is None:
+                print(f"firewallmap: cache unavailable ({error}); caching in memory for now", file=sys.stderr)
                 self.db = self._open(":memory:")
 
     @staticmethod

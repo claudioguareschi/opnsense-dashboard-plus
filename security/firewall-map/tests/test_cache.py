@@ -109,7 +109,29 @@ class CacheResilienceTest(unittest.TestCase):
             store = CACHE.CacheStore(path)
             store.put_many("hostname", [("8.8.8.8", ["dns.google", 1.0])])
             self.assertEqual(list(store.get_all("hostname")), ["8.8.8.8"])
-            self.assertTrue(os.path.exists(path + ".corrupt"))
+            # kept under a dated name, its WAL files with it
+            kept = [name for name in os.listdir(directory) if name.startswith("cache.db.corrupt-")]
+            self.assertEqual(len(kept), 1)
+
+    def test_a_transient_error_keeps_the_file(self):
+        import sqlite3
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "cache.db")
+            CACHE.CacheStore(path).put_many("hostname", [("8.8.8.8", ["dns.google", 1.0])])
+            original = CACHE.CacheStore._open
+
+            def busy(target):
+                if target != ":memory:":
+                    raise sqlite3.OperationalError("database is locked")
+                return original(target)
+            with mock.patch.object(CACHE.CacheStore, "_open", staticmethod(busy)):
+                store = CACHE.CacheStore(path)
+            # this run caches in memory; the file and its contents are untouched for the next
+            self.assertEqual(store.get_all("hostname"), {})
+            self.assertEqual(sorted(os.listdir(directory))[0], "cache.db")
+            self.assertFalse([name for name in os.listdir(directory) if "corrupt" in name])
+            self.assertEqual(list(CACHE.CacheStore(path).get_all("hostname")), ["8.8.8.8"])
 
     def test_skipped_state_details_do_not_leak(self):
         output = ("all tcp 1.2.3.163:1 (192.168.30.30:2) -> 34.209.15.107:8883       ESTABLISHED:ESTABLISHED\n"

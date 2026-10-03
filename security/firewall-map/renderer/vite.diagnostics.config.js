@@ -25,6 +25,7 @@
  */
 
 import {defineConfig} from 'vite';
+import {BANNER} from './banner.js';
 
 // The ?debug=1 diagnostics panel as its own classic script. Only development packages ship it
 // (tools/build.sh leaves it out of release builds); the page loads it when it is installed.
@@ -36,6 +37,7 @@ export default defineConfig({
       name: 'FirewallMapDiagnostics',
       fileName: () => 'firewall-map-diagnostics.js',
     },
+    rollupOptions: {output: {banner: BANNER}},
     outDir: 'dist-firewall-map-diagnostics',
     emptyOutDir: true,
     minify: false,

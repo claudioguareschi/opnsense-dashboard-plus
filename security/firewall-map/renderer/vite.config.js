@@ -24,12 +24,45 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import {defineConfig} from 'vite';
+import {BANNER} from './banner.js';
+
+/*
+ * The renderer bundles deck.gl, luma.gl, loaders.gl, math.gl and mjolnir.js (MIT). Their licenses
+ * must travel with every copy: this collects the license text of each package that ends up in
+ * the bundle into firewall-map-renderer.LICENSE, installed next to the bundle.
+ */
+function thirdPartyLicenses(fileName) {
+  return {
+    name: 'third-party-licenses',
+    generateBundle(_, bundle) {
+      const packages = new Map();
+      for (const chunk of Object.values(bundle)) {
+        for (const id of Object.keys(chunk.modules || {})) {
+          const match = id.replace(/\\/g, '/').match(/^(.*\/node_modules\/(?:@[^/]+\/)?[^/]+)\//);
+          if (match && !packages.has(match[1])) {
+            packages.set(match[1], JSON.parse(fs.readFileSync(path.join(match[1], 'package.json'), 'utf8')));
+          }
+        }
+      }
+      const sections = [...packages].sort(([, a], [, b]) => a.name.localeCompare(b.name)).map(([root, pkg]) => {
+        const file = fs.readdirSync(root).find((name) => /^(license|licence|copying)(\.|$)/i.test(name));
+        const text = file ? fs.readFileSync(path.join(root, file), 'utf8').trim() : `License: ${pkg.license}`;
+        return `${pkg.name} ${pkg.version} (${pkg.license})\n${'-'.repeat(72)}\n${text}\n`;
+      });
+      this.emitFile({type: 'asset', fileName, source: `Third-party software in firewall-map-renderer.js\n\n${sections.join('\n')}`});
+    },
+  };
+}
 
 export default defineConfig({
+  // libraries test process.env.NODE_ENV; nothing else of Node's `process` is defined (no global)
   define: {
-    process: '{env:{NODE_ENV:"production"}}',
+    'process.env.NODE_ENV': '"production"',
   },
+  plugins: [thirdPartyLicenses('firewall-map-renderer.LICENSE')],
   build: {
     lib: {
       entry: 'src/app.js',
@@ -41,7 +74,8 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       output: {
-        banner: 'var process = globalThis.process || {env:{NODE_ENV:"production"}};',
+        // after minification, which would strip it
+        postBanner: `${BANNER}\n/* Includes deck.gl, luma.gl, loaders.gl, math.gl and mjolnir.js (MIT License): see firewall-map-renderer.LICENSE. */`,
       },
     },
   },

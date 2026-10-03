@@ -118,9 +118,10 @@ class ThreatQueueTest(unittest.TestCase):
             path = os.path.join(directory, "cache.db")
             store = CACHE.CacheStore(path)
             store.put_many("geo:2:city.mmdb:1", [("108.188.77.155", {"country": "RO", "lat": 1, "lon": 2})])
-            db = THREATS.connect(path)
+            db = THREATS.connect(os.path.join(directory, "threats.db"))
             THREATS.record(db, self.observe(self.INBOUND), now=100.0)
-            self.assertEqual(THREATS.listing(db)["rows"][0]["remote"]["country_code"], "RO")
+            with mock.patch.object(THREATS, "CACHE_DB", path):
+                self.assertEqual(THREATS.listing(db)["rows"][0]["remote"]["country_code"], "RO")
 
     def test_bulk_dismiss_and_purge(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -241,6 +242,30 @@ class ThreatQueueTest(unittest.TestCase):
                 handle.write("<opnsense><system><user><dashboard>bnVsbA==</dashboard></user>"
                              "<user><dashboard>e30=</dashboard></user></system></opnsense>")
             self.assertFalse(COLLECTOR.widget_in_use(path))
+
+
+class ThreatHistoryFileTest(unittest.TestCase):
+    def test_history_moves_out_of_the_cache_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = os.path.join(directory, "cache.db")
+            old = sqlite3.connect(cache)
+            old.execute("CREATE TABLE cache (kind TEXT, key TEXT, value TEXT, stored REAL, PRIMARY KEY (kind, key))")
+            old.execute("CREATE TABLE threats (address TEXT PRIMARY KEY, first_seen REAL, last_seen REAL, samples INTEGER, "
+                        "data TEXT, status TEXT DEFAULT 'new', note TEXT DEFAULT '', status_changed REAL)")
+            old.execute("INSERT INTO threats VALUES ('203.0.113.9', 1, 2, 3, '{}', 'reviewed', 'seen before', 2)")
+            old.commit()
+            old.close()
+            db = THREATS.connect(os.path.join(directory, "threats.db"))
+            THREATS.move_from_cache(db, cache)
+            row = db.execute("SELECT status, note, disposition FROM threats WHERE address = '203.0.113.9'").fetchone()
+            self.assertEqual(row, ("reviewed", "seen before", "passed"))
+            # gone from the cache, so a later cache problem cannot touch it
+            check = sqlite3.connect(cache)
+            self.assertIsNone(check.execute("SELECT 1 FROM sqlite_master WHERE name = 'threats'").fetchone())
+            check.close()
+            # a second start does not copy again (nothing is there)
+            THREATS.move_from_cache(db, cache)
+            self.assertEqual(db.execute("SELECT count(*) FROM threats").fetchone()[0], 1)
 
 
 if __name__ == "__main__":

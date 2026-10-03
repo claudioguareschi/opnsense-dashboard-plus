@@ -2,14 +2,10 @@
     <firewallmap>
         <filename>FirewallMap.js</filename>
         <link>/ui/firewallmap</link>
+        <!-- what a viewer needs (the widget privilege). The camera's save (same privilege) and the
+             optional administrator calls are made outside ajaxCall; see FirewallMap.js. -->
         <endpoints>
             <endpoint>/api/firewallmap/flow/snapshot</endpoint>
-            <endpoint>/api/firewallmap/snapshots/save</endpoint>
-            <endpoint>/api/firewallmap/settings/get</endpoint>
-            <endpoint>/api/firewallmap/settings/set</endpoint>
-            <endpoint>/api/firewallmap/settings/tables</endpoint>
-            <endpoint>/api/firewall/alias/add_item</endpoint>
-            <endpoint>/api/firewall/alias/reconfigure</endpoint>
         </endpoints>
         <translations>
             <title>Firewall Map+</title>

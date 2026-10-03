@@ -1,16 +1,17 @@
 {
   "name": "firewall-map-renderer",
   "private": true,
-  "description": "Builds src/opnsense/www/js/firewall-map-renderer.js (src/, vite.config.js) firewall-map-page.js (page/, vite.page.config.js) and the development-only firewall-map-diagnostics.js (page/diagnostics.js, vite.diagnostics.config.js). Place this directory at examples/vite-app inside a checkout of https://github.com/visgl/flowmap.gl (v9.4.0), run pnpm install there, then npm run build and copy the three dist-*/ scripts into the plugin.",
+  "type": "module",
+  "description": "Builds the plugin's browser scripts: firewall-map-renderer.js (src/, vite.config.js) with its third-party license file, firewall-map-page.js (page/, vite.page.config.js) and the development-only firewall-map-diagnostics.js (page/diagnostics.js, vite.diagnostics.config.js). Run tools/build-renderer.sh from the repository root: it installs the pinned versions from package-lock.json (npm ci), builds, tests and copies the results into src/opnsense/www/js.",
   "scripts": {
     "build": "vite build && vite build --config vite.page.config.js && vite build --config vite.diagnostics.config.js",
     "test": "node test.mjs"
   },
   "dependencies": {
-    "@deck.gl/core": "^9.3.2",
-    "@deck.gl/layers": "^9.3.2"
+    "@deck.gl/core": "9.4.0",
+    "@deck.gl/layers": "9.4.0"
   },
   "devDependencies": {
-    "vite": "^8.0.8"
+    "vite": "8.3.2"
   }
 }

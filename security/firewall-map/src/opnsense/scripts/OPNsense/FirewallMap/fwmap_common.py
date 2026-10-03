@@ -47,6 +47,9 @@ REQUEST_MARKER = f"{RUN_DIR}/last_request"
 HOSTNAME_MARKER = f"{RUN_DIR}/hostnames_request"
 RC_SCRIPT = "/usr/local/etc/rc.d/firewallmap"
 CACHE_DB = f"{STATE_DIR}/cache.db"
+# the threat review history (statuses and notes): operator data, kept apart from the caches so a
+# damaged or deleted cache can never take it along
+THREATS_DB = f"{STATE_DIR}/threats.db"
 ABUSEIPDB_BLACKLIST = f"{STATE_DIR}/abuseipdb_blacklist.txt"
 # saved map snapshots (one document and one small metadata file each), and the requests the
 # camera button leaves for the collector, which holds every tracked flow in memory

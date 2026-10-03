@@ -405,6 +405,7 @@ def update(force=False, retry=False):
     error = "; ".join(item["message"] for item in errors) or None
     return {"result": "failed" if errors else "ok", "updated": updated, "error": error}
 
+
 if __name__ == "__main__":
     secure_umask()
     command = sys.argv[1] if len(sys.argv) > 1 else "status"

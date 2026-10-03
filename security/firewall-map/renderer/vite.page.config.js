@@ -25,6 +25,7 @@
  */
 
 import {defineConfig} from 'vite';
+import {BANNER} from './banner.js';
 
 // The map page (page/main.js and its modules) as one classic script, next to the renderer.
 export default defineConfig({
@@ -35,6 +36,7 @@ export default defineConfig({
       name: 'FirewallMapPage',
       fileName: () => 'firewall-map-page.js',
     },
+    rollupOptions: {output: {banner: BANNER}},
     outDir: 'dist-firewall-map-page',
     emptyOutDir: true,
     // readable in the browser's debugger: the page is small, the renderer is the big bundle

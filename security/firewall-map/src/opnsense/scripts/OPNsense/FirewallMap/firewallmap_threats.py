@@ -44,11 +44,11 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fwmap_common import CACHE_DB, is_icmp, remote_target, secure_umask, service_name  # noqa: E402
+from fwmap_common import CACHE_DB, THREATS_DB, is_icmp, remote_target, secure_umask, service_name  # noqa: E402
 from fwmap_leases import lease_names  # noqa: E402
 from fwmap_pf import flow_endpoints, inside_endpoint, orientation  # noqa: E402
 
-DATABASE = CACHE_DB
+DATABASE = THREATS_DB
 STATUSES = ("new", "reviewed", "dismissed", "blocked")
 DISPOSITIONS = ("passed", "firewall_blocked", "ips_dropped")
 VIEWS = (*DISPOSITIONS, "all", "reviewed", "dismissed")
@@ -76,7 +76,35 @@ def connect(path=DATABASE):
     # Releases before disposition tabs used status=dropped for IPS evidence.
     db.execute("UPDATE threats SET disposition = 'ips_dropped', status = 'new' WHERE status = 'dropped'")
     db.execute("CREATE INDEX IF NOT EXISTS threats_view ON threats(status, disposition, last_seen DESC)")
+    if path == DATABASE:
+        move_from_cache(db)
     return db
+
+
+def move_from_cache(db, cache=CACHE_DB):
+    """Earlier releases kept the history in cache.db: copy it here once, then drop it there."""
+    if not os.path.exists(cache) or db.execute("SELECT 1 FROM threats LIMIT 1").fetchone():
+        return
+    try:
+        db.execute("ATTACH DATABASE ? AS old", (cache,))
+    except sqlite3.Error:
+        return
+    try:
+        if not db.execute("SELECT 1 FROM old.sqlite_master WHERE type = 'table' AND name = 'threats'").fetchone():
+            return
+        here = [row[1] for row in db.execute("PRAGMA main.table_info(threats)")]
+        there = {row[1] for row in db.execute("PRAGMA old.table_info(threats)")}
+        columns = ", ".join(column for column in here if column in there)
+        db.execute("BEGIN IMMEDIATE")
+        db.execute(f"INSERT OR IGNORE INTO main.threats ({columns}) SELECT {columns} FROM old.threats")
+        db.execute("DROP TABLE old.threats")
+        db.execute("COMMIT")
+    except sqlite3.Error as error:
+        if db.in_transaction:
+            db.execute("ROLLBACK")
+        print(f"firewallmap: could not move the threat history out of the cache: {error}", file=sys.stderr)
+    finally:
+        db.execute("DETACH DATABASE old")
 
 
 def merge(old, new):
@@ -227,11 +255,17 @@ def prune(db, now=None):
                "ORDER BY disposition = 'passed' DESC, last_seen DESC LIMIT ?)", (KEEP_ROWS,))
 
 
-def cached_country(db, address):
-    """Country code of an address from the collector's local GeoIP cache (same database file)."""
+_caches = {}
+
+
+def cached_country(address, cache=None):
+    """Country code of an address from the collector's local GeoIP cache (read only)."""
+    cache = cache or CACHE_DB
     try:
-        found = db.execute("SELECT value FROM cache WHERE kind LIKE 'geo:%' AND key = ? ORDER BY stored DESC LIMIT 1",
-                           (address,)).fetchone()
+        if cache not in _caches:
+            _caches[cache] = sqlite3.connect(f"file:{cache}?mode=ro", uri=True, timeout=1, check_same_thread=False)
+        found = _caches[cache].execute(
+            "SELECT value FROM cache WHERE kind LIKE 'geo:%' AND key = ? ORDER BY stored DESC LIMIT 1", (address,)).fetchone()
         return (json.loads(found[0]) or {}).get("country") if found else None
     except (sqlite3.Error, ValueError, AttributeError):
         return None
@@ -312,7 +346,7 @@ def _decorate(db, row):
     remote = row.setdefault("remote", {})
     if not remote.get("country_code"):
         # entries recorded before the code was kept: take it from the local geolocation cache
-        code = cached_country(db, row["address"])
+        code = cached_country(row["address"])
         if code:
             remote["country_code"] = code
     return row

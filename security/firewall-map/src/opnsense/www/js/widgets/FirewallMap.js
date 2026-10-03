@@ -56,16 +56,26 @@ export default class FirewallMap extends BaseWidget {
         });
     }
 
+    /**
+     * The firewall-wide settings calls. They are optional: only administrators may make them, and
+     * the widget works without them. So they do not go through this.ajaxCall, whose endpoints (the
+     * Metadata list) decide who sees the widget at all: listing them would hide it from viewers.
+     * The server checks the settings privilege on every one of these requests.
+     */
+    _adminCall(url, data = {}, method = 'GET') {
+        return $.ajax({url, type: method, dataType: 'json', contentType: 'application/json', data, timeout: 15000});
+    }
+
     async _loadGeoSettings() {
         // only administrators may read (and change) the firewall-wide database settings
         try {
-            this.geoSettings = await this.ajaxCall('/api/firewallmap/settings/get');
+            this.geoSettings = await this._adminCall('/api/firewallmap/settings/get');
         } catch (_) {
             this.geoSettings = null;
             return null;
         }
         try {
-            this.threatTables = await this.ajaxCall('/api/firewallmap/settings/tables');
+            this.threatTables = await this._adminCall('/api/firewallmap/settings/tables');
         } catch (_) {
             this.threatTables = {tables: [], automatic: []};
         }
@@ -333,7 +343,8 @@ export default class FirewallMap extends BaseWidget {
         const $button = $(`#${this.id}-firewall-map-camera`).prop('disabled', true);
         try {
             // not ajaxCall: its 5 s timeout is shorter than the collector may take to answer, and
-            // its retry on timeout would save the snapshot twice
+            // its retry on timeout would save the snapshot twice. So the save is not in the Metadata
+            // endpoint list either; the widget privilege that shows the widget also covers it.
             const result = await $.ajax({
                 type: 'POST', url: '/api/firewallmap/snapshots/save', dataType: 'json',
                 contentType: 'application/json', data: JSON.stringify({}), timeout: 30000,
@@ -384,7 +395,7 @@ export default class FirewallMap extends BaseWidget {
             return;
         }
         try {
-            const result = await this.ajaxCall('/api/firewallmap/settings/set', JSON.stringify(update), 'POST');
+            const result = await this._adminCall('/api/firewallmap/settings/set', JSON.stringify(update), 'POST');
             if (result.result !== 'saved') {
                 console.error('Firewall Map+: settings not saved', result);
                 this._settingsError((result.validations || []).join(' ') || result.result);
@@ -550,7 +561,7 @@ export default class FirewallMap extends BaseWidget {
         this.polling = true;
         try {
             const host = window.FirewallMapRenderer.host;
-            const snapshot = await this.ajaxCall(`/api/firewallmap/flow/snapshot${window.FirewallMapRenderer.snapshotQuery(this.settings)}`);
+            const snapshot = await this.ajaxCall('/api/firewallmap/flow/snapshot', window.FirewallMapRenderer.snapshotParams(this.settings));
             // removed while the request was under way
             if (!this.renderer) {
                 return;
