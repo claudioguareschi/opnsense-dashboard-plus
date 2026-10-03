@@ -1,12 +1,12 @@
 <acl>
     <page-dashboard-widget-dashboard-plus>
         <!--
-            One privilege for all eight widgets, as the core widgets do it. It also grants the
-            core endpoints the widgets read: the live firewall log, gateway status, pf state
-            counts and interface details. The name says so, since the privilege key has to stay
+            One privilege for all ten widgets, as the core widgets do it. It also grants the
+            core endpoints the widgets read: the live firewall log, gateway status, pf state,
+            interface details and service controls. The name says so, since the privilege key has to stay
             as it is for existing user and group assignments.
         -->
-        <name>Dashboard: Dashboard Plus widgets (reads firewall log, gateways, states)</name>
+        <name>Dashboard: Dashboard Plus widgets (reads dashboard data and controls services)</name>
         <patterns>
             <pattern>api/dashboardplus/system/info</pattern>
             <pattern>api/dashboardplus/system/frequency</pattern>
@@ -22,10 +22,19 @@
             <pattern>api/diagnostics/traffic/interface</pattern>
             <pattern>api/diagnostics/traffic/stream/*</pattern>
             <pattern>api/routing/settings/search_gateway</pattern>
+            <pattern>api/unbound/service/status</pattern>
+            <pattern>api/unbound/diagnostics/stats</pattern>
+            <pattern>api/unbound/overview/totals/*</pattern>
+            <pattern>api/unbound/settings/get</pattern>
+            <pattern>api/unbound/settings/searchForward</pattern>
             <pattern>api/interfaces/overview/interfaces_info</pattern>
             <pattern>api/diagnostics/firewall/log</pattern>
             <pattern>api/diagnostics/firewall/stream_log</pattern>
             <pattern>api/diagnostics/interface/get_interface_names</pattern>
+            <pattern>api/core/service/search</pattern>
+            <pattern>api/core/service/start/*</pattern>
+            <pattern>api/core/service/stop/*</pattern>
+            <pattern>api/core/service/restart/*</pattern>
         </patterns>
     </page-dashboard-widget-dashboard-plus>
 </acl>

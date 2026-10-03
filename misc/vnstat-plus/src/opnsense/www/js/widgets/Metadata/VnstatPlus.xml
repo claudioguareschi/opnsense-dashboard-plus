@@ -1,0 +1,37 @@
+<metadata>
+    <vnstatplus>
+        <filename>VnstatPlus.js</filename>
+        <endpoints>
+            <endpoint>/api/vnstat/service/*</endpoint>
+        </endpoints>
+        <translations>
+            <title>VNStat Traffic+</title>
+            <dashboard_title>VNStat Traffic</dashboard_title>
+            <interface>Interface</interface>
+            <period>Period</period>
+            <period_hourly>Hourly</period_hourly>
+            <period_daily>Daily</period_daily>
+            <period_monthly>Monthly</period_monthly>
+            <period_yearly>Yearly</period_yearly>
+            <download>Download</download>
+            <upload>Upload</upload>
+            <total>Total</total>
+            <date>Date</date>
+            <traffic_chart>Traffic overview</traffic_chart>
+            <history>History</history>
+            <refresh>Refresh</refresh>
+            <msg_no_data>No VNStat data available</msg_no_data>
+            <excluded_interfaces>Excluded Interfaces</excluded_interfaces>
+            <refresh_interval>Refresh interval (minutes)</refresh_interval>
+            <visible_sections>Visible sections</visible_sections>
+            <kpi_cards>KPI cards</kpi_cards>
+            <traffic_overview>Traffic overview</traffic_overview>
+            <bar_range>Overview bar range</bar_range>
+            <current_period>Current period</current_period>
+            <latest_one>Latest 1 period</latest_one>
+            <latest_three>Latest 3 periods</latest_three>
+            <latest_six>Latest 6 periods</latest_six>
+            <latest_twelve>Latest 12 periods</latest_twelve>
+        </translations>
+    </vnstatplus>
+</metadata>
