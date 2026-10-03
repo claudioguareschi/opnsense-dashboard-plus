@@ -76,11 +76,11 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 line-height: 1.5;
             }
             .dashboard-plus-services-search {
-                width: auto;
+                width: auto !important;
                 min-width: 0;
-                max-width: none;
+                max-width: none !important;
                 order: 1;
-                flex: 1 1 0;
+                flex: 1 1 auto;
                 margin-left: 0.5em;
             }
             .dashboard-plus-services-toolbar > select {
