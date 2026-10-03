@@ -71,19 +71,19 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 line-height: 1.5;
             }
             .dashboard-plus-services-search {
-                width: 100%;
+                width: auto;
                 min-width: 0;
                 max-width: none;
                 grid-column: 1;
                 grid-row: 1;
-                width: calc(100% - 0.5em);
+                justify-self: stretch;
                 margin-left: 0.5em;
             }
             .dashboard-plus-services-toolbar > select {
                 grid-column: 2;
                 grid-row: 1;
-                justify-self: end;
-                width: calc(100% - 0.5em);
+                justify-self: stretch;
+                width: auto;
                 min-width: 0;
                 margin-right: 0.5em;
                 text-align: left;
@@ -128,12 +128,14 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                     grid-column: 1;
                 }
                 .dashboard-plus-services-search {
-                    width: calc(100% - 1em);
+                    width: auto;
+                    justify-self: stretch;
                     margin: 0 0.5em;
                 }
                 .dashboard-plus-services-toolbar > select {
                     grid-row: 3;
-                    width: calc(100% - 1em);
+                    width: auto;
+                    justify-self: stretch;
                     margin: 0 0.5em;
                 }
             }
