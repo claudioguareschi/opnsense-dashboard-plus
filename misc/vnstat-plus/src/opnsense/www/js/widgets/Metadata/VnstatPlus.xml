@@ -22,6 +22,15 @@
             <msg_no_data>No VNStat data available</msg_no_data>
             <excluded_interfaces>Excluded Interfaces</excluded_interfaces>
             <refresh_interval>Refresh interval (minutes)</refresh_interval>
+            <show_kpi>Show KPI cards</show_kpi>
+            <show_chart>Show traffic overview</show_chart>
+            <show_history>Show history table</show_history>
+            <bar_range>Overview bar range</bar_range>
+            <current_period>Current period</current_period>
+            <latest_one>Latest 1 period</latest_one>
+            <latest_three>Latest 3 periods</latest_three>
+            <latest_six>Latest 6 periods</latest_six>
+            <latest_twelve>Latest 12 periods</latest_twelve>
         </translations>
     </vnstatplus>
 </metadata>
