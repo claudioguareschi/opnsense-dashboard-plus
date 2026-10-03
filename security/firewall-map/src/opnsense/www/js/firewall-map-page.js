@@ -2177,7 +2177,6 @@
       <button type="button" class="btn btn-default btn-sm fwmap-snap-note-btn">${ic("edit")} ${escapeHtml(meta.note ? T.snapshot_edit_note : T.snapshot_add_note)}</button>
       <button type="button" class="btn btn-default btn-sm fwmap-snap-download" title="${escapeHtml(T.snapshot_download)}" aria-label="${escapeHtml(T.snapshot_download)}">${ic("download")}</button>
       ${state.isAdmin ? `<button type="button" class="btn btn-default btn-sm fwmap-snap-delete" title="${escapeHtml(T.snapshot_delete)}" aria-label="${escapeHtml(T.snapshot_delete)}">${ic("trash")}</button>` : ""}
-      <button type="button" class="btn btn-sm fwmap-snap-live"><i class="fwmap-live"></i> ${escapeHtml(T.back_to_live)}</button>
     </span>`).show();
 	}
 	var CLUSTER_PX = 18;
@@ -2369,7 +2368,7 @@
 		$("#fwmap-mode").on("click", "button", function() {
 			chooseMode($(this).data("mode"));
 		});
-		$("#fwmap-banner").on("click", ".fwmap-snap-note-btn", () => editNote()).on("click", ".fwmap-snap-download", () => download()).on("click", ".fwmap-snap-delete", () => remove()).on("click", ".fwmap-snap-live", () => backToLive());
+		$("#fwmap-banner").on("click", ".fwmap-snap-note-btn", () => editNote()).on("click", ".fwmap-snap-download", () => download()).on("click", ".fwmap-snap-delete", () => remove());
 		$("#fwmap-timeline").on("click", ".fwmap-tl-toggle", () => {
 			timelineOpen = !timelineOpen;
 			storage(TIMELINE_KEY, timelineOpen ? "1" : "0");

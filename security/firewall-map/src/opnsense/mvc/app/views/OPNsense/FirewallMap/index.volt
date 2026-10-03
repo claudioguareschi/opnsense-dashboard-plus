@@ -380,9 +380,6 @@
     .fwmap-banner-actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .fwmap-banner-actions .btn { display: inline-flex; align-items: center; gap: 5px; }
     .fwmap-banner-actions .btn .fwmap-ic { width: 15px; height: 15px; }
-    .fwmap-snap-live { background: var(--fwmap-ok); color: var(--fwmap-on-ok); border: 0; font-weight: 600; }
-    .fwmap-snap-live:hover { filter: brightness(.94); color: var(--fwmap-on-ok); }
-    .fwmap-snap-live .fwmap-live { background: currentColor; margin: 0 2px 0 0; }
     .fwmap-snap-note { font-style: italic; }
     .fwmap-snap-flagged { color: var(--fwmap-danger); font-weight: 600; }
     .fwmap-live.frozen { background: var(--fwmap-frozen); }
@@ -715,7 +712,6 @@
         snapshot_newer: {{ lang._('Newer snapshot')|json_encode }},
         no_snapshots: {{ lang._('No snapshots yet: take one with the camera button on the map.')|json_encode }},
         snapshots_kept: {{ lang._('The newest %s are kept, for up to %d days.')|json_encode }},
-        back_to_live: {{ lang._('Back to live')|json_encode }},
         timeline: {{ lang._('Timeline')|json_encode }},
         timeline_expand: {{ lang._('Show the timeline')|json_encode }},
         timeline_collapse: {{ lang._('Collapse the timeline')|json_encode }},
