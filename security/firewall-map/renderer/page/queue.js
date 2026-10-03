@@ -440,7 +440,7 @@ export async function showQueue() {
         }));
       });
     })
-    .on('click', '.fwmap-q-investigate', (event) => {
+    .on('click', '.fwmap-q-investigate, .fwmap-inv-retry', (event) => {
       event.preventDefault();
       investigate(addressOf(event.currentTarget), render);
     })

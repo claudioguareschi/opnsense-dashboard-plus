@@ -70,6 +70,8 @@ export const state = {
   renderedSelection: null,
   renderedAddress: null,
   investigations: new Map(),
+  // the address whose investigation the details panel scrolls to while it loads
+  revealInvestigation: null,
   abuseScores: new Map(),
   abuseChecking: new Set(),
   abuseConfigured: false,

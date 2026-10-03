@@ -31,9 +31,9 @@
  * keys ending in _one / _many are the singular and plural of one phrase.
  */
 export const DEFAULT_TEXT = {
-  map_started_inside: 'Started inside',
-  map_started_outside: 'Started outside',
-  map_started_both: 'Started from both sides',
+  map_started_inside: 'Outbound',
+  map_started_outside: 'Inbound',
+  map_started_both: 'Both directions',
   map_toward: 'Toward the firewall',
   map_away: 'Away from the firewall',
   map_blocked: 'Blocked',

@@ -92,18 +92,48 @@ function noteScore(result, address) {
   }
 }
 
-/** The full lookup for an address; `rerender` redraws whatever shows the card. */
+// a lookup that fails outright (the firewall busy, a registry slow to answer) is tried again once
+const RETRY_MS = 1500;
+
+function failureCard(address, text) {
+  return `<div class="text-danger">${escapeHtml(T.action_failed)}: ${escapeHtml(text)}</div>`
+    + `<button type="button" class="btn btn-default btn-xs fwmap-investigate fwmap-inv-retry" data-address="${escapeHtml(address)}">`
+    + `<i class="fa fa-rotate-right"></i> ${escapeHtml(T.retry)}</button>`;
+}
+
+async function lookup(address) {
+  let failure = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt) {
+      await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+    }
+    try {
+      const result = await getJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`);
+      if (result.status === 'ok') {
+        return {result};
+      }
+      failure = result.error || T.lookup_failed;
+    } catch (error) {
+      failure = errorText(error);
+    }
+  }
+  return {failure};
+}
+
+/** The full lookup for an address; `rerender` redraws whatever shows the card, scrolled to it. */
 export async function investigate(address, rerender) {
+  state.revealInvestigation = address;
   remember(address, `<div class="text-muted"><i class="fa fa-spinner fa-spin"></i> ${escapeHtml(T.looking_up)}</div>`);
   rerender();
-  try {
-    const result = await getJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`);
+  const {result, failure} = await lookup(address);
+  if (result) {
     remember(address, investigationCard(result));
     noteScore(result, address);
-  } catch (error) {
-    remember(address, `<div class="text-danger">${escapeHtml(T.action_failed)}: ${escapeHtml(errorText(error))}</div>`);
+  } else {
+    remember(address, failureCard(address, failure));
   }
   rerender();
+  state.revealInvestigation = null;
 }
 
 /** AbuseIPDB alone, from the Reputation card: the verdict fills in without opening the full investigation. */

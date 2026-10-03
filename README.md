@@ -66,8 +66,8 @@ the expand link on the widget (`/ui/firewallmap`).
 <img src="docs/screenshots/firewall-map-page.png" alt="Firewall Map+ full-size page with a connection selected">
 
 *The full-size map draws an arc from the firewall (the house) to every remote
-address it is talking to, colored by who opened the connection: green from inside, orange from
-outside. Red dots are sources the firewall blocked. Other coloring methods are selectable. 
+address it is talking to, colored inbound/outbound: green for outbound connections (started inside), orange for
+inbound ones (started outside). Red dots are sources the firewall blocked. Other coloring methods are selectable. 
 The filters above the map narrow it by traffic type, service, interface, inside host and country; 
 **Threats** opens the review list. On the right, **Top talkers** ranks hosts (or countries and networks) 
 with a live sparkline, and the details panel below explains whatever you click: here an arc to a 
@@ -110,9 +110,9 @@ flagged traffic got through*, or *Blocked*), then one sentence per address, for 
 
 ### Full-size page
 
-- **Filters**: traffic (all, permitted, blocked, threats that got through, IDS alerts), service,
+- **Filters**: traffic (all, allowed, blocked, threats that got through, IDS alerts), service,
   interface, inside host, country and network (click an ASN).
-- **Color** by who connected (default), data direction, egress interface or service, with a
+- **Color**: inbound/outbound (default), data direction, egress interface or service, with a
   legend.
 - **Top talkers** by host, country and network with sparklines; click one to filter the map.
 - **Resizable panels**: drag the handles between the map and the side panel, and between the top

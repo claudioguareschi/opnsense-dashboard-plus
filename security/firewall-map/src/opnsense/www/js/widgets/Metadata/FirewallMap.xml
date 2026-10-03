@@ -68,9 +68,9 @@
             <data_unavailable>Live flow data is unavailable</data_unavailable>
             <webgl_unavailable>WebGL is required for Firewall Map+</webgl_unavailable>
             <renderer_failed>Map renderer failed to initialize</renderer_failed>
-            <map_started_inside>Started inside</map_started_inside>
-            <map_started_outside>Started outside</map_started_outside>
-            <map_started_both>Started from both sides</map_started_both>
+            <map_started_inside>Outbound</map_started_inside>
+            <map_started_outside>Inbound</map_started_outside>
+            <map_started_both>Both directions</map_started_both>
             <map_toward>Toward the firewall</map_toward>
             <map_away>Away from the firewall</map_away>
             <map_blocked>Blocked</map_blocked>

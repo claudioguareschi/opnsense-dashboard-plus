@@ -102,9 +102,9 @@
 	//#endregion
 	//#region src/text.js
 	var DEFAULT_TEXT = {
-		map_started_inside: "Started inside",
-		map_started_outside: "Started outside",
-		map_started_both: "Started from both sides",
+		map_started_inside: "Outbound",
+		map_started_outside: "Inbound",
+		map_started_both: "Both directions",
 		map_toward: "Toward the firewall",
 		map_away: "Away from the firewall",
 		map_blocked: "Blocked",
@@ -213,6 +213,7 @@
 		renderedSelection: null,
 		renderedAddress: null,
 		investigations: /* @__PURE__ */ new Map(),
+		revealInvestigation: null,
 		abuseScores: /* @__PURE__ */ new Map(),
 		abuseChecking: /* @__PURE__ */ new Set(),
 		abuseConfigured: false,
@@ -973,6 +974,15 @@
     ${actionBar(address, selection.countryCode)}
   `);
 		if (scrollTop) $details.find(".fwmap-d-scroll").scrollTop(scrollTop);
+		const scroller = $details.find(".fwmap-d-scroll")[0];
+		const lookupCard = $details.find(".fwmap-investigation")[0];
+		if (state.revealInvestigation === address && scroller && lookupCard) {
+			const top = scroller.scrollTop + lookupCard.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 8;
+			scroller.scrollTo({
+				top,
+				behavior: "smooth"
+			});
+		}
 	}
 	//#endregion
 	//#region src/palette.js
@@ -1106,18 +1116,36 @@
 			while (state.abuseScores.size > 500) state.abuseScores.delete(state.abuseScores.keys().next().value);
 		}
 	}
-	/** The full lookup for an address; `rerender` redraws whatever shows the card. */
+	var RETRY_MS = 1500;
+	function failureCard(address, text) {
+		return `<div class="text-danger">${escapeHtml(T.action_failed)}: ${escapeHtml(text)}</div><button type="button" class="btn btn-default btn-xs fwmap-investigate fwmap-inv-retry" data-address="${escapeHtml(address)}"><i class="fa fa-rotate-right"></i> ${escapeHtml(T.retry)}</button>`;
+	}
+	async function lookup(address) {
+		let failure = null;
+		for (let attempt = 0; attempt < 2; attempt++) {
+			if (attempt) await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+			try {
+				const result = await getJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`);
+				if (result.status === "ok") return { result };
+				failure = result.error || T.lookup_failed;
+			} catch (error) {
+				failure = errorText(error);
+			}
+		}
+		return { failure };
+	}
+	/** The full lookup for an address; `rerender` redraws whatever shows the card, scrolled to it. */
 	async function investigate(address, rerender) {
+		state.revealInvestigation = address;
 		remember(address, `<div class="text-muted"><i class="fa fa-spinner fa-spin"></i> ${escapeHtml(T.looking_up)}</div>`);
 		rerender();
-		try {
-			const result = await getJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`);
+		const { result, failure } = await lookup(address);
+		if (result) {
 			remember(address, investigationCard(result));
 			noteScore(result, address);
-		} catch (error) {
-			remember(address, `<div class="text-danger">${escapeHtml(T.action_failed)}: ${escapeHtml(errorText(error))}</div>`);
-		}
+		} else remember(address, failureCard(address, failure));
 		rerender();
+		state.revealInvestigation = null;
 	}
 	/** AbuseIPDB alone, from the Reputation card: the verdict fills in without opening the full investigation. */
 	async function checkAbuse(address, rerender) {
@@ -1660,7 +1688,7 @@
 					await setThreat(address, "blocked", note);
 				}));
 			});
-		}).on("click", ".fwmap-q-investigate", (event) => {
+		}).on("click", ".fwmap-q-investigate, .fwmap-inv-retry", (event) => {
 			event.preventDefault();
 			investigate(addressOf(event.currentTarget), render);
 		}).on("click", ".fwmap-q-states", function(event) {

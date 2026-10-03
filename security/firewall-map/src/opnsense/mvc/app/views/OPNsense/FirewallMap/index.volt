@@ -159,8 +159,10 @@
     .fwmap-investigation { margin: 4px 0 8px; padding: 6px 8px; border-left: 3px solid rgba(128, 128, 128, .35); }
     .fwmap-inv-section { margin-bottom: 6px; }
     .fwmap-inv-title { font-weight: 600; font-size: .9em; text-transform: uppercase; letter-spacing: .03em; opacity: .75; }
-    .fwmap-inv-table { width: 100%; font-size: .9em; }
-    .fwmap-inv-table th { font-weight: normal; opacity: .7; padding-right: 8px; vertical-align: top; white-space: nowrap; width: 1%; }
+    /* one label column for every section (registry, routing, AbuseIPDB), so the values share one edge */
+    .fwmap-inv-table { width: 100%; font-size: .9em; table-layout: fixed; }
+    .fwmap-inv-table th { font-weight: normal; opacity: .7; padding-right: 8px; vertical-align: top; width: 10em; }
+    .fwmap-inv-retry { margin-top: 6px; }
     .fwmap-inv-table td { word-break: break-word; }
     #fwmap-review-count:empty { display: none; }
     #fwmap-review-count { background: var(--fwmap-danger); color: var(--fwmap-on-danger); }
@@ -503,6 +505,7 @@
         investigate: {{ lang._('Investigate')|json_encode }},
         looking_up: {{ lang._('Looking up registry, routing and reputation…')|json_encode }},
         lookup_failed: {{ lang._('Lookup failed')|json_encode }},
+        retry: {{ lang._('Retry')|json_encode }},
         registry: {{ lang._('Registry (RDAP)')|json_encode }},
         routing: {{ lang._('Routing (RIPEstat)')|json_encode }},
         owner: {{ lang._('Owner')|json_encode }},
@@ -608,8 +611,8 @@
         remote_side: {{ lang._('Remote side')|json_encode }},
         sec_ids_long: {{ lang._('IDS (Suricata)')|json_encode }},
         started: {{ lang._('Started')|json_encode }},
-        started_inside_long: {{ lang._('Started inside')|json_encode }},
-        started_outside_long: {{ lang._('Started outside')|json_encode }},
+        started_inside_long: {{ lang._('Outbound · started inside')|json_encode }},
+        started_outside_long: {{ lang._('Inbound · started outside')|json_encode }},
         target: {{ lang._('Target')|json_encode }},
         this_firewall_title: {{ lang._('This firewall')|json_encode }},
         tried: {{ lang._('Tried')|json_encode }},
@@ -704,9 +707,9 @@
         states_at: {{ lang._('States at')|json_encode }},
         current_states: {{ lang._('Current states')|json_encode }},
         // the renderer's words: legend, hover cards and flow sentences ({name} is filled in)
-        map_started_inside: {{ lang._('Started inside')|json_encode }},
-        map_started_outside: {{ lang._('Started outside')|json_encode }},
-        map_started_both: {{ lang._('Started from both sides')|json_encode }},
+        map_started_inside: {{ lang._('Outbound')|json_encode }},
+        map_started_outside: {{ lang._('Inbound')|json_encode }},
+        map_started_both: {{ lang._('Both directions')|json_encode }},
         map_toward: {{ lang._('Toward the firewall')|json_encode }},
         map_away: {{ lang._('Away from the firewall')|json_encode }},
         map_blocked: {{ lang._('Blocked')|json_encode }},
@@ -830,7 +833,7 @@
             <div id="fwmap-legend">
                 <span class="fwmap-legend-mode"><span class="fwmap-legend-label">{{ lang._('Color') }}</span>
                     <select id="fwmap-color" class="selectpicker" data-width="fit" data-style="btn-default btn-xs" aria-label="{{ lang._('Color') }}">
-                        <option value="initiator">{{ lang._('By who connected') }}</option>
+                        <option value="initiator">{{ lang._('Inbound / outbound') }}</option>
                         <option value="direction">{{ lang._('By data direction') }}</option>
                         <option value="egress">{{ lang._('By egress') }}</option>
                         <option value="service">{{ lang._('By service') }}</option>

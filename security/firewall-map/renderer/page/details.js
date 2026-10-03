@@ -355,4 +355,11 @@ export function renderDetails() {
   if (scrollTop) {
     $details.find('.fwmap-d-scroll').scrollTop(scrollTop);
   }
+  // Investigate: bring the lookup's card to the top of the panel, where its data will appear
+  const scroller = $details.find('.fwmap-d-scroll')[0];
+  const lookupCard = $details.find('.fwmap-investigation')[0];
+  if (state.revealInvestigation === address && scroller && lookupCard) {
+    const top = scroller.scrollTop + lookupCard.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 8;
+    scroller.scrollTo({top, behavior: 'smooth'});
+  }
 }
