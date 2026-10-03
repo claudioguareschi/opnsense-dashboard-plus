@@ -1,0 +1,27 @@
+<metadata>
+    <vnstatplus>
+        <filename>VnstatPlus.js</filename>
+        <endpoints>
+            <endpoint>/api/vnstat/service/*</endpoint>
+        </endpoints>
+        <translations>
+            <title>VNStat Traffic+</title>
+            <interface>Interface</interface>
+            <period>Period</period>
+            <period_hourly>Hourly</period_hourly>
+            <period_daily>Daily</period_daily>
+            <period_monthly>Monthly</period_monthly>
+            <period_yearly>Yearly</period_yearly>
+            <download>Download</download>
+            <upload>Upload</upload>
+            <total>Total</total>
+            <date>Date</date>
+            <traffic_chart>Traffic overview</traffic_chart>
+            <history>History</history>
+            <refresh>Refresh</refresh>
+            <msg_no_data>No VNStat data available</msg_no_data>
+            <excluded_interfaces>Excluded Interfaces</excluded_interfaces>
+            <refresh_interval>Refresh interval (minutes)</refresh_interval>
+        </translations>
+    </vnstatplus>
+</metadata>
