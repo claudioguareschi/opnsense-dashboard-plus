@@ -12,6 +12,11 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
     constructor(config) {
         super(config);
         this.configurable = true;
+        // Older test layouts may have saved a one-row manual height before the minimum
+        // was introduced. Drop that stale value so the widget can size to its content.
+        if (this.manualHeight && this.manualHeight < 5) {
+            this.manualHeight = null;
+        }
         this.services = [];
         this.currentConfig = null;
         this.filter = 'all';
@@ -23,7 +28,7 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
     getGridOptions() {
         // Keep the toolbar, table header and at least one service row visible when the
         // dashboard restores or manually resizes the widget.
-        return {sizeToContent: 650, minH: 4};
+        return {sizeToContent: 650, minH: 5};
     }
 
     _elementId(name) {
@@ -39,10 +44,10 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 min-height: 12em;
             }
             .dashboard-plus-services-toolbar {
-                display: flex;
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) minmax(10em, 18em) 8em;
                 align-items: center;
                 gap: 0.6em;
-                flex-wrap: wrap;
                 padding: 0.25em 0 0.7em;
             }
             .dashboard-plus-services-summary {
@@ -50,15 +55,20 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 align-items: center;
                 gap: 0.55em;
                 flex-wrap: wrap;
-                margin-right: auto;
+                min-width: 0;
                 font-size: 0.88em;
             }
             .dashboard-plus-services-summary span {
                 white-space: nowrap;
             }
             .dashboard-plus-services-search {
-                min-width: 10em;
-                max-width: 18em;
+                width: 100%;
+                min-width: 0;
+                max-width: none;
+            }
+            .dashboard-plus-services-toolbar > select {
+                width: 100%;
+                min-width: 0;
             }
             .dashboard-plus-services-table .dashboard-plus-services-action {
                 min-width: 2.1em;
@@ -86,9 +96,23 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 color: var(--danger, #d62728);
             }
             @media (max-width: 34em) {
+                .dashboard-plus-services-toolbar {
+                    grid-template-columns: minmax(0, 1fr) 8em;
+                }
+                .dashboard-plus-services-summary {
+                    grid-column: 1 / -1;
+                }
                 .dashboard-plus-services-search {
-                    min-width: 100%;
-                    max-width: none;
+                    grid-column: 1;
+                }
+            }
+            @media (max-width: 22em) {
+                .dashboard-plus-services-toolbar {
+                    grid-template-columns: 1fr;
+                }
+                .dashboard-plus-services-search,
+                .dashboard-plus-services-toolbar > select {
+                    grid-column: 1;
                 }
             }
         `;
@@ -114,7 +138,7 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 </div>
                 <div id="${this._elementId('error')}" class="dashboard-plus-services-error" style="display: none;"></div>
                 <div id="${this._elementId('table')}" class="flextable-container dashboard-plus-table dashboard-plus-services-table"
-                    role="table" style="--dashboard-plus-columns: auto minmax(0, 1.25fr) minmax(0, 2fr) auto;">
+                    role="table" style="--dashboard-plus-columns: minmax(8em, auto) minmax(0, 1.5fr) minmax(7em, 1fr) auto;">
                 </div>
                 <div id="${this._elementId('empty')}" class="dashboard-plus-services-empty" style="display: none;"></div>
             </div>
