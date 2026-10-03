@@ -64,6 +64,12 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
             .dashboard-plus-services-summary span {
                 white-space: nowrap;
             }
+            .dashboard-plus-services-search,
+            .dashboard-plus-services-toolbar > select {
+                font-family: inherit;
+                font-size: inherit;
+                line-height: 1.5;
+            }
             .dashboard-plus-services-search {
                 width: 100%;
                 min-width: 0;
@@ -80,8 +86,8 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 width: calc(100% - 0.5em);
                 min-width: 0;
                 margin-right: 0.5em;
-                text-align: center;
-                text-align-last: center;
+                text-align: left;
+                text-align-last: left;
             }
             .dashboard-plus-services-table .dashboard-plus-services-action {
                 min-width: 2.1em;
