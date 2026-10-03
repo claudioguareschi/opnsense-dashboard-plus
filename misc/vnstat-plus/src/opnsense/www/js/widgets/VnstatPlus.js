@@ -14,6 +14,10 @@ export default class VnstatPlus extends BaseWidget {
         this.currentInterface = null;
         this.excludedInterfaces = [];
         this.refreshSeconds = 300;
+        this.showKpi = true;
+        this.showChart = true;
+        this.showHistory = true;
+        this.barRange = '3';
         this.fetchPromise = null;
     }
 
@@ -56,6 +60,49 @@ export default class VnstatPlus extends BaseWidget {
                     {value: '1800', label: '30'}
                 ],
                 default: '300'
+            },
+            show_kpi: {
+                id: this._elementId('show-kpi'),
+                title: this.translations.show_kpi,
+                type: 'select',
+                options: [
+                    {value: 'yes', label: 'Yes'},
+                    {value: 'no', label: 'No'}
+                ],
+                default: 'yes'
+            },
+            show_chart: {
+                id: this._elementId('show-chart'),
+                title: this.translations.show_chart,
+                type: 'select',
+                options: [
+                    {value: 'yes', label: 'Yes'},
+                    {value: 'no', label: 'No'}
+                ],
+                default: 'yes'
+            },
+            show_history: {
+                id: this._elementId('show-history'),
+                title: this.translations.show_history,
+                type: 'select',
+                options: [
+                    {value: 'yes', label: 'Yes'},
+                    {value: 'no', label: 'No'}
+                ],
+                default: 'yes'
+            },
+            bar_range: {
+                id: this._elementId('bar-range'),
+                title: this.translations.bar_range,
+                type: 'select',
+                options: [
+                    {value: 'current', label: this.translations.current_period},
+                    {value: '1', label: this.translations.latest_one},
+                    {value: '3', label: this.translations.latest_three},
+                    {value: '6', label: this.translations.latest_six},
+                    {value: '12', label: this.translations.latest_twelve}
+                ],
+                default: '3'
             }
         };
     }
@@ -64,6 +111,7 @@ export default class VnstatPlus extends BaseWidget {
         this._applyConfig(await this.getWidgetConfig());
         await this._populateInterfaceDropdown();
         await this._fetchAndRender();
+        this._applyVisibility();
         this.config.callbacks?.updateGrid?.();
     }
 
@@ -71,13 +119,14 @@ export default class VnstatPlus extends BaseWidget {
         const rootId = this._elementId('root');
         const interfaceId = this._elementId('interface');
         const periodId = this._elementId('period');
+        const rangeId = this._elementId('range');
         const refreshId = this._elementId('refresh');
 
         return $(`
             <div id="${rootId}" class="vnstat-plus-root" style="padding: 0 0.35em 0.35em;">
                 <style>
-                    #${rootId} .vnstat-plus-controls { display: flex; gap: 0.4em; align-items: center; margin: 0 0 0.55em; }
-                    #${rootId} .vnstat-plus-controls select { min-width: 0; flex: 1 1 0; }
+                    #${rootId} .vnstat-plus-controls { display: flex; flex-wrap: wrap; gap: 0.4em; align-items: center; margin: 0 0 0.55em; }
+                    #${rootId} .vnstat-plus-controls select { min-width: 7em; flex: 1 1 7em; }
                     #${rootId} .vnstat-plus-controls button { flex: 0 0 auto; }
                     #${rootId} .vnstat-plus-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.45em; margin-bottom: 0.7em; }
                     #${rootId} .vnstat-plus-card { border: 1px solid rgba(128,128,128,0.32); border-radius: 4px; padding: 0.45em 0.55em; min-width: 0; }
@@ -88,12 +137,14 @@ export default class VnstatPlus extends BaseWidget {
                     #${rootId} .vnstat-plus-card-total .vnstat-plus-card-value { color: #70c596; }
                     #${rootId} .vnstat-plus-section-title { font-size: 0.9em; font-weight: 600; margin: 0.4em 0; }
                     #${rootId} .vnstat-plus-chart { display: flex; flex-direction: column; gap: 0.25em; }
-                    #${rootId} .vnstat-plus-bar-row { display: grid; grid-template-columns: 6.2em minmax(0, 1fr) 5.2em; gap: 0.45em; align-items: center; font-size: 0.82em; }
+                    #${rootId} .vnstat-plus-bar-row { display: grid; grid-template-columns: 6.2em minmax(0, 1fr) 5.2em; gap: 0.45em; align-items: center; font-size: 0.82em; position: relative; outline: none; }
                     #${rootId} .vnstat-plus-bar-label, #${rootId} .vnstat-plus-bar-total { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                     #${rootId} .vnstat-plus-bar-total { text-align: right; color: #aaa; }
                     #${rootId} .vnstat-plus-bar-track { height: 0.9em; display: flex; min-width: 0; background: rgba(128,128,128,0.15); border-radius: 2px; overflow: hidden; }
                     #${rootId} .vnstat-plus-bar-rx { background: #58a6ff; }
                     #${rootId} .vnstat-plus-bar-tx { background: #f0a35b; }
+                    #${rootId} .vnstat-plus-tooltip { display: none; position: absolute; left: 6.65em; bottom: calc(100% + 0.35em); z-index: 5; max-width: 90%; padding: 0.35em 0.55em; border: 1px solid rgba(128,128,128,0.45); border-radius: 4px; background: rgba(20,24,31,0.96); color: #eee; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
+                    #${rootId} .vnstat-plus-bar-row:hover .vnstat-plus-tooltip, #${rootId} .vnstat-plus-bar-row:focus .vnstat-plus-tooltip { display: block; }
                     #${rootId} .vnstat-plus-legend { display: flex; gap: 0.9em; color: #999; font-size: 0.78em; margin: 0.5em 0 0.7em 6.65em; }
                     #${rootId} .vnstat-plus-dot { display: inline-block; width: 0.7em; height: 0.7em; border-radius: 50%; margin-right: 0.25em; }
                     #${rootId} .vnstat-plus-table-wrap { overflow-x: auto; }
@@ -115,16 +166,23 @@ export default class VnstatPlus extends BaseWidget {
                         <option value="month" selected>${this._escape(this.translations.period_monthly)}</option>
                         <option value="year">${this._escape(this.translations.period_yearly)}</option>
                     </select>
+                    <select id="${rangeId}" class="form-control" aria-label="${this._escape(this.translations.bar_range)}">
+                        <option value="current">${this._escape(this.translations.current_period)}</option>
+                        <option value="1">${this._escape(this.translations.latest_one)}</option>
+                        <option value="3" selected>${this._escape(this.translations.latest_three)}</option>
+                        <option value="6">${this._escape(this.translations.latest_six)}</option>
+                        <option value="12">${this._escape(this.translations.latest_twelve)}</option>
+                    </select>
                     <button id="${refreshId}" type="button" class="btn btn-default" title="${this._escape(this.translations.refresh)}" aria-label="${this._escape(this.translations.refresh)}"><i class="fa fa-refresh"></i></button>
                 </div>
                 <div id="${this._elementId('summary')}" class="vnstat-plus-summary"></div>
-                <div class="vnstat-plus-section-title">${this._escape(this.translations.traffic_chart)}</div>
+                <div id="${this._elementId('chart-title')}" class="vnstat-plus-section-title">${this._escape(this.translations.traffic_chart)}</div>
                 <div id="${this._elementId('chart')}" class="vnstat-plus-chart"></div>
-                <div class="vnstat-plus-legend">
+                <div id="${this._elementId('legend')}" class="vnstat-plus-legend">
                     <span><i class="vnstat-plus-dot" style="background:#58a6ff;"></i>${this._escape(this.translations.download)}</span>
                     <span><i class="vnstat-plus-dot" style="background:#f0a35b;"></i>${this._escape(this.translations.upload)}</span>
                 </div>
-                <div class="vnstat-plus-section-title">${this._escape(this.translations.history)}</div>
+                <div id="${this._elementId('history-title')}" class="vnstat-plus-section-title">${this._escape(this.translations.history)}</div>
                 <div id="${this._elementId('table')}" class="vnstat-plus-table-wrap"></div>
             </div>
         `);
@@ -135,6 +193,7 @@ export default class VnstatPlus extends BaseWidget {
         const $root = $(`#${this._elementId('root')}`);
         const $interface = $(`#${this._elementId('interface')}`);
         const $period = $(`#${this._elementId('period')}`);
+        const $range = $(`#${this._elementId('range')}`);
 
         const prefs = this._loadPrefs();
         if (prefs?.period) {
@@ -144,9 +203,19 @@ export default class VnstatPlus extends BaseWidget {
         if (prefs?.interface) {
             this.currentInterface = prefs.interface;
         }
+        if (prefs?.barRange) {
+            this.barRange = prefs.barRange;
+            $range.val(this.barRange);
+        }
 
         $root.on('change.vnstat-plus-widget', `#${this._elementId('period')}`, async event => {
             this.currentPeriod = event.target.value;
+            this._savePrefs();
+            await this._fetchAndRender();
+            this.config.callbacks?.updateGrid?.();
+        });
+        $root.on('change.vnstat-plus-widget', `#${this._elementId('range')}`, async event => {
+            this.barRange = event.target.value;
             this._savePrefs();
             await this._fetchAndRender();
             this.config.callbacks?.updateGrid?.();
@@ -164,6 +233,8 @@ export default class VnstatPlus extends BaseWidget {
 
         await this._populateInterfaceDropdown();
         await this._fetchAndRender();
+        this._applyVisibility();
+        this.config.callbacks?.updateGrid?.();
     }
 
     async onWidgetTick() {
@@ -178,6 +249,19 @@ export default class VnstatPlus extends BaseWidget {
         this.excludedInterfaces = config.excluded_interfaces ?? [];
         this.refreshSeconds = Number(config.refresh_interval) || 300;
         this.tickTimeout = this.refreshSeconds;
+        this.showKpi = config.show_kpi !== 'no';
+        this.showChart = config.show_chart !== 'no';
+        this.showHistory = config.show_history !== 'no';
+        this.barRange = ['current', '1', '3', '6', '12'].includes(config.bar_range) ? config.bar_range : '3';
+        $(`#${this._elementId('range')}`).val(this.barRange);
+        this._applyVisibility();
+    }
+
+    _applyVisibility() {
+        $(`#${this._elementId('summary')}`).toggle(this.showKpi);
+        $(`#${this._elementId('chart-title')}, #${this._elementId('chart')}, #${this._elementId('legend')}`).toggle(this.showChart);
+        $(`#${this._elementId('history-title')}, #${this._elementId('table')}`).toggle(this.showHistory);
+        $(`#${this._elementId('range')}`).toggle(this.showChart);
     }
 
     async _populateInterfaceDropdown() {
@@ -232,12 +316,13 @@ export default class VnstatPlus extends BaseWidget {
             return;
         }
 
-        const limits = {hour: 12, day: 14, month: 12, year: 5};
         const entries = traffic.slice().sort((a, b) => this._dateToSortKey(a) - this._dateToSortKey(b));
-        const visible = entries.slice(-limits[this.currentPeriod]);
-        this._renderSummary(visible[visible.length - 1]);
-        this._renderChart(visible);
-        this._renderTable(visible.slice().reverse());
+        const tableLimits = {hour: 12, day: 14, month: 12, year: 5};
+        const tableEntries = entries.slice(-tableLimits[this.currentPeriod]);
+        const chartEntries = this._chartEntries(entries);
+        this._renderSummary(entries[entries.length - 1]);
+        this._renderChart(chartEntries);
+        this._renderTable(tableEntries.slice().reverse());
     }
 
     _renderEmpty(message) {
@@ -273,11 +358,13 @@ export default class VnstatPlus extends BaseWidget {
             const rxWidth = Math.min(100, (rx / maxTotal) * 100);
             const txWidth = Math.min(100 - rxWidth, (tx / maxTotal) * 100);
             const date = this._formatDate(entry);
+            const tooltip = `${date} · ${this.translations.download}: ${this._formatBytes(rx)} · ${this.translations.upload}: ${this._formatBytes(tx)} · ${this.translations.total}: ${this._formatBytes(total)}`;
             return `
-                <div class="vnstat-plus-bar-row" title="${this._escape(`${date}: ${this._formatBytes(total)}`)}">
+                <div class="vnstat-plus-bar-row" tabindex="0" aria-label="${this._escape(tooltip)}">
                     <span class="vnstat-plus-bar-label">${this._escape(date)}</span>
-                    <span class="vnstat-plus-bar-track"><i class="vnstat-plus-bar-rx" style="width:${rxWidth}%;"></i><i class="vnstat-plus-bar-tx" style="width:${txWidth}%;"></i></span>
+                    <span class="vnstat-plus-bar-track"><i class="vnstat-plus-bar-rx" style="width:${rxWidth}%;" title="${this._escape(`${this.translations.download}: ${this._formatBytes(rx)}`)}"></i><i class="vnstat-plus-bar-tx" style="width:${txWidth}%;" title="${this._escape(`${this.translations.upload}: ${this._formatBytes(tx)}`)}"></i></span>
                     <span class="vnstat-plus-bar-total">${this._escape(this._formatBytes(total))}</span>
+                    <span class="vnstat-plus-tooltip">${this._escape(tooltip)}</span>
                 </div>
             `;
         }).join('');
@@ -310,7 +397,8 @@ export default class VnstatPlus extends BaseWidget {
         try {
             localStorage.setItem('vnstat-plus-widget-prefs', JSON.stringify({
                 interface: this.currentInterface,
-                period: this.currentPeriod
+                period: this.currentPeriod,
+                barRange: this.barRange
             }));
         } catch (error) {
             // localStorage can be unavailable in private browsing modes.
@@ -324,6 +412,13 @@ export default class VnstatPlus extends BaseWidget {
         } catch (error) {
             return null;
         }
+    }
+
+    _chartEntries(entries) {
+        if (this.barRange === 'current') {
+            return entries.slice(-1);
+        }
+        return entries.slice(-Math.max(1, Number(this.barRange) || 3));
     }
 
     _formatBytes(bytes) {
