@@ -6,6 +6,7 @@
         </endpoints>
         <translations>
             <title>VNStat Traffic+</title>
+            <dashboard_title>VNStat Traffic</dashboard_title>
             <interface>Interface</interface>
             <period>Period</period>
             <period_hourly>Hourly</period_hourly>

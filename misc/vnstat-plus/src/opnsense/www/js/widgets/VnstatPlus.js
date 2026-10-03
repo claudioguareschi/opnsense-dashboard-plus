@@ -130,26 +130,26 @@ export default class VnstatPlus extends BaseWidget {
                     #${rootId} .vnstat-plus-controls button { flex: 0 0 auto; }
                     #${rootId} .vnstat-plus-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.45em; margin-bottom: 0.7em; }
                     #${rootId} .vnstat-plus-card { border: 1px solid rgba(128,128,128,0.32); border-radius: 4px; padding: 0.45em 0.55em; min-width: 0; }
-                    #${rootId} .vnstat-plus-card-label { color: #888; font-size: 0.78em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+                    #${rootId} .vnstat-plus-card-label { color: var(--vnstat-plus-muted); font-size: 0.78em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                     #${rootId} .vnstat-plus-card-value { font-size: 1.15em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-                    #${rootId} .vnstat-plus-card-rx .vnstat-plus-card-value { color: #58a6ff; }
-                    #${rootId} .vnstat-plus-card-tx .vnstat-plus-card-value { color: #f0a35b; }
-                    #${rootId} .vnstat-plus-card-total .vnstat-plus-card-value { color: #70c596; }
-                    #${rootId} .vnstat-plus-section-title { font-size: 0.9em; font-weight: 600; margin: 0.4em 0; }
+                    #${rootId} .vnstat-plus-card-rx .vnstat-plus-card-value { color: var(--vnstat-plus-rx); }
+                    #${rootId} .vnstat-plus-card-tx .vnstat-plus-card-value { color: var(--vnstat-plus-tx); }
+                    #${rootId} .vnstat-plus-card-total .vnstat-plus-card-value { color: var(--vnstat-plus-total); }
+                    #${rootId} .vnstat-plus-section-title { color: var(--vnstat-plus-muted); font-size: 0.9em; font-weight: 600; margin: 0.4em 0; }
                     #${rootId} .vnstat-plus-chart { display: flex; flex-direction: column; gap: 0.25em; }
                     #${rootId} .vnstat-plus-bar-row { display: grid; grid-template-columns: 6.2em minmax(0, 1fr) 5.2em; gap: 0.45em; align-items: center; font-size: 0.82em; position: relative; outline: none; }
                     #${rootId} .vnstat-plus-bar-label, #${rootId} .vnstat-plus-bar-total { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-                    #${rootId} .vnstat-plus-bar-total { text-align: right; color: #aaa; }
-                    #${rootId} .vnstat-plus-bar-track { height: 0.9em; display: flex; min-width: 0; background: rgba(128,128,128,0.15); border-radius: 2px; overflow: hidden; }
-                    #${rootId} .vnstat-plus-bar-rx { background: #58a6ff; }
-                    #${rootId} .vnstat-plus-bar-tx { background: #f0a35b; }
-                    #${rootId} .vnstat-plus-tooltip { display: none; position: absolute; left: 6.65em; bottom: calc(100% + 0.35em); z-index: 5; max-width: 90%; padding: 0.35em 0.55em; border: 1px solid rgba(128,128,128,0.45); border-radius: 4px; background: rgba(20,24,31,0.96); color: #eee; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
+                    #${rootId} .vnstat-plus-bar-total { text-align: right; color: var(--vnstat-plus-muted); }
+                    #${rootId} .vnstat-plus-bar-track { height: 0.9em; display: flex; min-width: 0; border: 1px solid var(--vnstat-plus-border); border-radius: 2px; overflow: hidden; }
+                    #${rootId} .vnstat-plus-bar-rx { background: var(--vnstat-plus-rx); }
+                    #${rootId} .vnstat-plus-bar-tx { background: var(--vnstat-plus-tx); }
+                    #${rootId} .vnstat-plus-tooltip { display: none; position: absolute; left: 6.65em; bottom: calc(100% + 0.35em); z-index: 5; max-width: 90%; padding: 0.35em 0.55em; border: 1px solid var(--vnstat-plus-tooltip-border); border-radius: 4px; background: var(--vnstat-plus-tooltip-bg); color: var(--vnstat-plus-tooltip-text); white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
                     #${rootId} .vnstat-plus-bar-row:hover .vnstat-plus-tooltip, #${rootId} .vnstat-plus-bar-row:focus .vnstat-plus-tooltip { display: block; }
-                    #${rootId} .vnstat-plus-legend { display: flex; gap: 0.9em; color: #999; font-size: 0.78em; margin: 0.5em 0 0.7em 6.65em; }
+                    #${rootId} .vnstat-plus-legend { display: flex; gap: 0.9em; color: var(--vnstat-plus-muted); font-size: 0.78em; margin: 0.5em 0 0.7em 6.65em; }
                     #${rootId} .vnstat-plus-dot { display: inline-block; width: 0.7em; height: 0.7em; border-radius: 50%; margin-right: 0.25em; }
                     #${rootId} .vnstat-plus-table-wrap { overflow-x: auto; }
                     #${rootId} table { width: 100%; margin-bottom: 0; font-size: 0.82em; }
-                    #${rootId} th { color: #999; font-weight: 600; }
+                    #${rootId} th { color: var(--vnstat-plus-muted); font-weight: 600; }
                     #${rootId} th:not(:first-child), #${rootId} td:not(:first-child) { text-align: right; }
                     #${rootId} .vnstat-plus-empty { color: #999; padding: 1em 0; text-align: center; }
                     @media (max-width: 420px) {
@@ -179,8 +179,8 @@ export default class VnstatPlus extends BaseWidget {
                 <div id="${this._elementId('chart-title')}" class="vnstat-plus-section-title">${this._escape(this.translations.traffic_chart)}</div>
                 <div id="${this._elementId('chart')}" class="vnstat-plus-chart"></div>
                 <div id="${this._elementId('legend')}" class="vnstat-plus-legend">
-                    <span><i class="vnstat-plus-dot" style="background:#58a6ff;"></i>${this._escape(this.translations.download)}</span>
-                    <span><i class="vnstat-plus-dot" style="background:#f0a35b;"></i>${this._escape(this.translations.upload)}</span>
+                    <span><i class="vnstat-plus-dot" style="background:var(--vnstat-plus-rx);"></i>${this._escape(this.translations.download)}</span>
+                    <span><i class="vnstat-plus-dot" style="background:var(--vnstat-plus-tx);"></i>${this._escape(this.translations.upload)}</span>
                 </div>
                 <div id="${this._elementId('history-title')}" class="vnstat-plus-section-title">${this._escape(this.translations.history)}</div>
                 <div id="${this._elementId('table')}" class="vnstat-plus-table-wrap"></div>
@@ -194,6 +194,8 @@ export default class VnstatPlus extends BaseWidget {
         const $interface = $(`#${this._elementId('interface')}`);
         const $period = $(`#${this._elementId('period')}`);
         const $range = $(`#${this._elementId('range')}`);
+        this._applyTheme();
+        $(`#${this.id}-title`).html(`<b>${this._escape(this.translations.dashboard_title)}</b>`);
 
         const prefs = this._loadPrefs();
         if (prefs?.period) {
@@ -255,6 +257,38 @@ export default class VnstatPlus extends BaseWidget {
         this.barRange = ['current', '1', '3', '6', '12'].includes(config.bar_range) ? config.bar_range : '3';
         $(`#${this._elementId('range')}`).val(this.barRange);
         this._applyVisibility();
+    }
+
+    _applyTheme() {
+        const $root = $(`#${this._elementId('root')}`);
+        if (!$root.length || typeof getComputedStyle !== 'function') {
+            return;
+        }
+
+        const readSemanticColor = className => {
+            const probe = $('<span></span>').addClass(className).css({
+                position: 'absolute',
+                visibility: 'hidden'
+            }).appendTo($root)[0];
+            const color = getComputedStyle(probe).color;
+            $(probe).remove();
+            return color;
+        };
+        const readUsableColor = (node, property, fallback) => {
+            const color = node ? getComputedStyle(node)[property] : '';
+            return color && color !== 'rgba(0, 0, 0, 0)' ? color : fallback;
+        };
+        const widget = $root.closest('.widget')[0] || $root[0];
+        const widgetStyle = getComputedStyle(widget);
+        const rootStyle = $root[0].style;
+        rootStyle.setProperty('--vnstat-plus-rx', readSemanticColor('text-info'));
+        rootStyle.setProperty('--vnstat-plus-tx', readSemanticColor('text-warning'));
+        rootStyle.setProperty('--vnstat-plus-total', readSemanticColor('text-success'));
+        rootStyle.setProperty('--vnstat-plus-muted', readSemanticColor('text-muted'));
+        rootStyle.setProperty('--vnstat-plus-border', readSemanticColor('text-muted'));
+        rootStyle.setProperty('--vnstat-plus-tooltip-bg', readUsableColor(widget, 'backgroundColor', '#20242b'));
+        rootStyle.setProperty('--vnstat-plus-tooltip-text', readUsableColor(widget, 'color', '#f4f4f4'));
+        rootStyle.setProperty('--vnstat-plus-tooltip-border', widgetStyle.color || '#888');
     }
 
     _applyVisibility() {
