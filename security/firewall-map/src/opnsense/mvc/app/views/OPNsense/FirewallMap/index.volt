@@ -348,26 +348,63 @@
     .fwmap-snap-note { font-style: italic; }
     .fwmap-snap-flagged { color: var(--fwmap-danger); font-weight: 600; }
     .fwmap-live.frozen { background: var(--fwmap-frozen); }
-    #fwmap-timeline { position: absolute; left: 12px; bottom: 12px; z-index: 4; display: flex; align-items: center; gap: 2px;
-        max-width: calc(100% - 24px); padding: 3px; border-radius: 999px; font-size: .9em;
+    /* the timeline: a pill bottom left that grows sideways only (same height), a scrubber when open */
+    #fwmap-timeline { position: absolute; left: 12px; bottom: 12px; z-index: 4; height: 40px; box-sizing: border-box;
+        display: flex; align-items: center; gap: 2px; max-width: calc(100% - 24px); padding: 0 4px; border-radius: 20px; font-size: .9em;
         background: var(--fwmap-panel, #fff); color: var(--fwmap-text, inherit); border: 1px solid var(--fwmap-frozen);
         box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
-    #fwmap-timeline button { border: 0; background: transparent; color: inherit; border-radius: 999px; height: 30px; }
-    #fwmap-timeline button:hover:not(:disabled) { background: var(--fwmap-frozen-soft); }
-    #fwmap-timeline button:disabled { opacity: .35; }
+    #fwmap-timeline.open { right: 12px; }
+    #fwmap-timeline button { border: 0; background: transparent; color: inherit; }
+    .fwmap-tl-toggle, .fwmap-tl-step, .fwmap-tl-day-step { height: 30px; border-radius: 15px; flex: none; }
+    #fwmap-timeline .fwmap-tl-toggle:hover, #fwmap-timeline .fwmap-tl-step:hover:not(:disabled),
+    #fwmap-timeline .fwmap-tl-day-step:hover:not(:disabled) { background: var(--fwmap-frozen-soft); }
+    #fwmap-timeline button:disabled { opacity: .3; }
     .fwmap-tl-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font-weight: 600; }
-    .fwmap-tl-step { width: 30px; padding: 0; }
-    .fwmap-tl-where { padding: 0 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-    #fwmap-timeline.open { right: 12px; flex-direction: column; align-items: stretch; gap: 6px; padding: 8px 10px 10px; border-radius: 12px; }
-    #fwmap-timeline.open .fwmap-tl-toggle { width: 30px; padding: 0; justify-content: center; }
-    .fwmap-tl-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; }
-    .fwmap-tl-strip { display: flex; align-items: center; gap: 6px; }
-    .fwmap-tl-chips { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scroll-behavior: smooth; padding-bottom: 2px; }
-    #fwmap-timeline .fwmap-snap-chip { flex: none; height: auto; display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
-        padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(128, 128, 128, .3); text-align: left; }
-    #fwmap-timeline .fwmap-snap-chip.active { border: 2px solid var(--fwmap-frozen); background: var(--fwmap-frozen-soft); }
-    .fwmap-snap-chip-time { font-weight: 600; white-space: nowrap; }
-    .fwmap-snap-chip-sub { font-size: .9em; opacity: .75; white-space: nowrap; }
+    #fwmap-timeline.open .fwmap-tl-toggle { width: 30px; padding: 0; justify-content: center; color: var(--fwmap-frozen); }
+    .fwmap-tl-step, .fwmap-tl-day-step { width: 28px; padding: 0; }
+    .fwmap-tl-where { padding: 0 6px; white-space: nowrap; font-variant-numeric: tabular-nums; flex: none; }
+    .fwmap-tl-day { display: inline-flex; align-items: center; flex: none; padding: 0 4px 0 2px; margin-right: 6px;
+        border-right: 1px solid rgba(128, 128, 128, .25); }
+    .fwmap-tl-day-label { font-weight: 600; white-space: nowrap; min-width: 4.5em; text-align: center; }
+    .fwmap-tl-track { position: relative; flex: 1; min-width: 120px; height: 100%; margin: 0 14px; }
+    .fwmap-tl-line { position: absolute; left: -6px; right: -6px; top: 15px; height: 2px; border-radius: 1px; background: rgba(128, 128, 128, .35); }
+    .fwmap-tl-tick { position: absolute; bottom: 2px; transform: translateX(-50%); font-size: .7em; opacity: .55; white-space: nowrap;
+        font-variant-numeric: tabular-nums; pointer-events: none; }
+    .fwmap-tl-tick::before { content: ""; position: absolute; left: 50%; top: -9px; width: 1px; height: 5px; background: currentColor; }
+    .fwmap-tl-dot, .fwmap-tl-group, .fwmap-tl-mini { position: absolute; transform: translate(-50%, -50%); }
+    #fwmap-timeline .fwmap-tl-dot { top: 16px; width: 12px; height: 12px; padding: 0; border-radius: 50%;
+        background: var(--fwmap-text, #888); opacity: .75; box-shadow: 0 0 0 2px var(--fwmap-panel, #fff); }
+    #fwmap-timeline .fwmap-tl-dot:hover, #fwmap-timeline .fwmap-tl-dot:focus-visible { opacity: 1; width: 15px; height: 15px; }
+    #fwmap-timeline .fwmap-tl-dot.flagged { background: var(--fwmap-danger); opacity: .9; }
+    #fwmap-timeline .fwmap-tl-dot.active { background: var(--fwmap-frozen); opacity: 1;
+        box-shadow: 0 0 0 2px var(--fwmap-panel, #fff), 0 0 0 4px var(--fwmap-frozen); }
+    .fwmap-tl-group { top: 16px; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+        cursor: pointer; background: var(--fwmap-frozen-soft); border: 1.5px solid var(--fwmap-frozen); outline: none;
+        box-shadow: 0 0 0 2px var(--fwmap-panel, #fff); }
+    .fwmap-tl-group.active { background: var(--fwmap-frozen); color: var(--fwmap-on-frozen); }
+    .fwmap-tl-group:focus-visible { box-shadow: 0 0 0 2px var(--fwmap-panel, #fff), 0 0 0 4px var(--fwmap-accent); }
+    .fwmap-tl-count { font-size: .72em; font-weight: 700; line-height: 1; }
+    /* a numbered dot opens a zoomed strip above the pill (the pill keeps its height) */
+    .fwmap-tl-pop { display: none; position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); padding-bottom: 12px; cursor: default; }
+    .fwmap-tl-group:hover .fwmap-tl-pop, .fwmap-tl-group:focus-within .fwmap-tl-pop { display: block; }
+    .fwmap-tl-strip { position: relative; display: block; height: 52px; border-radius: 12px; background: var(--fwmap-panel, #fff);
+        border: 1px solid var(--fwmap-frozen); box-shadow: 0 6px 18px rgba(0, 0, 0, .22); }
+    .fwmap-tl-strip::before { content: ""; position: absolute; left: 14px; right: 14px; top: 18px; height: 2px; background: rgba(128, 128, 128, .3); }
+    #fwmap-timeline .fwmap-tl-mini { top: 19px; width: 12px; height: 12px; padding: 0; border-radius: 50%; background: var(--fwmap-text, #888); opacity: .8; }
+    #fwmap-timeline .fwmap-tl-mini.flagged { background: var(--fwmap-danger); }
+    #fwmap-timeline .fwmap-tl-mini.active { background: var(--fwmap-frozen); opacity: 1; box-shadow: 0 0 0 2px var(--fwmap-panel, #fff), 0 0 0 4px var(--fwmap-frozen); }
+    #fwmap-timeline .fwmap-tl-mini:hover, #fwmap-timeline .fwmap-tl-mini:focus-visible { opacity: 1; width: 15px; height: 15px; }
+    .fwmap-tl-mini-time { position: absolute; top: 15px; left: 50%; transform: translateX(-50%) scale(.8); font-size: .78em; white-space: nowrap;
+        opacity: .75; pointer-events: none; color: var(--fwmap-text, inherit); }
+    /* the badge over a dot: date, time, counts, note, who took it */
+    .fwmap-tl-tip { display: none; position: absolute; left: 50%; bottom: calc(100% + 12px); transform: translateX(-50%); z-index: 2;
+        flex-direction: column; gap: 2px; min-width: 150px; max-width: 280px; padding: 7px 10px; border-radius: 8px; text-align: left;
+        white-space: normal; font-size: .88rem; line-height: 1.35; pointer-events: none;
+        background: var(--fwmap-panel, #fff); color: var(--fwmap-text, inherit); border: 1px solid rgba(128, 128, 128, .35);
+        box-shadow: 0 6px 18px rgba(0, 0, 0, .25); }
+    .fwmap-tl-dot:hover > .fwmap-tl-tip, .fwmap-tl-dot:focus-visible > .fwmap-tl-tip,
+    .fwmap-tl-mini:hover > .fwmap-tl-tip, .fwmap-tl-mini:focus-visible > .fwmap-tl-tip { display: flex; }
+    .fwmap-tl-tip b { white-space: nowrap; }
     .fwmap-snap-row { grid-template-columns: 30px minmax(0, 1fr) auto; }
     #fwmap-side.fwmap-narrow .fwmap-snap-row { grid-template-columns: 26px minmax(0, 1fr) auto; }
     .fwmap-snap-row.active { background: var(--fwmap-frozen-soft); box-shadow: inset 3px 0 0 var(--fwmap-frozen); }
@@ -641,6 +678,10 @@
         timeline: {{ lang._('Timeline')|json_encode }},
         timeline_expand: {{ lang._('Show the timeline')|json_encode }},
         timeline_collapse: {{ lang._('Collapse the timeline')|json_encode }},
+        timeline_previous_day: {{ lang._('Previous day with snapshots')|json_encode }},
+        timeline_next_day: {{ lang._('Next day with snapshots')|json_encode }},
+        snapshots_here_one: {{ lang._('{count} snapshot')|json_encode }},
+        snapshots_here_many: {{ lang._('{count} snapshots taken close together')|json_encode }},
         captured: {{ lang._('Captured')|json_encode }},
         as_captured: {{ lang._('As captured at')|json_encode }},
         may_have_closed: {{ lang._('this connection may have closed since')|json_encode }},

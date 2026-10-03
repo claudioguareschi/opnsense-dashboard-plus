@@ -133,6 +133,7 @@ export async function openSnapshot(id) {
 }
 
 function enterSnapshotMode(meta, data) {
+  timelineDay = dayKey(meta);
   if (state.mode !== 'snapshot') {
     state.tabBeforeSnapshots = state.talkerTab;
   }
@@ -279,11 +280,97 @@ function renderBanner() {
     </span>`).show();
 }
 
-function chipHtml(meta) {
-  const current = meta.id === state.frozen?.meta.id;
-  return `<button type="button" class="fwmap-snap-chip${current ? ' active' : ''}" data-id="${escapeHtml(meta.id)}"${current ? ' aria-current="true"' : ''}>
-    <span class="fwmap-snap-chip-time">${escapeHtml(takenText(meta))}</span>
-    <span class="fwmap-snap-chip-sub">${countsText(meta)}${meta.note ? ` · ${escapeHtml(T.snapshot_has_note)}` : ''}</span></button>`;
+// the scrubber: dots closer than this many pixels share one numbered dot
+const CLUSTER_PX = 18;
+// the zoomed strip a numbered dot opens keeps its dots at least this far apart
+const STRIP_GAP_PX = 34;
+let timelineDay = null;
+
+function dayKey(meta) {
+  return new Date((meta?.taken || 0) * 1000).toDateString();
+}
+
+function dayLabel(key) {
+  const date = new Date(key);
+  return new Date().toDateString() === key ? T.today : date.toLocaleDateString([], {weekday: 'short', day: 'numeric', month: 'short'});
+}
+
+/** The badge over a dot: when, what it holds, the note and who took it. */
+function tipHtml(meta) {
+  return `<span class="fwmap-tl-tip" role="tooltip"><b>${escapeHtml(takenText(meta))}</b>
+    <span>${countsText(meta)}</span>
+    ${meta.note ? `<span class="fwmap-snap-note">“${escapeHtml(meta.note)}”</span>` : ''}
+    ${meta.user ? `<span class="fwmap-muted">${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}</span>` : ''}</span>`;
+}
+
+/** A tick every 5 min … 6 h, whichever gives four to seven labels over `span` seconds. */
+function tickStep(span) {
+  const steps = [300, 600, 900, 1800, 3600, 7200, 10800, 21600];
+  return steps.find((stepSeconds) => span / stepSeconds <= 7) || 21600;
+}
+
+function timeLabel(seconds) {
+  return new Date(seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+}
+
+/** Lay out one day's snapshots on the track: numbered dots for close ones, a zoomed strip on hover. */
+function layoutTrack($track, day) {
+  const width = $track.width() || 300;
+  const metas = day.slice().sort((a, b) => a.taken - b.taken);
+  const first = metas[0].taken;
+  const last = metas[metas.length - 1].taken;
+  // the axis zooms to the day's snapshots, never narrower than 20 minutes
+  const span = Math.max(last - first, 1200);
+  const middle = (first + last) / 2;
+  const start = middle - span * 0.56;
+  const end = middle + span * 0.56;
+  const x = (taken) => ((taken - start) / (end - start)) * width;
+  const step = tickStep(end - start);
+  let ticks = '';
+  for (let tick = Math.ceil(start / step) * step; tick <= end; tick += step) {
+    ticks += `<span class="fwmap-tl-tick" style="left:${x(tick).toFixed(1)}px">${escapeHtml(timeLabel(tick))}</span>`;
+  }
+  const groups = [];
+  for (const meta of metas) {
+    const position = x(meta.taken);
+    const group = groups[groups.length - 1];
+    if (group && position - group.x0 < CLUSTER_PX) {
+      group.items.push(meta);
+      group.x1 = position;
+    } else {
+      groups.push({x0: position, x1: position, items: [meta]});
+    }
+  }
+  const currentId = state.frozen?.meta.id;
+  const dots = groups.map((group) => {
+    const centre = (group.x0 + group.x1) / 2;
+    const current = group.items.some((meta) => meta.id === currentId);
+    if (group.items.length === 1) {
+      const meta = group.items[0];
+      return `<button type="button" class="fwmap-tl-dot${current ? ' active' : ''}${meta.flagged ? ' flagged' : ''}" data-id="${escapeHtml(meta.id)}"
+        style="left:${centre.toFixed(1)}px" aria-label="${escapeHtml(takenText(meta))}"${current ? ' aria-current="true"' : ''}>${tipHtml(meta)}</button>`;
+    }
+    // the zoomed strip: the group's own time span, its dots spread to stay pickable
+    const a = group.items[0].taken;
+    const b = group.items[group.items.length - 1].taken;
+    const stripWidth = Math.max(180, (group.items.length - 1) * STRIP_GAP_PX + 60);
+    let previous = -Infinity;
+    const mini = group.items.map((meta, index) => {
+      let position = 30 + (b > a ? ((meta.taken - a) / (b - a)) * (stripWidth - 60) : index * STRIP_GAP_PX);
+      position = Math.max(position, previous + STRIP_GAP_PX);
+      previous = position;
+      const active = meta.id === currentId;
+      return `<button type="button" class="fwmap-tl-mini${active ? ' active' : ''}${meta.flagged ? ' flagged' : ''}" data-id="${escapeHtml(meta.id)}"
+        style="left:${position.toFixed(1)}px" aria-label="${escapeHtml(takenText(meta))}"${active ? ' aria-current="true"' : ''}>
+        <span class="fwmap-tl-mini-time">${escapeHtml(takenText(meta, false))}</span>${tipHtml(meta)}</button>`;
+    }).join('');
+    const finalWidth = Math.max(stripWidth, previous + 30);
+    return `<div class="fwmap-tl-group${current ? ' active' : ''}" tabindex="0" style="left:${centre.toFixed(1)}px"
+        aria-label="${escapeHtml(plural(T, 'snapshots_here', group.items.length))}">
+      <span class="fwmap-tl-count">${escapeHtml(group.items.length)}</span>
+      <span class="fwmap-tl-pop"><span class="fwmap-tl-strip" style="width:${finalWidth.toFixed(0)}px">${mini}</span></span></div>`;
+  }).join('');
+  $track.html(`<span class="fwmap-tl-line"></span>${ticks}${dots}`);
 }
 
 function renderTimeline() {
@@ -294,25 +381,31 @@ function renderTimeline() {
   }
   const list = state.snapshots;
   const index = list.findIndex((meta) => meta.id === state.frozen.meta.id);
-  // newest on the right, as time reads
-  const ordered = list.slice().reverse();
   const older = `<button type="button" class="fwmap-tl-step" data-step="1" title="${escapeHtml(T.snapshot_older)}" aria-label="${escapeHtml(T.snapshot_older)}"${index >= list.length - 1 ? ' disabled' : ''}>${ic('chevron-left')}</button>`;
   const newer = `<button type="button" class="fwmap-tl-step" data-step="-1" title="${escapeHtml(T.snapshot_newer)}" aria-label="${escapeHtml(T.snapshot_newer)}"${index <= 0 ? ' disabled' : ''}>${ic('chevron')}</button>`;
+  const where = `<span class="fwmap-tl-where">${escapeHtml(takenText(state.frozen.meta, false))} <span class="fwmap-muted">· ${escapeHtml(list.length - index)}/${escapeHtml(list.length)}</span></span>`;
   if (!timelineOpen) {
     $timeline.removeClass('open').html(`
       <button type="button" class="fwmap-tl-toggle" aria-expanded="false" title="${escapeHtml(T.timeline_expand)}">${ic('clock')} ${escapeHtml(T.timeline)}</button>
-      ${older}<span class="fwmap-tl-where">${escapeHtml(shortTime(state.frozen.meta))} <span class="fwmap-muted">· ${escapeHtml(list.length - index)} / ${escapeHtml(list.length)}</span></span>${newer}`).show();
+      ${older}${where}${newer}`).show();
     return;
   }
-  $timeline.addClass('open').html(`
-    <div class="fwmap-tl-head"><span>${ic('clock')} ${escapeHtml(T.timeline)} <span class="fwmap-muted">· ${escapeHtml(list.length)} / ${escapeHtml(state.snapshotsKept.keep)}</span></span>
-      <button type="button" class="fwmap-tl-toggle" aria-expanded="true" title="${escapeHtml(T.timeline_collapse)}" aria-label="${escapeHtml(T.timeline_collapse)}">${ic('chevron-down')}</button></div>
-    <div class="fwmap-tl-strip">${older}<div class="fwmap-tl-chips">${ordered.map(chipHtml).join('')}</div>${newer}</div>`).show();
-  const $chips = $timeline.find('.fwmap-tl-chips');
-  const $active = $chips.find('.fwmap-snap-chip.active');
-  if ($active.length) {
-    $chips.scrollLeft($active[0].offsetLeft - $chips.width() / 2 + $active.outerWidth() / 2);
+  // one day at a time: the snapshot on screen picks it, the day buttons move through the others
+  const days = [...new Set(list.map(dayKey))].sort((a, b) => new Date(a) - new Date(b));
+  if (!timelineDay || !days.includes(timelineDay)) {
+    timelineDay = dayKey(state.frozen.meta);
   }
+  const dayIndex = days.indexOf(timelineDay);
+  const dayButton = (stepValue, icon, label, disabled) => `<button type="button" class="fwmap-tl-day-step" data-day-step="${stepValue}"
+    title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"${disabled ? ' disabled' : ''}>${ic(icon)}</button>`;
+  $timeline.addClass('open').html(`
+    <button type="button" class="fwmap-tl-toggle" aria-expanded="true" title="${escapeHtml(T.timeline_collapse)}" aria-label="${escapeHtml(T.timeline_collapse)}">${ic('clock')}</button>
+    <span class="fwmap-tl-day">${dayButton(-1, 'chevron-left', T.timeline_previous_day, dayIndex <= 0)}
+      <span class="fwmap-tl-day-label">${escapeHtml(dayLabel(timelineDay))}</span>
+      ${dayButton(1, 'chevron', T.timeline_next_day, dayIndex >= days.length - 1)}</span>
+    <span class="fwmap-tl-track"></span>
+    ${older}${where}${newer}`).show();
+  layoutTrack($timeline.find('.fwmap-tl-track'), list.filter((meta) => dayKey(meta) === timelineDay));
 }
 
 /** The Snapshots tab of the side panel. */
@@ -396,8 +489,13 @@ export function bindSnapshots(pageHooks) {
     .on('click', '.fwmap-tl-step', function () {
       step(Number($(this).data('step')));
     })
-    .on('click', '.fwmap-snap-chip', function () {
+    .on('click', '.fwmap-tl-dot, .fwmap-tl-mini', function () {
       openSnapshot(String($(this).data('id')));
+    })
+    .on('click', '.fwmap-tl-day-step', function () {
+      const days = [...new Set(state.snapshots.map(dayKey))].sort((a, b) => new Date(a) - new Date(b));
+      timelineDay = days[days.indexOf(timelineDay) + Number($(this).data('day-step'))] || timelineDay;
+      renderTimeline();
     });
   $('#fwmap-talkers-list')
     .on('mousedown', '.fwmap-snap-row', function (event) {
@@ -410,6 +508,18 @@ export function bindSnapshots(pageHooks) {
         openSnapshot(String($(this).data('id')));
       }
     });
+  // the scrubber's layout depends on the map's width (window, splitters)
+  if (window.ResizeObserver) {
+    let frame = null;
+    new ResizeObserver(() => {
+      if (timelineOpen && state.mode === 'snapshot' && frame === null) {
+        frame = requestAnimationFrame(() => {
+          frame = null;
+          renderTimeline();
+        });
+      }
+    }).observe(document.getElementById('fwmap-map'));
+  }
   // a link from the dashboard widget's "Open in full map"
   const match = /(?:^#|&)snapshot=(\d{8}T\d{6}Z-[0-9a-f]{4})/.exec(window.location.hash);
   loadSnapshots().then(() => {

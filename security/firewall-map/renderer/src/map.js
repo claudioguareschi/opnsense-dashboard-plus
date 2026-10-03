@@ -27,7 +27,7 @@
 /* The deck.gl map: layers for arcs, blocked sources, IDS markers and labels, fades and pulses. */
 import {Deck, MapView, WebMercatorViewport} from '@deck.gl/core';
 import {GeoJsonLayer, IconLayer, PathLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
-import {IDS_ARC_FADE_SECONDS, buildArcs, continuePhases, buildBlocks, clearOfHomes, HOME_CLEARANCE, idsArcData, mercatorY, pulsePosition, pulses, unitsPerPixel} from './arcs.js';
+import {IDS_ARC_FADE_SECONDS, buildArcs, continuePhases, buildBlocks, clearOfHomes, HOME_CLEARANCE, idsArcData, marchingPulses, mercatorY, pulsePosition, pulses, unitsPerPixel} from './arcs.js';
 import {createFollow} from './follow.js';
 import {plain} from './format.js';
 import {DEFAULT_OPTIONS} from './options.js';
@@ -451,8 +451,8 @@ export function createFirewallMap(container, options = {}) {
     return new ScatterplotLayer({
       id: 'firewall-map-pulses',
       data: pulseItems.filter((item) => drawn(item.arc)),
-      getPosition: (item) => pulsePosition(item.arc, seconds, item.reverse),
-      getRadius: (item) => item.arc.heavy ? 3.4 : 2.4,
+      getPosition: (item) => pulsePosition(item.arc, seconds, item.reverse, item.period, item.phase),
+      getRadius: (item) => item.march ? (item.arc.heavy ? 2.6 : 1.9) : item.arc.heavy ? 3.4 : 2.4,
       radiusUnits: 'pixels',
       getFillColor: (item) => pulseColor(item),
       updateTriggers: {getPosition: seconds, getFillColor: [colors.toward.pulse, colors.away.pulse, colors.inbound.pulse, settings.colorMode, categoryKey]},
@@ -794,7 +794,7 @@ export function createFirewallMap(container, options = {}) {
     };
     (data.flows || []).filter((flow) => flow.ids).forEach((flow) => note(flow.dest, outcome({flagged: flow.ids.severity <= 2, stopped: false})));
     (data.ids_flows || []).forEach((flow) => note(flow.dest, idsOutcome(flow)));
-    pulseItems = pulses(arcs);
+    pulseItems = frozen ? marchingPulses(arcs) : pulses(arcs);
     blockArcs = blockFader.update(settings.blocks ? buildBlocks(data) : [], now);
     locationsShown = endpointFader.update(arcData.locations, now);
     alertPoints = alertFader.update(data.alerts || [], now);
@@ -856,9 +856,10 @@ export function createFirewallMap(container, options = {}) {
       follow.set(on);
       follow.update(true);
     },
-    /** A saved snapshot (true) or live traffic: a snapshot's pulses keep their recorded speed, nothing ages. */
+    /** A saved snapshot (true) or live traffic: a snapshot's arcs carry evenly spaced marching dots, nothing ages. */
     setFrozen(on) {
       frozen = Boolean(on);
+      pulseItems = frozen ? marchingPulses(arcs) : pulses(arcs);
     },
     /** Re-frame now (after a filter change) rather than waiting for the traffic to settle. */
     refit() {

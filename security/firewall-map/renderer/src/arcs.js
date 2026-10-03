@@ -359,13 +359,28 @@ export function clearOfHomes(path, homes, radius) {
   return shown;
 }
 
-export function pulsePosition(arc, seconds, reverse) {
+export function pulsePosition(arc, seconds, reverse, period = arc.period, phase = arc.phase) {
   const path = arc.shown || arc.path;
-  let t = (seconds / arc.period + arc.phase) % 1;
+  let t = (seconds / period + phase) % 1;
   if (reverse) {
     t = 1 - t;
   }
   return pointAt(path, t * ARC_SAMPLES);
+}
+
+// a saved snapshot: evenly spaced dots marching at one pace, so a frozen map never looks live
+const MARCH_DOTS = 6;
+const MARCH_PERIOD = 7;
+
+/** Equally spaced marching dots for every arc of a saved snapshot, in the traffic's direction. */
+export function marchingPulses(arcs) {
+  const items = [];
+  for (const item of pulses(arcs)) {
+    for (let dot = 0; dot < MARCH_DOTS; dot++) {
+      items.push({...item, period: MARCH_PERIOD, phase: dot / MARCH_DOTS, march: true});
+    }
+  }
+  return items;
 }
 
 /** Pulses run away from the firewall (arc origin) for outbound traffic and towards it for inbound. */
