@@ -332,7 +332,12 @@ export default class FirewallMap extends BaseWidget {
         host.flash(frame);
         const $button = $(`#${this.id}-firewall-map-camera`).prop('disabled', true);
         try {
-            const result = await this.ajaxCall('/api/firewallmap/snapshots/save', JSON.stringify({}), 'POST');
+            // not ajaxCall: its 5 s timeout is shorter than the collector may take to answer, and
+            // its retry on timeout would save the snapshot twice
+            const result = await $.ajax({
+                type: 'POST', url: '/api/firewallmap/snapshots/save', dataType: 'json',
+                contentType: 'application/json', data: JSON.stringify({}), timeout: 30000,
+            });
             if (result.result !== 'saved') {
                 throw new Error(result.error || result.result);
             }
