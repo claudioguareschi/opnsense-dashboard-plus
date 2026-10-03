@@ -46,6 +46,9 @@
     .fwmap-chip select { -webkit-appearance: none; appearance: none; border: 0; outline: 0; background: transparent; color: inherit;
         font: inherit; height: 100%; padding: 0 1.3em 0 0; margin: 0; cursor: pointer; max-width: 13em; text-overflow: ellipsis; }
     .fwmap-chip select option { color: initial; }
+    /* the theme forces its caret image onto every select (!important); the chips draw their own */
+    .fwmap-chip select, .fwmap-legend-mode select { background-image: none !important; background-color: transparent !important; }
+    #fwmap-toolbar button, .fwmap-chip { -webkit-user-select: none; user-select: none; }
     .fwmap-chip .fwmap-chip-caret { position: absolute; right: 7px; width: .9em; height: .9em; opacity: .6; pointer-events: none; }
     .fwmap-chip-clear { display: none; flex: none; align-items: center; justify-content: center; width: 1.3em; height: 1.3em; padding: 0;
         margin-right: -4px; border: 0; border-radius: 50%; background: transparent; color: inherit; opacity: .85; line-height: 1; }
