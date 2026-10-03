@@ -56,7 +56,7 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 gap: 0.55em;
                 flex-wrap: wrap;
                 min-width: 0;
-                grid-column: 1;
+                grid-column: 1 / -1;
                 grid-row: 2;
                 padding-left: 0.5em;
                 font-size: 0.88em;
@@ -74,14 +74,14 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 width: 100%;
                 min-width: 0;
                 max-width: none;
-                grid-column: 1 / -1;
+                grid-column: 1;
                 grid-row: 1;
-                width: calc(100% - 1em);
-                margin: 0 0.5em;
+                width: calc(100% - 0.5em);
+                margin-left: 0.5em;
             }
             .dashboard-plus-services-toolbar > select {
                 grid-column: 2;
-                grid-row: 2;
+                grid-row: 1;
                 justify-self: end;
                 width: calc(100% - 0.5em);
                 min-width: 0;
@@ -114,14 +114,6 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
             .dashboard-plus-services-error {
                 color: var(--danger, #d62728);
             }
-            @media (max-width: 34em) {
-                .dashboard-plus-services-toolbar {
-                    grid-template-columns: minmax(0, 1fr) 8em;
-                }
-                .dashboard-plus-services-search {
-                    grid-column: 1 / -1;
-                }
-            }
             @media (max-width: 22em) {
                 .dashboard-plus-services-toolbar {
                     grid-template-columns: 1fr;
@@ -134,6 +126,10 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 .dashboard-plus-services-search,
                 .dashboard-plus-services-toolbar > select {
                     grid-column: 1;
+                }
+                .dashboard-plus-services-search {
+                    width: calc(100% - 1em);
+                    margin: 0 0.5em;
                 }
                 .dashboard-plus-services-toolbar > select {
                     grid-row: 3;
