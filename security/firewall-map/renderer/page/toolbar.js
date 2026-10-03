@@ -75,6 +75,9 @@ export function updateToolbar(snapshot) {
       countries.set(country, {value: country, label: plain(country)});
     }
   }
+  for (const name of snapshot.interfaces || []) {
+    ifaces.set(name, {value: name, label: name});
+  }
   for (const block of snapshot.blocks || []) {
     if (block.country) {
       countries.set(block.country, {value: block.country, label: plain(block.country)});

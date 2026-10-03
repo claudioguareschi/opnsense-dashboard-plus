@@ -785,7 +785,7 @@
                 <div class="btn-group btn-group-sm fwmap-filter" data-filter="traffic" data-icon="fa-fw fa-arrows-up-down">
                     <select id="fwmap-filter-traffic" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" aria-label="{{ lang._('Traffic') }}">
                         <option value="all">{{ lang._('All traffic') }}</option>
-                        <option value="permitted">{{ lang._('Permitted') }}</option>
+                        <option value="permitted">{{ lang._('Allowed') }}</option>
                         <option value="blocked">{{ lang._('Blocked') }}</option>
                         <option value="threats">{{ lang._('Threats that got through') }}</option>
                         <option value="ids">{{ lang._('IDS alerts') }}</option>
@@ -795,7 +795,7 @@
                     <button type="button" class="btn btn-primary fwmap-filter-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><i class="fa fa-xmark" aria-hidden="true"></i></button>
                 </div>
                 <div class="btn-group btn-group-sm fwmap-filter" data-filter="iface" data-icon="fa-fw fa-sitemap">
-                    <select id="fwmap-filter-iface" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" aria-label="{{ lang._('Interface') }}"></select>
+                    <select id="fwmap-filter-iface" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" data-live-search="true" aria-label="{{ lang._('Interface') }}"></select>
                     <button type="button" class="btn btn-primary fwmap-filter-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><i class="fa fa-xmark" aria-hidden="true"></i></button>
                 </div>
                 <div class="btn-group btn-group-sm fwmap-filter" data-filter="host" data-icon="fa-fw fa-desktop">

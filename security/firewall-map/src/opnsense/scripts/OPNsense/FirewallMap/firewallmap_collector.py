@@ -606,6 +606,8 @@ class Collector:
         payload["ids_flows"] = self.correlator.snapshot(geo, origin, self.leases, self.networks, self.interfaces,
                                                         self.blocklists, self.reputation)
         # which lists are consulted, so the details can show "not listed" per list
+        # every configured interface, so the interface filter lists the quiet ones too
+        payload["interfaces"] = sorted(set(self.interfaces.values()), key=str.lower)
         payload["threat_lists"] = list(self.blocklists.index[0]) + ([REPUTATION_LIST] if self.reputation.scores else [])
         if origin and geo.get(origin) and not any(location["id"] == origin for location in payload["locations"]):
             location = geo.get(origin)
