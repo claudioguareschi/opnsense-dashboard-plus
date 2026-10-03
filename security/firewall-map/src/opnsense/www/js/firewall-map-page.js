@@ -2743,7 +2743,7 @@
 		$(".fwmap-filter select.selectpicker").each(function() {
 			withIcons($(this));
 		});
-		$("#fwmap-toolbar .selectpicker, #fwmap-color").selectpicker();
+		$("#fwmap-toolbar .selectpicker, #fwmap-color").selectpicker().selectpicker("refresh");
 		$("#fwmap-chips").on("click", ".fwmap-filter .fwmap-filter-clear", function(event) {
 			event.preventDefault();
 			const group = $(this).closest(".fwmap-filter");

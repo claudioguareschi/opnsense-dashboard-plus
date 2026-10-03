@@ -840,19 +840,19 @@
                     <button type="button" class="btn btn-primary fwmap-filter-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><i class="fa fa-xmark" aria-hidden="true"></i></button>
                 </div>
                 <div class="btn-group btn-group-sm fwmap-filter" data-filter="iface" data-icon="fa-fw fa-sitemap">
-                    <select id="fwmap-filter-iface" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" data-live-search="true" aria-label="{{ lang._('Interface') }}"></select>
+                    <select id="fwmap-filter-iface" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" data-live-search="true" aria-label="{{ lang._('Interface') }}"><option value="">{{ lang._('All interfaces') }}</option></select>
                     <button type="button" class="btn btn-primary fwmap-filter-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><i class="fa fa-xmark" aria-hidden="true"></i></button>
                 </div>
                 <div class="btn-group btn-group-sm fwmap-filter" data-filter="host" data-icon="fa-fw fa-desktop">
-                    <select id="fwmap-filter-host" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" data-live-search="true" aria-label="{{ lang._('Inside host') }}"></select>
+                    <select id="fwmap-filter-host" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" data-live-search="true" aria-label="{{ lang._('Inside host') }}"><option value="">{{ lang._('All inside hosts') }}</option></select>
                     <button type="button" class="btn btn-primary fwmap-filter-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><i class="fa fa-xmark" aria-hidden="true"></i></button>
                 </div>
                 <div class="btn-group btn-group-sm fwmap-filter" data-filter="service" data-icon="fa-fw fa-table-cells-large">
-                    <select id="fwmap-filter-service" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" data-live-search="true" aria-label="{{ lang._('Service') }}"></select>
+                    <select id="fwmap-filter-service" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" data-live-search="true" aria-label="{{ lang._('Service') }}"><option value="">{{ lang._('All services') }}</option></select>
                     <button type="button" class="btn btn-primary fwmap-filter-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><i class="fa fa-xmark" aria-hidden="true"></i></button>
                 </div>
                 <div class="btn-group btn-group-sm fwmap-filter" data-filter="country" data-icon="fa-fw fa-globe">
-                    <select id="fwmap-filter-country" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" data-live-search="true" aria-label="{{ lang._('Country') }}"></select>
+                    <select id="fwmap-filter-country" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" data-live-search="true" aria-label="{{ lang._('Country') }}"><option value="">{{ lang._('All countries') }}</option></select>
                     <button type="button" class="btn btn-primary fwmap-filter-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><i class="fa fa-xmark" aria-hidden="true"></i></button>
                 </div>
                 <div class="btn-group btn-group-sm" id="fwmap-filter-asn">

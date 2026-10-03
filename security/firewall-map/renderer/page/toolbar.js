@@ -147,7 +147,9 @@ export function bindChips() {
   $('.fwmap-filter select.selectpicker').each(function () {
     withIcons($(this));
   });
-  $('#fwmap-toolbar .selectpicker, #fwmap-color').selectpicker();
+  // bootstrap-select may already have built its buttons on page load (its data-api), before
+  // the icons were set: refresh so they show from the start, not only after the first data
+  $('#fwmap-toolbar .selectpicker, #fwmap-color').selectpicker().selectpicker('refresh');
   $('#fwmap-chips').on('click', '.fwmap-filter .fwmap-filter-clear', function (event) {
     event.preventDefault();
     const group = $(this).closest('.fwmap-filter');
