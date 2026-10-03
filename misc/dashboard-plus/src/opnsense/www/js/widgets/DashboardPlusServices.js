@@ -42,13 +42,19 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
         const css = `
             .dashboard-plus-services {
                 min-height: 12em;
+                width: 100%;
+                max-width: none;
+                box-sizing: border-box;
             }
             .dashboard-plus-services-toolbar {
                 display: flex;
                 flex-wrap: wrap;
                 align-items: center;
+                justify-content: flex-start;
                 gap: 0.6em;
                 width: 100%;
+                min-width: 100%;
+                max-width: none;
                 box-sizing: border-box;
                 padding: 0.25em 0 0.7em;
             }
