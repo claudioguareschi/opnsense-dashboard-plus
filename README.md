@@ -112,7 +112,7 @@ flagged traffic got through*, or *Blocked*), then one sentence per address, for 
 
 - **Filters**: traffic (all, allowed, blocked, threats that got through, IDS alerts), service,
   interface, inside host, country and network (click an ASN).
-- **Color**: inbound/outbound (default), data direction, egress interface or service, with a
+- **Color**: inbound/outbound (default), download/upload, egress interface or service, with a
   legend.
 - **Top talkers** by host, country and network with sparklines; click one to filter the map.
 - **Resizable panels**: drag the handles between the map and the side panel, and between the top

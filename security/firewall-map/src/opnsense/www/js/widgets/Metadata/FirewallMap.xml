@@ -71,8 +71,8 @@
             <map_started_inside>Outbound</map_started_inside>
             <map_started_outside>Inbound</map_started_outside>
             <map_started_both>Both directions</map_started_both>
-            <map_toward>Toward the firewall</map_toward>
-            <map_away>Away from the firewall</map_away>
+            <map_toward>Mostly download</map_toward>
+            <map_away>Mostly upload</map_away>
             <map_blocked>Blocked</map_blocked>
             <map_flagged_blocked>Flagged · blocked</map_flagged_blocked>
             <map_flagged_allowed>Flagged · allowed</map_flagged_allowed>

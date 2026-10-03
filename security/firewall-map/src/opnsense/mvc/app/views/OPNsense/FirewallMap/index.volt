@@ -712,8 +712,8 @@
         map_started_inside: {{ lang._('Outbound')|json_encode }},
         map_started_outside: {{ lang._('Inbound')|json_encode }},
         map_started_both: {{ lang._('Both directions')|json_encode }},
-        map_toward: {{ lang._('Toward the firewall')|json_encode }},
-        map_away: {{ lang._('Away from the firewall')|json_encode }},
+        map_toward: {{ lang._('Mostly download')|json_encode }},
+        map_away: {{ lang._('Mostly upload')|json_encode }},
         map_blocked: {{ lang._('Blocked')|json_encode }},
         map_flagged_blocked: {{ lang._('Flagged · blocked')|json_encode }},
         map_flagged_allowed: {{ lang._('Flagged · allowed')|json_encode }},
@@ -836,7 +836,7 @@
                 <span class="fwmap-legend-mode"><span class="fwmap-legend-label">{{ lang._('Color') }}</span>
                     <select id="fwmap-color" class="selectpicker" data-width="fit" data-style="btn-default btn-xs" aria-label="{{ lang._('Color') }}">
                         <option value="initiator">{{ lang._('Inbound / outbound') }}</option>
-                        <option value="direction">{{ lang._('By data direction') }}</option>
+                        <option value="direction">{{ lang._('Download / upload') }}</option>
                         <option value="egress">{{ lang._('By egress') }}</option>
                         <option value="service">{{ lang._('By service') }}</option>
                     </select></span>
