@@ -265,42 +265,6 @@
             <refresh_interval>Refresh interval</refresh_interval>
         </translations>
     </dashboardplusdnshealth>
-    <dashboardpluswanhealth>
-        <filename>DashboardPlusWanHealth.js</filename>
-        <link>/ui/routing/configuration</link>
-        <endpoints>
-            <endpoint>/api/routing/settings/search_gateway</endpoint>
-        </endpoints>
-        <translations>
-            <title>WAN Health+</title>
-            <dashboard_title>WAN Health</dashboard_title>
-            <connection>WAN connection</connection>
-            <loading>Loading</loading>
-            <waiting>Waiting for data</waiting>
-            <online>Online</online>
-            <offline>Offline</offline>
-            <warning>Warning</warning>
-            <unmonitored>Unmonitored</unmonitored>
-            <disabled>Disabled</disabled>
-            <unavailable>Unavailable</unavailable>
-            <no_wan>No WAN gateways selected</no_wan>
-            <default_gateway>default</default_gateway>
-            <gateways>WAN gateways</gateways>
-            <selected>selected</selected>
-            <rtt>RTT</rtt>
-            <jitter>Jitter</jitter>
-            <loss>Loss</loss>
-            <rtt_deviation>RTT deviation</rtt_deviation>
-            <packet_loss>Packet loss</packet_loss>
-            <updated>Updated</updated>
-            <fetch_failed>Unable to read WAN health data</fetch_failed>
-            <open_gateways>Open gateways</open_gateways>
-            <seconds_5>5 seconds</seconds_5>
-            <seconds_15>15 seconds</seconds_15>
-            <seconds_30>30 seconds</seconds_30>
-            <refresh_interval>Refresh interval</refresh_interval>
-        </translations>
-    </dashboardpluswanhealth>
     <dashboardplusservices>
         <filename>DashboardPlusServices.js</filename>
         <link>/ui/core/service</link>
