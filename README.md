@@ -4,7 +4,7 @@ Dashboard plus for [OPNsense](https://opnsense.org) provides a set of informativ
 
 | Package | What it adds |
 |---|---|
-| **os-dashboard-plus** | Enhanced dashboard widgets: System Information+, Traffic Graph+, System Metrics+, Thermal Sensors+, Interface Statistics+, Gateways+, Interfaces+, Firewall Logs+ and Services+. |
+| **os-dashboard-plus** | Enhanced dashboard widgets: System Information+, Traffic Graph+, System Metrics+, Thermal Sensors+, Interface Statistics+, Gateways+, Interfaces+, Firewall Logs+, Services+, DNS Health+ and WAN Health+. |
 | **os-firewall-map** (Firewall Map+) | The firewall's live traffic (IPv4 and IPv6) on a world map, as a dashboard widget and a full-size page, with plain-language details, threat lists, Suricata alerts and a Threats panel. |
 
 These widgets are not an official OPNsense plugin or endorsed by OPNsense in any way. I created them for personal use and they fit what I need but they are available for whoever can find a use for them. I am still actively developing so there can be bugs or improvement that can be made. This is a work in progress and I welcome suggestions to make these widgets better or more useful.
@@ -201,7 +201,7 @@ and background recording is on. It uses a few percent of one CPU core while a ma
 
 ## Dashboard Plus
 
-Nine widgets that sit next to OPNsense's built-in ones in **Add widget**. Everything is read
+Eleven widgets that sit next to OPNsense's built-in ones in **Add widget**. Everything is read
 locally from the firewall's own API. Each widget's options are in its settings dialog (gear icon
 on the widget).
 
@@ -277,6 +277,18 @@ interfaces, and how many rows.*
 
 *A searchable and filterable service table with running, stopped and locked states. Services can
 be selected in the widget settings, and start, stop and restart actions require confirmation.*
+
+### DNS Health+
+
+*A compact resolver health view showing Unbound status, recursive or forwarding mode, query rate,
+cache hit rate and DNSBL totals. When Unbound has forwarding entries, the configured AdGuard
+upstreams are listed by name and address. Settings: refresh interval.*
+
+### WAN Health+
+
+*A focused WAN view showing the overall connection state, default gateway, RTT, jitter, packet
+loss and each selected WAN gateway. An unmonitored gateway is shown explicitly as unmonitored,
+not as a failed connection. Settings: WAN gateways and refresh interval.*
 
 The screenshots come from a live firewall; host names, addresses, interface names and location
 were replaced with example values.

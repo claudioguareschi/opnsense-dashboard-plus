@@ -1,7 +1,7 @@
 <acl>
     <page-dashboard-widget-dashboard-plus>
         <!--
-            One privilege for all nine widgets, as the core widgets do it. It also grants the
+            One privilege for all eleven widgets, as the core widgets do it. It also grants the
             core endpoints the widgets read: the live firewall log, gateway status, pf state,
             interface details and service controls. The name says so, since the privilege key has to stay
             as it is for existing user and group assignments.
@@ -22,6 +22,11 @@
             <pattern>api/diagnostics/traffic/interface</pattern>
             <pattern>api/diagnostics/traffic/stream/*</pattern>
             <pattern>api/routing/settings/search_gateway</pattern>
+            <pattern>api/unbound/service/status</pattern>
+            <pattern>api/unbound/diagnostics/stats</pattern>
+            <pattern>api/unbound/overview/totals/*</pattern>
+            <pattern>api/unbound/settings/get</pattern>
+            <pattern>api/unbound/settings/searchForward</pattern>
             <pattern>api/interfaces/overview/interfaces_info</pattern>
             <pattern>api/diagnostics/firewall/log</pattern>
             <pattern>api/diagnostics/firewall/stream_log</pattern>
