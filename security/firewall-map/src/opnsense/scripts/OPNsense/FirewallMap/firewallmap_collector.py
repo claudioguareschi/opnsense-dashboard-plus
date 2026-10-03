@@ -51,6 +51,7 @@ import base64
 import binascii
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -607,7 +608,9 @@ class Collector:
                                                         self.blocklists, self.reputation)
         # which lists are consulted, so the details can show "not listed" per list
         # every configured interface, so the interface filter lists the quiet ones too
-        payload["interfaces"] = sorted(set(self.interfaces.values()), key=str.lower)
+        # (not loopback or the IPsec encapsulation device: no inside host lives behind them)
+        payload["interfaces"] = sorted({name for device, name in self.interfaces.items()
+                                        if not re.match(r"^(lo|enc)\d+$", device)}, key=str.lower)
         payload["threat_lists"] = list(self.blocklists.index[0]) + ([REPUTATION_LIST] if self.reputation.scores else [])
         if origin and geo.get(origin) and not any(location["id"] == origin for location in payload["locations"]):
             location = geo.get(origin)
