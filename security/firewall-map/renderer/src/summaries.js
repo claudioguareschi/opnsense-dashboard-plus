@@ -176,7 +176,7 @@ export function idsFlowSummary(flow, text = DEFAULT_TEXT) {
 }
 
 /**
- * One colour legend everywhere (badges, arcs, markers): green allowed and not flagged, grey
+ * One color legend everywhere (badges, arcs, markers): green allowed and not flagged, gray
  * blocked and not flagged, amber flagged but stopped (firewall or IPS), red flagged and let
  * through. Flagged means a blocklist, an AbuseIPDB report or a Suricata severity 1-2 alert; the
  * collector already folds all three into an address's lists.

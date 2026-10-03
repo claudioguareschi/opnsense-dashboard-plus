@@ -113,7 +113,7 @@ export default class DashboardPlusTraffic extends DashboardPlusWidget(BaseWidget
         this._destroyCharts();
         const selected = mergeOrder(config.interfaces, config.interfaces).filter(id => id in data.interfaces);
         // Classic10 repeats once a firewall has more than ten interfaces. Tableau20, keyed on
-        // every interface the firewall has, keeps each interface's colour stable.
+        // every interface the firewall has, keeps each interface's color stable.
         const palette = Chart.colorschemes.tableau.Tableau20;
         Object.keys(data.interfaces).forEach((id, index) => {
             this.interfaceColors[id] = palette[index % palette.length];

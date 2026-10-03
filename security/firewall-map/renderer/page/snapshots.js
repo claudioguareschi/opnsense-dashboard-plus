@@ -343,12 +343,12 @@ function layoutTrack($track, day) {
   }
   const currentId = state.frozen?.meta.id;
   const dots = groups.map((group) => {
-    const centre = (group.x0 + group.x1) / 2;
+    const center = (group.x0 + group.x1) / 2;
     const current = group.items.some((meta) => meta.id === currentId);
     if (group.items.length === 1) {
       const meta = group.items[0];
       return `<button type="button" class="fwmap-tl-dot${current ? ' active' : ''}${meta.flagged ? ' flagged' : ''}" data-id="${escapeHtml(meta.id)}"
-        style="left:${centre.toFixed(1)}px" aria-label="${escapeHtml(takenText(meta))}"${current ? ' aria-current="true"' : ''}>${tipHtml(meta)}</button>`;
+        style="left:${center.toFixed(1)}px" aria-label="${escapeHtml(takenText(meta))}"${current ? ' aria-current="true"' : ''}>${tipHtml(meta)}</button>`;
     }
     // the zoomed strip: the group's own time span, its dots spread to stay pickable
     const a = group.items[0].taken;
@@ -365,7 +365,7 @@ function layoutTrack($track, day) {
         <span class="fwmap-tl-mini-time">${escapeHtml(takenText(meta, false))}</span>${tipHtml(meta)}</button>`;
     }).join('');
     const finalWidth = Math.max(stripWidth, previous + 30);
-    return `<div class="fwmap-tl-group${current ? ' active' : ''}" tabindex="0" style="left:${centre.toFixed(1)}px"
+    return `<div class="fwmap-tl-group${current ? ' active' : ''}" tabindex="0" style="left:${center.toFixed(1)}px"
         aria-label="${escapeHtml(plural(T, 'snapshots_here', group.items.length))}">
       <span class="fwmap-tl-count">${escapeHtml(group.items.length)}</span>
       <span class="fwmap-tl-pop"><span class="fwmap-tl-strip" style="width:${finalWidth.toFixed(0)}px">${mini}</span></span></div>`;

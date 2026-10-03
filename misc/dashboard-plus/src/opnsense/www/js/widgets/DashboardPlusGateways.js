@@ -89,7 +89,7 @@ export default class DashboardPlusGateways extends DashboardPlusWidget(BaseWidge
         const icon = gateway.disabled
             ? `<i class="fa fa-times-circle-o" style="font-size: 1.3em; color: #777777;" title="${escapeHtml(this.translations.disabled)}"></i>`
             : `<i class="fa fa-check-circle-o" style="font-size: 1.3em;" title="${escapeHtml(this.translations.enabled)}"></i>`;
-        // the default-gateway globe sits beside both lines, centred like the status icon
+        // the default-gateway globe sits beside both lines, centered like the status icon
         const defaultMarker = gateway.defaultgw
             ? `<i class="fa fa-globe dashboard-plus-side-icon" aria-label="${escapeHtml(this.translations.default_gateway)}" title="${escapeHtml(this.translations.default_gateway)}"></i>`
             : '';

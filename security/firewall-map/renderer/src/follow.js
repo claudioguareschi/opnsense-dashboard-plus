@@ -42,7 +42,7 @@ const FOLLOW_MAX_ZOOM_STEPS = 3.5;
 // the view frames every arc seen over this window: a flow that comes and goes keeps its room
 // for a while instead of pulling the map in and out
 const FOLLOW_WINDOW_MS = 10000;
-// re-frame only for a real change: this much zoom, or the centre moving this share of the view
+// re-frame only for a real change: this much zoom, or the center moving this share of the view
 const FOLLOW_MIN_ZOOM_CHANGE = 0.25;
 const FOLLOW_MIN_SHIFT = 0.15;
 // a slow, gently eased flight (deck's default fly-to starts and stops abruptly)

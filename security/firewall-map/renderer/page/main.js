@@ -25,7 +25,7 @@
  */
 
 /*
- * Full-size Firewall Map+ page: filters, colour modes with legend, top talkers and investigation
+ * Full-size Firewall Map+ page: filters, color modes with legend, top talkers and investigation
  * actions around the shared renderer (firewall-map-renderer.js, the global FirewallMapRenderer).
  * Built with vite.page.config.js into src/opnsense/www/js/firewall-map-page.js.
  */
@@ -346,7 +346,7 @@ $(async () => {
   try {
     createRenderer();
   } catch (error) {
-    console.error('Firewall Map+: renderer initialisation failed', error);
+    console.error('Firewall Map+: renderer initialization failed', error);
     $('#fwmap-status').text(`${T.renderer_failed}: ${error?.message || error}`);
     return;
   }

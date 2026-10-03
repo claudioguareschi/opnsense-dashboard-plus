@@ -178,7 +178,7 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
       rateOut,
       dest,
       members,
-      // colour follows the dominant direction; pulses show both when traffic flows both ways
+      // color follows the dominant direction; pulses show both when traffic flows both ways
       toward: inShare >= 0.5,
       service: serviceCategory(members.slice().sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))[0]?.services?.[0]),
       egress: members.slice().sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))[0]?.egress || 'Unknown',

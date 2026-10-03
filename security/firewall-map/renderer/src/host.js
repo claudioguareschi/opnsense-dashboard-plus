@@ -41,7 +41,7 @@ export function hasWebGL() {
 }
 
 /**
- * Colour a map frame from the theme: its surface and border, the background grid, the text of
+ * Color a map frame from the theme: its surface and border, the background grid, the text of
  * any overlays, and the palette's CSS variables on `root` (for pills, cards and the queue).
  */
 export function applyTheme(frame, theme, {grid = null, overlays = [], root = frame} = {}) {
@@ -63,7 +63,7 @@ export function applyTheme(frame, theme, {grid = null, overlays = [], root = fra
 export {readTheme};
 
 /**
- * The camera's flash over a map frame: a short warm wash in the theme's warning colour (set by
+ * The camera's flash over a map frame: a short warm wash in the theme's warning color (set by
  * applyTheme as --fwmap-frozen), so taking a snapshot is felt without a dialog.
  */
 export function flash(frame) {

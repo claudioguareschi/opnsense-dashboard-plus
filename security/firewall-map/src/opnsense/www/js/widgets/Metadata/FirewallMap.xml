@@ -67,7 +67,7 @@
             <too_many_states>The state table is too large to map ({count} states). The map resumes below {limit}.</too_many_states>
             <data_unavailable>Live flow data is unavailable</data_unavailable>
             <webgl_unavailable>WebGL is required for Firewall Map+</webgl_unavailable>
-            <renderer_failed>Map renderer failed to initialise</renderer_failed>
+            <renderer_failed>Map renderer failed to initialize</renderer_failed>
             <map_started_inside>Started inside</map_started_inside>
             <map_started_outside>Started outside</map_started_outside>
             <map_started_both>Started from both sides</map_started_both>

@@ -27,7 +27,7 @@
 /*
  * Hover cards: the same visual grammar as the page's details panel. Title and place, a verdict
  * pill, one block per address (host, network, the plain-language sentence, IDS lines), and a
- * muted footer. Status colours come from the palette as CSS variables (see cssVariables).
+ * muted footer. Status colors come from the palette as CSS variables (see cssVariables).
  */
 import {escapeHtml, fill, flagHtml, formatRate, listLabel, plain, plural} from './format.js';
 import {cssVariables} from './palette.js';

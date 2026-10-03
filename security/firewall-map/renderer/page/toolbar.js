@@ -29,6 +29,7 @@ import {escapeHtml, plain} from '../src/format.js';
 import {state, T} from './context.js';
 import {flowService, locationsById} from './filters.js';
 
+/** Rebuild a filter's options (bootstrap-select), never while its list is open. */
 function fillSelect($select, values, current, allLabel) {
   const options = [`<option value="">${escapeHtml(allLabel)}</option>`]
     .concat([...values].sort((a, b) => String(a.label).localeCompare(String(b.label)))
@@ -38,11 +39,20 @@ function fillSelect($select, values, current, allLabel) {
     options.push(`<option value="${escapeHtml(current)}">${escapeHtml(current)}</option>`);
   }
   const html = options.join('');
-  // never rebuild a dropdown the user is working with
-  if ($select.data('html') !== html && document.activeElement !== $select[0]) {
+  if ($select.data('html') !== html && !$select.parent().hasClass('open')) {
     $select.html(html).data('html', html);
+    withIcons($select);
+    $select.selectpicker('refresh');
   }
   $select.val(current);
+}
+
+/** The filter's icon on every option, so bootstrap-select shows it on the button. */
+function withIcons($select) {
+  const icon = $select.closest('.fwmap-filter').data('icon');
+  if (icon) {
+    $select.find('option').attr('data-icon', icon);
+  }
 }
 
 export function updateToolbar(snapshot) {
@@ -75,83 +85,70 @@ export function updateToolbar(snapshot) {
   fillSelect($('#fwmap-filter-host'), hosts.values(), state.filters.host, T.all_hosts);
   fillSelect($('#fwmap-filter-country'), countries.values(), state.filters.country, T.all_countries);
   const asnActive = state.filters.asn !== '';
-  $('#fwmap-filter-asn').toggleClass('shown', asnActive).find('span').text(asnActive ? `AS${state.filters.asn}` : '');
+  $('#fwmap-filter-asn').toggleClass('shown', asnActive).find('.fwmap-asn-label > span').text(asnActive ? `AS${state.filters.asn}` : '');
   syncChips();
 }
 
-let measure;
-
-/** A select is as wide as the option it shows, so a chip never carries empty space. */
-function fitSelect(select) {
-  if (select.closest('#fwmap-more-menu')) {
-    select.style.width = '';
-    return;
-  }
-  const style = getComputedStyle(select);
-  measure = measure || document.createElement('canvas').getContext('2d');
-  measure.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-  const text = select.options[select.selectedIndex]?.text || '';
-  select.style.width = `${Math.ceil(measure.measureText(text).width + parseFloat(style.paddingRight || 0) + 4)}px`;
-}
-
-/** Chosen filters fill with the accent colour; the reset button appears once two are set. */
+/** A chosen filter turns primary and shows its clear button; reset appears once two are set. */
 export function syncChips() {
   let active = state.filters.asn ? 1 : 0;
-  let folded = 0;
-  $('.fwmap-chip[data-filter]').each(function () {
-    const select = $(this).find('select')[0];
-    const on = !['', 'all'].includes(select.value || '');
-    $(this).toggleClass('active', on);
+  $('.fwmap-filter').each(function () {
+    const $select = $(this).find('select.selectpicker');
+    const on = !['', 'all'].includes($select.val() || '');
+    if ($(this).hasClass('active') !== on || !$(this).data('styled')) {
+      $(this).toggleClass('active', on).data('styled', true);
+      $select.selectpicker('setStyle', on ? 'btn-primary btn-sm' : 'btn-default btn-sm');
+    }
+    $select.selectpicker('render');
     active += on ? 1 : 0;
-    folded += on && this.closest('#fwmap-more-menu') ? 1 : 0;
-    fitSelect(select);
   });
   $('#fwmap-reset').toggle(active >= 2);
-  $('#fwmap-more-count').text(folded || '');
   foldChips();
-  $('#fwmap-legend .fwmap-legend-mode select').each(function () {
-    fitSelect(this);
-  });
 }
 
-/** Chips that do not fit on the row move, from the right, into the "Filters" menu. */
+/** Filters that do not fit on the row move, from the right, into the "Filters" menu. */
 function foldChips() {
   const row = document.getElementById('fwmap-chips');
   const wrap = document.getElementById('fwmap-more-wrap');
   const menu = document.getElementById('fwmap-more-menu');
-  if (!row || row.offsetParent === null || row.contains(document.activeElement) && document.activeElement.tagName === 'SELECT') {
+  // never move a filter whose list is open
+  if (!row || row.offsetParent === null || $('.fwmap-filter .bootstrap-select.open').length) {
     return;
   }
-  // document order is the chips' own order, wherever they are now
-  const chips = [...document.querySelectorAll('.fwmap-chip[data-filter]')];
-  const wasFolded = chips.some((chip) => chip.parentNode === menu);
-  for (const chip of chips) {
-    row.insertBefore(chip, document.getElementById('fwmap-filter-asn'));
+  // document order is the filters' own order, wherever they are now
+  const groups = [...document.querySelectorAll('.fwmap-filter')];
+  for (const group of groups) {
+    row.insertBefore(group, document.getElementById('fwmap-filter-asn'));
   }
   wrap.style.display = 'none';
   if (row.scrollWidth > row.clientWidth + 1) {
     wrap.style.display = '';
-    // the traffic chip, the main filter, always stays on the row
-    for (let index = chips.length - 1; index > 0 && row.scrollWidth > row.clientWidth + 1; index--) {
-      menu.insertBefore(chips[index], menu.firstChild);
+    // traffic, the main filter, always stays on the row
+    for (let index = groups.length - 1; index > 0 && row.scrollWidth > row.clientWidth + 1; index--) {
+      menu.insertBefore(groups[index], menu.firstChild);
     }
   } else {
-    wrap.classList.remove('open');
+    closeMore();
   }
-  if (wasFolded !== chips.some((chip) => chip.parentNode === menu)) {
-    chips.forEach((chip) => fitSelect(chip.querySelector('select')));
-  }
-  const folded = chips.filter((chip) => chip.parentNode === menu && chip.classList.contains('active')).length;
+  const folded = groups.filter((group) => group.parentNode === menu && group.classList.contains('active')).length;
   $('#fwmap-more-count').text(folded || '');
 }
 
-/** Clear buttons on chosen chips, the "Filters" menu, and refolding as the row resizes. */
+function closeMore() {
+  $('#fwmap-more-wrap').removeClass('open');
+  $('#fwmap-more').attr('aria-expanded', 'false');
+}
+
+/** bootstrap-select on the filters and the legend's color scheme, clear buttons, the "Filters" menu. */
 export function bindChips() {
-  $('#fwmap-toolbar').on('click', '.fwmap-chip[data-filter] .fwmap-chip-clear', function (event) {
+  $('.fwmap-filter select.selectpicker').each(function () {
+    withIcons($(this));
+  });
+  $('#fwmap-toolbar .selectpicker, #fwmap-color').selectpicker();
+  $('#fwmap-chips').on('click', '.fwmap-filter .fwmap-filter-clear', function (event) {
     event.preventDefault();
-    event.stopPropagation();
-    const chip = $(this).closest('.fwmap-chip');
-    chip.find('select').val(chip.data('filter') === 'traffic' ? 'all' : '').trigger('change');
+    const group = $(this).closest('.fwmap-filter');
+    group.find('select').val(group.data('filter') === 'traffic' ? 'all' : '').trigger('change');
   });
   $('#fwmap-more').on('click', (event) => {
     event.stopPropagation();
@@ -161,16 +158,12 @@ export function bindChips() {
   });
   $(document).on('mousedown', (event) => {
     if (!$(event.target).closest('#fwmap-more-wrap').length) {
-      $('#fwmap-more-wrap').removeClass('open');
-      $('#fwmap-more').attr('aria-expanded', 'false');
+      closeMore();
     }
   });
   $('#fwmap-toolbar').on('change', 'select', () => syncChips());
-  $('#fwmap-color').on('change', function () {
-    fitSelect(this);
-  });
   if (window.ResizeObserver) {
-    new ResizeObserver(() => syncChips()).observe(document.getElementById('fwmap-toolbar'));
+    new ResizeObserver(() => foldChips()).observe(document.getElementById('fwmap-toolbar'));
   }
   syncChips();
 }

@@ -66,7 +66,7 @@ the expand link on the widget (`/ui/firewallmap`).
 <img src="docs/screenshots/firewall-map-page.png" alt="Firewall Map+ full-size page with a connection selected">
 
 *The full-size map draws an arc from the firewall (the house) to every remote
-address it is talking to, coloured by who opened the connection: green from inside, orange from
+address it is talking to, colored by who opened the connection: green from inside, orange from
 outside. Red dots are sources the firewall blocked. Other coloring methods are selectable. 
 The filters above the map narrow it by traffic type, service, interface, inside host and country; 
 **Threats** opens the review list. On the right, **Top talkers** ranks hosts (or countries and networks) 
@@ -85,7 +85,7 @@ the display options and, for administrators, the firewall-wide settings describe
 
 - **Live connections**: an arc from the firewall to every remote address, from PF state counters
   sampled every 2 seconds. **Green** arcs were opened from inside your network, **orange** from
-  outside (port forwards, services on the firewall), grey from both. Pulses travel in the
+  outside (port forwards, services on the firewall), gray from both. Pulses travel in the
   direction the data flows. Arcs fade in and out and keep their curve while they live.
 - **Blocked attempts**: connection attempts the firewall dropped (from the filter log) pulse in
   red towards the firewall, above a configurable number of hits.
@@ -112,7 +112,7 @@ flagged traffic got through*, or *Blocked*), then one sentence per address, for 
 
 - **Filters**: traffic (all, permitted, blocked, threats that got through, IDS alerts), service,
   interface, inside host, country and network (click an ASN).
-- **Colour** by who connected (default), data direction, egress interface or service, with a
+- **Color** by who connected (default), data direction, egress interface or service, with a
   legend.
 - **Top talkers** by host, country and network with sparklines; click one to filter the map.
 - **Resizable panels**: drag the handles between the map and the side panel, and between the top
@@ -231,7 +231,7 @@ and filesystem usage. Settings: which components to show, and the chart window (
 <img src="docs/screenshots/traffic-graph.png" alt="Traffic Graph+" width="795">
 
 *Live traffic in and out, one chart per interface or all interfaces combined, each interface in its
-own colour. The icon in the top-left corner switches between the expanded view shown here and a
+own color. The icon in the top-left corner switches between the expanded view shown here and a
 compact one. Settings: per-interface or combined display, which interfaces, and the time window
 (20 seconds, 1 minute or 5 minutes).* Rows can be dragged into any order.
 
@@ -320,7 +320,7 @@ versions and signs the whole catalogue.
 - **0.50** (both packages): first public beta. Dashboard Plus and Firewall Map+ share one version
   number and are released together.
 
-## Licence
+## License
 
 BSD 2-Clause, see [LICENSE](LICENSE). Firewall Map+ bundles deck.gl and luma.gl (MIT) and Natural
 Earth data (public domain); DB-IP Lite data is CC BY 4.0; MaxMind GeoLite2 is subject to MaxMind's

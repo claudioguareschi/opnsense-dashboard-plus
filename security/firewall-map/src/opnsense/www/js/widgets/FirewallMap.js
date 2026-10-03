@@ -33,7 +33,7 @@ export default class FirewallMap extends BaseWidget {
         super(config);
         this.tickTimeout = 2;
         // the dashboard ticks on a fixed interval: never stack requests or abort-and-retry them,
-        // a slow firewall would otherwise get a burst of cancelled HTTP/2 streams
+        // a slow firewall would otherwise get a burst of canceled HTTP/2 streams
         this.timeoutPeriod = 15000;
         this.retryLimit = 0;
         this.polling = false;
@@ -414,7 +414,7 @@ export default class FirewallMap extends BaseWidget {
     }
 
     getMarkup() {
-        // Colours are applied from the active theme once the widget is in the page.
+        // Colors are applied from the active theme once the widget is in the page.
         return $(`
             <div id="${this.id}-firewall-map" style="position: relative; height: 430px; overflow: hidden; border-radius: 6px; isolation: isolate;">
                 <div id="${this.id}-firewall-map-grid" aria-hidden="true" style="pointer-events: none; position: absolute; inset: 0; z-index: 0; background-size: 36px 36px;"></div>
@@ -500,7 +500,7 @@ export default class FirewallMap extends BaseWidget {
         try {
             renderer = await this._loadRenderer();
         } catch (error) {
-            console.error('Firewall Map+: renderer initialisation failed', error);
+            console.error('Firewall Map+: renderer initialization failed', error);
             this._status(`${this.translations.renderer_failed}: ${error?.message || error}`);
             return;
         }
@@ -529,10 +529,10 @@ export default class FirewallMap extends BaseWidget {
             $(`#${this.id}-firewall-map-follow`).on('click', () => this._setFollow(!this.settings.follow));
             $(`#${this.id}-firewall-map-camera`).on('click', () => this._takeSnapshot());
             // deck.gl positions its canvas absolutely without left/top, so pin it explicitly
-            // rather than relying on the static position (the dashboard centres widget text).
+            // rather than relying on the static position (the dashboard centers widget text).
             $(container).children('canvas').css({left: 0, top: 0});
         } catch (error) {
-            console.error('Firewall Map+: renderer initialisation failed', error);
+            console.error('Firewall Map+: renderer initialization failed', error);
             this._status(`${this.translations.renderer_failed}: ${error?.message || error}`);
             return;
         }

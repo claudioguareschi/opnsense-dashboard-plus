@@ -26,68 +26,45 @@
 
 <style>
     /*
-     * Colours come from the theme through CSS variables set by the renderer's host.applyTheme():
-     * --fwmap-accent, --fwmap-text, --fwmap-panel and the status colours --fwmap-ok, -danger,
-     * -contained, -blocked (each with an --fwmap-on-* text colour). Sizes are in em of the
+     * Colors come from the theme through CSS variables set by the renderer's host.applyTheme():
+     * --fwmap-accent, --fwmap-text, --fwmap-panel and the status colors --fwmap-ok, -danger,
+     * -contained, -blocked (each with an --fwmap-on-* text color). Sizes are in em of the
      * surrounding text, so the page scales with the theme's font size.
      */
-    /* one row: the mode switch, the filter chips (in the order a connection runs: interface, inside
-       host, service, country) and the threats list at the end. Chips that do not fit fold into a
-       "Filters" menu instead of wrapping onto a second row. */
+    /* one row of Bootstrap controls: the mode switch, the filters (in the order a connection runs:
+       interface, inside host, service, country; bootstrap-select dropdowns) and the threats list at the
+       end. Filters that do not fit fold into a "Filters" menu instead of wrapping onto a second row. */
     #fwmap-toolbar { display: flex; flex-wrap: nowrap; gap: 8px; align-items: center; margin-bottom: 12px; min-width: 0; }
-    .fwmap-tool-sep { flex: none; width: 1px; height: 1.8em; background: rgba(128, 128, 128, .3); }
+    #fwmap-toolbar > .btn-group, #fwmap-toolbar > .btn { flex: none; }
+    .fwmap-tool-sep { flex: none; width: 1px; height: 22px; background: rgba(128, 128, 128, .3); }
     #fwmap-chips { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; }
-    .fwmap-chip { position: relative; flex: none; display: inline-flex; align-items: center; gap: 5px; height: 2.3em; padding: 0 8px;
-        border: 1px solid rgba(128, 128, 128, .3); border-radius: 8px; background: var(--fwmap-panel, #fff); color: var(--fwmap-text, inherit);
-        white-space: nowrap; box-shadow: 0 1px 2px rgba(0, 0, 0, .04); }
-    .fwmap-chip:hover { border-color: rgba(128, 128, 128, .55); }
-    .fwmap-chip:focus-within { box-shadow: 0 0 0 2px var(--fwmap-accent); }
-    .fwmap-chip > .fwmap-ic { width: 1.05em; height: 1.05em; flex: none; opacity: .75; pointer-events: none; }
-    .fwmap-chip select { -webkit-appearance: none; appearance: none; border: 0; outline: 0; background: transparent; color: inherit;
-        font: inherit; height: 100%; padding: 0 1.3em 0 0; margin: 0; cursor: pointer; max-width: 13em; text-overflow: ellipsis; }
-    .fwmap-chip select option { color: initial; }
-    /* the theme forces its caret image onto every select (!important); the chips draw their own */
-    .fwmap-chip select, .fwmap-legend-mode select { background-image: none !important; background-color: transparent !important; }
-    #fwmap-toolbar button, .fwmap-chip { -webkit-user-select: none; user-select: none; }
-    .fwmap-chip .fwmap-chip-caret { position: absolute; right: 7px; width: .9em; height: .9em; opacity: .6; pointer-events: none; }
-    .fwmap-chip-clear { display: none; flex: none; align-items: center; justify-content: center; width: 1.3em; height: 1.3em; padding: 0;
-        margin-right: -4px; border: 0; border-radius: 50%; background: transparent; color: inherit; opacity: .85; line-height: 1; }
-    .fwmap-chip-clear:hover, .fwmap-chip-clear:focus { background: rgba(0, 0, 0, .15); opacity: 1; color: inherit; text-decoration: none; }
-    .fwmap-chip-clear .fwmap-ic { width: .8em; height: .8em; }
-    /* a chosen filter fills with the accent colour and trades its caret for a clear button */
-    .fwmap-chip.active { background: var(--fwmap-accent); border-color: var(--fwmap-accent); color: var(--fwmap-on-accent, #fff); }
-    .fwmap-chip.active > .fwmap-ic { opacity: 1; }
-    .fwmap-chip.active .fwmap-chip-caret { display: none; }
-    .fwmap-chip.active select { padding-right: 2px; }
-    .fwmap-chip.active .fwmap-chip-clear { display: inline-flex; }
-    #fwmap-filter-asn { display: none; font-weight: 600; }
+    #fwmap-chips > .btn-group { flex: none; float: none; }
+    .fwmap-filter .bootstrap-select > .dropdown-toggle { max-width: 16em; }
+    /* the filter's icon labels the button; the list itself stays plain */
+    .fwmap-filter .dropdown-menu li .fa { display: none; }
+    /* a chosen filter turns primary (bootstrap-select's style) and gains a joined clear button */
+    /* flex, not Bootstrap's floats, so the clear button joins on the right of its dropdown */
+    #fwmap-chips > .fwmap-filter { display: inline-flex; }
+    .fwmap-filter-clear { display: none; }
+    .fwmap-filter.active .fwmap-filter-clear { display: inline-flex; align-items: center; margin-left: -1px;
+        border-top-left-radius: 0; border-bottom-left-radius: 0; }
+    #fwmap-more-menu > .fwmap-filter { display: flex; }
+    .fwmap-filter.active .bootstrap-select > .dropdown-toggle { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+    #fwmap-filter-asn { display: none; }
     #fwmap-filter-asn.shown { display: inline-flex; }
-    #fwmap-more-wrap { position: relative; flex: none; }
-    #fwmap-more { cursor: pointer; padding-right: 2em; }
-    #fwmap-more .badge { background: var(--fwmap-accent); color: var(--fwmap-on-accent, #fff); }
-    #fwmap-more .badge:empty { display: none; }
-    #fwmap-more-menu { display: none; position: absolute; top: calc(100% + 6px); left: 0; z-index: 20; min-width: 15em; padding: 8px;
-        flex-direction: column; align-items: stretch; gap: 6px; border: 1px solid rgba(128, 128, 128, .3); border-radius: 8px;
-        background: var(--fwmap-panel, #fff); box-shadow: 0 6px 18px rgba(0, 0, 0, .15); }
-    #fwmap-more-wrap.open #fwmap-more-menu { display: flex; }
-    #fwmap-more-menu .fwmap-chip select { max-width: none; flex: 1; }
-    #fwmap-reset { flex: none; width: 2.3em; height: 2.3em; display: inline-flex; align-items: center; justify-content: center; padding: 0;
-        border: 0; border-radius: 8px; background: transparent; color: inherit; opacity: .75; }
-    #fwmap-reset:hover { background: rgba(128, 128, 128, .14); opacity: 1; }
-    #fwmap-reset .fwmap-ic { width: 1.1em; height: 1.1em; }
-    #fwmap-toolbar .fwmap-tool-btn { flex: none; height: 2.3em; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 8px; }
-    #fwmap-toolbar .fwmap-tool-btn .fwmap-ic { width: 1.15em; height: 1.15em; }
+    #fwmap-filter-asn .fwmap-filter-clear { display: inline-flex; align-items: center; margin-left: -1px; }
+    #fwmap-filter-asn .fwmap-asn-label { cursor: default; }
+    #fwmap-more-menu { padding: 8px; min-width: 16em; }
+    #fwmap-more-wrap.open #fwmap-more-menu { display: flex; flex-direction: column; gap: 6px; }
+    #fwmap-more-menu > .btn-group { float: none; }
+    #fwmap-more-menu .bootstrap-select { flex: 1; }
+    #fwmap-more-menu .bootstrap-select > .dropdown-toggle { max-width: none; }
+    #fwmap-more .badge:empty, #fwmap-mode .badge:empty { display: none; }
     #fwmap-toolbar #fwmap-review { margin-left: auto; }
-    /* the colour scheme explains the legend, so it is chosen there */
-    .fwmap-legend-mode { position: relative; pointer-events: auto; display: inline-flex; align-items: center; gap: 6px; margin: -3px 4px 0 0;
-        height: 1.9em; padding: 0 8px; border: 1px solid rgba(128, 128, 128, .3); border-radius: 6px; font-weight: normal;
-        background: var(--fwmap-panel, #fff); color: var(--fwmap-text, inherit); }
-    .fwmap-legend-mode > span { opacity: .7; }
-    .fwmap-legend-mode select { -webkit-appearance: none; appearance: none; border: 0; outline: 0; background: transparent; color: inherit;
-        font: inherit; font-weight: 600; padding: 0 1.2em 0 0; cursor: pointer; }
-    .fwmap-legend-mode select option { color: initial; font-weight: normal; }
-    .fwmap-legend-mode .fwmap-chip-caret { position: absolute; right: 7px; width: .85em; height: .85em; opacity: .6; pointer-events: none; }
-    .fwmap-legend-mode:focus-within { box-shadow: 0 0 0 2px var(--fwmap-accent); }
+    #fwmap-review > .fa { margin-right: 3px; }
+    /* the color scheme explains the legend, so it is chosen there */
+    .fwmap-legend-mode { pointer-events: auto; display: inline-flex; align-items: center; gap: 6px; margin-right: 4px; }
+    .fwmap-legend-mode .fwmap-legend-label { opacity: .7; }
     #fwmap-legend-items { display: contents; }
     #fwmap-layout { display: flex; height: calc(100vh - 222px); min-height: 540px; }
     #fwmap-main { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid rgba(128, 128, 128, .18);
@@ -355,15 +332,10 @@
     .fwmap-abuse-check { white-space: nowrap; font-weight: 500; }
 
     /* snapshots: the Live | Snapshots switch, the camera, and snapshot mode (frame, banner, timeline).
-       --fwmap-frozen is the theme's warning colour, made to stand out on the map background. */
-    .fwmap-mode { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid rgba(128, 128, 128, .3); border-radius: 8px; flex: none; }
-    .fwmap-mode button { height: 2em; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: 5px;
-        background: transparent; color: inherit; opacity: .75; white-space: nowrap; }
-    .fwmap-mode button:hover:not(:disabled) { background: rgba(128, 128, 128, .12); opacity: 1; }
-    .fwmap-mode button:disabled { opacity: .4; cursor: default; }
-    .fwmap-mode button.active { opacity: 1; font-weight: 600; background: rgba(128, 128, 128, .14); }
-    .fwmap-mode #fwmap-mode-snapshots.active { background: var(--fwmap-frozen-soft); box-shadow: inset 0 0 0 1px var(--fwmap-frozen); }
-    .fwmap-mode .fwmap-live { margin: 0; }
+       --fwmap-frozen is the theme's warning color, made to stand out on the map background. */
+    /* Bootstrap's own active button for live; a snapshot on screen takes the warning color */
+    #fwmap-mode .fwmap-live { margin: 0 2px 1px 0; }
+    #fwmap-mode #fwmap-mode-snapshots.active { background: var(--fwmap-frozen-soft); border-color: var(--fwmap-frozen); }
     #fwmap-snapshot-count:empty { display: none; }
     #fwmap-snapshot-count { background: rgba(128, 128, 128, .35); color: inherit; }
     #fwmap-camera { position: absolute; right: 12px; top: 146px; z-index: 3; width: 32px; height: 32px; padding: 0;
@@ -477,7 +449,7 @@
         starting: {{ lang._('Starting flow collector…')|json_encode }},
         unavailable: {{ lang._('Live flow data is unavailable')|json_encode }},
         webgl: {{ lang._('WebGL is required for Firewall Map+')|json_encode }},
-        renderer_failed: {{ lang._('Map renderer failed to initialise')|json_encode }},
+        renderer_failed: {{ lang._('Map renderer failed to initialize')|json_encode }},
         carp_backup: {{ lang._('CARP backup: traffic is passing through the master')|json_encode }},
         key_missing: {{ lang._('A MaxMind license key is needed: add it in the Firewall Map widget settings or in the GeoIP alias settings, or choose DB-IP Lite')|json_encode }},
         downloading: {{ lang._('Downloading the geolocation database…')|json_encode }},
@@ -804,47 +776,65 @@
     <div id="fwmap-layout">
         <div id="fwmap-main">
     <div id="fwmap-toolbar">
-            <div id="fwmap-mode" class="fwmap-mode" role="group" aria-label="{{ lang._('Map mode') }}">
-                <button type="button" id="fwmap-mode-live" class="active" data-mode="live" aria-pressed="true"><i class="fwmap-live"></i>{{ lang._('Live') }}</button>
-                <button type="button" id="fwmap-mode-snapshots" data-mode="snapshots" aria-pressed="false" disabled><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.6l1.6-2.4h6.6L16.9 7h2.6A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.8" r="3.4"/></svg>{{ lang._('Snapshots') }} <span class="badge" id="fwmap-snapshot-count"></span></button>
+            <div id="fwmap-mode" class="btn-group btn-group-sm" role="group" aria-label="{{ lang._('Map mode') }}">
+                <button type="button" id="fwmap-mode-live" class="btn btn-default active" data-mode="live" aria-pressed="true"><i class="fwmap-live"></i> {{ lang._('Live') }}</button>
+                <button type="button" id="fwmap-mode-snapshots" class="btn btn-default" data-mode="snapshots" aria-pressed="false" disabled><i class="fa fa-fw fa-camera" aria-hidden="true"></i> {{ lang._('Snapshots') }} <span class="badge" id="fwmap-snapshot-count"></span></button>
             </div>
             <span class="fwmap-tool-sep" aria-hidden="true"></span>
             <div id="fwmap-chips" role="group" aria-label="{{ lang._('Filters') }}">
-                <span class="fwmap-chip" data-filter="traffic"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 20V4M3 8l4-4 4 4M17 4v16M13 16l4 4 4-4"/></svg><select id="fwmap-filter-traffic" aria-label="{{ lang._('Traffic') }}">
-                    <option value="all">{{ lang._('All traffic') }}</option>
-                    <option value="permitted">{{ lang._('Permitted') }}</option>
-                    <option value="blocked">{{ lang._('Blocked') }}</option>
-                    <option value="threats">{{ lang._('Threats that got through') }}</option>
-                    <option value="ids">{{ lang._('IDS alerts') }}</option>
-                    <option value="ids_flows">{{ lang._('IDS flows') }}</option>
-                    <option value="ids_addresses">{{ lang._('IDS addresses') }}</option>
-                </select><svg class="fwmap-ic fwmap-chip-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg><button type="button" class="fwmap-chip-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></span>
-                <span class="fwmap-chip" data-filter="iface"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="6" rx="1"/><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3M12 12V8"/></svg><select id="fwmap-filter-iface" aria-label="{{ lang._('Interface') }}"></select><svg class="fwmap-ic fwmap-chip-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg><button type="button" class="fwmap-chip-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></span>
-                <span class="fwmap-chip" data-filter="host"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg><select id="fwmap-filter-host" aria-label="{{ lang._('Inside host') }}"></select><svg class="fwmap-ic fwmap-chip-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg><button type="button" class="fwmap-chip-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></span>
-                <span class="fwmap-chip" data-filter="service"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><select id="fwmap-filter-service" aria-label="{{ lang._('Service') }}"></select><svg class="fwmap-ic fwmap-chip-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg><button type="button" class="fwmap-chip-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></span>
-                <span class="fwmap-chip" data-filter="country"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg><select id="fwmap-filter-country" aria-label="{{ lang._('Country') }}"></select><svg class="fwmap-ic fwmap-chip-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg><button type="button" class="fwmap-chip-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></span>
-                <span id="fwmap-filter-asn" class="fwmap-chip active"><span></span><a href="#" class="fwmap-chip-clear" title="{{ lang._('Remove') }}" aria-label="{{ lang._('Remove') }}">&times;</a></span>
-                <div id="fwmap-more-wrap" style="display:none">
-                    <button type="button" id="fwmap-more" class="fwmap-chip" aria-haspopup="true" aria-expanded="false"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg><span>{{ lang._('Filters') }}</span> <span class="badge" id="fwmap-more-count"></span><svg class="fwmap-ic fwmap-chip-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-                    <div id="fwmap-more-menu" role="group" aria-label="{{ lang._('More filters') }}"></div>
+                <div class="btn-group btn-group-sm fwmap-filter" data-filter="traffic" data-icon="fa-fw fa-arrows-up-down">
+                    <select id="fwmap-filter-traffic" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" aria-label="{{ lang._('Traffic') }}">
+                        <option value="all">{{ lang._('All traffic') }}</option>
+                        <option value="permitted">{{ lang._('Permitted') }}</option>
+                        <option value="blocked">{{ lang._('Blocked') }}</option>
+                        <option value="threats">{{ lang._('Threats that got through') }}</option>
+                        <option value="ids">{{ lang._('IDS alerts') }}</option>
+                        <option value="ids_flows">{{ lang._('IDS flows') }}</option>
+                        <option value="ids_addresses">{{ lang._('IDS addresses') }}</option>
+                    </select>
+                    <button type="button" class="btn btn-primary fwmap-filter-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><i class="fa fa-xmark" aria-hidden="true"></i></button>
                 </div>
-                <button id="fwmap-reset" type="button" title="{{ lang._('Reset filters') }}" aria-label="{{ lang._('Reset filters') }}" style="display:none"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></button>
+                <div class="btn-group btn-group-sm fwmap-filter" data-filter="iface" data-icon="fa-fw fa-sitemap">
+                    <select id="fwmap-filter-iface" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" aria-label="{{ lang._('Interface') }}"></select>
+                    <button type="button" class="btn btn-primary fwmap-filter-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><i class="fa fa-xmark" aria-hidden="true"></i></button>
+                </div>
+                <div class="btn-group btn-group-sm fwmap-filter" data-filter="host" data-icon="fa-fw fa-desktop">
+                    <select id="fwmap-filter-host" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" data-live-search="true" aria-label="{{ lang._('Inside host') }}"></select>
+                    <button type="button" class="btn btn-primary fwmap-filter-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><i class="fa fa-xmark" aria-hidden="true"></i></button>
+                </div>
+                <div class="btn-group btn-group-sm fwmap-filter" data-filter="service" data-icon="fa-fw fa-table-cells-large">
+                    <select id="fwmap-filter-service" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" data-live-search="true" aria-label="{{ lang._('Service') }}"></select>
+                    <button type="button" class="btn btn-primary fwmap-filter-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><i class="fa fa-xmark" aria-hidden="true"></i></button>
+                </div>
+                <div class="btn-group btn-group-sm fwmap-filter" data-filter="country" data-icon="fa-fw fa-globe">
+                    <select id="fwmap-filter-country" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" data-live-search="true" aria-label="{{ lang._('Country') }}"></select>
+                    <button type="button" class="btn btn-primary fwmap-filter-clear" title="{{ lang._('Show all') }}" aria-label="{{ lang._('Show all') }}"><i class="fa fa-xmark" aria-hidden="true"></i></button>
+                </div>
+                <div class="btn-group btn-group-sm" id="fwmap-filter-asn">
+                    <span class="btn btn-primary fwmap-asn-label"><i class="fa fa-fw fa-building" aria-hidden="true"></i> <span></span></span>
+                    <a href="#" role="button" class="btn btn-primary fwmap-filter-clear" title="{{ lang._('Remove') }}" aria-label="{{ lang._('Remove') }}"><i class="fa fa-xmark" aria-hidden="true"></i></a>
+                </div>
+                <div class="btn-group btn-group-sm" id="fwmap-more-wrap" style="display:none">
+                    <button type="button" class="btn btn-default dropdown-toggle" id="fwmap-more" aria-haspopup="true" aria-expanded="false"><i class="fa fa-fw fa-filter" aria-hidden="true"></i> {{ lang._('Filters') }} <span class="badge" id="fwmap-more-count"></span> <span class="caret"></span></button>
+                    <div class="dropdown-menu" id="fwmap-more-menu" role="group" aria-label="{{ lang._('More filters') }}"></div>
+                </div>
+                <button id="fwmap-reset" class="btn btn-default btn-sm" type="button" title="{{ lang._('Reset filters') }}" aria-label="{{ lang._('Reset filters') }}" style="display:none"><i class="fa fa-fw fa-rotate-left" aria-hidden="true"></i></button>
             </div>
             <button id="fwmap-review" class="btn btn-default btn-sm fwmap-tool-btn" type="button" style="display:none" title="{{ lang._('Threats') }}">
-                <svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span class="fwmap-tool-text">{{ lang._('Threats') }}</span> <span class="badge" id="fwmap-review-count"></span>
+                <i class="fa fa-fw fa-list" aria-hidden="true"></i><span class="fwmap-tool-text">{{ lang._('Threats') }}</span> <span class="badge" id="fwmap-review-count"></span>
             </button>
         </div>
         <div id="fwmap-map">
             <div id="fwmap-grid" aria-hidden="true"></div>
             <div id="fwmap-canvas"></div>
             <div id="fwmap-legend">
-                <label class="fwmap-legend-mode"><span>{{ lang._('Colour') }}</span>
-                    <select id="fwmap-color" aria-label="{{ lang._('Colour') }}">
+                <span class="fwmap-legend-mode"><span class="fwmap-legend-label">{{ lang._('Color') }}</span>
+                    <select id="fwmap-color" class="selectpicker" data-width="fit" data-style="btn-default btn-xs" aria-label="{{ lang._('Color') }}">
                         <option value="initiator">{{ lang._('By who connected') }}</option>
                         <option value="direction">{{ lang._('By data direction') }}</option>
                         <option value="egress">{{ lang._('By egress') }}</option>
                         <option value="service">{{ lang._('By service') }}</option>
-                    </select><svg class="fwmap-ic fwmap-chip-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></label>
+                    </select></span>
                 <span id="fwmap-legend-items"></span>
             </div>
             <div id="fwmap-zoom">

@@ -58,7 +58,7 @@ const FRAME_INTERVAL = 1000 / 30;
 // arches, blocked sources and endpoints fade in and out instead of popping
 const FADE_IN_MS = 800;
 
-/** A colour with its alpha scaled by a fade opacity. */
+/** A color with its alpha scaled by a fade opacity. */
 function faded(color, opacity) {
   return opacity >= 1 ? color : [color[0], color[1], color[2], Math.round((color[3] ?? 255) * opacity)];
 }
@@ -148,7 +148,7 @@ function homeIconAtlas() {
 const HOME_LAYER = 'firewall-map-home';
 const HOME_ICON_MAPPING = {home: {x: 0, y: 0, width: 48, height: 48, anchorY: 24, mask: true}};
 
-// Mercator world is 512px wide at zoom 0. The whole-world view is centred on longitude 0, so the
+// Mercator world is 512px wide at zoom 0. The whole-world view is centered on longitude 0, so the
 // world fills the map edge to edge instead of leaving a strip on one side; this latitude keeps
 // inhabited land in view.
 const WORLD_TILE = 512;
@@ -324,7 +324,7 @@ export function createFirewallMap(container, options = {}) {
   let blocksDrawn = [];
   let endpointsDrawn = [];
   let homesDrawn = [];
-  // stable colour per category across refreshes (first seen keeps its colour)
+  // stable color per category across refreshes (first seen keeps its color)
   const categoryColors = new Map();
   let categoryKey = '';
 
@@ -395,7 +395,7 @@ export function createFirewallMap(container, options = {}) {
     if (categorical()) {
       return rgb(baseColor(item.arc), alpha);
     }
-    // by who connected, pulses keep the arc's colour; their movement shows which way the data goes
+    // by who connected, pulses keep the arc's color; their movement shows which way the data goes
     const scheme = settings.colorMode === 'initiator' ? initiatorScheme(item.arc.initiated) : item.toward ? colors.toward : colors.away;
     return rgb(scheme.pulse, alpha);
   }
@@ -673,7 +673,7 @@ export function createFirewallMap(container, options = {}) {
         updateTriggers: {getColor: [colors.danger, colors.contained, fadeKey]},
       }),
       new ScatterplotLayer({
-        // addresses Suricata alerted on with no arc right now: a hollow marker in the alert colour
+        // addresses Suricata alerted on with no arc right now: a hollow marker in the alert color
         id: 'firewall-map-alerts',
         data: alertPoints,
         getPosition: (alert) => [alert.lon, alert.lat],
@@ -771,7 +771,7 @@ export function createFirewallMap(container, options = {}) {
   function compose(now = performance.now()) {
     const seconds = (now - started) / 1000;
     frameNow = now;
-    // colours are recomputed every frame only while something is fading
+    // colors are recomputed every frame only while something is fading
     fadeKey = animating(now) ? now : 'steady';
     clearHome();
     return [...baseLayers, ...fadingLayers(), pulseLayer(seconds), ...blockPulseLayers(seconds), ...homeLayers(), labelLayer].filter(Boolean);
@@ -787,7 +787,7 @@ export function createFirewallMap(container, options = {}) {
     const previousArcs = new Map(arcs.map((arc) => [arc.key, arc]));
     arcs = arcFader.update(continuePhases(previousArcs, buildArcs(arcData, {...settings, previousLanes}), (now - started) / 1000), now);
     // endpoints with recent Suricata history get a ring (history, not proof about the current traffic)
-    // coloured by the worst outcome there: red if flagged traffic got through, amber if it was stopped
+    // colored by the worst outcome there: red if flagged traffic got through, amber if it was stopped
     const rank = {blocked: 0, ok: 0, contained: 1, danger: 2};
     idsHistory = new Map();
     const note = (dest, kind) => {
@@ -879,7 +879,7 @@ export function createFirewallMap(container, options = {}) {
       colors = palette(theme);
       deck.setProps({layers: layers(lastData)});
     },
-    /** Zoom by `steps` (positive in, negative out) around the centre. */
+    /** Zoom by `steps` (positive in, negative out) around the center. */
     zoom(steps) {
       moveTo({zoom: Math.max(viewState.minZoom, Math.min(viewState.maxZoom, viewState.zoom + steps))}, 250);
     },
