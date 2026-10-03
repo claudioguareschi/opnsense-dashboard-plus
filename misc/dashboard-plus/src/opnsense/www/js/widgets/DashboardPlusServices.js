@@ -48,6 +48,8 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 flex-wrap: wrap;
                 align-items: center;
                 gap: 0.6em;
+                width: 100%;
+                box-sizing: border-box;
                 padding: 0.25em 0 0.7em;
             }
             .dashboard-plus-services-summary {
@@ -80,9 +82,10 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
             }
             .dashboard-plus-services-toolbar > select {
                 order: 2;
-                flex: 0 0 8em;
-                width: 8em;
-                min-width: 0;
+                flex: 0 1 clamp(7em, 20%, 12em);
+                width: clamp(7em, 20%, 12em);
+                min-width: 7em;
+                max-width: 12em;
                 margin-right: 0.5em;
                 text-align: left;
                 text-align-last: left;
@@ -133,7 +136,10 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 }
                 .dashboard-plus-services-toolbar > select {
                     order: 3;
+                    flex: 0 0 auto;
                     width: auto;
+                    min-width: 0;
+                    max-width: none;
                     margin: 0 0.5em;
                 }
             }
