@@ -122,9 +122,11 @@ async function lookup(address) {
 
 /** The full lookup for an address; `rerender` redraws whatever shows the card, scrolled to it. */
 export async function investigate(address, rerender) {
+  // one slow scroll to the card when the lookup starts; the data then fills in where the eye already is
   state.revealInvestigation = address;
-  remember(address, `<div class="text-muted"><i class="fa fa-spinner fa-spin"></i> ${escapeHtml(T.looking_up)}</div>`);
+  remember(address, `<div class="fwmap-inv-loading"><i class="fa fa-spinner fa-spin"></i> ${escapeHtml(T.looking_up)}</div>`);
   rerender();
+  state.revealInvestigation = null;
   const {result, failure} = await lookup(address);
   if (result) {
     remember(address, investigationCard(result));
@@ -133,7 +135,6 @@ export async function investigate(address, rerender) {
     remember(address, failureCard(address, failure));
   }
   rerender();
-  state.revealInvestigation = null;
 }
 
 /** AbuseIPDB alone, from the Reputation card: the verdict fills in without opening the full investigation. */

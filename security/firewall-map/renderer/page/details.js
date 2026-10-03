@@ -31,6 +31,9 @@ import {ABUSEIPDB_BLACKLIST_LIST, ABUSEIPDB_LOOKUP_LIST, state, T} from './conte
 import {ic} from './icons.js';
 import {ago, bigPill, card, endBox, pill, place, rows, serviceParts, spanText} from './parts.js';
 
+// Investigate scrolls its card into view slowly enough to follow
+const REVEAL_MS = 900;
+
 /** What the map knows about a remote address: hostname, network, country. */
 export function remoteOf(address) {
   const location = (state.snapshot?.locations || []).find((item) => item.id === address) || {};
@@ -355,11 +358,21 @@ export function renderDetails() {
   if (scrollTop) {
     $details.find('.fwmap-d-scroll').scrollTop(scrollTop);
   }
-  // Investigate: bring the lookup's card to the top of the panel, where its data will appear
+  // Investigate: one slow scroll that brings the lookup's card to the top of the panel. The card
+  // keeps at least the panel's height, so it can reach the top and the data arriving mid-scroll
+  // (a re-render) neither stops the scroll nor makes it jump.
   const scroller = $details.find('.fwmap-d-scroll')[0];
   const lookupCard = $details.find('.fwmap-investigation')[0];
-  if (state.revealInvestigation === address && scroller && lookupCard) {
+  const now = performance.now();
+  if (state.revealInvestigation === address) {
+    state.revealing = {address, until: now + REVEAL_MS};
+  }
+  const revealing = state.revealing?.address === address && now < state.revealing.until;
+  if (scroller && lookupCard && state.revealing?.address === address) {
+    lookupCard.style.minHeight = `${Math.max(0, scroller.clientHeight - 16)}px`;
+  }
+  if (scroller && lookupCard && revealing) {
     const top = scroller.scrollTop + lookupCard.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 8;
-    scroller.scrollTo({top, behavior: 'smooth'});
+    $(scroller).stop().animate({scrollTop: top}, Math.max(0, state.revealing.until - now), 'swing');
   }
 }

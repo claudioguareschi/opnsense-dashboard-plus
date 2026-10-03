@@ -214,6 +214,7 @@
 		renderedAddress: null,
 		investigations: /* @__PURE__ */ new Map(),
 		revealInvestigation: null,
+		revealing: null,
 		abuseScores: /* @__PURE__ */ new Map(),
 		abuseChecking: /* @__PURE__ */ new Set(),
 		abuseConfigured: false,
@@ -650,6 +651,7 @@
 	}
 	//#endregion
 	//#region page/details.js
+	var REVEAL_MS = 900;
 	/** What the map knows about a remote address: hostname, network, country. */
 	function remoteOf(address) {
 		const location = (state.snapshot?.locations || []).find((item) => item.id === address) || {};
@@ -976,12 +978,16 @@
 		if (scrollTop) $details.find(".fwmap-d-scroll").scrollTop(scrollTop);
 		const scroller = $details.find(".fwmap-d-scroll")[0];
 		const lookupCard = $details.find(".fwmap-investigation")[0];
-		if (state.revealInvestigation === address && scroller && lookupCard) {
+		const now = performance.now();
+		if (state.revealInvestigation === address) state.revealing = {
+			address,
+			until: now + REVEAL_MS
+		};
+		const revealing = state.revealing?.address === address && now < state.revealing.until;
+		if (scroller && lookupCard && state.revealing?.address === address) lookupCard.style.minHeight = `${Math.max(0, scroller.clientHeight - 16)}px`;
+		if (scroller && lookupCard && revealing) {
 			const top = scroller.scrollTop + lookupCard.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 8;
-			scroller.scrollTo({
-				top,
-				behavior: "smooth"
-			});
+			$(scroller).stop().animate({ scrollTop: top }, Math.max(0, state.revealing.until - now), "swing");
 		}
 	}
 	//#endregion
@@ -1137,15 +1143,15 @@
 	/** The full lookup for an address; `rerender` redraws whatever shows the card, scrolled to it. */
 	async function investigate(address, rerender) {
 		state.revealInvestigation = address;
-		remember(address, `<div class="text-muted"><i class="fa fa-spinner fa-spin"></i> ${escapeHtml(T.looking_up)}</div>`);
+		remember(address, `<div class="fwmap-inv-loading"><i class="fa fa-spinner fa-spin"></i> ${escapeHtml(T.looking_up)}</div>`);
 		rerender();
+		state.revealInvestigation = null;
 		const { result, failure } = await lookup(address);
 		if (result) {
 			remember(address, investigationCard(result));
 			noteScore(result, address);
 		} else remember(address, failureCard(address, failure));
 		rerender();
-		state.revealInvestigation = null;
 	}
 	/** AbuseIPDB alone, from the Reputation card: the verdict fills in without opening the full investigation. */
 	async function checkAbuse(address, rerender) {

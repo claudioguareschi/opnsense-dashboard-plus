@@ -72,6 +72,7 @@ export const state = {
   investigations: new Map(),
   // the address whose investigation the details panel scrolls to while it loads
   revealInvestigation: null,
+  revealing: null,
   abuseScores: new Map(),
   abuseChecking: new Set(),
   abuseConfigured: false,

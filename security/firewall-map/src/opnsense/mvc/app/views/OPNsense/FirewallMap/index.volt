@@ -163,6 +163,8 @@
     .fwmap-inv-table { width: 100%; font-size: .9em; table-layout: fixed; }
     .fwmap-inv-table th { font-weight: normal; opacity: .7; padding-right: 8px; vertical-align: top; width: 10em; }
     .fwmap-inv-retry { margin-top: 6px; }
+    /* while the lookup runs: a spinner where the data will appear (seen mostly on slow links) */
+    .fwmap-inv-loading { display: flex; align-items: center; gap: 8px; padding: 12px 0; opacity: .7; }
     .fwmap-inv-table td { word-break: break-word; }
     #fwmap-review-count:empty { display: none; }
     #fwmap-review-count { background: var(--fwmap-danger); color: var(--fwmap-on-danger); }
