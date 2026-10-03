@@ -102,7 +102,7 @@ class GeoDatabaseUpdateTest(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def fetch(self, edition, key, workdir):
+    def fetch(self, edition, key, workdir, progress=None):
         target = os.path.join(workdir, f"{edition}.mmdb")
         with open(target, "w") as handle:
             handle.write(edition)
@@ -118,7 +118,7 @@ class GeoDatabaseUpdateTest(unittest.TestCase):
             self.assertEqual(GEODB.update()["updated"], [])
 
     def test_failure_hides_the_key_and_backs_off(self):
-        def broken(edition, key, workdir):
+        def broken(edition, key, workdir, progress=None):
             raise RuntimeError(f"HTTP 401 for https://download.maxmind.com/?license_key={key}")
         with mock.patch.object(GEODB, "fetch_maxmind", broken):
             result = GEODB.update()
@@ -142,6 +142,65 @@ class GeoDatabaseUpdateTest(unittest.TestCase):
                 mock.patch.object(GEODB, "alias_license_key", lambda path=None: None):
             self.assertEqual(GEODB.update()["error"], "maxmind_key_missing")
         self.assertFalse(GEODB.in_backoff(GEODB.read_status()))
+
+
+    def unauthorized(self, edition, key, workdir, progress=None):
+        import urllib.error
+        raise urllib.error.HTTPError(f"https://download.maxmind.com/?license_key={key}", 401, "Unauthorized", {}, None)
+
+    def test_retries_wait_longer_each_time_and_explain_the_error(self):
+        waits = []
+        with mock.patch.object(GEODB, "fetch_maxmind", self.unauthorized):
+            for _ in range(5):
+                before = time.time()
+                GEODB.update()
+                status = GEODB.read_status()
+                waits.append(round(status["next_retry"] - before))
+                # pretend the wait is over
+                status["next_retry"] = time.time() - 1
+                GEODB.write_status(status)
+        self.assertEqual(waits, [60, 120, 300, 900, 900])
+        self.assertEqual({error["code"] for error in status["errors"]}, {"unauthorized"})
+        self.assertNotIn("secret-key", json.dumps(status))
+
+    def test_retry_skips_the_wait_and_starts_the_steps_over(self):
+        with mock.patch.object(GEODB, "fetch_maxmind", self.unauthorized):
+            GEODB.update()
+            GEODB.update(retry=True)
+            self.assertEqual(GEODB.read_status()["failures"], 1)
+            self.assertEqual(GEODB.update()["result"], "backoff")
+        with mock.patch.object(GEODB, "fetch_maxmind", self.fetch):
+            self.assertEqual(GEODB.update(retry=True)["result"], "ok")
+        self.assertEqual(GEODB.read_status()["failures"], 0)
+
+    def test_progress_is_reported_while_downloading(self):
+        seen = []
+        original = GEODB.write_status
+
+        def record(payload):
+            seen.append(payload.get("state"))
+            original(payload)
+
+        def fetch(edition, key, workdir, progress=None):
+            progress(512, 1024)
+            progress(1024, 1024)
+            return self.fetch(edition, key, workdir)
+        with mock.patch.object(GEODB, "fetch_maxmind", fetch), mock.patch.object(GEODB, "write_status", record):
+            GEODB.update()
+        self.assertIn("downloading", seen)
+        self.assertEqual(seen[-1], "idle")
+
+    def test_viewer_sees_progress_failure_and_when_to_retry(self):
+        from support import COMMON
+        now = 1000.0
+        self.assertEqual(COMMON.geodb_view({"state": "downloading", "progress": {"edition": "GeoLite2-City", "done": 5, "total": 10, "updated": now}}, now)["state"], "downloading")
+        # a download that stopped reporting is not running
+        self.assertEqual(COMMON.geodb_view({"state": "downloading", "progress": {"updated": now - 60}}, now)["state"], "idle")
+        failed = {"errors": [{"code": "unauthorized"}], "next_retry": now + 30, "last_error": "x"}
+        self.assertEqual(COMMON.geodb_view(failed, now)["retry_at"], now + 30)
+        self.assertFalse(COMMON.geodb_retry_due(failed, now))
+        self.assertTrue(COMMON.geodb_retry_due(failed, now + 31))
+        self.assertEqual(COMMON.geodb_view({"last_error": "maxmind_key_missing"}, now)["state"], "idle")
 
 
 if __name__ == "__main__":

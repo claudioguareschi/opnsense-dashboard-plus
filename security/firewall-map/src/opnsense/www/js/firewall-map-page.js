@@ -164,7 +164,27 @@
 		map_last_minute: "{count} in the last minute",
 		map_hammering: " · hammering",
 		map_active_links_one: "{count} active link",
-		map_active_links_many: "{count} active links"
+		map_active_links_many: "{count} active links",
+		geo_downloading_title: "Downloading the geolocation database",
+		geo_preparing: "Starting the download…",
+		geo_progress: "{done} of {total}",
+		geo_fills_in: "The map fills in as soon as it is done.",
+		geo_failed_title: "The geolocation database could not be downloaded",
+		geo_key_title: "A MaxMind license key is needed",
+		geo_retry_in: "Trying again in {time}",
+		geo_retrying: "Trying again…",
+		geo_retry_now: "Retry now",
+		geo_partial: "Network names are unavailable",
+		geo_err_unauthorized: "MaxMind did not accept the license key. A new key can take a few minutes to start working; if this persists, check the key in the settings and that GeoLite2 downloads are enabled for your MaxMind account.",
+		geo_err_forbidden: "{provider} refused the download (HTTP 403): the account may not have access to this database.",
+		geo_err_not_found: "{provider} did not have the database at the expected address (HTTP 404). DB-IP publishes a new file each month; early in the month it may not be out yet.",
+		geo_err_rate_limited: "{provider} limits how often a database can be downloaded (HTTP 429).",
+		geo_err_unreachable: "The firewall could not reach {provider}. Check that it has internet access and working DNS.",
+		geo_err_timeout: "The download from {provider} took too long and was stopped. A slow or busy connection is the usual cause.",
+		geo_err_invalid: "The downloaded file was not a valid database.",
+		geo_err_disk_full: "The database could not be saved: the firewall's disk is full.",
+		geo_err_http: "{provider} answered with an error.",
+		geo_err_other: "The download failed."
 	};
 	/** The text table in use: the caller's translations over the English defaults. */
 	function textTable(text) {
@@ -215,6 +235,7 @@
 		investigations: /* @__PURE__ */ new Map(),
 		revealInvestigation: null,
 		revealing: null,
+		geoNoteDismissed: null,
 		abuseScores: /* @__PURE__ */ new Map(),
 		abuseChecking: /* @__PURE__ */ new Set(),
 		abuseConfigured: false,
@@ -2790,6 +2811,18 @@
 		statusLine(snapshot, shown);
 		$("#fwmap-credit").html(host().creditHtml(snapshot.provider));
 	}
+	/**
+	* The geolocation card over an empty map (downloading, failed, key missing), or the small note when
+	* only network names are missing; re-rendered only when it changes, so Retry stays pressed.
+	*/
+	function showGeo(snapshot) {
+		const html = snapshot ? host().geoCardHtml(snapshot, T, { admin: state.isAdmin }) || host().geoNoteHtml(snapshot, T, state.geoNoteDismissed) : "";
+		const $slot = $("#fwmap-geo");
+		if ($slot.data("html") !== html) {
+			$slot.html(html).data("html", html);
+			host().tickCountdowns();
+		}
+	}
 	/** One request at a time, never stacked on a slow firewall; nothing while the page is hidden. */
 	function poll(query) {
 		let timer = null;
@@ -2799,12 +2832,13 @@
 			try {
 				const snapshot = await getJSON(`/api/firewallmap/flow/snapshot${query}`);
 				const problem = host().problemText(snapshot, T);
+				showGeo(state.mode === "live" ? snapshot : null);
 				if (problem && state.mode === "live") {
 					if (snapshot.status === "no_database" || snapshot.status === "too_many_states") state.renderer.render({
 						flows: [],
 						locations: []
 					});
-					$("#fwmap-status").text(problem);
+					$("#fwmap-status").text(snapshot.status === "no_database" ? "" : problem);
 				} else {
 					state.live = snapshot;
 					const groups = talkers(snapshot);
@@ -3058,6 +3092,10 @@
 			renderDetails,
 			setTab,
 			setFollow: (on) => setFollow(on)
+		});
+		$("#fwmap-geo").on("click", ".fwmap-geo-note-close", () => {
+			state.geoNoteDismissed = host().geoNoteKey(state.live);
+			showGeo(state.mode === "live" ? state.live : null);
 		});
 		$(window).on("resize", () => state.renderer.resize());
 		$(document).on("keydown", (event) => {

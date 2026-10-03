@@ -149,9 +149,23 @@ class SettingsController extends ApiControllerBase
         }
         $databaseAfter = [(string)$general->provider, (string)$general->update_days, (string)$general->license_key];
         if ($databaseAfter !== $databaseBefore) {
-            (new Backend())->configdRun('firewallmap geodb update', true);
+            // a new key or provider: download now, not after an earlier failure's wait
+            (new Backend())->configdRun('firewallmap geodb retry', true);
         }
         return ['result' => 'saved'];
+    }
+
+    /**
+     * "Retry now" on the map's geolocation card: download the database without waiting out the
+     * earlier failure. Runs in the background; the map shows its progress.
+     */
+    public function retryGeodbAction()
+    {
+        if (!$this->request->isPost()) {
+            return ['result' => 'failed'];
+        }
+        (new Backend())->configdRun('firewallmap geodb retry', true);
+        return ['result' => 'started'];
     }
 
     /**

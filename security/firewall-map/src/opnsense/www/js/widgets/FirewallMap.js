@@ -419,6 +419,7 @@ export default class FirewallMap extends BaseWidget {
             <div id="${this.id}-firewall-map" style="position: relative; height: 430px; overflow: hidden; border-radius: 6px; isolation: isolate;">
                 <div id="${this.id}-firewall-map-grid" aria-hidden="true" style="pointer-events: none; position: absolute; inset: 0; z-index: 0; background-size: 36px 36px;"></div>
                 <div id="${this.id}-firewall-map-canvas" style="position: absolute; inset: 0; z-index: 1; text-align: left;"></div>
+                <div id="${this.id}-firewall-map-geo"></div>
                 <div id="${this.id}-firewall-map-status" style="position: absolute; left: 12px; right: 150px; bottom: 9px; z-index: 2; font-size: .82em; letter-spacing: .02em; pointer-events: none; text-align: left;"></div>
                 <div id="${this.id}-firewall-map-credit" style="position: absolute; right: 10px; bottom: 9px; z-index: 2; font-size: .75em; opacity: .7;"></div>
                 <div style="position: absolute; right: 10px; top: 10px; z-index: 3; display: flex; flex-direction: column; border: 1px solid rgba(128, 128, 128, .3); border-radius: 6px; overflow: hidden; background: var(--fwmap-panel, #fff); color: var(--fwmap-text, inherit); box-shadow: 0 1px 3px rgba(0, 0, 0, .08);">
@@ -555,6 +556,7 @@ export default class FirewallMap extends BaseWidget {
                 return;
             }
             const problem = host.problemText(snapshot, this._text());
+            await this._showGeo(snapshot);
             if (problem) {
                 if (snapshot.status === 'no_database' || snapshot.status === 'too_many_states') {
                     // no locations or no sample: keep the map empty and say why
@@ -562,7 +564,8 @@ export default class FirewallMap extends BaseWidget {
                 } else if (snapshot.status !== 'starting') {
                     console.error('Firewall Map+: collector reported', snapshot);
                 }
-                this._status(problem);
+                // the geolocation card says it on the map itself
+                this._status(snapshot.status === 'no_database' ? '' : problem);
                 return;
             }
             this.renderer.render(snapshot);
@@ -590,6 +593,32 @@ export default class FirewallMap extends BaseWidget {
             this.renderer?.resize();
         }
         return changed;
+    }
+
+    /**
+     * The geolocation card over an empty map (downloading, failed, key missing), or the small note
+     * when only network names are missing. Retry now is for administrators: whether this user is
+     * one is learned once, from the plugin settings they can (or cannot) read.
+     */
+    async _showGeo(snapshot) {
+        const host = window.FirewallMapRenderer.host;
+        if (snapshot?.geodb?.state === 'failed' && this.geoSettings === null && !this.geoAsked) {
+            this.geoAsked = true;
+            await this._loadGeoSettings();
+        }
+        const admin = Boolean(this.geoSettings?.provider);
+        const html = host.geoCardHtml(snapshot, this._text(), {admin}) || host.geoNoteHtml(snapshot, this._text(), this.geoNoteDismissed);
+        const slot = document.getElementById(`${this.id}-firewall-map-geo`);
+        if (slot && slot.dataset.html !== html) {
+            slot.innerHTML = html;
+            slot.dataset.html = html;
+            slot.querySelector('.fwmap-geo-note-close')?.addEventListener('click', () => {
+                this.geoNoteDismissed = host.geoNoteKey(snapshot);
+                slot.innerHTML = '';
+                slot.dataset.html = '';
+            });
+            host.tickCountdowns();
+        }
     }
 
     /**

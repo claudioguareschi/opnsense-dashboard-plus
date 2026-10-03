@@ -52,6 +52,10 @@ ABUSEIPDB_BLACKLIST = f"{STATE_DIR}/abuseipdb_blacklist.txt"
 # camera button leaves for the collector, which holds every tracked flow in memory
 SNAPSHOT_DIR = f"{STATE_DIR}/snapshots"
 SNAPSHOT_REQUEST_DIR = f"{RUN_DIR}/snapshot_requests"
+# the geolocation download's status (written by firewallmap_geodb.py, read on every map poll)
+GEODB_STATUS = f"{STATE_DIR}/geodb.json"
+# a download whose progress has not moved for this long is no longer running
+GEODB_STALE_SECONDS = 30
 
 PFCTL = "/sbin/pfctl"
 RULES_DEBUG = "/tmp/rules.debug"
@@ -182,6 +186,32 @@ def requested(marker, seconds, now=None):
         return (time.time() if now is None else now) - os.stat(marker).st_mtime < seconds
     except OSError:
         return False
+
+
+def geodb_view(status, now=None):
+    """What a map viewer is told about the geolocation download: running (with progress), failed
+    (each database's error and when it is tried again) or idle. Never the license key: the messages
+    were scrubbed when written."""
+    now = time.time() if now is None else now
+    view = {"now": now, "state": "idle"}
+    progress = status.get("progress") or {}
+    if status.get("state") == "downloading" and now - (progress.get("updated") or 0) < GEODB_STALE_SECONDS:
+        view.update(state="downloading", edition=progress.get("edition"), done=progress.get("done") or 0,
+                    total=progress.get("total"))
+        return view
+    errors = status.get("errors")
+    if errors is None and status.get("last_error") not in (None, "maxmind_key_missing"):
+        # written by an older version: one message, no classification
+        errors = [{"kind": None, "edition": None, "code": "other", "message": status["last_error"]}]
+    if errors:
+        view.update(state="failed", errors=errors, retry_at=status.get("next_retry"), provider=status.get("provider"))
+    return view
+
+
+def geodb_retry_due(status, now=None):
+    """A failed download whose wait is over (and that is not running now)."""
+    view = geodb_view(status, now)
+    return view["state"] == "failed" and (view.get("retry_at") or 0) <= view["now"]
 
 
 def host_port(address, port):

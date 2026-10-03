@@ -73,6 +73,8 @@ export const state = {
   // the address whose investigation the details panel scrolls to while it loads
   revealInvestigation: null,
   revealing: null,
+  // the AS-database note the viewer closed (it comes back for a different failure)
+  geoNoteDismissed: null,
   abuseScores: new Map(),
   abuseChecking: new Set(),
   abuseConfigured: false,

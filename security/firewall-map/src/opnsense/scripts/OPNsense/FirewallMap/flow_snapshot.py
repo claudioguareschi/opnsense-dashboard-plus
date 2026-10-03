@@ -39,7 +39,9 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fwmap_common import HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR  # noqa: E402
+from fwmap_common import (  # noqa: E402
+    GEODB_STATUS, HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, geodb_retry_due, geodb_view, read_json,
+)
 
 GEODB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "firewallmap_geodb.py")
 STALE_SECONDS = 10
@@ -78,11 +80,13 @@ def mark_request(path=None):
 
 
 FETCH_MARKER = f"{RUN_DIR}/fetch_started"
-FETCH_EVERY_SECONDS = 60
+# the updater itself waits out failures (retry steps); this only keeps polls from starting one
+# each while it decides
+FETCH_EVERY_SECONDS = 10
 
 
 def fetch_database(marker=None, now=None):
-    """A missing database is downloaded in the background, at most once a minute."""
+    """A missing (or failed) database is downloaded in the background, at most every few seconds."""
     marker = marker or FETCH_MARKER
     try:
         if (now or time.time()) - os.stat(marker).st_mtime < FETCH_EVERY_SECONDS:
@@ -118,8 +122,14 @@ def main(want_hostnames=False, block_minimum=1):
     if payload is None:
         start_collector()
         payload = {"status": "starting", "flows": [], "locations": []}
-    if payload.get("status") == "no_database" and payload.get("reason") == "database_missing":
+    geodb = read_json(GEODB_STATUS)
+    missing = payload.get("status") == "no_database" and payload.get("reason") == "database_missing"
+    if (missing and geodb.get("state") != "downloading" and not geodb.get("errors")) or geodb_retry_due(geodb):
         fetch_database()
+    # the download's progress or its errors (a failed AS database also while the map works)
+    view = geodb_view(geodb)
+    if payload.get("status") == "no_database" or view["state"] == "failed":
+        payload["geodb"] = view
     if not want_hostnames:
         payload.pop("hostnames", None)
     return apply_block_threshold(payload, block_minimum)

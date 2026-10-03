@@ -101,6 +101,19 @@ function refresh() {
   $('#fwmap-credit').html(host().creditHtml(snapshot.provider));
 }
 
+/**
+ * The geolocation card over an empty map (downloading, failed, key missing), or the small note when
+ * only network names are missing; re-rendered only when it changes, so Retry stays pressed.
+ */
+function showGeo(snapshot) {
+  const html = snapshot ? host().geoCardHtml(snapshot, T, {admin: state.isAdmin}) || host().geoNoteHtml(snapshot, T, state.geoNoteDismissed) : '';
+  const $slot = $('#fwmap-geo');
+  if ($slot.data('html') !== html) {
+    $slot.html(html).data('html', html);
+    host().tickCountdowns();
+  }
+}
+
 /** One request at a time, never stacked on a slow firewall; nothing while the page is hidden. */
 function poll(query) {
   let timer = null;
@@ -112,12 +125,14 @@ function poll(query) {
     try {
       const snapshot = await getJSON(`/api/firewallmap/flow/snapshot${query}`);
       const problem = host().problemText(snapshot, T);
+      showGeo(state.mode === 'live' ? snapshot : null);
       if (problem && state.mode === 'live') {
         // no database or no sample: an empty map, not the last picture
         if (snapshot.status === 'no_database' || snapshot.status === 'too_many_states') {
           state.renderer.render({flows: [], locations: []});
         }
-        $('#fwmap-status').text(problem);
+        // the geolocation card says it on the map itself
+        $('#fwmap-status').text(snapshot.status === 'no_database' ? '' : problem);
       } else {
         state.live = snapshot;
         // the sparklines keep their history in snapshot mode too
@@ -400,6 +415,10 @@ $(async () => {
   }
   renderDetails();
   bindSnapshots({refresh, renderDetails, setTab, setFollow: (on) => setFollow(on)});
+  $('#fwmap-geo').on('click', '.fwmap-geo-note-close', () => {
+    state.geoNoteDismissed = host().geoNoteKey(state.live);
+    showGeo(state.mode === 'live' ? state.live : null);
+  });
   $(window).on('resize', () => state.renderer.resize());
   // Escape leaves a snapshot
   $(document).on('keydown', (event) => {

@@ -28,12 +28,15 @@
 
     firewallmap_geodb.py status          JSON status (never includes the license key)
     firewallmap_geodb.py update [force]  download when missing or older than update_days
+    firewallmap_geodb.py update retry    the same, now: no waiting out an earlier failure (a new
+                                         key, or "Retry now")
 
 MaxMind GeoLite2 needs a license key: the plugin's own key when set, otherwise the key
 of a MaxMind GeoIP alias URL (Firewall > Aliases > GeoIP settings). DB-IP Lite needs no
 key. Downloads go only to the provider; endpoint addresses are never sent anywhere.
 """
 
+import errno
 import fcntl
 import gzip
 import json
@@ -43,7 +46,9 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import socket
 import time
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ElementTree
 from configparser import ConfigParser
@@ -51,20 +56,24 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlencode, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fwmap_common import STATE_DIR, read_json, secure_umask, write_json  # noqa: E402
+from fwmap_common import GEODB_STATUS, STATE_DIR, read_json, secure_umask, write_json  # noqa: E402
 
 
 CONFIG_XML = "/conf/config.xml"
 GEOIP_ALIAS_CONF = "/usr/local/etc/filter_geoip.conf"
 GEOIP_DIR = "/usr/local/share/GeoIP"
-STATUS_FILE = f"{STATE_DIR}/geodb.json"
+STATUS_FILE = GEODB_STATUS
 LOCK_FILE = f"{STATE_DIR}/geodb.lock"
 MMDBLOOKUP = "/usr/local/bin/mmdblookup"
 MAXMIND_URL = "https://download.maxmind.com/app/geoip_download"
 DBIP_URL = "https://download.db-ip.com/free/{edition}-{month}.mmdb.gz"
 TIMEOUT = 120
-# after a failed download, automatic retries wait this long (a forced update always runs)
-RETRY_SECONDS = 900
+# after failed downloads, automatic retries wait longer each time: a new MaxMind key that takes a
+# few minutes to activate works almost at once, a lasting problem is not hammered (a forced or
+# retry update always runs)
+RETRY_STEPS = (60, 120, 300, 900)
+# progress is written at most this often while downloading
+PROGRESS_SECONDS = 0.5
 
 DATABASES = {
     "maxmind": {
@@ -170,6 +179,8 @@ def status():
         "asn": file_info(paths["asn"]),
         "last_attempt": last.get("last_attempt"),
         "last_error": last.get("last_error"),
+        "errors": last.get("errors"),
+        "next_retry": last.get("next_retry"),
     }
 
 
@@ -183,15 +194,25 @@ def validate(path, probe):
         raise RuntimeError("downloaded database failed validation")
 
 
-def download(url, target):
+def download(url, target, progress=None):
+    """Fetch `url` into `target`, telling `progress(done, total)` as it goes (total may be None)."""
     request = urllib.request.Request(url, headers={"User-Agent": "OPNsense-FirewallMap"})
     with urllib.request.urlopen(request, timeout=TIMEOUT) as response, open(target, "wb") as handle:
-        shutil.copyfileobj(response, handle)
+        total = int(response.headers.get("Content-Length") or 0) or None
+        done = 0
+        while True:
+            chunk = response.read(65536)
+            if not chunk:
+                break
+            handle.write(chunk)
+            done += len(chunk)
+            if progress:
+                progress(done, total)
 
 
-def fetch_maxmind(edition, key, workdir):
+def fetch_maxmind(edition, key, workdir, progress=None):
     archive = os.path.join(workdir, f"{edition}.tar.gz")
-    download(f"{MAXMIND_URL}?{urlencode({'edition_id': edition, 'license_key': key, 'suffix': 'tar.gz'})}", archive)
+    download(f"{MAXMIND_URL}?{urlencode({'edition_id': edition, 'license_key': key, 'suffix': 'tar.gz'})}", archive, progress)
     with tarfile.open(archive, "r:gz") as tar:
         member = next((item for item in tar.getmembers() if item.name.endswith(f"{edition}.mmdb")), None)
         if member is None:
@@ -203,7 +224,7 @@ def fetch_maxmind(edition, key, workdir):
     return target
 
 
-def fetch_dbip(edition, workdir):
+def fetch_dbip(edition, workdir, progress=None):
     # DB-IP publishes the Lite databases monthly; early in a month fall back to the previous one
     now = datetime.now(timezone.utc)
     months = [now.strftime("%Y-%m"), (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")]
@@ -211,12 +232,13 @@ def fetch_dbip(edition, workdir):
     last_error = None
     for month in months:
         try:
-            download(DBIP_URL.format(edition=edition, month=month), compressed)
+            download(DBIP_URL.format(edition=edition, month=month), compressed, progress)
             break
         except Exception as error:
             last_error = error
     else:
-        raise RuntimeError(f"{edition} download failed ({last_error})")
+        # the original error, so it can be explained (an HTTP status, an unreachable host)
+        raise last_error
     target = os.path.join(workdir, f"{edition}.mmdb")
     with gzip.open(compressed, "rb") as source, open(target, "wb") as handle:
         shutil.copyfileobj(source, handle)
@@ -231,14 +253,39 @@ def needs_update(path, update_days, force):
 
 
 def in_backoff(last, now=None):
-    """True while a failed download is recent; a missing key is not a download failure."""
+    """True while a failed download waits for its next try; a missing key is not a download failure."""
     if last.get("last_error") in (None, "maxmind_key_missing") or not last.get("last_attempt"):
         return False
+    now = time.time() if now is None else now
+    if last.get("next_retry"):
+        return now < last["next_retry"]
     try:
+        # written by an older version: no next_retry, a fixed wait
         attempted = datetime.fromisoformat(last["last_attempt"]).timestamp()
     except ValueError:
         return False
-    return (time.time() if now is None else now) - attempted < RETRY_SECONDS
+    return now - attempted < RETRY_STEPS[-1]
+
+
+def retry_delay(failures):
+    """Seconds before the next automatic try after `failures` failures in a row."""
+    return RETRY_STEPS[min(max(failures, 1), len(RETRY_STEPS)) - 1]
+
+
+def error_code(error):
+    """What went wrong, in a word the page can explain."""
+    if isinstance(error, urllib.error.HTTPError):
+        return {401: "unauthorized", 403: "forbidden", 404: "not_found", 429: "rate_limited"}.get(error.code, "http")
+    if isinstance(error, (socket.timeout, TimeoutError)):
+        return "timeout"
+    if isinstance(error, urllib.error.URLError):
+        reason = error.reason
+        return "timeout" if isinstance(reason, (socket.timeout, TimeoutError)) or "timed out" in str(reason) else "unreachable"
+    if isinstance(error, OSError) and error.errno == errno.ENOSPC:
+        return "disk_full"
+    if isinstance(error, (tarfile.TarError, gzip.BadGzipFile, EOFError)) or "validation" in str(error) or "no database" in str(error):
+        return "invalid"
+    return "other"
 
 
 def scrub(message, key):
@@ -246,17 +293,25 @@ def scrub(message, key):
     return message.replace(key, "<key>") if key else message
 
 
-def fetch_databases(provider, paths, key, update_days, force):
-    """Download, validate and install what is due. Returns (updated kinds, error or None)."""
+def fetch_databases(provider, paths, key, update_days, force, report=None):
+    """Download, validate and install what is due. Returns (updated kinds, errors); each error is
+    {kind, edition, code, message} with the key scrubbed. `report(edition, done, total)` follows
+    the downloads."""
     updated = []
-    error = None
+    errors = []
     with tempfile.TemporaryDirectory(dir=STATE_DIR) as workdir:
         for kind, probe in (("city", ["location", "latitude"]), ("asn", [])):
             if not needs_update(paths[kind], update_days, force):
                 continue
             edition = paths["editions"][kind]
+            progress = (lambda done, total, edition=edition: report(edition, done, total)) if report else None
             try:
-                fetched = fetch_maxmind(edition, key, workdir) if provider.startswith("maxmind") else fetch_dbip(edition, workdir)
+                if report:
+                    report(edition, 0, None)
+                if provider.startswith("maxmind"):
+                    fetched = fetch_maxmind(edition, key, workdir, progress=progress)
+                else:
+                    fetched = fetch_dbip(edition, workdir, progress=progress)
                 validate(fetched, probe)
                 os.chmod(fetched, 0o644)
                 os.makedirs(GEOIP_DIR, exist_ok=True)
@@ -264,11 +319,14 @@ def fetch_databases(provider, paths, key, update_days, force):
                 os.replace(f"{paths[kind]}.new", paths[kind])
                 updated.append(kind)
             except Exception as exc:
-                error = scrub(f"{edition}: {exc}", key)
-    return updated, error
+                errors.append({"kind": kind, "edition": edition, "code": error_code(exc),
+                               "message": scrub(f"{edition}: {exc}", key)})
+    return updated, errors
 
 
-def update(force=False):
+def update(force=False, retry=False):
+    """Download what is due. `force` downloads everything again; `retry` does not wait out an
+    earlier failure and starts the retry steps over (a new key, or "Retry now")."""
     values = settings()
     provider = effective_provider(values)
     paths = DATABASES[provider]
@@ -283,21 +341,40 @@ def update(force=False):
         if provider.startswith("maxmind"):
             key, _ = license_key(values)
             if not key:
-                write_status({**read_status(), "last_attempt": datetime.now(timezone.utc).isoformat(),
-                              "last_error": "maxmind_key_missing"})
+                write_status({"last_attempt": datetime.now(timezone.utc).isoformat(),
+                              "last_error": "maxmind_key_missing", "provider": provider})
                 return {"result": "failed", "error": "maxmind_key_missing"}
         last = read_status()
-        if not force and in_backoff(last):
+        if not (force or retry) and in_backoff(last):
             return {"result": "backoff", "error": last["last_error"]}
-        updated, error = fetch_databases(provider, paths, key, values["update_days"], force)
-        write_status({"last_attempt": datetime.now(timezone.utc).isoformat(), "last_error": error})
-    return {"result": "failed" if error else "ok", "updated": updated, "error": error}
+        written = [0.0]
 
+        def report(edition, done, total):
+            # the map shows this as a progress bar; written at most every PROGRESS_SECONDS
+            now = time.time()
+            if done and now - written[0] < PROGRESS_SECONDS and (total is None or done < total):
+                return
+            written[0] = now
+            write_status({**last, "state": "downloading", "provider": provider,
+                          "progress": {"edition": edition, "done": done, "total": total, "updated": now}})
+
+        updated, errors = fetch_databases(provider, paths, key, values["update_days"], force, report)
+        failures = 0 if not errors else (0 if retry else last.get("failures") or 0) + 1
+        now = time.time()
+        write_status({
+            "last_attempt": datetime.now(timezone.utc).isoformat(),
+            "last_error": "; ".join(error["message"] for error in errors) or None,
+            "errors": errors, "failures": failures, "provider": provider, "state": "idle",
+            "next_retry": now + retry_delay(failures) if errors else None,
+        })
+    error = "; ".join(item["message"] for item in errors) or None
+    return {"result": "failed" if errors else "ok", "updated": updated, "error": error}
 
 if __name__ == "__main__":
     secure_umask()
     command = sys.argv[1] if len(sys.argv) > 1 else "status"
     if command == "update":
-        print(json.dumps(update(force=len(sys.argv) > 2 and sys.argv[2] == "force")))
+        mode = sys.argv[2] if len(sys.argv) > 2 else ""
+        print(json.dumps(update(force=mode == "force", retry=mode == "retry")))
     else:
         print(json.dumps(status()))

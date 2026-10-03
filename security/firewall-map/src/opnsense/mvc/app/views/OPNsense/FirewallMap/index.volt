@@ -477,6 +477,26 @@
         key_missing: {{ lang._('A MaxMind license key is needed: add it in the Firewall Map widget settings or in the GeoIP alias settings, or choose DB-IP Lite')|json_encode }},
         downloading: {{ lang._('Downloading the geolocation database…')|json_encode }},
         database_failed: {{ lang._('Geolocation database download failed')|json_encode }},
+        geo_downloading_title: {{ lang._('Downloading the geolocation database')|json_encode }},
+        geo_preparing: {{ lang._('Starting the download…')|json_encode }},
+        geo_progress: {{ lang._('{done} of {total}')|json_encode }},
+        geo_fills_in: {{ lang._('The map fills in as soon as it is done.')|json_encode }},
+        geo_failed_title: {{ lang._('The geolocation database could not be downloaded')|json_encode }},
+        geo_key_title: {{ lang._('A MaxMind license key is needed')|json_encode }},
+        geo_retry_in: {{ lang._('Trying again in {time}')|json_encode }},
+        geo_retrying: {{ lang._('Trying again…')|json_encode }},
+        geo_retry_now: {{ lang._('Retry now')|json_encode }},
+        geo_partial: {{ lang._('Network names are unavailable')|json_encode }},
+        geo_err_unauthorized: {{ lang._('MaxMind did not accept the license key. A new key can take a few minutes to start working; if this persists, check the key in the settings and that GeoLite2 downloads are enabled for your MaxMind account.')|json_encode }},
+        geo_err_forbidden: {{ lang._('{provider} refused the download (HTTP 403): the account may not have access to this database.')|json_encode }},
+        geo_err_not_found: {{ lang._('{provider} did not have the database at the expected address (HTTP 404). DB-IP publishes a new file each month; early in the month it may not be out yet.')|json_encode }},
+        geo_err_rate_limited: {{ lang._('{provider} limits how often a database can be downloaded (HTTP 429).')|json_encode }},
+        geo_err_unreachable: {{ lang._('The firewall could not reach {provider}. Check that it has internet access and working DNS.')|json_encode }},
+        geo_err_timeout: {{ lang._('The download from {provider} took too long and was stopped. A slow or busy connection is the usual cause.')|json_encode }},
+        geo_err_invalid: {{ lang._('The downloaded file was not a valid database.')|json_encode }},
+        geo_err_disk_full: {{ lang._("The database could not be saved: the firewall's disk is full.")|json_encode }},
+        geo_err_http: {{ lang._('{provider} answered with an error.')|json_encode }},
+        geo_err_other: {{ lang._('The download failed.')|json_encode }},
         all_services: {{ lang._('All services')|json_encode }},
         all_interfaces: {{ lang._('All interfaces')|json_encode }},
         all_hosts: {{ lang._('All inside hosts')|json_encode }},
@@ -868,6 +888,7 @@
             </div>
             <button type="button" id="fwmap-camera" title="{{ lang._('Take a snapshot: save the map as it is now, to review later') }}" aria-label="{{ lang._('Take a snapshot') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.6l1.6-2.4h6.6L16.9 7h2.6A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.8" r="3.4"/></svg></button>
             <div id="fwmap-banner" style="display:none" aria-live="polite"></div>
+            <div id="fwmap-geo"></div>
             <div id="fwmap-timeline" style="display:none"></div>
             <div id="fwmap-credit"></div>
         </div>
