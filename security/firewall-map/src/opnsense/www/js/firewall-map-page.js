@@ -2171,8 +2171,8 @@
 		const partial = meta.partial ? ` · <span class="fwmap-muted" title="${escapeHtml(T.snapshot_partial_hint)}">${escapeHtml(T.snapshot_partial)}</span>` : "";
 		$banner.html(`
     ${ic("camera", "fwmap-banner-ic")}
-    <span class="fwmap-banner-text"><b>${escapeHtml(T.snapshot)} · ${escapeHtml(takenText(meta))}</b>${note}
-      <span class="fwmap-banner-counts">· ${countsText(meta)}${meta.user ? ` · ${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}` : ""}${partial}</span></span>
+    <span class="fwmap-banner-text"><b>${escapeHtml(T.snapshot)} · ${escapeHtml(takenText(meta))}</b>${meta.user ? ` <span class="fwmap-banner-counts">· ${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}</span>` : ""}${note}
+      <span class="fwmap-banner-counts">· ${countsText(meta)}${partial}</span></span>
     <span class="fwmap-banner-actions">
       <button type="button" class="btn btn-default btn-sm fwmap-snap-note-btn">${ic("edit")} ${escapeHtml(meta.note ? T.snapshot_edit_note : T.snapshot_add_note)}</button>
       <button type="button" class="btn btn-default btn-sm fwmap-snap-download" title="${escapeHtml(T.snapshot_download)}" aria-label="${escapeHtml(T.snapshot_download)}">${ic("download")}</button>
@@ -2193,12 +2193,12 @@
 			month: "short"
 		});
 	}
-	/** The badge over a dot: when, what it holds, the note and who took it. */
+	/** The badge over a dot: when and by whom, what it holds, the note. */
 	function tipHtml(meta) {
 		return `<span class="fwmap-tl-tip" role="tooltip"><b>${escapeHtml(takenText(meta))}</b>
+    ${meta.user ? `<span class="fwmap-muted">${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}</span>` : ""}
     <span>${countsText(meta)}</span>
-    ${meta.note ? `<span class="fwmap-snap-note">“${escapeHtml(meta.note)}”</span>` : ""}
-    ${meta.user ? `<span class="fwmap-muted">${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}</span>` : ""}</span>`;
+    ${meta.note ? `<span class="fwmap-snap-note">“${escapeHtml(meta.note)}”</span>` : ""}</span>`;
 	}
 	/** A tick every 5 min … 6 h, whichever gives four to seven labels over `span` seconds. */
 	function tickStep(span) {
@@ -2327,8 +2327,8 @@
 			return `<div class="fwmap-talker fwmap-snap-row${current ? " active" : ""}" role="button" tabindex="0" data-id="${escapeHtml(meta.id)}"
         aria-pressed="${current}" title="${escapeHtml(T.snapshot_show)}">
       <span class="fwmap-talker-icon">${ic("camera")}</span>
-      <span class="fwmap-talker-text"><span class="fwmap-talker-label">${escapeHtml(takenText(meta))}</span>
-        <span class="fwmap-talker-sub">${countsText(meta)}${meta.user ? ` · ${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}` : ""}</span>
+      <span class="fwmap-talker-text"><span class="fwmap-talker-label">${escapeHtml(takenText(meta))}${meta.user ? ` <span class="fwmap-snap-by">· ${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}</span>` : ""}</span>
+        <span class="fwmap-talker-sub">${countsText(meta)}</span>
         ${meta.note ? `<span class="fwmap-talker-sub fwmap-snap-note">“${escapeHtml(meta.note)}”</span>` : ""}</span>
       <span class="fwmap-snap-size">${escapeHtml(formatBytes(meta.size || 0))}</span>
     </div>`;

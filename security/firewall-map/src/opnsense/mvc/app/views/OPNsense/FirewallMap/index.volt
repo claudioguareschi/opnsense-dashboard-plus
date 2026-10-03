@@ -377,6 +377,8 @@
     .fwmap-banner-ic { width: 18px; height: 18px; color: var(--fwmap-frozen); }
     .fwmap-banner-text { flex: 1 1 260px; min-width: 0; }
     .fwmap-banner-counts { opacity: .8; }
+    /* who took a snapshot sits with its time, in the small muted style of the line below */
+    .fwmap-snap-by { font-size: .8em; font-weight: normal; opacity: .65; }
     .fwmap-banner-actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .fwmap-banner-actions .btn { display: inline-flex; align-items: center; gap: 5px; }
     .fwmap-banner-actions .btn .fwmap-ic { width: 15px; height: 15px; }
