@@ -1,6 +1,6 @@
 #!/usr/local/bin/python3
 
-# Copyright (C) 2026 Claudio Guareschi <cguareschi@gmail.com>
+# Copyright (C) 2026 Claudio Guareschi <cguareschimd@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
