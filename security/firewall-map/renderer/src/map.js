@@ -203,8 +203,9 @@ export function createFirewallMap(container, options = {}) {
     },
     controller: {scrollZoom: {smooth: true}, dragRotate: false, touchRotate: false},
     useDevicePixels: true,
-    // arcs are 1.5px wide: pick within a few pixels so clicks and hovers land reliably
-    pickingRadius: 6,
+    // arcs are 1.5px wide: pick within a few pixels so clicks and hovers land reliably, but not so
+    // far that an empty-looking spot answers
+    pickingRadius: 5,
     // arrow pointer so endpoints and arches can be hovered; the hand only while dragging
     getCursor: ({isDragging, isHovering}) => isDragging ? 'grabbing' : (isHovering ? 'pointer' : 'default'),
     onHover: (info) => {
@@ -361,7 +362,9 @@ export function createFirewallMap(container, options = {}) {
   }
 
   function arcBaseColor(arc) {
-    const alpha = Math.round((arc.heavy ? 150 : 70) + 105 * arc.activity);
+    // an idle connection is still a state on the firewall (and may be the one a snapshot was taken
+    // for): it stays plainly visible wherever it can be hovered, busier ones only get stronger
+    const alpha = Math.round((arc.heavy ? 170 : 140) + (arc.heavy ? 85 : 115) * arc.activity);
     if (arc.threat) {
       // flagged traffic the firewall let through
       return rgb(colors.danger, Math.max(alpha, 170));

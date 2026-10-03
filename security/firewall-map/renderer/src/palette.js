@@ -117,6 +117,7 @@ export function cssVariables(colors) {
   const on = (value) => ((0.2126 * value[0] + 0.7152 * value[1] + 0.0722 * value[2]) / 255 > 0.6 ? 'rgb(40, 30, 0)' : '#fff');
   return {
     '--fwmap-accent': color(colors.accent),
+    '--fwmap-on-accent': on(colors.accent),
     '--fwmap-text': color(colors.text),
     '--fwmap-panel': color(colors.background),
     '--fwmap-danger': color(colors.danger),

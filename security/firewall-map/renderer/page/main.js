@@ -41,7 +41,7 @@ import {bindSplitters, readFollow, setFollow, watchSideWidth} from './layout.js'
 import {refreshQueueCount, showQueue} from './queue.js';
 import {backToLive, bindSnapshots, renderSnapshotList, showSavedStates, takenText} from './snapshots.js';
 import {renderTalkers, talkerActive, talkers, talkersFromLast} from './talkers.js';
-import {updateLegend, updateToolbar} from './toolbar.js';
+import {bindChips, syncChips, updateLegend, updateToolbar} from './toolbar.js';
 
 const host = () => window.FirewallMapRenderer.host;
 
@@ -194,10 +194,12 @@ function bindFilters() {
   bind('#fwmap-filter-iface', 'iface');
   bind('#fwmap-filter-host', 'host');
   bind('#fwmap-filter-country', 'country');
+  bindChips();
   $('#fwmap-filter-asn a').on('click', (event) => {
     event.preventDefault();
     state.filters.asn = '';
     refresh();
+    syncChips();
   });
   $('#fwmap-color').on('change', function () {
     state.colorMode = $(this).val();
@@ -208,6 +210,7 @@ function bindFilters() {
     resetFilters();
     $('#fwmap-filter-traffic').val('all');
     refresh();
+    syncChips();
   });
   // the IDS counters in the status line filter the map; a second click shows everything again
   $('#fwmap-status').on('click', '.fwmap-status-ids', function (event) {

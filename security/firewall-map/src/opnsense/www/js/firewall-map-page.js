@@ -2378,11 +2378,89 @@
 		fillSelect($("#fwmap-filter-host"), hosts.values(), state.filters.host, T.all_hosts);
 		fillSelect($("#fwmap-filter-country"), countries.values(), state.filters.country, T.all_countries);
 		const asnActive = state.filters.asn !== "";
-		$("#fwmap-filter-asn").toggle(asnActive).find("span").text(asnActive ? `AS${state.filters.asn}` : "");
+		$("#fwmap-filter-asn").toggleClass("shown", asnActive).find("span").text(asnActive ? `AS${state.filters.asn}` : "");
+		syncChips();
+	}
+	var measure;
+	/** A select is as wide as the option it shows, so a chip never carries empty space. */
+	function fitSelect(select) {
+		if (select.closest("#fwmap-more-menu")) {
+			select.style.width = "";
+			return;
+		}
+		const style = getComputedStyle(select);
+		measure = measure || document.createElement("canvas").getContext("2d");
+		measure.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+		const text = select.options[select.selectedIndex]?.text || "";
+		select.style.width = `${Math.ceil(measure.measureText(text).width + parseFloat(style.paddingRight || 0) + 4)}px`;
+	}
+	/** Chosen filters fill with the accent colour; the reset button appears once two are set. */
+	function syncChips() {
+		let active = state.filters.asn ? 1 : 0;
+		let folded = 0;
+		$(".fwmap-chip[data-filter]").each(function() {
+			const select = $(this).find("select")[0];
+			const on = !["", "all"].includes(select.value || "");
+			$(this).toggleClass("active", on);
+			active += on ? 1 : 0;
+			folded += on && this.closest("#fwmap-more-menu") ? 1 : 0;
+			fitSelect(select);
+		});
+		$("#fwmap-reset").toggle(active >= 2);
+		$("#fwmap-more-count").text(folded || "");
+		foldChips();
+		$("#fwmap-legend .fwmap-legend-mode select").each(function() {
+			fitSelect(this);
+		});
+	}
+	/** Chips that do not fit on the row move, from the right, into the "Filters" menu. */
+	function foldChips() {
+		const row = document.getElementById("fwmap-chips");
+		const wrap = document.getElementById("fwmap-more-wrap");
+		const menu = document.getElementById("fwmap-more-menu");
+		if (!row || row.offsetParent === null || row.contains(document.activeElement) && document.activeElement.tagName === "SELECT") return;
+		const chips = [...document.querySelectorAll(".fwmap-chip[data-filter]")];
+		const wasFolded = chips.some((chip) => chip.parentNode === menu);
+		for (const chip of chips) row.insertBefore(chip, document.getElementById("fwmap-filter-asn"));
+		wrap.style.display = "none";
+		if (row.scrollWidth > row.clientWidth + 1) {
+			wrap.style.display = "";
+			for (let index = chips.length - 1; index > 0 && row.scrollWidth > row.clientWidth + 1; index--) menu.insertBefore(chips[index], menu.firstChild);
+		} else wrap.classList.remove("open");
+		if (wasFolded !== chips.some((chip) => chip.parentNode === menu)) chips.forEach((chip) => fitSelect(chip.querySelector("select")));
+		const folded = chips.filter((chip) => chip.parentNode === menu && chip.classList.contains("active")).length;
+		$("#fwmap-more-count").text(folded || "");
+	}
+	/** Clear buttons on chosen chips, the "Filters" menu, and refolding as the row resizes. */
+	function bindChips() {
+		$("#fwmap-toolbar").on("click", ".fwmap-chip[data-filter] .fwmap-chip-clear", function(event) {
+			event.preventDefault();
+			event.stopPropagation();
+			const chip = $(this).closest(".fwmap-chip");
+			chip.find("select").val(chip.data("filter") === "traffic" ? "all" : "").trigger("change");
+		});
+		$("#fwmap-more").on("click", (event) => {
+			event.stopPropagation();
+			const open = !$("#fwmap-more-wrap").hasClass("open");
+			$("#fwmap-more-wrap").toggleClass("open", open);
+			$("#fwmap-more").attr("aria-expanded", String(open));
+		});
+		$(document).on("mousedown", (event) => {
+			if (!$(event.target).closest("#fwmap-more-wrap").length) {
+				$("#fwmap-more-wrap").removeClass("open");
+				$("#fwmap-more").attr("aria-expanded", "false");
+			}
+		});
+		$("#fwmap-toolbar").on("change", "select", () => syncChips());
+		$("#fwmap-color").on("change", function() {
+			fitSelect(this);
+		});
+		if (window.ResizeObserver) new ResizeObserver(() => syncChips()).observe(document.getElementById("fwmap-toolbar"));
+		syncChips();
 	}
 	function updateLegend() {
 		const items = state.renderer.legend();
-		$("#fwmap-legend").html(items.map((item) => `<span class="fwmap-legend-item"><i style="background:rgb(${item.color.slice(0, 3).join(",")})"></i>${escapeHtml(item.label)}</span>`).join("") + `<span class="fwmap-legend-item"><i class="fwmap-legend-ring"></i>${escapeHtml(T.ids_alert)}</span>`);
+		$("#fwmap-legend-items").html(items.map((item) => `<span class="fwmap-legend-item"><i style="background:rgb(${item.color.slice(0, 3).join(",")})"></i>${escapeHtml(item.label)}</span>`).join("") + `<span class="fwmap-legend-item"><i class="fwmap-legend-ring"></i>${escapeHtml(T.ids_alert)}</span>`);
 	}
 	//#endregion
 	//#region page/main.js
@@ -2505,10 +2583,12 @@
 		bind("#fwmap-filter-iface", "iface");
 		bind("#fwmap-filter-host", "host");
 		bind("#fwmap-filter-country", "country");
+		bindChips();
 		$("#fwmap-filter-asn a").on("click", (event) => {
 			event.preventDefault();
 			state.filters.asn = "";
 			refresh();
+			syncChips();
 		});
 		$("#fwmap-color").on("change", function() {
 			state.colorMode = $(this).val();
@@ -2523,6 +2603,7 @@
 			resetFilters();
 			$("#fwmap-filter-traffic").val("all");
 			refresh();
+			syncChips();
 		});
 		$("#fwmap-status").on("click", ".fwmap-status-ids", function(event) {
 			event.preventDefault();
