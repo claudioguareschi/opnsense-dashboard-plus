@@ -44,8 +44,8 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 min-height: 12em;
             }
             .dashboard-plus-services-toolbar {
-                display: grid;
-                grid-template-columns: minmax(0, 1fr) 8em;
+                display: flex;
+                flex-wrap: wrap;
                 align-items: center;
                 gap: 0.6em;
                 padding: 0.25em 0 0.7em;
@@ -56,8 +56,8 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 gap: 0.55em;
                 flex-wrap: wrap;
                 min-width: 0;
-                grid-column: 1 / -1;
-                grid-row: 2;
+                order: 3;
+                flex: 0 0 100%;
                 padding-left: 0.5em;
                 font-size: 0.88em;
             }
@@ -74,16 +74,14 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 width: auto;
                 min-width: 0;
                 max-width: none;
-                grid-column: 1;
-                grid-row: 1;
-                justify-self: stretch;
+                order: 1;
+                flex: 1 1 0;
                 margin-left: 0.5em;
             }
             .dashboard-plus-services-toolbar > select {
-                grid-column: 2;
-                grid-row: 1;
-                justify-self: stretch;
-                width: auto;
+                order: 2;
+                flex: 0 0 8em;
+                width: 8em;
                 min-width: 0;
                 margin-right: 0.5em;
                 text-align: left;
@@ -116,26 +114,26 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
             }
             @media (max-width: 22em) {
                 .dashboard-plus-services-toolbar {
-                    grid-template-columns: 1fr;
+                    flex-direction: column;
+                    align-items: stretch;
                 }
                 .dashboard-plus-services-summary {
-                    grid-column: 1;
-                    grid-row: 2;
+                    order: 2;
+                    flex: 0 0 auto;
                     padding-left: 0.5em;
                 }
                 .dashboard-plus-services-search,
                 .dashboard-plus-services-toolbar > select {
-                    grid-column: 1;
+                    flex: 0 0 auto;
                 }
                 .dashboard-plus-services-search {
+                    order: 1;
                     width: auto;
-                    justify-self: stretch;
                     margin: 0 0.5em;
                 }
                 .dashboard-plus-services-toolbar > select {
-                    grid-row: 3;
+                    order: 3;
                     width: auto;
-                    justify-self: stretch;
                     margin: 0 0.5em;
                 }
             }
