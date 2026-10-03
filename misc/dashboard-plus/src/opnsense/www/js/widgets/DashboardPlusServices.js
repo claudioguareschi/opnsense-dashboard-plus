@@ -52,9 +52,9 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 align-items: center;
                 justify-content: flex-start;
                 gap: 0.6em;
-                width: 100%;
-                min-width: 100%;
-                max-width: none;
+                width: 100% !important;
+                min-width: 100% !important;
+                max-width: none !important;
                 box-sizing: border-box;
                 padding: 0.25em 0 0.7em;
             }
