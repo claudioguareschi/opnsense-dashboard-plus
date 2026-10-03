@@ -1,0 +1,203 @@
+/*
+ * Copyright (C) 2026 Claudio Guareschi <cguareschimd@gmail.com>
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY,
+ * OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/*
+ * The hidden diagnostics panel (?debug=1 on the page URL): frame rate, frame cost, memory, GPU
+ * memory, poll latency and WebGL context losses, with ten-minute plots, to watch the map for
+ * leaks and load over a long session. Nothing here runs unless it is asked for.
+ */
+import {escapeHtml} from '../src/format.js';
+import {state} from './context.js';
+
+const SAMPLE_MS = 1000;
+const KEEP = 600;
+const POLL_PATH = '/api/firewallmap/flow/snapshot';
+
+const samples = [];
+const polls = [];
+let longTasks = 0;
+let started = 0;
+
+export function diagnosticsRequested() {
+  try {
+    return new URLSearchParams(window.location.search).get('debug') === '1';
+  } catch (_) {
+    return false;
+  }
+}
+
+function observe() {
+  try {
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (entry.name.includes(POLL_PATH)) {
+          polls.push({ms: entry.duration, bytes: entry.encodedBodySize || entry.transferSize || 0});
+        }
+      }
+    }).observe({type: 'resource', buffered: false});
+  } catch (_) {
+    // resource timing unavailable: the poll row stays empty
+  }
+  try {
+    // Chromium only: main-thread work over 50 ms
+    new PerformanceObserver((list) => {
+      longTasks += list.getEntries().length;
+    }).observe({type: 'longtask', buffered: false});
+  } catch (_) {
+    longTasks = null;
+  }
+}
+
+function sample() {
+  const map = state.renderer?.diagnostics?.() || {};
+  const recent = polls.splice(0);
+  const heap = performance.memory?.usedJSHeapSize;
+  const point = {
+    t: Math.round((Date.now() - started) / 1000),
+    fps: map.animating ? map.framesComposed / (SAMPLE_MS / 1000) : 0,
+    // deck.gl's measured CPU time per drawn frame; before its first report, our own layer building
+    frameMs: map.cpuPerFrame || (map.framesComposed ? map.composeMs / map.framesComposed : 0),
+    heapMb: heap ? heap / 1048576 : null,
+    gpuMb: map.gpuMemory ? map.gpuMemory / 1048576 : null,
+    nodes: document.getElementsByTagName('*').length,
+    pollMs: recent.length ? Math.max(...recent.map((entry) => entry.ms)) : null,
+    pollKb: recent.length ? recent[recent.length - 1].bytes / 1024 : null,
+    arcs: map.arcs, blocks: map.blocks, pulses: map.pulses,
+    contextLosses: (state.contextLosses || 0),
+    longTasks,
+    mode: state.mode,
+    hidden: document.hidden,
+  };
+  samples.push(point);
+  if (samples.length > KEEP) {
+    samples.shift();
+  }
+  return point;
+}
+
+function cssColor(name, fallback) {
+  const value = getComputedStyle(document.getElementById('fwmap-map')).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+/** A sparkline of `key` over the kept samples, with its latest value and the range. */
+function plot(canvas, key, color) {
+  const values = samples.map((point) => point[key]).filter((value) => typeof value === 'number');
+  const ratio = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  if (canvas.width !== width * ratio) {
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+  }
+  const context = canvas.getContext('2d');
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  if (values.length < 2) {
+    return '';
+  }
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  const span = high - low || 1;
+  context.strokeStyle = color;
+  context.lineWidth = 1.2;
+  context.beginPath();
+  values.forEach((value, index) => {
+    // the newest sample at the right edge; ten minutes span the width
+    const x = width - ((values.length - 1 - index) / (KEEP - 1)) * width;
+    const y = height - 2 - ((value - low) / span) * (height - 4);
+    if (index) {
+      context.lineTo(x, y);
+    } else {
+      context.moveTo(x, y);
+    }
+  });
+  context.stroke();
+  return `${low.toFixed(low < 10 ? 1 : 0)}–${high.toFixed(high < 10 ? 1 : 0)}`;
+}
+
+const PLOTS = [
+  {key: 'fps', label: 'FPS', unit: '', color: ['--fwmap-ok', '#5a9b3c']},
+  {key: 'frameMs', label: 'Frame', unit: 'ms', color: ['--fwmap-accent', '#c03e14']},
+  {key: 'heapMb', label: 'JS heap', unit: 'MB', color: ['--fwmap-contained', '#d4a020']},
+  {key: 'gpuMb', label: 'GPU', unit: 'MB', color: ['--fwmap-blocked', '#888']},
+  {key: 'pollMs', label: 'Poll', unit: 'ms', color: ['--fwmap-danger', '#b03030']},
+];
+
+function format(value, unit) {
+  if (typeof value !== 'number') {
+    return 'n/a';
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)}${unit ? ` ${unit}` : ''}`;
+}
+
+function uptime(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return hours ? `${hours} h ${minutes} min` : `${minutes} min ${seconds % 60} s`;
+}
+
+function render(panel, point) {
+  for (const item of PLOTS) {
+    const row = panel.querySelector(`[data-plot="${item.key}"]`);
+    const range = plot(row.querySelector('canvas'), item.key, cssColor(...item.color));
+    row.querySelector('.fwmap-diag-value').textContent = format(point[item.key], item.unit);
+    row.querySelector('.fwmap-diag-range').textContent = range;
+  }
+  const facts = [
+    ['Uptime', uptime(point.t)],
+    ['Arcs · blocks · dots', `${point.arcs ?? 'n/a'} · ${point.blocks ?? 'n/a'} · ${point.pulses ?? 'n/a'}`],
+    ['DOM nodes', point.nodes],
+    ['Poll size', format(point.pollKb, 'KB')],
+    ['Long tasks', point.longTasks ?? 'n/a'],
+    ['WebGL resets', point.contextLosses],
+  ];
+  panel.querySelector('.fwmap-diag-facts').innerHTML = facts
+    .map(([label, value]) => `<span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b>`).join('');
+}
+
+/** Show the panel and start sampling; only called when ?debug=1 is on the URL. */
+export function startDiagnostics() {
+  started = Date.now();
+  observe();
+  const panel = document.createElement('div');
+  panel.id = 'fwmap-diag';
+  panel.innerHTML = `<div class="fwmap-diag-head"><b>Diagnostics</b>
+      <button type="button" class="btn btn-default btn-xs fwmap-diag-copy" title="Copy the samples as JSON">Copy</button>
+      <button type="button" class="btn btn-default btn-xs fwmap-diag-close" title="Hide until the page is reloaded">&times;</button></div>`
+    + PLOTS.map((item) => `<div class="fwmap-diag-plot" data-plot="${item.key}"><span>${escapeHtml(item.label)}</span>`
+      + '<canvas></canvas><b class="fwmap-diag-value"></b><small class="fwmap-diag-range"></small></div>').join('')
+    + '<div class="fwmap-diag-facts"></div>';
+  document.getElementById('fwmap-map').appendChild(panel);
+  const timer = setInterval(() => render(panel, sample()), SAMPLE_MS);
+  panel.querySelector('.fwmap-diag-close').addEventListener('click', () => {
+    clearInterval(timer);
+    panel.remove();
+  });
+  panel.querySelector('.fwmap-diag-copy').addEventListener('click', () => {
+    navigator.clipboard?.writeText(JSON.stringify({userAgent: navigator.userAgent, samples}));
+  });
+}

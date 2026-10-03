@@ -1075,6 +1075,182 @@
 		};
 	}
 	//#endregion
+	//#region page/diagnostics.js
+	var SAMPLE_MS = 1e3;
+	var KEEP = 600;
+	var POLL_PATH = "/api/firewallmap/flow/snapshot";
+	var samples = [];
+	var polls = [];
+	var longTasks = 0;
+	var started = 0;
+	function diagnosticsRequested() {
+		try {
+			return new URLSearchParams(window.location.search).get("debug") === "1";
+		} catch (_) {
+			return false;
+		}
+	}
+	function observe() {
+		try {
+			new PerformanceObserver((list) => {
+				for (const entry of list.getEntries()) if (entry.name.includes(POLL_PATH)) polls.push({
+					ms: entry.duration,
+					bytes: entry.encodedBodySize || entry.transferSize || 0
+				});
+			}).observe({
+				type: "resource",
+				buffered: false
+			});
+		} catch (_) {}
+		try {
+			new PerformanceObserver((list) => {
+				longTasks += list.getEntries().length;
+			}).observe({
+				type: "longtask",
+				buffered: false
+			});
+		} catch (_) {
+			longTasks = null;
+		}
+	}
+	function sample() {
+		const map = state.renderer?.diagnostics?.() || {};
+		const recent = polls.splice(0);
+		const heap = performance.memory?.usedJSHeapSize;
+		const point = {
+			t: Math.round((Date.now() - started) / 1e3),
+			fps: map.animating ? map.framesComposed / (SAMPLE_MS / 1e3) : 0,
+			frameMs: map.cpuPerFrame || (map.framesComposed ? map.composeMs / map.framesComposed : 0),
+			heapMb: heap ? heap / 1048576 : null,
+			gpuMb: map.gpuMemory ? map.gpuMemory / 1048576 : null,
+			nodes: document.getElementsByTagName("*").length,
+			pollMs: recent.length ? Math.max(...recent.map((entry) => entry.ms)) : null,
+			pollKb: recent.length ? recent[recent.length - 1].bytes / 1024 : null,
+			arcs: map.arcs,
+			blocks: map.blocks,
+			pulses: map.pulses,
+			contextLosses: state.contextLosses || 0,
+			longTasks,
+			mode: state.mode,
+			hidden: document.hidden
+		};
+		samples.push(point);
+		if (samples.length > KEEP) samples.shift();
+		return point;
+	}
+	function cssColor(name, fallback) {
+		return getComputedStyle(document.getElementById("fwmap-map")).getPropertyValue(name).trim() || fallback;
+	}
+	/** A sparkline of `key` over the kept samples, with its latest value and the range. */
+	function plot(canvas, key, color) {
+		const values = samples.map((point) => point[key]).filter((value) => typeof value === "number");
+		const ratio = window.devicePixelRatio || 1;
+		const width = canvas.clientWidth;
+		const height = canvas.clientHeight;
+		if (canvas.width !== width * ratio) {
+			canvas.width = width * ratio;
+			canvas.height = height * ratio;
+		}
+		const context = canvas.getContext("2d");
+		context.setTransform(ratio, 0, 0, ratio, 0, 0);
+		context.clearRect(0, 0, width, height);
+		if (values.length < 2) return "";
+		const low = Math.min(...values);
+		const high = Math.max(...values);
+		const span = high - low || 1;
+		context.strokeStyle = color;
+		context.lineWidth = 1.2;
+		context.beginPath();
+		values.forEach((value, index) => {
+			const x = width - (values.length - 1 - index) / 599 * width;
+			const y = height - 2 - (value - low) / span * (height - 4);
+			if (index) context.lineTo(x, y);
+			else context.moveTo(x, y);
+		});
+		context.stroke();
+		return `${low.toFixed(low < 10 ? 1 : 0)}–${high.toFixed(high < 10 ? 1 : 0)}`;
+	}
+	var PLOTS = [
+		{
+			key: "fps",
+			label: "FPS",
+			unit: "",
+			color: ["--fwmap-ok", "#5a9b3c"]
+		},
+		{
+			key: "frameMs",
+			label: "Frame",
+			unit: "ms",
+			color: ["--fwmap-accent", "#c03e14"]
+		},
+		{
+			key: "heapMb",
+			label: "JS heap",
+			unit: "MB",
+			color: ["--fwmap-contained", "#d4a020"]
+		},
+		{
+			key: "gpuMb",
+			label: "GPU",
+			unit: "MB",
+			color: ["--fwmap-blocked", "#888"]
+		},
+		{
+			key: "pollMs",
+			label: "Poll",
+			unit: "ms",
+			color: ["--fwmap-danger", "#b03030"]
+		}
+	];
+	function format(value, unit) {
+		if (typeof value !== "number") return "n/a";
+		return `${value.toFixed(value < 10 ? 1 : 0)}${unit ? ` ${unit}` : ""}`;
+	}
+	function uptime(seconds) {
+		const hours = Math.floor(seconds / 3600);
+		const minutes = Math.floor(seconds % 3600 / 60);
+		return hours ? `${hours} h ${minutes} min` : `${minutes} min ${seconds % 60} s`;
+	}
+	function render(panel, point) {
+		for (const item of PLOTS) {
+			const row = panel.querySelector(`[data-plot="${item.key}"]`);
+			const range = plot(row.querySelector("canvas"), item.key, cssColor(...item.color));
+			row.querySelector(".fwmap-diag-value").textContent = format(point[item.key], item.unit);
+			row.querySelector(".fwmap-diag-range").textContent = range;
+		}
+		const facts = [
+			["Uptime", uptime(point.t)],
+			["Arcs · blocks · dots", `${point.arcs ?? "n/a"} · ${point.blocks ?? "n/a"} · ${point.pulses ?? "n/a"}`],
+			["DOM nodes", point.nodes],
+			["Poll size", format(point.pollKb, "KB")],
+			["Long tasks", point.longTasks ?? "n/a"],
+			["WebGL resets", point.contextLosses]
+		];
+		panel.querySelector(".fwmap-diag-facts").innerHTML = facts.map(([label, value]) => `<span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b>`).join("");
+	}
+	/** Show the panel and start sampling; only called when ?debug=1 is on the URL. */
+	function startDiagnostics() {
+		started = Date.now();
+		observe();
+		const panel = document.createElement("div");
+		panel.id = "fwmap-diag";
+		panel.innerHTML = `<div class="fwmap-diag-head"><b>Diagnostics</b>
+      <button type="button" class="btn btn-default btn-xs fwmap-diag-copy" title="Copy the samples as JSON">Copy</button>
+      <button type="button" class="btn btn-default btn-xs fwmap-diag-close" title="Hide until the page is reloaded">&times;</button></div>` + PLOTS.map((item) => `<div class="fwmap-diag-plot" data-plot="${item.key}"><span>${escapeHtml(item.label)}</span><canvas></canvas><b class="fwmap-diag-value"></b><small class="fwmap-diag-range"></small></div>`).join("") + "<div class=\"fwmap-diag-facts\"></div>";
+		document.getElementById("fwmap-map").appendChild(panel);
+		const timer = setInterval(() => render(panel, sample()), SAMPLE_MS);
+		panel.querySelector(".fwmap-diag-close").addEventListener("click", () => {
+			clearInterval(timer);
+			panel.remove();
+		});
+		panel.querySelector(".fwmap-diag-copy").addEventListener("click", () => {
+			navigator.clipboard?.writeText(JSON.stringify({
+				userAgent: navigator.userAgent,
+				samples
+			}));
+		});
+	}
+	//#endregion
 	//#region page/investigate.js
 	function scoreBadge(score) {
 		return `<span class="fwmap-pill fwmap-pill-${score >= 75 ? "danger" : score >= 25 ? "warning" : score > 0 ? "contained" : "ok"}">${escapeHtml(score)}%</span>`;
@@ -2742,13 +2918,44 @@
 				state.selection = selection;
 				renderDetails();
 			},
-			onFollowChange: (on) => setFollow(on, false)
+			onFollowChange: (on) => setFollow(on, false),
+			onContextLost: () => recoverRenderer()
 		});
 		setFollow(state.follow);
 		$(container).children("canvas").css({
 			left: 0,
 			top: 0
 		});
+	}
+	var MAX_RESETS = 3;
+	var RESET_WINDOW_MS = 12e4;
+	var REBUILD_MS = 2e3;
+	var resets = [];
+	var rebuilding = null;
+	/** The WebGL context was lost: say so, then build a new renderer (a new canvas, a new context). */
+	function recoverRenderer() {
+		state.contextLosses = (state.contextLosses || 0) + 1;
+		const now = Date.now();
+		resets = resets.filter((time) => now - time < RESET_WINDOW_MS).concat(now);
+		if (rebuilding) return;
+		if (resets.length > MAX_RESETS) {
+			$("#fwmap-status").text(T.webgl_failed);
+			return;
+		}
+		$("#fwmap-status").text(T.webgl_lost);
+		rebuilding = setTimeout(() => {
+			rebuilding = null;
+			try {
+				state.renderer.destroy();
+			} catch (_) {}
+			$("#fwmap-canvas").empty();
+			createRenderer();
+			if (state.mode === "snapshot") {
+				state.renderer.setFrozen(true);
+				state.renderer.setFollow(false);
+			}
+			refresh();
+		}, REBUILD_MS);
 	}
 	$(async () => {
 		if (!window.FirewallMapRenderer?.host.hasWebGL()) {
@@ -2783,6 +2990,7 @@
 			if (event.key === "Escape" && state.mode === "snapshot" && !$(".modal.in").length) backToLive();
 		});
 		poll(snapshotQuery(state.settings));
+		if (diagnosticsRequested()) startDiagnostics();
 	});
 	//#endregion
 })();

@@ -163,6 +163,22 @@
     .fwmap-inv-table { width: 100%; font-size: .9em; table-layout: fixed; }
     .fwmap-inv-table th { font-weight: normal; opacity: .7; padding-right: 8px; vertical-align: top; width: 10em; }
     .fwmap-inv-retry { margin-top: 6px; }
+    /* ?debug=1: the diagnostics panel, translucent over the bottom right of the map */
+    #fwmap-diag { position: absolute; right: 12px; bottom: 60px; z-index: 5; width: 270px; padding: 8px 10px; font-size: 11px;
+        line-height: 1.35; border: 1px solid rgba(128, 128, 128, .3); border-radius: 6px; color: var(--fwmap-text, inherit);
+        background: color-mix(in srgb, var(--fwmap-panel, #fff) 78%, transparent); backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px); box-shadow: 0 2px 8px rgba(0, 0, 0, .12); font-variant-numeric: tabular-nums; }
+    .fwmap-diag-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .fwmap-diag-head b { flex: 1; }
+    .fwmap-diag-plot { display: grid; grid-template-columns: 48px 1fr 54px; grid-template-rows: auto auto; column-gap: 6px;
+        align-items: center; margin-bottom: 3px; }
+    .fwmap-diag-plot > span { opacity: .7; grid-row: span 2; }
+    .fwmap-diag-plot canvas { width: 100%; height: 22px; grid-row: span 2; }
+    .fwmap-diag-value { text-align: right; }
+    .fwmap-diag-range { text-align: right; opacity: .6; font-size: 10px; }
+    .fwmap-diag-facts { display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; margin-top: 6px; padding-top: 6px;
+        border-top: 1px solid rgba(128, 128, 128, .25); }
+    .fwmap-diag-facts span { opacity: .7; }
     /* while the lookup runs: a spinner where the data will appear (seen mostly on slow links) */
     .fwmap-inv-loading { display: flex; align-items: center; gap: 8px; padding: 12px 0; opacity: .7; }
     .fwmap-inv-table td { word-break: break-word; }
@@ -454,6 +470,8 @@
         unavailable: {{ lang._('Live flow data is unavailable')|json_encode }},
         webgl: {{ lang._('WebGL is required for Firewall Map+')|json_encode }},
         renderer_failed: {{ lang._('Map renderer failed to initialize')|json_encode }},
+        webgl_lost: {{ lang._('The browser reset its graphics: the map is restarting…')|json_encode }},
+        webgl_failed: {{ lang._('The browser keeps resetting its graphics: reload the page to show the map again')|json_encode }},
         carp_backup: {{ lang._('CARP backup: traffic is passing through the master')|json_encode }},
         key_missing: {{ lang._('A MaxMind license key is needed: add it in the Firewall Map widget settings or in the GeoIP alias settings, or choose DB-IP Lite')|json_encode }},
         downloading: {{ lang._('Downloading the geolocation database…')|json_encode }},

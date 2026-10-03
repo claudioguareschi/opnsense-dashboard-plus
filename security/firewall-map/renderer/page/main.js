@@ -36,6 +36,7 @@ import {getJSON} from './api.js';
 import {POLL_MS, resetFilters, state, T} from './context.js';
 import {renderDetails} from './details.js';
 import {filtered} from './filters.js';
+import {diagnosticsRequested, startDiagnostics} from './diagnostics.js';
 import {checkAbuse, investigate} from './investigate.js';
 import {bindSplitters, readFollow, setFollow, watchSideWidth} from './layout.js';
 import {refreshQueueCount, showQueue} from './queue.js';
@@ -332,9 +333,48 @@ function createRenderer() {
     },
     // moving the map by hand ends follow mode, as in a navigation app
     onFollowChange: (on) => setFollow(on, false),
+    onContextLost: () => recoverRenderer(),
   });
   setFollow(state.follow);
   $(container).children('canvas').css({left: 0, top: 0});
+}
+
+// a browser that keeps taking the GPU away is not fought: after this many resets in RESET_WINDOW_MS
+// the map stops and asks for a reload
+const MAX_RESETS = 3;
+const RESET_WINDOW_MS = 120000;
+const REBUILD_MS = 2000;
+let resets = [];
+let rebuilding = null;
+
+/** The WebGL context was lost: say so, then build a new renderer (a new canvas, a new context). */
+function recoverRenderer() {
+  state.contextLosses = (state.contextLosses || 0) + 1;
+  const now = Date.now();
+  resets = resets.filter((time) => now - time < RESET_WINDOW_MS).concat(now);
+  if (rebuilding) {
+    return;
+  }
+  if (resets.length > MAX_RESETS) {
+    $('#fwmap-status').text(T.webgl_failed);
+    return;
+  }
+  $('#fwmap-status').text(T.webgl_lost);
+  rebuilding = setTimeout(() => {
+    rebuilding = null;
+    try {
+      state.renderer.destroy();
+    } catch (_) {
+      // the old context is gone; nothing left to release
+    }
+    $('#fwmap-canvas').empty();
+    createRenderer();
+    if (state.mode === 'snapshot') {
+      state.renderer.setFrozen(true);
+      state.renderer.setFollow(false);
+    }
+    refresh();
+  }, REBUILD_MS);
 }
 
 $(async () => {
@@ -368,4 +408,7 @@ $(async () => {
     }
   });
   poll(snapshotQuery(state.settings));
+  if (diagnosticsRequested()) {
+    startDiagnostics();
+  }
 });

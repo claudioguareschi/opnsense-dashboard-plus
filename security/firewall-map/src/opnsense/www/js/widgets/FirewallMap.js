@@ -524,10 +524,11 @@ export default class FirewallMap extends BaseWidget {
             const container = document.getElementById(`${this.id}-firewall-map-canvas`);
             // moving the map by hand ends follow mode, as on the full-size map
             this.renderer = renderer.create(container, {theme, settings, text: this.translations,
-                onFollowChange: (on) => this._setFollow(on, false)});
+                onFollowChange: (on) => this._setFollow(on, false),
+                onContextLost: () => this._recoverRenderer()});
             this._setFollow(settings.follow, false);
-            $(`#${this.id}-firewall-map-follow`).on('click', () => this._setFollow(!this.settings.follow));
-            $(`#${this.id}-firewall-map-camera`).on('click', () => this._takeSnapshot());
+            $(`#${this.id}-firewall-map-follow`).off('click').on('click', () => this._setFollow(!this.settings.follow));
+            $(`#${this.id}-firewall-map-camera`).off('click').on('click', () => this._takeSnapshot());
             // deck.gl positions its canvas absolutely without left/top, so pin it explicitly
             // rather than relying on the static position (the dashboard centers widget text).
             $(container).children('canvas').css({left: 0, top: 0});
@@ -589,6 +590,38 @@ export default class FirewallMap extends BaseWidget {
             this.renderer?.resize();
         }
         return changed;
+    }
+
+    /**
+     * The browser took the GPU away (memory pressure, sleep, a driver reset): say so and build the
+     * map again on a new canvas. A browser that keeps doing it is not fought: after three resets in
+     * two minutes the widget asks for a reload instead.
+     */
+    _recoverRenderer() {
+        const now = Date.now();
+        this.resets = (this.resets || []).filter((time) => now - time < 120000).concat(now);
+        if (this.rebuilding || this.closed) {
+            return;
+        }
+        if (this.resets.length > 3) {
+            this._status(this.translations.webgl_failed);
+            return;
+        }
+        this._status(this.translations.webgl_lost);
+        this.rebuilding = setTimeout(async () => {
+            this.rebuilding = null;
+            if (this.closed) {
+                return;
+            }
+            try {
+                this.renderer?.destroy();
+            } catch (_) {
+                // the old context is gone; nothing left to release
+            }
+            this.renderer = null;
+            $(`#${this.id}-firewall-map-canvas`).empty();
+            await this.onMarkupRendered();
+        }, 2000);
     }
 
     onWidgetClose() {

@@ -68,6 +68,8 @@
             <data_unavailable>Live flow data is unavailable</data_unavailable>
             <webgl_unavailable>WebGL is required for Firewall Map+</webgl_unavailable>
             <renderer_failed>Map renderer failed to initialize</renderer_failed>
+            <webgl_lost>The browser reset its graphics: the map is restarting…</webgl_lost>
+            <webgl_failed>The browser keeps resetting its graphics: reload the page to show the map again</webgl_failed>
             <map_started_inside>Outbound</map_started_inside>
             <map_started_outside>Inbound</map_started_outside>
             <map_started_both>Both directions</map_started_both>

@@ -185,8 +185,13 @@ export function createFirewallMap(container, options = {}) {
     arcs: () => arcs,
   }, {...options, follow: settings.follow});
 
+  // deck.gl's own frame statistics (GPU memory, frame cost), kept for diagnostics() once a second
+  let deckMetrics = {};
   const deck = new Deck({
     parent: container,
+    _onMetrics: (metrics) => {
+      deckMetrics = {...metrics};
+    },
     views: new MapView({repeat: false}),
     viewState,
     onViewStateChange: ({viewState: next, interactionState}) => {
@@ -223,6 +228,16 @@ export function createFirewallMap(container, options = {}) {
   });
   // Exposed for in-browser diagnostics of the live widget.
   container.firewallMapDeck = deck;
+  // The browser can take the GPU away (memory pressure, sleep, a driver reset). The map cannot
+  // repaint without it, so the host is told and builds a new renderer; preventDefault lets the
+  // browser hand the context back. The events do not bubble: listen while they travel down.
+  let contextLosses = 0;
+  const onContextLost = (event) => {
+    event.preventDefault();
+    contextLosses += 1;
+    options.onContextLost?.();
+  };
+  container.addEventListener('webglcontextlost', onContextLost, true);
   container.firewallMapFollow = () => follow.diagnostics();
   const tooltip = createTooltip(container);
 
@@ -491,11 +506,16 @@ export function createFirewallMap(container, options = {}) {
     ];
   }
 
+  let framesComposed = 0;
+  let composeMs = 0;
   function draw(now) {
     frame = null;
     if (now - lastFrame >= FRAME_INTERVAL) {
       lastFrame = now;
+      const start = performance.now();
       deck.setProps({layers: compose(now)});
+      framesComposed += 1;
+      composeMs += performance.now() - start;
     }
     if (arcs.length || blockArcs.length || animating(now)) {
       frame = requestAnimationFrame(draw);
@@ -898,7 +918,18 @@ export function createFirewallMap(container, options = {}) {
       deck.redraw(true);
       follow.resized();
     },
+    /** For the page's ?debug=1 panel: frame rate, frame cost, GPU memory and what is on the map. */
+    diagnostics() {
+      const metrics = deckMetrics;
+      const result = {fps: metrics.fps, cpuPerFrame: metrics.cpuTimePerFrame, gpuPerFrame: metrics.gpuTimePerFrame,
+        gpuMemory: metrics.gpuMemory, framesComposed, composeMs, animating: frame !== null,
+        arcs: arcs.length, blocks: blockArcs.length, pulses: pulseItems.length, contextLosses};
+      framesComposed = 0;
+      composeMs = 0;
+      return result;
+    },
     destroy() {
+      container.removeEventListener('webglcontextlost', onContextLost, true);
       if (frame !== null) {
         cancelAnimationFrame(frame);
         frame = null;
