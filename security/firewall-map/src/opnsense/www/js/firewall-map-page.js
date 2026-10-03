@@ -1161,8 +1161,9 @@
 		context.strokeStyle = color;
 		context.lineWidth = 1.2;
 		context.beginPath();
+		const slots = Math.min(KEEP, Math.max(60, values.length)) - 1;
 		values.forEach((value, index) => {
-			const x = width - (values.length - 1 - index) / 599 * width;
+			const x = width - (values.length - 1 - index) / slots * width;
 			const y = height - 2 - (value - low) / span * (height - 4);
 			if (index) context.lineTo(x, y);
 			else context.moveTo(x, y);
@@ -1215,14 +1216,15 @@
 		for (const item of PLOTS) {
 			const row = panel.querySelector(`[data-plot="${item.key}"]`);
 			const range = plot(row.querySelector("canvas"), item.key, cssColor(...item.color));
-			row.querySelector(".fwmap-diag-value").textContent = format(point[item.key], item.unit);
+			const latest = [...samples].reverse().find((entry) => typeof entry[item.key] === "number")?.[item.key];
+			row.querySelector(".fwmap-diag-value").textContent = format(latest ?? point[item.key], item.unit);
 			row.querySelector(".fwmap-diag-range").textContent = range;
 		}
 		const facts = [
 			["Uptime", uptime(point.t)],
 			["Arcs · blocks · dots", `${point.arcs ?? "n/a"} · ${point.blocks ?? "n/a"} · ${point.pulses ?? "n/a"}`],
 			["DOM nodes", point.nodes],
-			["Poll size", format(point.pollKb, "KB")],
+			["Poll size", format([...samples].reverse().find((entry) => typeof entry.pollKb === "number")?.pollKb, "KB")],
 			["Long tasks", point.longTasks ?? "n/a"],
 			["WebGL resets", point.contextLosses]
 		];
