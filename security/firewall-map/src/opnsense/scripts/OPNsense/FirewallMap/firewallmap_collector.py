@@ -441,7 +441,7 @@ def idle(started, now=None, marker=REQUEST_MARKER, idle_seconds=IDLE_SECONDS):
 
 def database_state(values):
     """Return (city path, asn path, problem) for the provider in effect."""
-    provider = geodb.effective_provider(values)
+    provider = geodb.lookup_provider(values)
     paths = geodb.DATABASES[provider]
     if os.path.exists(paths["city"]):
         return paths["city"], paths["asn"], None
@@ -532,7 +532,8 @@ class Collector:
         if self._due("settings", now, SETTINGS_REFRESH_SECONDS):
             self.values = geodb.settings()
             self.recording = recording_wanted(self.values)
-            self.provider = geodb.effective_provider(self.values)
+            # DB-IP while it stands in for a failing MaxMind download (its credit is then shown)
+            self.provider = geodb.lookup_provider(self.values)
             city, asn, self.problem = database_state(self.values)
             # a new provider or a refreshed database invalidates cached locations
             if self.geo is None or self.geo.database != city or self.geo.database_mtime != self.geo._database_mtime():

@@ -305,9 +305,13 @@ export function geoNoteHtml(snapshot, text, dismissed = null) {
   if (geo.now) {
     skew = Date.now() / 1000 - geo.now;
   }
-  const why = explanations(geo, t)[0] || '';
+  const why = explanations(geo, t).join(' ');
+  // DB-IP standing in for MaxMind, only the AS database missing, or an update that failed while
+  // the previous database keeps working
+  const what = geo.fallback ? fill(t.geo_fallback, {provider: PROVIDERS[geo.fallback] || geo.fallback})
+    : (geo.errors || []).every((error) => error.kind === 'asn') ? t.geo_partial : t.geo_stale;
   return `<div class="fwmap-geo-note" role="status" title="${escapeHtml(why)}"><i class="fa fa-triangle-exclamation" aria-hidden="true"></i>`
-    + `<span>${escapeHtml(t.geo_partial)} · ${countdownHtml(geo, t)}</span>`
+    + `<span>${escapeHtml(what)} · ${countdownHtml(geo, t)}</span>`
     + `<button type="button" class="fwmap-geo-note-close" aria-label="${escapeHtml(t.close || 'Close')}">&times;</button></div>`;
 }
 

@@ -205,6 +205,9 @@ def geodb_view(status, now=None):
         errors = [{"kind": None, "edition": None, "code": "other", "message": status["last_error"]}]
     if errors:
         view.update(state="failed", errors=errors, retry_at=status.get("next_retry"), provider=status.get("provider"))
+        if (status.get("fallback") or {}).get("active"):
+            # the map works on DB-IP Lite meanwhile
+            view["fallback"] = status["fallback"]["provider"]
     return view
 
 

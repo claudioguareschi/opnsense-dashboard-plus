@@ -487,6 +487,8 @@
         geo_retrying: {{ lang._('Trying again…')|json_encode }},
         geo_retry_now: {{ lang._('Retry now')|json_encode }},
         geo_partial: {{ lang._('Network names are unavailable')|json_encode }},
+        geo_fallback: {{ lang._('Using {provider} Lite while the MaxMind download fails')|json_encode }},
+        geo_stale: {{ lang._('The geolocation database could not be updated')|json_encode }},
         geo_err_unauthorized: {{ lang._('MaxMind did not accept the license key. A new key can take a few minutes to start working; if this persists, check the key in the settings and that GeoLite2 downloads are enabled for your MaxMind account.')|json_encode }},
         geo_err_forbidden: {{ lang._('{provider} refused the download (HTTP 403): the account may not have access to this database.')|json_encode }},
         geo_err_not_found: {{ lang._('{provider} did not have the database at the expected address (HTTP 404). DB-IP publishes a new file each month; early in the month it may not be out yet.')|json_encode }},

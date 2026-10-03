@@ -124,6 +124,16 @@ def effective_provider(values):
     return "maxmind" if license_key(values)[0] else "dbip"
 
 
+def lookup_provider(values):
+    """The databases to look addresses up in: the chosen provider's, or DB-IP Lite while a MaxMind
+    download keeps failing and DB-IP was fetched as a stand-in (see update)."""
+    provider = effective_provider(values)
+    if provider.startswith("maxmind") and not os.path.exists(DATABASES[provider]["city"]) \
+            and "dbip" in DATABASES and os.path.exists(DATABASES["dbip"]["city"]):
+        return "dbip"
+    return provider
+
+
 def alias_license_key(path=GEOIP_ALIAS_CONF):
     """The key embedded in a MaxMind GeoIP alias download URL, if one is configured."""
     config = ConfigParser()
@@ -324,6 +334,29 @@ def fetch_databases(provider, paths, key, update_days, force, report=None):
     return updated, errors
 
 
+def fall_back(provider, paths, failures, update_days, previous, report=None):
+    """Keep the map working while MaxMind fails. Once its downloads have failed through the short
+    retries (the next wait is the long one) and no MaxMind database exists, fetch DB-IP Lite (no
+    key needed) and look addresses up there; MaxMind is still tried on schedule. When the MaxMind
+    database arrives, the stand-in is deleted. Returns the fallback state for the status file."""
+    standin = DATABASES.get("dbip")
+    if not provider.startswith("maxmind") or standin is None:
+        return None
+    if os.path.exists(paths["city"]):
+        if previous:
+            # the stand-in was ours, fetched only for this: remove it
+            for kind in ("city", "asn"):
+                try:
+                    os.remove(standin[kind])
+                except OSError:
+                    pass
+        return None
+    if failures < len(RETRY_STEPS) and not previous:
+        return None
+    _, errors = fetch_databases("dbip", standin, None, update_days, False, report)
+    return {"provider": "dbip", "active": os.path.exists(standin["city"]), "errors": errors}
+
+
 def update(force=False, retry=False):
     """Download what is due. `force` downloads everything again; `retry` does not wait out an
     earlier failure and starts the retry steps over (a new key, or "Retry now")."""
@@ -360,12 +393,14 @@ def update(force=False, retry=False):
 
         updated, errors = fetch_databases(provider, paths, key, values["update_days"], force, report)
         failures = 0 if not errors else (0 if retry else last.get("failures") or 0) + 1
+        fallback = fall_back(provider, paths, failures, values["update_days"], last.get("fallback"), report)
         now = time.time()
         write_status({
             "last_attempt": datetime.now(timezone.utc).isoformat(),
             "last_error": "; ".join(error["message"] for error in errors) or None,
             "errors": errors, "failures": failures, "provider": provider, "state": "idle",
             "next_retry": now + retry_delay(failures) if errors else None,
+            "fallback": fallback,
         })
     error = "; ".join(item["message"] for item in errors) or None
     return {"result": "failed" if errors else "ok", "updated": updated, "error": error}

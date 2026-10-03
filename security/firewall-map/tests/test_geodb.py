@@ -190,6 +190,30 @@ class GeoDatabaseUpdateTest(unittest.TestCase):
         self.assertIn("downloading", seen)
         self.assertEqual(seen[-1], "idle")
 
+    def test_falls_back_to_dbip_at_the_long_wait_and_back_to_maxmind(self):
+        dbip = {"city": os.path.join(self.directory, "dbip-city.mmdb"), "asn": os.path.join(self.directory, "dbip-asn.mmdb"),
+                "editions": {"city": "dbip-city-lite", "asn": "dbip-asn-lite"}}
+        databases = {**GEODB.DATABASES, "dbip": dbip}
+        with mock.patch.object(GEODB, "DATABASES", databases), \
+                mock.patch.object(GEODB, "fetch_maxmind", self.unauthorized), \
+                mock.patch.object(GEODB, "fetch_dbip", lambda edition, workdir, progress=None: self.fetch(edition, None, workdir)):
+            values = {"provider": "maxmind", "license_key": "secret-key", "update_days": 3}
+            for attempt in range(1, 5):
+                GEODB.update(retry=False)
+                status = GEODB.read_status()
+                # the short retries keep waiting for MaxMind; the fourth failure (a 15-minute wait) falls back
+                self.assertEqual(bool(status["fallback"]), attempt >= 4)
+                status["next_retry"] = time.time() - 1
+                GEODB.write_status(status)
+            self.assertTrue(os.path.exists(dbip["city"]))
+            self.assertEqual(GEODB.lookup_provider(values), "dbip")
+        with mock.patch.object(GEODB, "DATABASES", databases), mock.patch.object(GEODB, "fetch_maxmind", self.fetch):
+            self.assertEqual(GEODB.update()["result"], "ok")
+            self.assertEqual(GEODB.lookup_provider(values), "maxmind")
+        # the stand-in is gone once MaxMind works
+        self.assertFalse(os.path.exists(dbip["city"]))
+        self.assertIsNone(GEODB.read_status()["fallback"])
+
     def test_viewer_sees_progress_failure_and_when_to_retry(self):
         from support import COMMON
         now = 1000.0

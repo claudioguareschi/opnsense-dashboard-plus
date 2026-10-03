@@ -105,6 +105,8 @@ export const DEFAULT_TEXT = {
   geo_retrying: 'Trying again…',
   geo_retry_now: 'Retry now',
   geo_partial: 'Network names are unavailable',
+  geo_fallback: 'Using {provider} Lite while the MaxMind download fails',
+  geo_stale: 'The geolocation database could not be updated',
   geo_err_unauthorized: 'MaxMind did not accept the license key. A new key can take a few minutes to start working; if this persists, check the key in the settings and that GeoLite2 downloads are enabled for your MaxMind account.',
   geo_err_forbidden: '{provider} refused the download (HTTP 403): the account may not have access to this database.',
   geo_err_not_found: '{provider} did not have the database at the expected address (HTTP 404). DB-IP publishes a new file each month; early in the month it may not be out yet.',
