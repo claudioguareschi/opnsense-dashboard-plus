@@ -32,6 +32,7 @@ const DEFAULT_THEME = {
   text: [169, 200, 217],
   accent: [45, 212, 191],
   success: [76, 175, 80],
+  warning: [240, 173, 78],
 };
 
 export function rgb(color, alpha = 255) {
@@ -44,9 +45,36 @@ export function mix(a, b, amount) {
 
 const ORANGE = [240, 140, 0];
 
+/** WCAG relative luminance of an [r, g, b] colour. */
+function relativeLuminance(color) {
+  const channel = (value) => {
+    const c = value / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(color[0]) + 0.7152 * channel(color[1]) + 0.0722 * channel(color[2]);
+}
+
+export function contrast(a, b) {
+  const [light, dark] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
+  return (light + 0.05) / (dark + 0.05);
+}
+
+/**
+ * The theme's colour pushed away from the background until it stands out by `ratio` (WCAG
+ * contrast for graphics and large text is 3:1): lighter on dark themes, darker on light ones.
+ */
+export function standOut(color, background, dark, ratio = 3) {
+  const target = dark ? [255, 255, 255] : [0, 0, 0];
+  let result = color.slice(0, 3);
+  for (let step = 1; step <= 10 && contrast(result, background) < ratio; step += 1) {
+    result = mix(color.slice(0, 3), target, step / 10);
+  }
+  return result;
+}
+
 /** Map palette derived from the dashboard theme so the widget blends in. */
 export function palette(theme = DEFAULT_THEME) {
-  const {dark, background, text, accent, success} = {...DEFAULT_THEME, ...theme};
+  const {dark, background, text, accent, success, warning} = {...DEFAULT_THEME, ...theme};
   const shade = (color, amount) => mix(color, dark ? [255, 255, 255] : text, amount);
   return {
     dark,
@@ -67,6 +95,8 @@ export function palette(theme = DEFAULT_THEME) {
     contained: dark ? [245, 200, 60] : [222, 168, 0],
     blocked: dark ? [165, 165, 165] : [125, 125, 125],
     ok: dark ? [90, 190, 110] : [40, 150, 70],
+    // a saved snapshot on screen: the theme's warning colour, made to stand out on its background
+    frozen: standOut(warning, background, dark),
     label: rgb(mix(text, background, 0.15), 230),
     tooltip: {
       background: `rgb(${background.join(',')})`,
@@ -97,12 +127,17 @@ export function cssVariables(colors) {
     '--fwmap-on-blocked': on(colors.blocked),
     '--fwmap-ok': color(colors.ok),
     '--fwmap-on-ok': on(colors.ok),
+    '--fwmap-frozen': color(colors.frozen),
+    '--fwmap-on-frozen': on(colors.frozen),
+    // a wash of it for banners and selected rows, readable with the theme's own text colour
+    '--fwmap-frozen-soft': `rgba(${colors.frozen.join(', ')}, ${colors.dark ? 0.16 : 0.14})`,
   };
 }
 
 /**
  * Read the dashboard theme's own colours (OPNsense themes don't expose CSS variables): the
- * background behind the map, body text, the link colour (theme accent) and the success green.
+ * background behind the map, body text, the link colour (theme accent), the success green and the
+ * warning colour (saved snapshots).
  */
 export function readTheme(element) {
   const parse = (value) => {
@@ -131,8 +166,11 @@ export function readTheme(element) {
   const success = document.createElement('span');
   success.className = 'text-success';
   const green = probeColor(success) || [76, 175, 80];
+  const warning = document.createElement('span');
+  warning.className = 'text-warning';
+  const amber = probeColor(warning) || [240, 173, 78];
   const luminance = (0.2126 * background[0] + 0.7152 * background[1] + 0.0722 * background[2]) / 255;
-  return {dark: luminance < 0.5, background, text, accent, success: green};
+  return {dark: luminance < 0.5, background, text, accent, success: green, warning: amber};
 }
 
 // categories for "colour by service"; each flow uses its busiest service

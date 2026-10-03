@@ -41,6 +41,7 @@ import firewallmap_abuseipdb as ABUSEIPDB  # noqa: E402,F401
 import firewallmap_collector as COLLECTOR  # noqa: E402,F401
 import firewallmap_feeds as FEEDS  # noqa: E402,F401
 import firewallmap_geodb as GEODB  # noqa: E402,F401
+import firewallmap_snapshots as SNAPSHOTS  # noqa: E402,F401
 import firewallmap_investigate as INVESTIGATE  # noqa: E402,F401
 import firewallmap_threats as THREATS  # noqa: E402,F401
 import flow_snapshot as SNAPSHOT  # noqa: E402,F401

@@ -232,7 +232,8 @@ export function talkersFromLast() {
   const groups = groupTalkers(state.snapshot);
   for (const [group, entries] of Object.entries(groups)) {
     for (const entry of entries) {
-      entry.series = state.history.get(`${group}:${entry.key}`);
+      // a saved snapshot has no history of its own: no sparkline rather than today's
+      entry.series = state.mode === 'snapshot' ? null : state.history.get(`${group}:${entry.key}`);
     }
   }
   return groups;

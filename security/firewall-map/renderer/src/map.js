@@ -313,6 +313,8 @@ export function createFirewallMap(container, options = {}) {
   let alertPoints = [];
   let frameNow = performance.now();
   let dataTime = performance.now();
+  // a saved snapshot on screen: time stands still, so closed IDS connections do not fade
+  let frozen = false;
   let fadeKey = 'steady';
   // the zoom (to 1/20 of a step) the arch ends were last cleared of the house icon for
   let clearKey = null;
@@ -350,7 +352,7 @@ export function createFirewallMap(container, options = {}) {
     if (!arc.ids || arc.ids.active) {
       return 1;
     }
-    const closed = (arc.ids.closed_seconds ?? arc.ids.last_seconds ?? 0) + (frameNow - dataTime) / 1000;
+    const closed = (arc.ids.closed_seconds ?? arc.ids.last_seconds ?? 0) + (frozen ? 0 : (frameNow - dataTime) / 1000);
     return Math.max(0, 1 - closed / IDS_ARC_FADE_SECONDS);
   }
 
@@ -853,6 +855,10 @@ export function createFirewallMap(container, options = {}) {
     setFollow(on) {
       follow.set(on);
       follow.update(true);
+    },
+    /** A saved snapshot (true) or live traffic: a snapshot's pulses keep their recorded speed, nothing ages. */
+    setFrozen(on) {
+      frozen = Boolean(on);
     },
     /** Re-frame now (after a filter change) rather than waiting for the traffic to settle. */
     refit() {

@@ -45,7 +45,17 @@ export const MAX_ABUSE_SCORES = 500;
 
 export const state = {
   renderer: null,
+  // what the map shows: the live document, or a saved snapshot's in snapshot mode
   snapshot: null,
+  // the newest live document, kept up to date in snapshot mode too
+  live: null,
+  mode: 'live',
+  // the saved snapshot on screen: {meta, data}
+  frozen: null,
+  snapshots: [],
+  snapshotsKept: {keep: 50, keep_days: 30},
+  // the side panel's tab before snapshot mode switched it to Snapshots
+  tabBeforeSnapshots: null,
   settings: null,
   // the plugin settings (null for users who may not read them)
   pluginSettings: null,

@@ -48,6 +48,10 @@ HOSTNAME_MARKER = f"{RUN_DIR}/hostnames_request"
 RC_SCRIPT = "/usr/local/etc/rc.d/firewallmap"
 CACHE_DB = f"{STATE_DIR}/cache.db"
 ABUSEIPDB_BLACKLIST = f"{STATE_DIR}/abuseipdb_blacklist.txt"
+# saved map snapshots (one document and one small metadata file each), and the requests the
+# camera button leaves for the collector, which holds every tracked flow in memory
+SNAPSHOT_DIR = f"{STATE_DIR}/snapshots"
+SNAPSHOT_REQUEST_DIR = f"{RUN_DIR}/snapshot_requests"
 
 PFCTL = "/sbin/pfctl"
 RULES_DEBUG = "/tmp/rules.debug"

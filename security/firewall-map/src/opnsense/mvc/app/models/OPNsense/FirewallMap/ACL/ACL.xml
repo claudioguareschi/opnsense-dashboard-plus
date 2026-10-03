@@ -3,21 +3,24 @@
         <name>Dashboard: Firewall Map widget</name>
         <patterns>
             <pattern>api/firewallmap/flow/snapshot</pattern>
+            <pattern>api/firewallmap/snapshots/*</pattern>
             <pattern>ui/firewallmap</pattern>
             <pattern>ui/firewallmap/*</pattern>
         </patterns>
     </page-dashboard-widget-firewall-map>
     <page-firewall-map-settings>
         <!--
-            Also covers the lookups an investigation makes to outside services and the review
-            queue (including deleting reviewed or dismissed entries). The privilege key stays as
-            it is so existing user and group assignments keep working; the name says what it grants.
+            Also covers the lookups an investigation makes to outside services, the review queue
+            (including deleting reviewed or dismissed entries) and deleting saved map snapshots. The
+            privilege key stays as it is so existing user and group assignments keep working; the
+            name says what it grants.
         -->
         <name>Firewall Map+: settings, investigations and threats</name>
         <patterns>
             <pattern>api/firewallmap/settings/*</pattern>
             <pattern>api/firewallmap/investigate/*</pattern>
             <pattern>api/firewallmap/threats/*</pattern>
+            <pattern>api/firewallmap/snapshot_admin/*</pattern>
         </patterns>
     </page-firewall-map-settings>
 </acl>

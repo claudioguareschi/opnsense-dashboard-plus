@@ -39,6 +39,7 @@ import {filtered} from './filters.js';
 import {checkAbuse, investigate} from './investigate.js';
 import {bindSplitters, readFollow, setFollow, watchSideWidth} from './layout.js';
 import {refreshQueueCount, showQueue} from './queue.js';
+import {backToLive, bindSnapshots, renderSnapshotList, showSavedStates, takenText} from './snapshots.js';
 import {renderTalkers, talkerActive, talkers, talkersFromLast} from './talkers.js';
 import {updateLegend, updateToolbar} from './toolbar.js';
 
@@ -67,11 +68,17 @@ function statusLine(snapshot, shown) {
   // the Suricata links sit before the CARP note, which stays last
   const carp = snapshot.carp === 'backup' ? parts.pop() : null;
   $('#fwmap-status').html([...parts, ...idsLinks(snapshot), carp].filter(Boolean).join(' · '));
-  state.updatedAt = Date.now();
+  if (state.mode === 'live') {
+    state.updatedAt = Date.now();
+  }
   updatedLine();
 }
 
 function updatedLine() {
+  if (state.mode === 'snapshot' && state.frozen) {
+    $('#fwmap-updated').html(`${escapeHtml(T.captured)} ${escapeHtml(takenText(state.frozen.meta))} <i class="fwmap-live frozen"></i>`);
+    return;
+  }
   if (!state.updatedAt) {
     return;
   }
@@ -104,20 +111,27 @@ function poll(query) {
     try {
       const snapshot = await getJSON(`/api/firewallmap/flow/snapshot${query}`);
       const problem = host().problemText(snapshot, T);
-      if (problem) {
+      if (problem && state.mode === 'live') {
         // no database or no sample: an empty map, not the last picture
         if (snapshot.status === 'no_database' || snapshot.status === 'too_many_states') {
           state.renderer.render({flows: [], locations: []});
         }
         $('#fwmap-status').text(problem);
       } else {
-        state.snapshot = snapshot;
-        renderTalkers(talkers(snapshot));
-        refresh();
+        state.live = snapshot;
+        // the sparklines keep their history in snapshot mode too
+        const groups = talkers(snapshot);
+        if (state.mode === 'live') {
+          state.snapshot = snapshot;
+          renderTabs(groups);
+          refresh();
+        }
       }
     } catch (error) {
       console.error('Firewall Map+: flow update failed', error);
-      $('#fwmap-status').text(T.unavailable);
+      if (state.mode === 'live') {
+        $('#fwmap-status').text(T.unavailable);
+      }
     }
     if (!document.hidden) {
       timer = setTimeout(tick, POLL_MS);
@@ -131,6 +145,25 @@ function poll(query) {
     }
   });
   tick();
+}
+
+/** The side panel's current tab: top talkers from `groups`, or the saved snapshots. */
+function renderTabs(groups) {
+  const snapshots = state.talkerTab === 'snapshots';
+  $('#fwmap-talker-sort').toggle(!snapshots && state.talkerTab !== 'ids');
+  if (snapshots) {
+    renderSnapshotList();
+  } else if (groups) {
+    renderTalkers(groups);
+  }
+}
+
+/** Switch the side panel to `tab` (as a click on it would). */
+function setTab(tab) {
+  state.talkerTab = tab;
+  $('#fwmap-talkers .nav li').removeClass('active').find('a').attr('aria-selected', 'false');
+  $(`#fwmap-talkers .nav a[data-tab="${tab}"]`).attr('aria-selected', 'true').parent().addClass('active');
+  renderTabs(state.snapshot ? talkersFromLast() : null);
 }
 
 function selectTalker(row) {
@@ -188,11 +221,11 @@ function bindTalkers() {
   const rowOf = (element) => (state.talkerRows || [])[$(element).closest('.fwmap-talker').data('index')];
   // delegated: the rows are redrawn every poll, a click must survive that
   $('#fwmap-talkers-list')
-    .on('mousedown', '.fwmap-talker', function (event) {
+    .on('mousedown', '.fwmap-talker:not(.fwmap-snap-row)', function (event) {
       event.preventDefault();
       selectTalker(rowOf(this));
     })
-    .on('keydown', '.fwmap-talker', function (event) {
+    .on('keydown', '.fwmap-talker:not(.fwmap-snap-row)', function (event) {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
         const index = $(this).data('index');
@@ -202,18 +235,11 @@ function bindTalkers() {
       }
     });
   $('#fwmap-talker-search, #fwmap-talker-sort').on('input change', () => {
-    if (state.snapshot) {
-      renderTalkers(talkersFromLast());
-    }
+    renderTabs(state.snapshot ? talkersFromLast() : null);
   });
   $('#fwmap-talkers .nav a').on('click', function (event) {
     event.preventDefault();
-    state.talkerTab = $(this).data('tab');
-    $('#fwmap-talkers .nav li').removeClass('active').find('a').attr('aria-selected', 'false');
-    $(this).attr('aria-selected', 'true').parent().addClass('active');
-    if (state.snapshot) {
-      renderTalkers(talkersFromLast());
-    }
+    setTab($(this).data('tab'));
   });
 }
 
@@ -228,7 +254,9 @@ function bindDetails() {
     renderDetails();
   });
   on('.fwmap-copy', ($element) => navigator.clipboard?.writeText(address($element)));
-  on('.fwmap-states', ($element) => showStates(address($element)));
+  // in snapshot mode "States" are the ones saved with it; "Current states" asks the firewall now
+  on('.fwmap-states', ($element) => (state.mode === 'snapshot' ? showSavedStates(address($element)) : showStates(address($element))));
+  on('.fwmap-states-now', ($element) => showStates(address($element)));
   on('.fwmap-kill', ($element) => killStates(address($element)));
   on('.fwmap-alias', ($element) => addToAlias(address($element)));
   on('.fwmap-mark', ($element) => markThreat(address($element)));
@@ -328,6 +356,13 @@ $(async () => {
     setInterval(refreshQueueCount, 60000);
   }
   renderDetails();
+  bindSnapshots({refresh, renderDetails, setTab, setFollow: (on) => setFollow(on)});
   $(window).on('resize', () => state.renderer.resize());
+  // Escape leaves a snapshot
+  $(document).on('keydown', (event) => {
+    if (event.key === 'Escape' && state.mode === 'snapshot' && !$('.modal.in').length) {
+      backToLive();
+    }
+  });
   poll(snapshotQuery(state.settings));
 });

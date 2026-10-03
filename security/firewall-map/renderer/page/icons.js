@@ -55,6 +55,11 @@ const ICON_PATHS = {
   'chevron-down': '<path d="m6 9 6 6 6-6"/>',
   'list-box': '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/>',
   'expand': '<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>',
+  'camera': '<path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.6l1.6-2.4h6.6L16.9 7h2.6A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.8" r="3.4"/>',
+  'download': '<path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/>',
+  'edit': '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m14 6 4 4"/>',
+  'chevron-left': '<path d="m15 18-6-6 6-6"/>',
+  'live': '<circle cx="12" cy="12" r="4"/>',
 };
 // the Font Awesome names used across the page, mapped to the outline set
 const ICON_ALIASES = {

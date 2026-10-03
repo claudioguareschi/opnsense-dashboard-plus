@@ -307,6 +307,77 @@
     .fwmap-not-listed { color: var(--fwmap-ok); }
     .fwmap-not-listed .fwmap-ic { stroke-width: 2.4; width: .95em; height: .95em; }
     .fwmap-abuse-check { white-space: nowrap; font-weight: 500; }
+
+    /* snapshots: the Live | Snapshots switch, the camera, and snapshot mode (frame, banner, timeline).
+       --fwmap-frozen is the theme's warning colour, made to stand out on the map background. */
+    #fwmap-toolbar #fwmap-mode { margin-left: auto; }
+    #fwmap-toolbar #fwmap-review { margin-left: 0; }
+    .fwmap-mode { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid rgba(128, 128, 128, .3); border-radius: 8px; flex: none; }
+    .fwmap-mode button { height: 2em; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: 5px;
+        background: transparent; color: inherit; opacity: .75; white-space: nowrap; }
+    .fwmap-mode button:hover:not(:disabled) { background: rgba(128, 128, 128, .12); opacity: 1; }
+    .fwmap-mode button:disabled { opacity: .4; cursor: default; }
+    .fwmap-mode button.active { opacity: 1; font-weight: 600; background: rgba(128, 128, 128, .14); }
+    .fwmap-mode #fwmap-mode-snapshots.active { background: var(--fwmap-frozen-soft); box-shadow: inset 0 0 0 1px var(--fwmap-frozen); }
+    .fwmap-mode .fwmap-live { margin: 0; }
+    #fwmap-snapshot-count:empty { display: none; }
+    #fwmap-snapshot-count { background: rgba(128, 128, 128, .35); color: inherit; }
+    #fwmap-camera { position: absolute; right: 12px; top: 146px; z-index: 3; width: 32px; height: 32px; padding: 0;
+        display: flex; align-items: center; justify-content: center; border: 1px solid var(--fwmap-accent); border-radius: 8px;
+        background: var(--fwmap-panel, #fff); color: var(--fwmap-accent); box-shadow: 0 1px 3px rgba(0, 0, 0, .08); }
+    #fwmap-camera:hover { background: var(--fwmap-accent); color: #fff; }
+    #fwmap-camera:disabled { opacity: .6; }
+    #fwmap-camera .fwmap-ic { width: 18px; height: 18px; }
+    #fwmap-map.fwmap-frozen::after { content: ""; position: absolute; inset: 0; z-index: 4; pointer-events: none;
+        border: 2px solid var(--fwmap-frozen); border-radius: 6px; }
+    #fwmap-map.fwmap-frozen #fwmap-legend, #fwmap-map.fwmap-frozen #fwmap-zoom { top: 58px; }
+    #fwmap-map.fwmap-frozen #fwmap-credit { display: none; }
+    #fwmap-banner { position: absolute; left: 0; right: 0; top: 0; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+        padding: 8px 12px; font-size: .92em; color: var(--fwmap-text, inherit);
+        background: linear-gradient(var(--fwmap-frozen-soft), var(--fwmap-frozen-soft)), var(--fwmap-panel, #fff);
+        border-bottom: 1px solid var(--fwmap-frozen); }
+    .fwmap-banner-ic { width: 18px; height: 18px; color: var(--fwmap-frozen); }
+    .fwmap-banner-text { flex: 1 1 260px; min-width: 0; }
+    .fwmap-banner-counts { opacity: .8; }
+    .fwmap-banner-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .fwmap-banner-actions .btn { display: inline-flex; align-items: center; gap: 5px; }
+    .fwmap-banner-actions .btn .fwmap-ic { width: 15px; height: 15px; }
+    .fwmap-snap-live { background: var(--fwmap-ok); color: var(--fwmap-on-ok); border: 0; font-weight: 600; }
+    .fwmap-snap-live:hover { filter: brightness(.94); color: var(--fwmap-on-ok); }
+    .fwmap-snap-live .fwmap-live { background: currentColor; margin: 0 2px 0 0; }
+    .fwmap-snap-note { font-style: italic; }
+    .fwmap-snap-flagged { color: var(--fwmap-danger); font-weight: 600; }
+    .fwmap-live.frozen { background: var(--fwmap-frozen); }
+    #fwmap-timeline { position: absolute; left: 12px; bottom: 12px; z-index: 4; display: flex; align-items: center; gap: 2px;
+        max-width: calc(100% - 24px); padding: 3px; border-radius: 999px; font-size: .9em;
+        background: var(--fwmap-panel, #fff); color: var(--fwmap-text, inherit); border: 1px solid var(--fwmap-frozen);
+        box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+    #fwmap-timeline button { border: 0; background: transparent; color: inherit; border-radius: 999px; height: 30px; }
+    #fwmap-timeline button:hover:not(:disabled) { background: var(--fwmap-frozen-soft); }
+    #fwmap-timeline button:disabled { opacity: .35; }
+    .fwmap-tl-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font-weight: 600; }
+    .fwmap-tl-step { width: 30px; padding: 0; }
+    .fwmap-tl-where { padding: 0 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    #fwmap-timeline.open { right: 12px; flex-direction: column; align-items: stretch; gap: 6px; padding: 8px 10px 10px; border-radius: 12px; }
+    #fwmap-timeline.open .fwmap-tl-toggle { width: 30px; padding: 0; justify-content: center; }
+    .fwmap-tl-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; }
+    .fwmap-tl-strip { display: flex; align-items: center; gap: 6px; }
+    .fwmap-tl-chips { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scroll-behavior: smooth; padding-bottom: 2px; }
+    #fwmap-timeline .fwmap-snap-chip { flex: none; height: auto; display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+        padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(128, 128, 128, .3); text-align: left; }
+    #fwmap-timeline .fwmap-snap-chip.active { border: 2px solid var(--fwmap-frozen); background: var(--fwmap-frozen-soft); }
+    .fwmap-snap-chip-time { font-weight: 600; white-space: nowrap; }
+    .fwmap-snap-chip-sub { font-size: .9em; opacity: .75; white-space: nowrap; }
+    .fwmap-snap-row { grid-template-columns: 30px minmax(0, 1fr) auto; }
+    #fwmap-side.fwmap-narrow .fwmap-snap-row { grid-template-columns: 26px minmax(0, 1fr) auto; }
+    .fwmap-snap-row.active { background: var(--fwmap-frozen-soft); box-shadow: inset 3px 0 0 var(--fwmap-frozen); }
+    .fwmap-snap-row .fwmap-talker-icon { color: var(--fwmap-frozen); opacity: 1; }
+    .fwmap-snap-size { font-size: .85em; opacity: .6; white-space: nowrap; }
+    .fwmap-snap-kept { font-size: .85em; padding: 0 6px 6px; }
+    .fwmap-snap-notice { display: flex; align-items: center; gap: 8px; margin: 8px 0 2px; padding: 6px 10px; border-radius: 4px; font-size: .92em;
+        background: var(--fwmap-frozen-soft); border-left: 3px solid var(--fwmap-frozen); }
+    .fwmap-snap-notice .fwmap-ic { color: var(--fwmap-frozen); }
+    .fwmap-toast-ok { color: var(--fwmap-ok); stroke-width: 2.6; }
     @media (max-width: 1100px) {
         #fwmap-layout { flex-direction: column; height: auto; }
         #fwmap-split-side { display: none; }
@@ -541,6 +612,40 @@
         queue_empty_all: {{ lang._('Threat history is empty.')|json_encode }},
         too_many_states: {{ lang._('The state table is too large to map ({count} states). The map resumes below {limit}.')|json_encode }},
         resize_hint: {{ lang._('Drag or use the arrow keys to resize; double-click or Home to reset')|json_encode }},
+        today: {{ lang._('Today')|json_encode }},
+        snapshot: {{ lang._('Snapshot')|json_encode }},
+        snapshots: {{ lang._('Snapshots')|json_encode }},
+        snapshot_flows_one: {{ lang._('{count} flow')|json_encode }},
+        snapshot_flows_many: {{ lang._('{count} flows')|json_encode }},
+        snapshot_flagged_one: {{ lang._('{count} flagged')|json_encode }},
+        snapshot_flagged_many: {{ lang._('{count} flagged')|json_encode }},
+        snapshot_saved: {{ lang._('Snapshot saved')|json_encode }},
+        snapshot_open: {{ lang._('Open')|json_encode }},
+        snapshot_note: {{ lang._('Snapshot note')|json_encode }},
+        snapshot_add_note: {{ lang._('Add a note')|json_encode }},
+        snapshot_edit_note: {{ lang._('Edit note')|json_encode }},
+        snapshot_has_note: {{ lang._('note')|json_encode }},
+        snapshot_download: {{ lang._('Download as JSON')|json_encode }},
+        snapshot_delete: {{ lang._('Delete snapshot')|json_encode }},
+        snapshot_delete_confirm: {{ lang._('Delete the snapshot taken')|json_encode }},
+        snapshot_by: {{ lang._('by')|json_encode }},
+        snapshot_partial: {{ lang._('summary only')|json_encode }},
+        snapshot_partial_hint: {{ lang._('The collector did not answer in time: the map as shown was saved, without the connection states.')|json_encode }},
+        snapshot_no_states: {{ lang._('This snapshot was saved without connection states.')|json_encode }},
+        snapshot_show: {{ lang._('Show this snapshot')|json_encode }},
+        snapshot_older: {{ lang._('Older snapshot')|json_encode }},
+        snapshot_newer: {{ lang._('Newer snapshot')|json_encode }},
+        no_snapshots: {{ lang._('No snapshots yet: take one with the camera button on the map.')|json_encode }},
+        snapshots_kept: {{ lang._('The newest %s are kept, for up to %d days.')|json_encode }},
+        back_to_live: {{ lang._('Back to live')|json_encode }},
+        timeline: {{ lang._('Timeline')|json_encode }},
+        timeline_expand: {{ lang._('Show the timeline')|json_encode }},
+        timeline_collapse: {{ lang._('Collapse the timeline')|json_encode }},
+        captured: {{ lang._('Captured')|json_encode }},
+        as_captured: {{ lang._('As captured at')|json_encode }},
+        may_have_closed: {{ lang._('this connection may have closed since')|json_encode }},
+        states_at: {{ lang._('States at')|json_encode }},
+        current_states: {{ lang._('Current states')|json_encode }},
         // the renderer's words: legend, hover cards and flow sentences ({name} is filled in)
         map_started_inside: {{ lang._('Started inside')|json_encode }},
         map_started_outside: {{ lang._('Started outside')|json_encode }},
@@ -639,6 +744,10 @@
                 <span></span> <a href="#" style="color:inherit" title="{{ lang._('Remove') }}" aria-label="{{ lang._('Remove') }}">&times;</a>
             </span>
             <button id="fwmap-reset" class="btn btn-default btn-sm fwmap-tool-btn" type="button" title="{{ lang._('Reset filters') }}" aria-label="{{ lang._('Reset filters') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></button>
+            <div id="fwmap-mode" class="fwmap-mode" role="group" aria-label="{{ lang._('Map mode') }}">
+                <button type="button" id="fwmap-mode-live" class="active" data-mode="live" aria-pressed="true"><i class="fwmap-live"></i>{{ lang._('Live') }}</button>
+                <button type="button" id="fwmap-mode-snapshots" data-mode="snapshots" aria-pressed="false" disabled><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.6l1.6-2.4h6.6L16.9 7h2.6A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.8" r="3.4"/></svg>{{ lang._('Snapshots') }} <span class="badge" id="fwmap-snapshot-count"></span></button>
+            </div>
             <button id="fwmap-review" class="btn btn-default btn-sm fwmap-tool-btn" type="button" style="display:none" title="{{ lang._('Threats') }}">
                 <svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span class="fwmap-tool-text">{{ lang._('Threats') }}</span> <span class="badge" id="fwmap-review-count"></span>
             </button>
@@ -653,6 +762,9 @@
                 <button type="button" data-zoom="fit" title="{{ lang._('Whole world') }}" aria-label="{{ lang._('Whole world') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
                 <button type="button" id="fwmap-follow" data-zoom="follow" aria-pressed="false" title="{{ lang._('Follow traffic: keep the map zoomed to the current arcs') }}" aria-label="{{ lang._('Follow traffic') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
             </div>
+            <button type="button" id="fwmap-camera" title="{{ lang._('Take a snapshot: save the map as it is now, to review later') }}" aria-label="{{ lang._('Take a snapshot') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.6l1.6-2.4h6.6L16.9 7h2.6A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.8" r="3.4"/></svg></button>
+            <div id="fwmap-banner" style="display:none" aria-live="polite"></div>
+            <div id="fwmap-timeline" style="display:none"></div>
             <div id="fwmap-credit"></div>
         </div>
         <div id="fwmap-statusbar"><div id="fwmap-status" aria-live="polite"></div><div id="fwmap-updated"></div></div>
@@ -665,6 +777,7 @@
                     <li role="presentation"><a href="#" role="tab" aria-selected="false" data-tab="countries" title="{{ lang._('Countries') }}">{{ lang._('Countries') }}</a></li>
                     <li role="presentation"><a href="#" role="tab" aria-selected="false" data-tab="networks" title="{{ lang._('Networks') }}">{{ lang._('Networks') }}</a></li>
                     <li role="presentation"><a href="#" role="tab" aria-selected="false" data-tab="ids" title="{{ lang._('IDS') }}">{{ lang._('IDS') }}</a></li>
+                    <li role="presentation"><a href="#" role="tab" aria-selected="false" data-tab="snapshots" title="{{ lang._('Snapshots') }}">{{ lang._('Snapshots') }}</a></li>
                 </ul>
                 <div class="fwmap-talker-tools">
                     <div class="fwmap-talker-search"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-5-5"/></svg>

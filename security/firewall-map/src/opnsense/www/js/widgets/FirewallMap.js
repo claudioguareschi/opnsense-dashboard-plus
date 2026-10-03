@@ -5,6 +5,26 @@
 
 // A cap far above any widget: the map fits its content (see _fitToContent).
 const AUTO_HEIGHT = 10000;
+// follow traffic is the map's own toggle, remembered per browser (as on the full-size map)
+const FOLLOW_KEY = 'firewallmap.widget.follow';
+const CAMERA_ICON = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.6l1.6-2.4h6.6L16.9 7h2.6A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.8" r="3.4"/></svg>';
+const TARGET_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>';
+
+function readStorage(key) {
+    try {
+        return window.localStorage.getItem(key);
+    } catch (_) {
+        return null;
+    }
+}
+
+function writeStorage(key, value) {
+    try {
+        window.localStorage.setItem(key, value);
+    } catch (_) {
+        // private windows or blocked storage: the choice lasts for this page only
+    }
+}
 
 export default class FirewallMap extends BaseWidget {
     static FIREWALL_WIDE = ['geo_provider', 'geo_key', 'geo_update_days', 'abuseipdb_key', 'threat_lists', 'blocklist_aliases'];
@@ -150,7 +170,6 @@ export default class FirewallMap extends BaseWidget {
                 ['blocks', this.translations.blocks],
                 ['hostnames', this.translations.hostnames],
                 ['asn', this.translations.asn],
-                ['follow', this.translations.follow],
                 ['blocklist-aliases', this.translations.blocklist_aliases],
             ]) {
                 const $select = $(`#${this.id}-option-${option}`);
@@ -272,13 +291,6 @@ export default class FirewallMap extends BaseWidget {
                 options: choices([['1', this.translations.asn], ['0', this.translations.labels_off]]),
                 default: '1',
             },
-            follow: {
-                id: `${this.id}-option-follow`,
-                title: this.translations.follow,
-                type: 'select',
-                options: choices([['0', this.translations.labels_off], ['1', this.translations.follow]]),
-                default: '0',
-            },
             ...this._geoOptions(choices),
         };
     }
@@ -286,7 +298,55 @@ export default class FirewallMap extends BaseWidget {
     async _settings() {
         const config = await this.getWidgetConfig();
         // the renderer script parses the options; without it there is no map to configure
-        return window.FirewallMapRenderer ? window.FirewallMapRenderer.parseSettings(config) : null;
+        if (!window.FirewallMapRenderer) {
+            return null;
+        }
+        return {...window.FirewallMapRenderer.parseSettings(config), follow: this._follow()};
+    }
+
+    /** Follow traffic: the map's toggle wins; until it is used, the old dashboard option decides. */
+    _follow() {
+        const stored = readStorage(FOLLOW_KEY);
+        return stored === null ? this.config?.widget?.follow === '1' : stored === '1';
+    }
+
+    _setFollow(on, tellRenderer = true) {
+        writeStorage(FOLLOW_KEY, on ? '1' : '0');
+        if (this.settings) {
+            this.settings.follow = on;
+        }
+        $(`#${this.id}-firewall-map-follow`).attr('aria-pressed', String(on))
+            .css({color: on ? 'var(--fwmap-accent)' : 'inherit', background: on ? 'rgba(128, 128, 128, .22)' : 'transparent'});
+        if (tellRenderer) {
+            this.renderer?.setFollow(on);
+        }
+    }
+
+    /** The camera: a flash and a saved snapshot, then a note that opens it on the full-size map. */
+    async _takeSnapshot() {
+        const frame = document.getElementById(`${this.id}-firewall-map`);
+        const host = window.FirewallMapRenderer?.host;
+        if (!frame || !host) {
+            return;
+        }
+        host.flash(frame);
+        const $button = $(`#${this.id}-firewall-map-camera`).prop('disabled', true);
+        try {
+            const result = await this.ajaxCall('/api/firewallmap/snapshots/save', JSON.stringify({}), 'POST');
+            if (result.result !== 'saved') {
+                throw new Error(result.error || result.result);
+            }
+            const meta = result.snapshot;
+            const time = new Date(meta.taken * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+            const escape = window.FirewallMapRenderer.escapeHtml;
+            host.toast(frame, `<span><b>${escape(this.translations.snapshot_saved)}</b> <span style="opacity: .7;">· ${escape(time)}</span></span>`
+                + `<a href="/ui/firewallmap#snapshot=${encodeURIComponent(meta.id)}" class="btn btn-primary btn-xs">${escape(this.translations.snapshot_open)}</a>`);
+        } catch (error) {
+            console.error('Firewall Map+: snapshot not saved', error);
+            host.toast(frame, `<span>${window.FirewallMapRenderer.escapeHtml(this.translations.snapshot_failed)}</span>`);
+        } finally {
+            $button.prop('disabled', false);
+        }
     }
 
     /** Curated feeds picked in the dialog become URL table aliases; returns the names that failed. */
@@ -356,6 +416,10 @@ export default class FirewallMap extends BaseWidget {
                 <div id="${this.id}-firewall-map-canvas" style="position: absolute; inset: 0; z-index: 1; text-align: left;"></div>
                 <div id="${this.id}-firewall-map-status" style="position: absolute; left: 12px; right: 150px; bottom: 9px; z-index: 2; font-size: .82em; letter-spacing: .02em; pointer-events: none; text-align: left;"></div>
                 <div id="${this.id}-firewall-map-credit" style="position: absolute; right: 10px; bottom: 9px; z-index: 2; font-size: .75em; opacity: .7;"></div>
+                <div style="position: absolute; right: 10px; top: 10px; z-index: 3; display: flex; flex-direction: column; border: 1px solid rgba(128, 128, 128, .3); border-radius: 6px; overflow: hidden; background: var(--fwmap-panel, #fff); color: var(--fwmap-text, inherit); box-shadow: 0 1px 3px rgba(0, 0, 0, .08);">
+                    <button type="button" id="${this.id}-firewall-map-follow" aria-pressed="false" title="${this.translations.follow}" aria-label="${this.translations.follow}" style="width: 30px; height: 30px; padding: 0; border: 0; background: transparent; color: inherit; display: flex; align-items: center; justify-content: center;">${TARGET_ICON}</button>
+                    <button type="button" id="${this.id}-firewall-map-camera" title="${this.translations.snapshot_take}" aria-label="${this.translations.snapshot_take}" style="width: 30px; height: 30px; padding: 0; border: 0; border-top: 1px solid rgba(128, 128, 128, .25); background: transparent; color: var(--fwmap-accent, inherit); display: flex; align-items: center; justify-content: center;">${CAMERA_ICON}</button>
+                </div>
             </div>
         `);
     }
@@ -453,8 +517,12 @@ export default class FirewallMap extends BaseWidget {
             });
             this.settings = settings;
             const container = document.getElementById(`${this.id}-firewall-map-canvas`);
-            // no toggle on the widget: panning pauses follow mode for a minute instead of ending it
-            this.renderer = renderer.create(container, {theme, settings, text: this.translations, followResumeMs: 60000});
+            // moving the map by hand ends follow mode, as on the full-size map
+            this.renderer = renderer.create(container, {theme, settings, text: this.translations,
+                onFollowChange: (on) => this._setFollow(on, false)});
+            this._setFollow(settings.follow, false);
+            $(`#${this.id}-firewall-map-follow`).on('click', () => this._setFollow(!this.settings.follow));
+            $(`#${this.id}-firewall-map-camera`).on('click', () => this._takeSnapshot());
             // deck.gl positions its canvas absolutely without left/top, so pin it explicitly
             // rather than relying on the static position (the dashboard centres widget text).
             $(container).children('canvas').css({left: 0, top: 0});

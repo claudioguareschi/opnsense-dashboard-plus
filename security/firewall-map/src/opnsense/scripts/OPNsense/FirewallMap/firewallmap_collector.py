@@ -42,6 +42,9 @@ Suricata correlation live in the fwmap_* modules next to it.
     firewallmap_collector.py tables    JSON threat list candidates for the settings dialog
     firewallmap_collector.py ensure    start the collector when background recording is wanted
     firewallmap_collector.py reload    ask a running collector to re-read its settings
+
+A map snapshot (the camera button) is a request file in SNAPSHOT_REQUEST_DIR: the next sample
+writes every tracked flow, not just the capped summary, plus the PF states behind them.
 """
 
 import base64
@@ -66,14 +69,15 @@ from fwmap_blocklists import (  # noqa: E402
 from fwmap_blocks import BlockTracker, FilterLogTail, block_event_time, block_snapshot, parse_block  # noqa: E402
 from fwmap_cache import CacheStore, GeoCache  # noqa: E402
 from fwmap_common import (  # noqa: E402
-    CONFIG_XML, HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, remote_target, requested,
-    secure_umask, service_name, service_port_label, write_json, write_text,
+    CONFIG_XML, HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, SNAPSHOT_DIR, SNAPSHOT_REQUEST_DIR,
+    host_port, remote_target, requested, secure_umask, service_name, service_port_label, write_json, write_text,
 )
 from fwmap_ids import (  # noqa: E402
     ALERT_BACKLOG_BYTES, EVE_LOG, AlertTracker, Correlator, alert_snapshot, connection_snapshot, firewall_blocks,
     ips_drops,
 )
 from fwmap_leases import HostnameResolver, describe_inside, describe_target, lease_names  # noqa: E402
+from firewallmap_snapshots import valid_id as snapshot_valid_id  # noqa: E402
 from fwmap_pf import (  # noqa: E402
     TooManyStates, flow_endpoints, host_info, inside_endpoint, interface_names, lan_rule_index, orientation,
     port_forwards, rule_descriptions, rule_for, sample_states,
@@ -108,6 +112,9 @@ RATE_SMOOTHING = 0.5
 HOST_REFRESH_SECONDS = 30.0
 MAX_SERVICES = 4
 MAX_INSIDE = 3
+# PF states kept with a saved snapshot, per remote address and in all
+SNAPSHOT_STATES_PER_ADDRESS = 50
+SNAPSHOT_STATES_TOTAL = 5000
 
 
 def _ranked(counts, limit=None):
@@ -241,14 +248,14 @@ class FlowTracker:
         return max(0.0, 1.0 - (now - flow["last_active"]) / self.fade_seconds)
 
     def visible(self, now, limit=MAX_FLOWS):
-        """Active or fading flows, strongest first, capped before they reach the browser."""
+        """Active or fading flows, strongest first, capped before they reach the browser (None: all)."""
         ranked = []
         for (local, remote), flow in self.flows.items():
             activity = self.activity(flow, now)
             if activity > 0:
                 ranked.append((max(flow["rate"], 1.0) * activity, local, remote, flow, activity))
         ranked.sort(key=lambda item: item[0], reverse=True)
-        return ranked[:limit]
+        return ranked if limit is None else ranked[:limit]
 
 
 def _flow_entry(local, remote, flow, activity, local_addresses, context, wall_time):
@@ -306,9 +313,9 @@ def _location_entry(address, location, local_addresses):
     return entry
 
 
-def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None, context=None):
+def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None, context=None, limit=MAX_FLOWS):
     context = context or {}
-    visible = tracker.visible(now)
+    visible = tracker.visible(now, limit)
     geo.resolve([address for _, local, remote, _, _ in visible for address in (local, remote)])
     flows = []
     location_ids = set()
@@ -575,7 +582,8 @@ class Collector:
         self.correlator.resolve(self.local_addresses, wall, self.networks)
         self.alerts.expire(wall)
 
-    def publish_snapshot(self, now):
+    def build_payload(self, now, limit=MAX_FLOWS):
+        """The map document: flows (the strongest `limit`, None for all), blocked sources, alerts."""
         resolver = self.hostnames if requested(HOSTNAME_MARKER, HOSTNAME_REQUEST_SECONDS) else None
         geo = self.geo
         context = {
@@ -583,7 +591,8 @@ class Collector:
             "blocklists": self.blocklists, "reputation": self.reputation, "alerts": self.alerts,
             "descriptions": self.descriptions,
         }
-        payload = snapshot(self.tracker, geo, self.local_addresses, self.role, now, time.time(), resolver, context)
+        payload = snapshot(self.tracker, geo, self.local_addresses, self.role, now, time.time(), resolver, context,
+                           limit)
         origin = next((location["id"] for location in payload["locations"] if location["local"]), None)
         if origin is None and self.local_addresses:
             origin = sorted(self.local_addresses)[0]
@@ -604,7 +613,57 @@ class Collector:
                 "id": origin, "name": origin, "lat": location["lat"], "lon": location["lon"], "local": True,
             })
         payload["provider"] = self.provider
-        write_json(OUTPUT_FILE, payload)
+        return payload
+
+    def publish_snapshot(self, now):
+        write_json(OUTPUT_FILE, self.build_payload(now))
+
+    def state_rows(self, records, remotes):
+        """The PF states behind the given remote addresses, as the map page's States dialog lists them."""
+        rows, total = {}, 0
+        for record in records:
+            if total >= SNAPSHOT_STATES_TOTAL:
+                break
+            pair = flow_endpoints(record, self.local_addresses, self.networks)
+            if pair is None or pair[1] not in remotes:
+                continue
+            listed = rows.setdefault(pair[1], [])
+            if len(listed) >= SNAPSHOT_STATES_PER_ADDRESS:
+                continue
+            nat = record.get("nat")
+            listed.append({
+                "interface": self.interfaces.get(record.get("interface"), record.get("interface")),
+                "proto": record.get("protocol"),
+                "src_addr": record["src"]["address"], "src_port": record["src"]["port"],
+                "dst_addr": record["dst"]["address"], "dst_port": record["dst"]["port"],
+                "nat": host_port(nat["address"], nat["port"]) if nat and nat.get("address") else None,
+                "state": record.get("state"),
+                "bytes": (record.get("bytes_in") or 0) + (record.get("bytes_out") or 0),
+                "age": record.get("age"),
+            })
+            total += 1
+        return rows
+
+    def save_requested_snapshots(self, records, now):
+        """Write a full snapshot for each camera request waiting in SNAPSHOT_REQUEST_DIR."""
+        try:
+            names = sorted(os.listdir(SNAPSHOT_REQUEST_DIR))
+        except OSError:
+            return
+        requests = [name[:-len(".request")] for name in names if name.endswith(".request")]
+        if not requests:
+            return
+        payload = self.build_payload(now, limit=None)
+        remotes = {flow["dest"] for flow in payload["flows"]} | {block["source"] for block in payload["blocks"]}
+        payload["states"] = self.state_rows(records, remotes)
+        payload["full"] = True
+        for snapshot_id in requests:
+            if snapshot_valid_id(snapshot_id):
+                write_json(f"{SNAPSHOT_DIR}/{snapshot_id}.json", payload)
+            try:
+                os.remove(f"{SNAPSHOT_REQUEST_DIR}/{snapshot_id}.request")
+            except OSError:
+                pass
 
     def step(self):
         """One iteration. Returns the seconds to rest before the next, or None to stop."""
@@ -648,6 +707,7 @@ class Collector:
         self.recorder.update(records, self, now)
         if not background:
             self.publish_snapshot(now)
+            self.save_requested_snapshots(records, now)
         # locations resolved for the queue in the background are saved too (at most once a minute)
         self.geo.save()
         return self._rest(started, background)

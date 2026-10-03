@@ -270,13 +270,25 @@ function actionBar(address, countryCode) {
       more.push(`<li><a href="#" class="fwmap-country" data-code="${escapeHtml(countryCode)}"><i class="fa fa-map-marker"></i> ${escapeHtml(T.add_country)} (${escapeHtml(countryCode)})</a></li>`);
     }
   }
-  const admin = state.isAdmin ? `
-    <button type="button" class="btn btn-primary fwmap-investigate" data-address="${escapeHtml(address)}">${ic('external')} ${escapeHtml(T.investigate)}</button>
+  const investigate = state.isAdmin
+    ? `<button type="button" class="btn btn-primary fwmap-investigate" data-address="${escapeHtml(address)}">${ic('external')} ${escapeHtml(T.investigate)}</button>` : '';
+  // a snapshot shows the states saved with it (to everyone who may see the snapshot) and the
+  // current ones; killing states belongs to the live map
+  const states = state.mode === 'snapshot' ? `
+    <button type="button" class="btn btn-default fwmap-states" data-address="${escapeHtml(address)}">${ic('list')} ${escapeHtml(T.states_at)} ${escapeHtml(capturedTime())}</button>
+    ${state.isAdmin ? `<button type="button" class="btn btn-default fwmap-states-now" data-address="${escapeHtml(address)}">${ic('clock')} ${escapeHtml(T.current_states)}</button>` : ''}`
+    : state.isAdmin ? `
     <button type="button" class="btn btn-default fwmap-states" data-address="${escapeHtml(address)}">${ic('list')} ${escapeHtml(T.show_states)}</button>
     <button type="button" class="btn btn-default fwmap-kill" data-address="${escapeHtml(address)}">${ic('trash')} ${escapeHtml(T.kill_states)}</button>` : '';
+  const admin = investigate + states;
   return `<div class="fwmap-actions">${admin}
     <div class="btn-group dropup"><button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true">${escapeHtml(T.more)} <span class="caret"></span></button>
     <ul class="dropdown-menu dropdown-menu-right">${more.join('')}</ul></div></div>`;
+}
+
+/** "16:42" of the snapshot on screen. */
+function capturedTime() {
+  return new Date((state.frozen?.meta?.taken || 0) * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
 }
 
 function diagramHtml(diagram) {
@@ -327,10 +339,11 @@ export function renderDetails() {
         <div class="fwmap-d-verdict">${model.verdict}<div class="fwmap-d-verdict-sub">${escapeHtml(model.sub)}</div></div>
         <a href="#" id="fwmap-details-close" title="${escapeHtml(T.close)}" aria-label="${escapeHtml(T.close)}">${ic('x')}</a>
       </div>
+      ${state.mode === 'snapshot' ? `<div class="fwmap-snap-notice">${ic('camera')} ${escapeHtml(T.as_captured)} ${escapeHtml(capturedTime())} · ${escapeHtml(T.may_have_closed)}</div>` : ''}
       ${picker}
       ${diagramHtml(model.diagram)}
       <div class="fwmap-cards">
-        ${card('fa-bar-chart', T.sec_connection, model.connection, state.isAdmin ? {cls: 'fwmap-states', address, title: T.show_states} : null)}
+        ${card('fa-bar-chart', T.sec_connection, model.connection, state.isAdmin || state.mode === 'snapshot' ? {cls: 'fwmap-states', address, title: T.show_states} : null)}
         ${card('fa-shield', T.sec_firewall, model.firewall, {href: '/ui/diagnostics/firewall/log', title: T.open_log})}
         ${model.ids}
         ${model.reputation}

@@ -4,6 +4,7 @@
         <link>/ui/firewallmap</link>
         <endpoints>
             <endpoint>/api/firewallmap/flow/snapshot</endpoint>
+            <endpoint>/api/firewallmap/snapshots/save</endpoint>
             <endpoint>/api/firewallmap/settings/get</endpoint>
             <endpoint>/api/firewallmap/settings/set</endpoint>
             <endpoint>/api/firewallmap/settings/tables</endpoint>
@@ -33,7 +34,11 @@
             <attempts>attempts in 10 minutes</attempts>
             <hostnames>Lookup hostnames</hostnames>
             <asn>Show ASN</asn>
-            <follow>Follow traffic (zoom to the current arcs)</follow>
+            <follow>Follow traffic: keep the map zoomed to the current arcs</follow>
+            <snapshot_take>Take a snapshot: save the map as it is now, to review on the full-size map</snapshot_take>
+            <snapshot_saved>Snapshot saved</snapshot_saved>
+            <snapshot_open>Open in full map</snapshot_open>
+            <snapshot_failed>The snapshot could not be saved</snapshot_failed>
             <provider_auto>Automatic (MaxMind with a key, otherwise DB-IP Lite)</provider_auto>
             <provider_maxmind>MaxMind GeoLite2 (free)</provider_maxmind>
             <provider_maxmind_paid>MaxMind GeoIP2 City (paid subscription)</provider_maxmind_paid>

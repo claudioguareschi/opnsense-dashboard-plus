@@ -63,6 +63,49 @@ export function applyTheme(frame, theme, {grid = null, overlays = [], root = fra
 export {readTheme};
 
 /**
+ * The camera's flash over a map frame: a short warm wash in the theme's warning colour (set by
+ * applyTheme as --fwmap-frozen), so taking a snapshot is felt without a dialog.
+ */
+export function flash(frame) {
+  const veil = document.createElement('div');
+  veil.setAttribute('aria-hidden', 'true');
+  Object.assign(veil.style, {
+    position: 'absolute', inset: '0', zIndex: '5', pointerEvents: 'none', borderRadius: 'inherit',
+    background: 'var(--fwmap-frozen-soft, rgba(255, 220, 160, .25))',
+    boxShadow: 'inset 0 0 0 3px var(--fwmap-frozen, #e0a030)',
+  });
+  frame.appendChild(veil);
+  const done = () => veil.remove();
+  if (veil.animate) {
+    veil.animate([{opacity: 0}, {opacity: 1, offset: 0.15}, {opacity: 0}], {duration: 650, easing: 'ease-out'}).onfinish = done;
+  } else {
+    setTimeout(done, 650);
+  }
+}
+
+/**
+ * A small notice at the bottom of a map frame (built from trusted HTML), gone after `ms`.
+ * Returns the element, so a caller can bind its links.
+ */
+export function toast(frame, html, ms = 6000) {
+  frame.querySelectorAll('.fwmap-toast').forEach((old) => old.remove());
+  const note = document.createElement('div');
+  note.className = 'fwmap-toast';
+  note.setAttribute('role', 'status');
+  Object.assign(note.style, {
+    position: 'absolute', left: '50%', bottom: '44px', transform: 'translateX(-50%)', zIndex: '6',
+    display: 'flex', alignItems: 'center', gap: '10px', maxWidth: 'calc(100% - 24px)', whiteSpace: 'nowrap',
+    padding: '8px 10px 8px 14px', borderRadius: '10px', fontSize: '.92em',
+    background: 'var(--fwmap-panel, #fff)', color: 'var(--fwmap-text, inherit)',
+    border: '1px solid rgba(128, 128, 128, .35)', boxShadow: '0 6px 20px rgba(0, 0, 0, .25)',
+  });
+  note.innerHTML = html;
+  frame.appendChild(note);
+  setTimeout(() => note.remove(), ms);
+  return note;
+}
+
+/**
  * The status line under a map, as HTML-escaped parts: flows, blocked sources, threats that got
  * through, CARP backup. `text` holds active_flows_one/_many, blocked_sources_one/_many,
  * below_threshold, listed_flows_one/_many, no_flows and carp_backup.

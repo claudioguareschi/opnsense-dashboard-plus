@@ -187,6 +187,29 @@ class CollectorLoopTest(unittest.TestCase):
         self.assertEqual(payload["flows"][0]["lists"], ["Test list"])
         self.assertEqual(self.queued(), [self.REMOTE])
 
+    def test_camera_request_saves_every_flow_and_its_states(self):
+        snapshots = os.path.join(self.directory, "snapshots")
+        requests = os.path.join(self.directory, "requests")
+        os.makedirs(requests)
+        for name, value in (("SNAPSHOT_DIR", snapshots), ("SNAPSHOT_REQUEST_DIR", requests)):
+            patcher = mock.patch.object(COLLECTOR, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.collector.step()
+        self.bytes = 5000
+        snapshot_id = "20261003T164210Z-1a2b"
+        with open(os.path.join(requests, f"{snapshot_id}.request"), "w") as handle:
+            handle.write("{}")
+        self.collector.step()
+        with open(os.path.join(snapshots, f"{snapshot_id}.json")) as handle:
+            saved = json.load(handle)
+        self.assertEqual([flow["dest"] for flow in saved["flows"]], [self.REMOTE])
+        self.assertTrue(saved["full"])
+        state = saved["states"][self.REMOTE][0]
+        self.assertEqual((state["proto"], state["src_addr"], state["state"]), ("tcp", self.REMOTE, "ESTABLISHED:ESTABLISHED"))
+        self.assertEqual(state["nat"], "192.168.1.2:443")
+        self.assertFalse(os.listdir(requests))
+
     def test_background_feeds_the_queue_without_a_map(self):
         self.idle = True
         rest = self.collector.step()
