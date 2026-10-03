@@ -263,11 +263,20 @@ class InitiatorTest(unittest.TestCase):
 class StateGuardTest(unittest.TestCase):
     def test_a_huge_state_table_is_not_walked(self):
         walked = []
-        with mock.patch.object(PF, "state_count", lambda: PF.MAX_SAMPLED_STATES + 1), \
+        with mock.patch.object(PF, "physical_memory", lambda: 4 * 1024 ** 3), \
+                mock.patch.object(PF, "state_count", lambda: 100001), \
                 mock.patch.object(PF.subprocess, "run", lambda *a, **k: walked.append(a)):
             with self.assertRaises(PF.TooManyStates):
                 PF.sample_states()
         self.assertEqual(walked, [])
+
+    def test_the_limit_follows_the_firewalls_memory(self):
+        gigabyte = 1024 ** 3
+        self.assertEqual(PF.state_limit(4 * gigabyte), 100000)
+        self.assertEqual(PF.state_limit(8 * gigabyte), 205000)
+        # a small box keeps a floor, a big one a ceiling (a sample must stay quick)
+        self.assertEqual(PF.state_limit(gigabyte // 2), PF.MIN_SAMPLED_STATES)
+        self.assertEqual(PF.state_limit(64 * gigabyte), PF.MAX_SAMPLED_STATES)
 
     def test_reads_the_state_count(self):
         output = "State Table                          Total             Rate\n  current entries                     1246               \n"

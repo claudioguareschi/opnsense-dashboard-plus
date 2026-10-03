@@ -1,5 +1,3 @@
-<?php
-
 /*
  * Copyright (C) 2026 Claudio Guareschi <cguareschimd@gmail.com>
  * All rights reserved.
@@ -25,21 +23,21 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-namespace OPNsense\FirewallMap;
 
-/**
- * Full-size Firewall Map+ view, opened from the dashboard widget's link button.
- */
-class IndexController extends \OPNsense\Base\IndexController
-{
-    public function indexAction()
-    {
-        $this->view->title = gettext('Firewall Map');
-        /* cache_safe() keys on the firmware version; the plugin's renderer changes independently */
-        $this->view->rendererVersion = @filemtime('/usr/local/opnsense/www/js/firewall-map-renderer.js') ?: 0;
-        $this->view->pageVersion = @filemtime('/usr/local/opnsense/www/js/firewall-map-page.js') ?: 0;
-        /* the ?debug=1 panel: installed by development packages only */
-        $this->view->diagnosticsVersion = @filemtime('/usr/local/opnsense/www/js/firewall-map-diagnostics.js') ?: 0;
-        $this->view->pick('OPNsense/FirewallMap/index');
-    }
-}
+import {defineConfig} from 'vite';
+
+// The ?debug=1 diagnostics panel as its own classic script. Only development packages ship it
+// (tools/build.sh leaves it out of release builds); the page loads it when it is installed.
+export default defineConfig({
+  build: {
+    lib: {
+      entry: 'page/diagnostics.js',
+      formats: ['iife'],
+      name: 'FirewallMapDiagnostics',
+      fileName: () => 'firewall-map-diagnostics.js',
+    },
+    outDir: 'dist-firewall-map-diagnostics',
+    emptyOutDir: true,
+    minify: false,
+  },
+});

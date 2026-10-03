@@ -66,6 +66,8 @@ for PLUGIN in ${PLUGINS}; do
     if [ -n "${DEVEL:-}" ]; then
         (cd "${WORK}/${PLUGIN}" && make PLUGIN_DEVEL=yes package > /dev/null)
     else
+        # development-only tooling (the map's ?debug=1 diagnostics panel) stays out of releases
+        rm -f "${WORK}/${PLUGIN}/src/opnsense/www/js/firewall-map-diagnostics.js"
         (cd "${WORK}/${PLUGIN}" && make PLUGIN_DEVEL= package > /dev/null)
     fi
     cp "${WORK}/${PLUGIN}"/work/pkg/*.pkg "${ROOT}/dist/"

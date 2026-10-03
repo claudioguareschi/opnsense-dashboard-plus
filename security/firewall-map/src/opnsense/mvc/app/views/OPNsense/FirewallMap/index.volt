@@ -163,24 +163,6 @@
     .fwmap-inv-table { width: 100%; font-size: .9em; table-layout: fixed; }
     .fwmap-inv-table th { font-weight: normal; opacity: .7; padding-right: 8px; vertical-align: top; width: 10em; }
     .fwmap-inv-retry { margin-top: 6px; }
-    /* ?debug=1: the diagnostics panel, translucent; it starts at the bottom right of the map and can be dragged anywhere */
-    #fwmap-diag { position: fixed; z-index: 1030; width: 270px; padding: 8px 10px; font-size: 11px;
-        line-height: 1.35; border: 1px solid rgba(128, 128, 128, .3); border-radius: 6px; color: var(--fwmap-text, inherit);
-        background: color-mix(in srgb, var(--fwmap-panel, #fff) 78%, transparent); backdrop-filter: blur(6px);
-        -webkit-backdrop-filter: blur(6px); box-shadow: 0 2px 8px rgba(0, 0, 0, .12); font-variant-numeric: tabular-nums; }
-    .fwmap-diag-head { display: flex; align-items: center; gap: 6px; margin: -8px -10px 4px; padding: 6px 10px 4px; cursor: move;
-        touch-action: none; user-select: none; -webkit-user-select: none; }
-    .fwmap-diag-note { opacity: .65; font-size: 10px; margin-bottom: 4px; }
-    .fwmap-diag-head b { flex: 1; }
-    .fwmap-diag-plot { display: grid; grid-template-columns: 48px 1fr 54px; grid-template-rows: auto auto; column-gap: 6px;
-        align-items: center; margin-bottom: 3px; }
-    .fwmap-diag-plot > span { opacity: .7; grid-row: span 2; }
-    .fwmap-diag-plot canvas { width: 100%; height: 22px; grid-row: span 2; }
-    .fwmap-diag-value { text-align: right; }
-    .fwmap-diag-range { text-align: right; opacity: .6; font-size: 10px; }
-    .fwmap-diag-facts { display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; margin-top: 6px; padding-top: 6px;
-        border-top: 1px solid rgba(128, 128, 128, .25); }
-    .fwmap-diag-facts span { opacity: .7; }
     /* while the lookup runs: a spinner where the data will appear (seen mostly on slow links) */
     .fwmap-inv-loading { display: flex; align-items: center; gap: 8px; padding: 12px 0; opacity: .7; }
     .fwmap-inv-table td { word-break: break-word; }
@@ -816,6 +798,9 @@
 </script>
 <script src="/ui/js/firewall-map-renderer.js?v={{ rendererVersion }}"></script>
 <script src="/ui/js/firewall-map-page.js?v={{ pageVersion }}"></script>
+{% if diagnosticsVersion %}
+<script src="/ui/js/firewall-map-diagnostics.js?v={{ diagnosticsVersion }}"></script>
+{% endif %}
 
 <div class="content-box" style="padding: 12px;">
     <div id="fwmap-layout">

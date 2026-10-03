@@ -36,7 +36,6 @@ import {getJSON} from './api.js';
 import {POLL_MS, resetFilters, state, T} from './context.js';
 import {renderDetails} from './details.js';
 import {filtered} from './filters.js';
-import {diagnosticsRequested, startDiagnostics} from './diagnostics.js';
 import {checkAbuse, investigate} from './investigate.js';
 import {bindSplitters, readFollow, setFollow, watchSideWidth} from './layout.js';
 import {refreshQueueCount, showQueue} from './queue.js';
@@ -427,7 +426,8 @@ $(async () => {
     }
   });
   poll(snapshotQuery(state.settings));
-  if (diagnosticsRequested()) {
-    startDiagnostics();
+  // ?debug=1: the diagnostics panel, a separate script that only development packages install
+  if (new URLSearchParams(window.location.search).get('debug') === '1' && window.FirewallMapDiagnostics) {
+    window.FirewallMapDiagnostics.start({renderer: () => state.renderer, mode: () => state.mode, contextLosses: () => state.contextLosses});
   }
 });

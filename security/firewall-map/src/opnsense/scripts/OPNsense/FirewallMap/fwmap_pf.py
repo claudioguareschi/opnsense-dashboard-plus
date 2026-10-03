@@ -26,6 +26,7 @@
 
 """PF state table, ruleset and interface parsing for Firewall Map+."""
 
+import functools
 import ipaddress
 import re
 import subprocess
@@ -482,9 +483,14 @@ def state_outside(record, pair):
     return outside_key(record["protocol"], public["address"], public["port"], remote, far["port"])
 
 
-# Walking the state table costs about 2 kB of memory and 20 µs per state; above this many states
-# (a flood, or a very busy firewall) the map stops sampling instead of risking the firewall's memory
-MAX_SAMPLED_STATES = 100000
+# Walking the state table costs about 2 kB of memory and 20 µs per state. The map walks at most
+# as many states as fit in a small share of the firewall's RAM (a 4 GB box: about 100,000), so a
+# flood or a very busy firewall stops the sampling instead of risking memory; never fewer than
+# MIN, and never more than MAX, which already takes about 5 s per sample.
+BYTES_PER_STATE = 2048
+STATE_MEMORY_SHARE = 0.05
+MIN_SAMPLED_STATES = 25000
+MAX_SAMPLED_STATES = 250000
 STATE_COUNT = re.compile(r"current entries\s+(\d+)")
 
 
@@ -505,7 +511,27 @@ def state_count():
     return int(match.group(1)) if match else None
 
 
-def sample_states(limit=MAX_SAMPLED_STATES):
+@functools.lru_cache(maxsize=1)
+def physical_memory():
+    """Installed RAM in bytes (hw.physmem), or None when unknown."""
+    try:
+        output = subprocess.run(["/sbin/sysctl", "-n", "hw.physmem"], capture_output=True, check=False, text=True, timeout=5).stdout
+        return int(output.strip()) or None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
+def state_limit(memory=None):
+    """How many states the map may walk on this firewall, from its RAM (see STATE_MEMORY_SHARE)."""
+    memory = physical_memory() if memory is None else memory
+    if not memory:
+        return 100000
+    limit = int(memory * STATE_MEMORY_SHARE / BYTES_PER_STATE) // 5000 * 5000
+    return max(MIN_SAMPLED_STATES, min(MAX_SAMPLED_STATES, limit))
+
+
+def sample_states(limit=None):
+    limit = state_limit() if limit is None else limit
     count = state_count()
     if count is not None and count > limit:
         raise TooManyStates(count, limit)

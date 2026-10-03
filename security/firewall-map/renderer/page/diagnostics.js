@@ -25,12 +25,14 @@
  */
 
 /*
- * The hidden diagnostics panel (?debug=1 on the page URL): frame rate, frame cost, memory, GPU
- * memory, poll latency and WebGL context losses, with ten-minute plots, to watch the map for
- * leaks and load over a long session. Nothing here runs unless it is asked for.
+ * The diagnostics panel (?debug=1 on the page URL): frame rate, frame cost, memory, GPU memory,
+ * poll latency and WebGL context losses, with ten-minute plots, to watch the map for leaks and
+ * load over a long session. A separate script, shipped in development packages only: the page
+ * calls start() when it is installed and asked for. It sees the page through `page` (the
+ * renderer, the mode, the WebGL reset count) and brings its own styles.
  */
-import {escapeHtml} from '../src/format.js';
-import {state} from './context.js';
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'})[c]);
+let page = {renderer: () => null, mode: () => '', contextLosses: () => 0};
 
 const SAMPLE_MS = 1000;
 const KEEP = 600;
@@ -40,14 +42,6 @@ const samples = [];
 const polls = [];
 let longTasks = 0;
 let started = 0;
-
-export function diagnosticsRequested() {
-  try {
-    return new URLSearchParams(window.location.search).get('debug') === '1';
-  } catch (_) {
-    return false;
-  }
-}
 
 function observe() {
   try {
@@ -72,7 +66,7 @@ function observe() {
 }
 
 function sample() {
-  const map = state.renderer?.diagnostics?.() || {};
+  const map = page.renderer()?.diagnostics?.() || {};
   const recent = polls.splice(0);
   const heap = performance.memory?.usedJSHeapSize;
   const point = {
@@ -86,9 +80,9 @@ function sample() {
     pollMs: recent.length ? Math.max(...recent.map((entry) => entry.ms)) : null,
     pollKb: recent.length ? recent[recent.length - 1].bytes / 1024 : null,
     arcs: map.arcs, blocks: map.blocks, pulses: map.pulses,
-    contextLosses: (state.contextLosses || 0),
+    contextLosses: page.contextLosses() || 0,
     longTasks,
-    mode: state.mode,
+    mode: page.mode(),
     hidden: document.hidden,
   };
   samples.push(point);
@@ -253,8 +247,14 @@ function draggable(panel) {
   window.addEventListener('resize', () => placePanel(panel, {left: panel.offsetLeft, top: panel.offsetTop}));
 }
 
-/** Show the panel and start sampling; only called when ?debug=1 is on the URL. */
-export function startDiagnostics() {
+const STYLES = `#fwmap-diag { position: fixed; z-index: 1030; width: 270px; padding: 8px 10px; font-size: 11px; line-height: 1.35; border: 1px solid rgba(128, 128, 128, .3); border-radius: 6px; color: var(--fwmap-text, inherit); background: color-mix(in srgb, var(--fwmap-panel, #fff) 78%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); box-shadow: 0 2px 8px rgba(0, 0, 0, .12); font-variant-numeric: tabular-nums; } .fwmap-diag-head { display: flex; align-items: center; gap: 6px; margin: -8px -10px 4px; padding: 6px 10px 4px; cursor: move; touch-action: none; user-select: none; -webkit-user-select: none; } .fwmap-diag-note { opacity: .65; font-size: 10px; margin-bottom: 4px; } .fwmap-diag-head b { flex: 1; } .fwmap-diag-plot { display: grid; grid-template-columns: 48px 1fr 54px; grid-template-rows: auto auto; column-gap: 6px; align-items: center; margin-bottom: 3px; } .fwmap-diag-plot > span { opacity: .7; grid-row: span 2; } .fwmap-diag-plot canvas { width: 100%; height: 22px; grid-row: span 2; } .fwmap-diag-value { text-align: right; } .fwmap-diag-range { text-align: right; opacity: .6; font-size: 10px; } .fwmap-diag-facts { display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(128, 128, 128, .25); } .fwmap-diag-facts span { opacity: .7; }`;
+
+/** Show the panel and start sampling; the page calls this when ?debug=1 is on the URL. */
+export function start(hooks) {
+  page = {...page, ...hooks};
+  const style = document.createElement('style');
+  style.textContent = STYLES;
+  document.head.appendChild(style);
   started = Date.now();
   observe();
   const panel = document.createElement('div');
