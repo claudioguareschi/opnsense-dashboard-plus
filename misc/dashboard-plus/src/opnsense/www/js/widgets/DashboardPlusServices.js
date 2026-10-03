@@ -80,6 +80,8 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 width: calc(100% - 0.5em);
                 min-width: 0;
                 margin-right: 0.5em;
+                text-align: center;
+                text-align-last: center;
             }
             .dashboard-plus-services-table .dashboard-plus-services-action {
                 min-width: 2.1em;
