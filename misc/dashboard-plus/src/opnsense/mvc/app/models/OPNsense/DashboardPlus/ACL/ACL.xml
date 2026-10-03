@@ -24,4 +24,19 @@
             <pattern>api/core/service/restart/*</pattern>
         </patterns>
     </page-dashboard-widget-dashboard-plus-services>
+
+    <page-dashboard-widget-dashboard-plus-dns-health>
+        <!--
+            Read-only Unbound access required specifically by DNS Health+.
+            Kept separate from the general Dashboard Plus privilege.
+        -->
+        <name>Dashboard: DNS Health+ status</name>
+        <patterns>
+            <pattern>api/unbound/service/status</pattern>
+            <pattern>api/unbound/diagnostics/stats</pattern>
+            <pattern>api/unbound/overview/totals/*</pattern>
+            <pattern>api/unbound/settings/get</pattern>
+            <pattern>api/unbound/settings/searchForward</pattern>
+        </patterns>
+    </page-dashboard-widget-dashboard-plus-dns-health>
 </acl>
