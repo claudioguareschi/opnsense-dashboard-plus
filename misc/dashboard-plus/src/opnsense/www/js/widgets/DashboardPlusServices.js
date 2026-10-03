@@ -36,9 +36,6 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
     }
 
     _addStyle() {
-        if (document.getElementById(SERVICE_STYLE_ID)) {
-            return;
-        }
         const css = `
             .dashboard-plus-services {
                 min-height: 12em;
@@ -150,7 +147,12 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 }
             }
         `;
-        $('<style>').attr('id', SERVICE_STYLE_ID).text(css).appendTo('head');
+        const existing = document.getElementById(SERVICE_STYLE_ID);
+        if (existing) {
+            $(existing).text(css);
+        } else {
+            $('<style>').attr('id', SERVICE_STYLE_ID).text(css).appendTo('head');
+        }
     }
 
     getMarkup() {
