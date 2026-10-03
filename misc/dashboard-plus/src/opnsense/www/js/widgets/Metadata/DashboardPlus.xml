@@ -224,4 +224,36 @@
             <no_entries>No matching firewall log entries</no_entries>
         </translations>
     </dashboardplusfirewalllogs>
+    <dashboardplusservices>
+        <filename>DashboardPlusServices.js</filename>
+        <link>/ui/core/service</link>
+        <endpoints>
+            <endpoint>/api/core/service/*</endpoint>
+        </endpoints>
+        <translations>
+            <title>Services+</title>
+            <dashboard_title>Services</dashboard_title>
+            <services>Services</services>
+            <status>Status</status>
+            <service>Service</service>
+            <identifier>Service ID</identifier>
+            <actions>Actions</actions>
+            <search>Search services</search>
+            <all>All</all>
+            <running>Running</running>
+            <stopped>Stopped</stopped>
+            <locked>Locked</locked>
+            <start>Start</start>
+            <stop>Stop</stop>
+            <restart>Restart</restart>
+            <refresh_interval>Refresh interval</refresh_interval>
+            <seconds_15>15 seconds</seconds_15>
+            <seconds_30>30 seconds</seconds_30>
+            <minute_1>1 minute</minute_1>
+            <minutes_2>2 minutes</minutes_2>
+            <no_matches>No matching services</no_matches>
+            <fetch_failed>Unable to load services</fetch_failed>
+            <action_failed>Service action failed</action_failed>
+        </translations>
+    </dashboardplusservices>
 </metadata>
