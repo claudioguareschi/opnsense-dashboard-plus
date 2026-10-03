@@ -1,13 +1,8 @@
 <acl>
     <page-dashboard-widget-dashboard-plus>
         <!--
-            Only the plugin's own endpoints: the hardware information and the system metrics
-            (memory, load, CPU frequency, temperatures, pf states, mbufs, swap, filesystems)
-            that System Metrics+, Thermal Sensors+ and System Information+ read in one request.
-            The other data the widgets show from OPNsense itself (the firewall log, gateways,
-            interfaces, CPU usage) stays under OPNsense's own privileges: the dashboard shows a
-            widget only to users who may read every endpoint it lists, as for OPNsense's own
-            widgets.
+            Only the plugin's own endpoints. Native OPNsense data remains governed by
+            OPNsense's own privileges.
         -->
         <name>Dashboard: Dashboard Plus widgets</name>
         <patterns>
@@ -15,4 +10,18 @@
             <pattern>api/dashboardplus/system/metrics</pattern>
         </patterns>
     </page-dashboard-widget-dashboard-plus>
+
+    <page-dashboard-widget-dashboard-plus-services>
+        <!--
+            Service control is intentionally a separate privilege so access to the
+            Dashboard Plus widgets does not implicitly grant service management.
+        -->
+        <name>Dashboard: Services+ control</name>
+        <patterns>
+            <pattern>api/core/service/search</pattern>
+            <pattern>api/core/service/start/*</pattern>
+            <pattern>api/core/service/stop/*</pattern>
+            <pattern>api/core/service/restart/*</pattern>
+        </patterns>
+    </page-dashboard-widget-dashboard-plus-services>
 </acl>
