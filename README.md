@@ -238,8 +238,9 @@ Since some of these widgets are meant to extend the information provided by the 
 release date, boot method) and the current and next boot environment; OPNsense and FreeBSD
 versions with update status; CPU model, current and maximum frequency and core/thread layout;
 crypto hardware (AES-NI, QuickAssist) and the algorithms accelerated for IPsec; kernel PTI and MDS
-mitigation state; uptime, date and time; and the DNS resolver the firewall itself uses. No
-settings.*
+mitigation state; uptime, date and time; and the DNS resolver the firewall itself uses.
+Settings: which sections to show.* While the dashboard is in edit mode, sections can be dragged
+into any order.
 
 ### System Metrics+
 

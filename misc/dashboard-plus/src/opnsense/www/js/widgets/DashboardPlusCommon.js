@@ -105,6 +105,31 @@ export function isDragging($container) {
     return $container[0]?.dataset.dragging === '1';
 }
 
+/* True while the dashboard is in edit mode (the pencil button in the page header is active). */
+export function isEditMode() {
+    return $('#edit-grid').hasClass('active');
+}
+
+/*
+ * Call onChange(editing) whenever the dashboard enters or leaves edit mode. Returns a function
+ * that stops watching.
+ */
+export function watchEditMode(onChange) {
+    const button = document.getElementById('edit-grid');
+    if (!button) {
+        return () => {};
+    }
+    let editing = isEditMode();
+    const observer = new MutationObserver(() => {
+        if (isEditMode() !== editing) {
+            editing = isEditMode();
+            onChange(editing);
+        }
+    });
+    observer.observe(button, {attributes: true, attributeFilter: ['class']});
+    return () => observer.disconnect();
+}
+
 /*
  * The Dashboard Plus styles, added to the page once with the widget code (so a cached stylesheet
  * can never pair with a newer widget). Colors are the theme's: Bootstrap's text-* classes, labels

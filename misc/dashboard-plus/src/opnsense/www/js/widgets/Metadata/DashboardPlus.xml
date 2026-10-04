@@ -53,6 +53,8 @@
             <inactive>Inactive</inactive>
             <active>Active</active>
             <available>Available</available>
+            <sections>Sections</sections>
+            <drag_to_reorder>Drag to reorder</drag_to_reorder>
         </translations>
     </dashboardplussysteminformation>
     <dashboardplustraffic>

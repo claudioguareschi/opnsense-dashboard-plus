@@ -24,14 +24,26 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-const {escapeHtml, renderTitle, fill, DashboardPlusWidget} =
-    await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
+const {
+    escapeHtml, renderTitle, fill, DashboardPlusWidget, mergeOrder, makeSortable, isDragging,
+    isEditMode, watchEditMode
+} = await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
+
+// Every section, in the default order. Boot Environment and Crypto Hardware show only where the
+// firewall has them.
+const SECTIONS = [
+    'name', 'user', 'hardware', 'firmware', 'boot_environment', 'version', 'cpu', 'accelerator',
+    'ipsec', 'accelerated_algorithms', 'pti', 'mds', 'uptime', 'datetime', 'dns_servers'
+];
 
 export default class DashboardPlusSystemInformation extends DashboardPlusWidget(BaseTableWidget) {
     constructor(config) {
         super(config);
+        this.configurable = true;
         this.tickTimeout = 10;
         this.loaded = false;
+        this.data = null;
+        this.currentConfig = null;
     }
 
     getGridOptions() {
@@ -117,6 +129,14 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
         }[code] ?? code;
     }
 
+    /* The kernel reports the MDS state in lower case ("inactive", "software (Silvermont)"). */
+    _mds(state) {
+        if (state === 'inactive') {
+            return this.translations.inactive;
+        }
+        return typeof state === 'string' && state ? state.charAt(0).toUpperCase() + state.slice(1) : state;
+    }
+
     _frequency(cpu) {
         if (!cpu?.current_mhz) {
             return null;
@@ -133,7 +153,9 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
             {threads: cpu.threads, packages: cpu.packages, cores: cpu.cores, threads_per_core: cpu.threads_per_core});
     }
 
-    _rows(system, time, details) {
+    /* The rows of every section the firewall has, by section name. */
+    _sections({system, time, details}) {
+        const t = this.translations;
         const versions = Array.isArray(system?.versions) ? system.versions : [];
         const hardware = details.hardware || {};
         const bios = details.bios || {};
@@ -143,60 +165,126 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
         const frequency = this._frequency(cpu);
         const updateLink = $('<a>')
             .attr('href', '/ui/core/firmware#checkupdate')
-            .text(system?.updates || this.translations.unavailable)
+            .text(system?.updates || t.unavailable)
             .prop('outerHTML');
 
-        const rows = [
-            [this.translations.name, this._value(system?.name)],
-            [this.translations.user, this._value(details.user)],
-            [this.translations.hardware, this._group([
-                {label: this.translations.manufacturer, value: hardware.manufacturer},
-                {label: this.translations.model, value: hardware.model},
-                {label: this.translations.serial, value: hardware.serial}
-            ])],
-            [this.translations.firmware, this._group([
-                {label: this.translations.vendor, value: bios.vendor},
-                {label: this.translations.version, value: bios.version},
-                {label: this.translations.release_date, value: bios.date},
-                {label: this.translations.boot_method, value: bios.boot_method}
-            ])]
-        ];
-        if (bootEnvironment.current || bootEnvironment.next) {
-            rows.push([this.translations.boot_environment, this._group([
-                {label: this.translations.current, value: bootEnvironment.current},
-                {label: this.translations.next, value: bootEnvironment.next}
-            ])]);
-        }
-        rows.push(
-            [this.translations.version, this._group([
-                {label: this.translations.opnsense, value: versions[0]},
-                {label: this.translations.freebsd, value: versions[1]},
-                {label: this.translations.update_status, value: updateLink, html: true}
-            ])],
-            [this.translations.cpu, this._group([
-                {label: this.translations.model, value: cpu.model},
+        const sections = {
+            name: this._value(system?.name),
+            user: this._value(details.user),
+            hardware: this._group([
+                {label: t.manufacturer, value: hardware.manufacturer},
+                {label: t.model, value: hardware.model},
+                {label: t.serial, value: hardware.serial}
+            ]),
+            firmware: this._group([
+                {label: t.vendor, value: bios.vendor},
+                {label: t.version, value: bios.version},
+                {label: t.release_date, value: bios.date},
+                {label: t.boot_method, value: bios.boot_method}
+            ]),
+            version: this._group([
+                {label: t.opnsense, value: versions[0]},
+                {label: t.freebsd, value: versions[1]},
+                {label: t.update_status, value: updateLink, html: true}
+            ]),
+            cpu: this._group([
+                {label: t.model, value: cpu.model},
                 {label: '', value: frequency ? `<span id="${this.id}-frequency">${escapeHtml(frequency)}</span>` : null, html: true},
                 {label: '', value: this._topology(cpu)}
-            ])]
-        );
-        if ((details.crypto_hardware || []).length > 0) {
-            rows.push([this.translations.accelerator, this._cryptoHardware(details.crypto_hardware)]);
+            ]),
+            ipsec: this._value(this._state(details.ipsec)),
+            accelerated_algorithms: this._list(details.accelerated_algorithms, ', '),
+            pti: this._value(this._state(mitigations.pti)),
+            mds: this._value(this._mds(mitigations.mds)),
+            uptime: `<span id="${this.id}-uptime">${this._value(time?.uptime)}</span>`,
+            datetime: `<span id="${this.id}-datetime">${this._value(time?.datetime)}</span>`,
+            dns_servers: this._dns(details.dns)
+        };
+        if (bootEnvironment.current || bootEnvironment.next) {
+            sections.boot_environment = this._group([
+                {label: t.current, value: bootEnvironment.current},
+                {label: t.next, value: bootEnvironment.next}
+            ]);
         }
-        rows.push(
-            [this.translations.ipsec, this._value(this._state(details.ipsec))],
-            [this.translations.accelerated_algorithms, this._list(details.accelerated_algorithms, ', ')],
-            [this.translations.pti, this._value(this._state(mitigations.pti))],
-            [this.translations.mds, this._value(this._state(mitigations.mds))],
-            [this.translations.uptime, `<span id="${this.id}-uptime">${this._value(time?.uptime)}</span>`],
-            [this.translations.datetime, `<span id="${this.id}-datetime">${this._value(time?.datetime)}</span>`],
-            [this.translations.dns_servers, this._dns(details.dns)]
-        );
-        return rows.map(([label, value]) => [escapeHtml(label), value]);
+        if ((details.crypto_hardware || []).length > 0) {
+            sections.accelerator = this._cryptoHardware(details.crypto_hardware);
+        }
+        return sections;
+    }
+
+    /* The chosen sections in the user's order. */
+    _order() {
+        const chosen = this.currentConfig?.sections;
+        return mergeOrder(chosen, chosen ?? SECTIONS).filter(section => SECTIONS.includes(section));
+    }
+
+    _render() {
+        const $table = $(`#${this._tableId()}`);
+        if (!this.data || !this.currentConfig || isDragging($table)) {
+            return;
+        }
+        const sections = this._sections(this.data);
+        const shown = this._order().filter(section => section in sections);
+        super.updateTable(this._tableId(), shown.map(section => [escapeHtml(this.translations[section]), sections[section]]));
+        // updateTable appends one row per entry, in order
+        $table.children('.flextable-row').each((index, row) => {
+            $(row).attr('data-sort-id', shown[index]);
+        });
+        this._applyEditMode(isEditMode());
+    }
+
+    /* Sections can be dragged into a new order only while the dashboard is being edited. */
+    _applyEditMode(editing) {
+        $(`#${this._tableId()} > .flextable-row[data-sort-id]`)
+            .attr('draggable', editing ? 'true' : null)
+            .attr('title', editing ? this.translations.drag_to_reorder : null)
+            .css('cursor', editing ? 'grab' : '');
     }
 
     async onMarkupRendered() {
         renderTitle(this);
+        this.currentConfig = await this.getWidgetConfig();
+        makeSortable($(`#${this._tableId()}`), {
+            itemSelector: '.flextable-row[data-sort-id]',
+            placeholderClass: 'flextable-row',
+            label: this.translations.drag_to_reorder,
+            onReorder: order => {
+                this.currentConfig.sections = mergeOrder(order, this.currentConfig.sections || order);
+                this.setWidgetConfig(this.currentConfig);
+            }
+        });
+        this.stopWatchingEditMode = watchEditMode(editing => this._applyEditMode(editing));
         this.fitToContent();
+    }
+
+    async getWidgetOptions() {
+        // List the sections in the widget's order, so the dropdown reads like the widget.
+        const chosen = this.currentConfig?.sections;
+        const order = Array.isArray(chosen) ? mergeOrder(chosen, [...chosen, ...SECTIONS]) : SECTIONS;
+        return {
+            sections: {
+                title: this.translations.sections,
+                type: 'select_multiple',
+                id: `${this.id}-sections`,
+                options: order.map(section => ({value: section, label: this.translations[section]})),
+                default: SECTIONS
+            }
+        };
+    }
+
+    async onWidgetOptionsChanged() {
+        const previous = this.currentConfig?.sections;
+        const config = await this.getWidgetConfig();
+        // The dialog returns the selection in option order; keep the dragged order.
+        config.sections = mergeOrder(previous, config.sections);
+        this.setWidgetConfig(config);
+        this.currentConfig = config;
+        this._render();
+    }
+
+    onWidgetClose() {
+        super.onWidgetClose();
+        this.stopWatchingEditMode?.();
     }
 
     async onWidgetTick() {
@@ -211,7 +299,8 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
             if (details?.status !== 'ok') {
                 throw new Error('System information is unavailable');
             }
-            super.updateTable(this._tableId(), this._rows(system, time, details));
+            this.data = {system, time, details};
+            this._render();
             this.loaded = true;
             return;
         }
