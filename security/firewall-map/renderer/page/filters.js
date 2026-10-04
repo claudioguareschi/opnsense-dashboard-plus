@@ -42,6 +42,10 @@ export function insideHostMatches(inside, host) {
     return true;
   }
   if (typeof inside === 'string') {
+    if (inside.startsWith('[')) {
+      const end = inside.indexOf(']');
+      return end > 0 && inside.slice(1, end) === host;
+    }
     return inside === host || inside.startsWith(`${host}:`);
   }
   return inside?.ip === host;

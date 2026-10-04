@@ -76,6 +76,8 @@ test('only places that are drawn stay in the locations', () => {
 test('host filters match regular and IDS host representations', () => {
   assert.equal(insideHostMatches({ip: '10.0.0.5'}, '10.0.0.5'), true);
   assert.equal(insideHostMatches('10.0.0.5:443', '10.0.0.5'), true);
+  assert.equal(insideHostMatches('[2001:db8::5]:443', '2001:db8::5'), true);
+  assert.equal(insideHostMatches('[2001:db8::6]:443', '2001:db8::5'), false);
   assert.equal(insideHostMatches('10.0.0.6:443', '10.0.0.5'), false);
   assert.equal(insideHostMatches({ip: '10.0.0.6'}, '10.0.0.5'), false);
 });
