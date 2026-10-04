@@ -58,12 +58,14 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 flex: none;
                 width: 0.7em;
                 height: 0.7em;
+                margin: 0 0.25em;
                 border-radius: 50%;
                 background: currentColor;
                 opacity: 0.8;
             }
             .dashboard-plus-dns-health-label {
                 min-width: 0;
+                text-align: left;
             }
             .dashboard-plus-dns-health-eyebrow,
             .dashboard-plus-dns-health-metric-label,
@@ -74,6 +76,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 letter-spacing: 0.02em;
             }
             .dashboard-plus-dns-health-state {
+                text-align: left;
                 font-size: 1.05em;
                 font-weight: 600;
                 white-space: nowrap;
