@@ -32,6 +32,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 
 from .common import (
     PFCTL, RULES_DEBUG, host_port, ip_object, normalize_ip, private_ip, public_ip, remote_target, service_name,
@@ -40,6 +41,11 @@ from .common import (
 
 
 IFCONFIG = "/sbin/ifconfig"
+CURL = "/usr/local/bin/curl"
+EXTERNAL_IP_URL = "https://ifconfig.me/ip"
+EXTERNAL_IP_REFRESH_SECONDS = 300.0
+_external_address = None
+_external_checked = 0.0
 COUNTERS = re.compile(r"(?P<packets_in>\d+):(?P<packets_out>\d+) pkts,\s+(?P<bytes_in>\d+):(?P<bytes_out>\d+) bytes")
 AGE = re.compile(r"\bage (?:(?P<days>\d+)d)?(?P<h>\d+):(?P<m>\d+):(?P<s>\d+)")
 RLABEL = re.compile(r"\brlabel ([^,\s]+)")
@@ -280,9 +286,10 @@ def _origin_address(record, local_addresses, networks):
         return None
     same_family = [address for address in local_addresses
                    if ipaddress.ip_address(address).version == version]
-    on_egress = [address for address in same_family
+    public = [address for address in same_family if public_ip(address)]
+    on_egress = [address for address in public
                  if _network_device(address, networks) == record.get("origif")]
-    return min(on_egress or same_family, default=None)
+    return min(on_egress or public or same_family, default=None)
 
 
 def flow_endpoints(record, local_addresses, networks=None):
@@ -294,21 +301,30 @@ def flow_endpoints(record, local_addresses, networks=None):
     src = record["src"]["address"]
     dst = record["dst"]["address"]
     nat = record["nat"]["address"] if record["nat"] else None
+    public_origins = {address for address in local_addresses if public_ip(address)}
     if nat and public_ip(nat):
         local = nat
-    elif src in local_addresses:
+    elif src in local_addresses and (public_ip(src) or not public_origins):
         local = src
-    elif dst in local_addresses:
+    elif dst in local_addresses and (public_ip(dst) or not public_origins):
         local = dst
+    elif src in local_addresses and private_ip(src) and public_origins and public_ip(dst):
+        local = _origin_address(record, local_addresses, networks)
+        if local:
+            return local, dst
+        return None
+    elif dst in local_addresses and private_ip(dst) and public_origins and public_ip(src):
+        local = _origin_address(record, local_addresses, networks)
+        if local:
+            return local, src
+        return None
     elif nat and private_ip(src) and public_ip(dst) and local_addresses:
         # outbound NAT to a tunnel address (e.g. a WireGuard or IPsec egress): draw it from the
         # firewall's own location, the egress interface tells which path it took
-        try:
-            version = ipaddress.ip_address(dst).version
-            local = min(address for address in local_addresses if ipaddress.ip_address(address).version == version)
-        except (TypeError, ValueError):
-            return None
-        return local, dst
+        local = _origin_address(record, local_addresses, networks)
+        if local:
+            return local, dst
+        return None
     else:
         # With a routed prefix there is no NAT and neither state endpoint is an address assigned
         # to the firewall. Identify the protected endpoint from the interface networks, then draw
@@ -417,7 +433,12 @@ def interface_networks(output):
 
 
 def host_info():
-    """Return (public IP addresses on this firewall, CARP role or None, interface networks)."""
+    """Return (usable firewall addresses, CARP role or None, interface networks).
+
+    A firewall behind CGNAT or another upstream router has no public address on any interface.
+    In that case, add the observed public egress address so outbound flows still have a stable
+    geolocation origin. The lookup is only attempted when needed and is cached.
+    """
     try:
         output = subprocess.run(
             [IFCONFIG, "-a"], capture_output=True, check=False, text=True, timeout=2,
@@ -426,7 +447,18 @@ def host_info():
         return set(), None, []
     candidates = re.findall(r"\binet\s+(\d+(?:\.\d+){3})", output)
     candidates += re.findall(r"\binet6\s+([^\s%]+)", output)
-    addresses = {str(ipaddress.ip_address(address)) for address in candidates if public_ip(address)}
+    addresses = set()
+    for candidate in candidates:
+        try:
+            address = ipaddress.ip_address(candidate)
+        except ValueError:
+            continue
+        if not (address.is_loopback or address.is_link_local or address.is_unspecified or address.is_multicast):
+            addresses.add(str(address))
+    if not any(public_ip(address) for address in addresses):
+        external = external_public_address()
+        if external:
+            addresses.add(external)
     roles = set(re.findall(r"\bcarp: (MASTER|BACKUP|INIT)\b", output))
     if not roles:
         role = None
@@ -435,6 +467,30 @@ def host_info():
     else:
         role = "backup"
     return addresses, role, interface_networks(output)
+
+
+def external_public_address():
+    """Return the public egress address when the firewall has no public interface address.
+
+    This is deliberately a short, cached, best-effort lookup. A failed lookup leaves the normal
+    local-address behavior intact and never prevents collection from running.
+    """
+    global _external_address, _external_checked
+    now = time.monotonic()
+    if now - _external_checked < EXTERNAL_IP_REFRESH_SECONDS:
+        return _external_address
+    _external_checked = now
+    try:
+        result = subprocess.run(
+            [CURL, "-4", "-fsS", "--max-time", "3", EXTERNAL_IP_URL],
+            capture_output=True, check=False, text=True, timeout=4,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return _external_address
+    candidate = normalize_ip(result.stdout.strip())
+    if result.returncode == 0 and public_ip(candidate):
+        _external_address = candidate
+    return _external_address
 
 
 def blocked_rule_tables(path=RULES_DEBUG):

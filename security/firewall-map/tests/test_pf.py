@@ -108,6 +108,48 @@ vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
                    "   age 00:00:05, expires in 23:59:37, 1:1 pkts, 1:1 bytes\n   id: 01 creatorid: 02\n"
         self.assertIsNone(PF.flow_endpoints(PF.parse_states(lan_side)[0], {"1.2.3.163"}))
 
+    def test_host_info_adds_cached_public_egress_for_private_wan(self):
+        output = """igb1: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
+\tinet 10.152.200.80 netmask 0xffffff00 broadcast 10.152.200.255
+vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
+\tinet 192.168.30.1 netmask 0xffffff00 broadcast 192.168.30.255
+"""
+
+        def run(command, **kwargs):
+            if command[0] == PF.IFCONFIG:
+                return mock.Mock(stdout=output)
+            return mock.Mock(stdout="8.8.8.8\n", returncode=0)
+
+        with mock.patch.object(PF, "_external_address", None), \
+                mock.patch.object(PF, "_external_checked", 0.0), \
+                mock.patch.object(PF.subprocess, "run", side_effect=run) as process:
+            addresses, role, networks = PF.host_info()
+            again, _, _ = PF.host_info()
+
+        self.assertEqual(role, None)
+        self.assertEqual(addresses, {"10.152.200.80", "192.168.30.1", "8.8.8.8"})
+        self.assertEqual(again, addresses)
+        self.assertEqual(sum(call.args[0][0] == PF.CURL for call in process.call_args_list), 1)
+        self.assertIn((ipaddress.ip_network("10.152.200.0/24"), "igb1"), networks)
+
+    def test_private_wan_nat_uses_public_egress_as_map_origin(self):
+        state = self.NAT_OUT.replace("1.2.3.163:19421", "10.152.200.80:19421")
+        record = PF.parse_states(state)[0]
+        networks = PF.interface_networks(self.IFCONFIG)
+        self.assertEqual(
+            PF.flow_endpoints(record, {"10.152.200.80", "192.168.30.248", "8.8.8.8"}, networks),
+            ("8.8.8.8", "34.209.15.107"),
+        )
+
+    def test_private_wan_firewall_traffic_uses_public_egress_as_map_origin(self):
+        state = self.NAT_OUT.replace("1.2.3.163:19421 (192.168.30.30:51858)", "10.152.200.80:19421")
+        record = PF.parse_states(state)[0]
+        networks = PF.interface_networks(self.IFCONFIG)
+        self.assertEqual(
+            PF.flow_endpoints(record, {"10.152.200.80", "192.168.30.248", "8.8.8.8"}, networks),
+            ("8.8.8.8", "34.209.15.107"),
+        )
+
     def test_maps_inside_host_to_interface_and_name(self):
         networks = PF.interface_networks(self.IFCONFIG)
         self.assertIn(("192.168.30.250/32", "vlan03"), [(str(network), device) for network, device in networks])
