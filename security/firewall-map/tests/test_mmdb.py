@@ -114,7 +114,9 @@ class ReaderTest(unittest.TestCase):
         truncated = bytes([(2 << 5) | 20]) + b"short"
         self_pointer = bytes([(1 << 5) | 0, 0])
         pointer_to_pointer = bytes([(1 << 5) | 0, 2, (1 << 5) | 0, 0])
-        for data in (truncated, self_pointer, pointer_to_pointer):
+        # a map whose two values point back at the map: exponential work within the depth limit
+        fan_out = bytes([(7 << 5) | 2, (2 << 5) | 1]) + b"a" + bytes([1 << 5, 0, (2 << 5) | 1]) + b"b" + bytes([1 << 5, 0])
+        for data in (truncated, self_pointer, pointer_to_pointer, fan_out):
             decoder = mmdb.Decoder(data, 0, len(data))
             with self.assertRaises(mmdb.InvalidDatabaseError):
                 decoder.decode(0)

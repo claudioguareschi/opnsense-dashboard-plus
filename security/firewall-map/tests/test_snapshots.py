@@ -130,6 +130,12 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(kept, list(reversed(ids))[:3])
         self.assertNotIn(old, kept)
 
+    def test_a_failed_save_gives_its_slot_back(self):
+        now = time.time()
+        self.assertEqual(self.save(now=now)["error"], "no current map data")
+        COMMON.write_json(self.summary, SUMMARY)
+        self.assertEqual(self.save(now=now + 1)["result"], "saved")
+
     def test_one_snapshot_per_interval(self):
         COMMON.write_json(self.summary, SUMMARY)
         now = time.time()

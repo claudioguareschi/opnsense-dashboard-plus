@@ -263,9 +263,23 @@ class ThreatHistoryFileTest(unittest.TestCase):
                 check = sqlite3.connect(database)
                 self.assertEqual(check.execute("PRAGMA user_version").fetchone()[0], 0)
                 check.close()
+                # the collector records a new entry before the move is tried again
+                check = sqlite3.connect(database)
+                check.execute("INSERT INTO threats (address, status) VALUES ('198.51.100.1', 'new')")
+                check.commit()
+                check.close()
                 os.rmdir(cache)
+                old = sqlite3.connect(cache)
+                old.execute("CREATE TABLE threats (address TEXT PRIMARY KEY, first_seen REAL, last_seen REAL, samples INTEGER, "
+                            "data TEXT, status TEXT DEFAULT 'new', note TEXT DEFAULT '', status_changed REAL)")
+                old.execute("INSERT INTO threats VALUES ('203.0.113.9', 1, 2, 3, '{}', 'reviewed', 'seen before', 2)")
+                old.execute("INSERT INTO threats VALUES ('198.51.100.1', 1, 2, 3, '{}', 'dismissed', '', 2)")
+                old.commit()
+                old.close()
                 db = THREATS.connect(database)
                 self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], THREATS.SCHEMA_VERSION)
+                rows = dict(db.execute("SELECT address, status FROM threats"))
+                self.assertEqual(rows, {"203.0.113.9": "reviewed", "198.51.100.1": "new"})
                 db.close()
 
 

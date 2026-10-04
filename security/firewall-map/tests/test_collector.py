@@ -269,6 +269,15 @@ class CollectorStateGuardTest(CollectorLoopTest):
         with open(self.output) as handle:
             self.assertEqual(json.load(handle)["status"], "ok")
 
+    def test_a_slow_walk_says_so(self):
+        def slow():
+            raise COLLECTOR.TooManyStates(30000, 35000, slow=True)
+        with mock.patch.object(COLLECTOR, "sample_states", slow):
+            self.collector.step()
+        with open(self.output) as handle:
+            payload = json.load(handle)
+        self.assertEqual((payload["status"], payload["slow"]), ("too_many_states", True))
+
 
 class ThreatRecorderTest(unittest.TestCase):
     def test_records_flagged_addresses_with_identity_and_connections(self):

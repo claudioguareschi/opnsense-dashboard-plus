@@ -551,6 +551,7 @@ class TooManyStates(RuntimeError):
                          else f"{count} states (limit {limit})")
         self.count = count
         self.limit = limit
+        self.slow = slow
 
 
 def state_count():

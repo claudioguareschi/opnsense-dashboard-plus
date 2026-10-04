@@ -689,7 +689,8 @@ class Collector:
             records = sample_states()
         except TooManyStates as error:
             if not background:
-                write_json(OUTPUT_FILE, status_document("too_many_states", count=error.count, limit=error.limit))
+                write_json(OUTPUT_FILE, status_document("too_many_states", count=error.count, limit=error.limit,
+                                                        slow=error.slow))
             if not self.too_many_states:
                 log_warning(f"sampling paused: {error}")
             self.too_many_states = True

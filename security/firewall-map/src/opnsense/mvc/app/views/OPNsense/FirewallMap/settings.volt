@@ -35,13 +35,20 @@
             keyField('license_key').closest('tr').toggle(maxmind);
             keyField('remove_license_key').closest('tr').toggle(maxmind && Boolean(status.license_key_set));
             keyField('remove_abuseipdb_key').closest('tr').toggle(Boolean(status.abuseipdb_configured));
+            // a hidden box must not remove a key on Apply
+            if (!maxmind || !status.license_key_set) {
+                keyField('remove_license_key').prop('checked', false);
+            }
+            if (!status.abuseipdb_configured) {
+                keyField('remove_abuseipdb_key').prop('checked', false);
+            }
         };
         // the keys are never sent back: say whether one is stored instead
         const describeKeys = function () {
             ajaxGet('/api/firewallmap/settings/status', {}, function (data) {
                 status = data || {};
-                const stored = "{{ lang._('A key is stored') }}";
-                const alias = "{{ lang._('Using the key of the GeoIP alias') }}";
+                const stored = {{ lang._('A key is stored')|json_encode }};
+                const alias = {{ lang._('Using the key of the GeoIP alias')|json_encode }};
                 keyField('license_key').attr('placeholder', status.license_key_set ? stored
                     : (status.database && status.database.key_source === 'alias' ? alias : ''));
                 keyField('abuseipdb_key').attr('placeholder', status.abuseipdb_configured ? stored : '');

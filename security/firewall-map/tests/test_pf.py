@@ -263,6 +263,21 @@ class StateGuardTest(unittest.TestCase):
             PF.parse_states(three, limit=2)
         self.assertEqual(raised.exception.limit, 2)
 
+    def test_a_slow_walk_is_stopped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pfctl = os.path.join(directory, "pfctl")
+            with open(pfctl, "w") as handle:
+                handle.write("#!/bin/sh\nexec sleep 5\n")
+            os.chmod(pfctl, 0o755)
+            with mock.patch.object(PF, "PFCTL", pfctl), mock.patch.object(PF, "SAMPLE_TIMEOUT", 0.2), \
+                    mock.patch.object(PF, "state_count", lambda: 30000):
+                started = time.monotonic()
+                with self.assertRaises(PF.TooManyStates) as raised:
+                    PF.sample_states(limit=35000)
+        self.assertTrue(raised.exception.slow)
+        self.assertEqual(raised.exception.count, 30000)
+        self.assertLess(time.monotonic() - started, 3)
+
     def test_the_limit_follows_the_firewalls_memory(self):
         gigabyte = 1024 ** 3
         self.assertEqual(PF.state_limit(4 * gigabyte), 35000)

@@ -146,7 +146,7 @@ export function problemText(summary, text) {
     return text.starting;
   }
   if (summary.status === 'too_many_states') {
-    return fill(text.too_many_states, {count: Number(summary.count).toLocaleString(), limit: Number(summary.limit).toLocaleString()});
+    return fill(summary.slow ? text.too_slow_states : text.too_many_states, {count: Number(summary.count).toLocaleString(), limit: Number(summary.limit).toLocaleString()});
   }
   if (summary.status === 'no_database') {
     return summary.reason === 'maxmind_key_missing' ? text.key_missing

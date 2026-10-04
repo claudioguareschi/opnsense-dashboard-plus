@@ -89,9 +89,10 @@ def connect(path=DATABASE):
 
 def move_from_cache(db, cache=None):
     """Earlier releases kept the history in cache.db: copy it here once, then drop it there. True
-    when done or when there is nothing to move, False when it has to be tried again."""
+    when done or when there is nothing to move, False when it has to be tried again. Rows recorded
+    here since (after an earlier failed try) are kept: INSERT OR IGNORE lets them win."""
     cache = cache or CACHE_DB
-    if not os.path.exists(cache) or db.execute("SELECT 1 FROM threats LIMIT 1").fetchone():
+    if not os.path.exists(cache):
         return True
     try:
         db.execute("ATTACH DATABASE ? AS old", (cache,))

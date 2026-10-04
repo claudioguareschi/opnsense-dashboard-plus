@@ -28,6 +28,7 @@ namespace OPNsense\FirewallMap\Api;
 
 use OPNsense\Base\ApiMutableModelControllerBase;
 use OPNsense\Core\Backend;
+use OPNsense\FirewallMap\BlocklistAliases;
 
 /**
  * Firewall Map+ settings (Reporting: Firewall Map: Settings): OPNsense's standard get and set; the
@@ -38,6 +39,18 @@ class SettingsController extends ApiMutableModelControllerBase
 {
     protected static $internalModelName = 'firewallmap';
     protected static $internalModelClass = 'OPNsense\FirewallMap\FirewallMap';
+
+    /**
+     * Validation checks the blocklist aliases against the curated feeds (see the model): ask configd
+     * for them before the config lock is taken, not while holding it.
+     */
+    public function setAction()
+    {
+        if ($this->request->isPost()) {
+            BlocklistAliases::feeds();
+        }
+        return parent::setAction();
+    }
 
     /** "Remove the stored key": a write-only field cannot be emptied by posting an empty value */
     protected function setActionHook()

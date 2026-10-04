@@ -134,7 +134,8 @@ def save(user, now=None, wait=WAIT_SECONDS, directory=SNAPSHOT_DIR, requests=SNA
     now = time.time() if now is None else now
     os.makedirs(directory, exist_ok=True)
     os.makedirs(requests, exist_ok=True)
-    if not reserve(now, requests):
+    previous = reserve(now, requests)
+    if previous is None:
         newest = metas(directory)[:1]
         return {"result": "failed", "error": "too_soon", "snapshot": newest[0] if newest else None}
     snapshot_id = new_id(now)
@@ -147,6 +148,8 @@ def save(user, now=None, wait=WAIT_SECONDS, directory=SNAPSHOT_DIR, requests=SNA
             fresh = False
         payload = read_json(summary_file) if fresh else {}
         if payload.get("status") != "ok":
+            # nothing was saved: the next try must not be told a snapshot was just taken
+            release(now, previous, requests)
             return {"result": "failed", "error": "no current map data"}
         write_json(document_path(snapshot_id, directory), payload)
         partial = True
@@ -158,9 +161,9 @@ def save(user, now=None, wait=WAIT_SECONDS, directory=SNAPSHOT_DIR, requests=SNA
     return {"result": "saved", "snapshot": meta}
 
 
-def reserve(now, directory=SNAPSHOT_REQUEST_DIR):
-    """Take the save slot (at most one save every MIN_INTERVAL_SECONDS): checked and taken under a
-    lock, since a save then waits seconds for the collector and configd runs requests in parallel."""
+def _slot(directory, update):
+    """Read and rewrite the time of the last save under a lock: update(last) returns the new time,
+    or None to leave it. Returns (last, new time or None)."""
     with open(os.path.join(directory, "last_save"), "a+") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         handle.seek(0)
@@ -168,12 +171,25 @@ def reserve(now, directory=SNAPSHOT_REQUEST_DIR):
             last = float(handle.read().strip() or 0)
         except ValueError:
             last = 0.0
-        if 0 <= now - last < MIN_INTERVAL_SECONDS:
-            return False
-        handle.seek(0)
-        handle.truncate()
-        handle.write(f"{now}\n")
-    return True
+        value = update(last)
+        if value is not None:
+            handle.seek(0)
+            handle.truncate()
+            handle.write(f"{value}\n")
+    return last, value
+
+
+def reserve(now, directory=SNAPSHOT_REQUEST_DIR):
+    """Take the save slot (at most one save every MIN_INTERVAL_SECONDS): checked and taken under a
+    lock, since a save then waits seconds for the collector and configd runs requests in parallel.
+    The previous slot time when taken (for release()), None when it is too soon."""
+    last, taken = _slot(directory, lambda last: None if 0 <= now - last < MIN_INTERVAL_SECONDS else now)
+    return None if taken is None else last
+
+
+def release(now, previous, directory=SNAPSHOT_REQUEST_DIR):
+    """Give the slot back after a failed save, unless a later save has taken it since."""
+    _slot(directory, lambda last: previous if last == now else None)
 
 
 def metas(directory=SNAPSHOT_DIR):

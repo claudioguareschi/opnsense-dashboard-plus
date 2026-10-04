@@ -72,14 +72,13 @@ class ServiceController extends ApiMutableServiceControllerBase
         }
         $backend = new Backend();
         /* ask configd for the feed tables before taking the config lock, not while holding it */
-        $feeds = BlocklistAliases::feeds();
+        BlocklistAliases::feeds();
         Config::getInstance()->lock();
         $general = (new FirewallMap())->general;
         [$aliases, $changes, $error] = BlocklistAliases::reconcile(
             (string)$general->blocklist_aliases === '1',
             (string)$general->threat_lists,
-            $general->abuseipdb_key->getValue() !== '',
-            $feeds
+            $general->abuseipdb_key->getValue() !== ''
         );
         if ($error === null && $changes) {
             $aliases->serializeToConfig();

@@ -131,9 +131,12 @@ class Reader:
 class Decoder:
     """Values of the data section (or the metadata), starting at absolute file offsets. A damaged
     file never raises anything but InvalidDatabaseError: every read stays inside the section, a
-    pointer may not lead to another pointer, and nesting is bounded."""
+    pointer may not lead to another pointer, and nesting and the work per value are bounded (a map
+    whose entries point back at itself would otherwise grow exponentially within the depth)."""
 
     MAX_DEPTH = 32
+    # a GeoLite2 City record has a few hundred values
+    MAX_VALUES = 20000
 
     def __init__(self, data, base, limit):
         self.data = data
@@ -143,7 +146,9 @@ class Decoder:
     def decode(self, offset):
         """(value, offset after it)."""
         try:
-            return self._decode(offset, 0)
+            # the budget is per lookup (a list, so the recursion shares it; the reader may be used
+            # from more than one thread)
+            return self._decode(offset, 0, [self.MAX_VALUES])
         except InvalidDatabaseError:
             raise
         except (IndexError, ValueError, struct.error, RecursionError) as error:
@@ -154,9 +159,12 @@ class Decoder:
             raise InvalidDatabaseError("data runs past the end of the section")
         return self.data[offset:offset + size]
 
-    def _decode(self, offset, depth, pointer_allowed=True):
+    def _decode(self, offset, depth, budget, pointer_allowed=True):
         if depth > self.MAX_DEPTH:
             raise InvalidDatabaseError("data nested too deeply")
+        budget[0] -= 1
+        if budget[0] < 0:
+            raise InvalidDatabaseError("value too large")
         control = self._bytes(offset, 1)[0]
         offset += 1
         kind = control >> 5
@@ -174,7 +182,7 @@ class Decoder:
                 pointer = ((value << 24) | raw) + 526336
             else:
                 pointer = raw
-            target, _ = self._decode(self.base + pointer, depth + 1, pointer_allowed=False)
+            target, _ = self._decode(self.base + pointer, depth + 1, budget, pointer_allowed=False)
             return target, offset + size + 1
         if kind == 0:  # extended type
             kind = 7 + self._bytes(offset, 1)[0]
@@ -190,13 +198,13 @@ class Decoder:
         if kind == 7:
             result = {}
             for _ in range(size):
-                key, offset = self._decode(offset, depth + 1)
-                result[key], offset = self._decode(offset, depth + 1)
+                key, offset = self._decode(offset, depth + 1, budget)
+                result[key], offset = self._decode(offset, depth + 1, budget)
             return result, offset
         if kind == 11:
             items = []
             for _ in range(size):
-                item, offset = self._decode(offset, depth + 1)
+                item, offset = self._decode(offset, depth + 1, budget)
                 items.append(item)
             return items, offset
         if kind == 3:

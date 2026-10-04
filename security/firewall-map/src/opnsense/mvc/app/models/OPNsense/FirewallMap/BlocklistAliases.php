@@ -42,17 +42,28 @@ class BlocklistAliases
     public const ABUSE_DESCRIPTION = 'Firewall Map+ AbuseIPDB blacklist (100% confidence; no rules added)';
     public const FEED_PREFIX = 'Firewall Map+ threat feed: ';
 
-    /** Curated feeds as the collector lists them: [name => [url, label]] */
+    /** the curated feeds, asked of configd once per request (see feeds()) */
+    private static $feeds = null;
+
+    /**
+     * Curated feeds as the collector lists them: [name => [url, label]]. The controllers call this
+     * before they take the config lock, so reconcile() never waits on configd while holding it.
+     */
     public static function feeds(): array
     {
-        $report = json_decode((string)(new Backend())->configdRun('firewallmap tables'), true);
-        $feeds = [];
-        foreach ($report['tables'] ?? [] as $table) {
-            if (!empty($table['curated']) && !empty($table['url'])) {
-                $feeds[$table['name']] = ['url' => $table['url'], 'label' => $table['label'] ?? $table['name']];
+        if (self::$feeds === null) {
+            $report = json_decode((string)(new Backend())->configdRun('firewallmap tables'), true);
+            self::$feeds = [];
+            foreach ($report['tables'] ?? [] as $table) {
+                if (!empty($table['curated']) && !empty($table['url'])) {
+                    self::$feeds[$table['name']] = [
+                        'url' => $table['url'],
+                        'label' => $table['label'] ?? $table['name'],
+                    ];
+                }
             }
         }
-        return $feeds;
+        return self::$feeds;
     }
 
     private static function ours($alias): bool
@@ -67,10 +78,10 @@ class BlocklistAliases
      * feed aliases are kept, none are added. Returns [alias model, changes ("added FWMAP_x",
      * "removed FWMAP_y"), error].
      */
-    public static function reconcile(bool $enabled, string $threatLists, bool $abuseKey, ?array $feeds = null): array
+    public static function reconcile(bool $enabled, string $threatLists, bool $abuseKey): array
     {
         $model = new Alias();
-        $feeds = $feeds ?? self::feeds();
+        $feeds = self::feeds();
         $chosen = array_filter(array_map('trim', explode(',', $threatLists)));
         $existing = [];
         foreach ($model->aliases->alias->iterateItems() as $uuid => $alias) {
