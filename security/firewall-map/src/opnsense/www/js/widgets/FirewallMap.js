@@ -6,6 +6,9 @@
 // A cap far above any widget: the map fits its content (see _fitToContent).
 const AUTO_HEIGHT = 10000;
 // follow traffic is the map's own toggle, remembered per browser (as on the full-size map)
+// the renderer's content hash, written by tools/build-renderer.sh: a new renderer has a new
+// address, so a browser never runs an old cached copy with a newer widget
+const RENDERER_VERSION = '5b993b2fd495';
 const FOLLOW_KEY = 'firewallmap.widget.follow';
 const CAMERA_ICON = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.6l1.6-2.4h6.6L16.9 7h2.6A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.8" r="3.4"/></svg>';
 const TARGET_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>';
@@ -451,9 +454,9 @@ export default class FirewallMap extends BaseWidget {
             return window.FirewallMapRenderer;
         }
         if (!this.loadingRenderer) {
-            // cache allowed ($.getScript forbids it): the browser revalidates the 1.2 MB file
-            // instead of fetching it on every dashboard load, and an upgrade still replaces it
-            this.loadingRenderer = $.ajax({url: '/ui/js/firewall-map-renderer.js', dataType: 'script', cache: true});
+            // cached by the browser ($.getScript forbids it), so a dashboard load does not fetch 1.2 MB;
+            // OPNsense lets /ui/js be cached for two days, so the version names this exact build
+            this.loadingRenderer = $.ajax({url: `/ui/js/firewall-map-renderer.js?v=${RENDERER_VERSION}`, dataType: 'script', cache: true});
         }
         try {
             await this.loadingRenderer;

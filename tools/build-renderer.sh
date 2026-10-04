@@ -46,6 +46,10 @@ npm ci --ignore-scripts --no-audit --no-fund
 npm run build
 npm test
 
+# the widget loads the renderer under this build's content hash (see RENDERER_VERSION there)
+WIDGET="${TARGET}/widgets/FirewallMap.js"
+VERSION="$(shasum -a 256 dist-firewall-map/firewall-map-renderer.js | cut -c1-12)"
+
 if [ "${1:-}" = "--check" ]; then
     STATUS=0
     # the build regenerates src/text.js from the widget's translations: it must match the commit
@@ -63,8 +67,15 @@ if [ "${1:-}" = "--check" ]; then
             STATUS=1
         fi
     done
+    if grep -q "^const RENDERER_VERSION = '${VERSION}';" "${WIDGET}"; then
+        echo "same      RENDERER_VERSION"
+    else
+        echo "DIFFERENT RENDERER_VERSION in the widget"
+        STATUS=1
+    fi
     exit ${STATUS}
 fi
+sed -i.bak "s/^const RENDERER_VERSION = '.*';/const RENDERER_VERSION = '${VERSION}';/" "${WIDGET}" && rm -f "${WIDGET}.bak"
 
 for FILE in ${FILES}; do
     cp "${FILE}" "${TARGET}/"
