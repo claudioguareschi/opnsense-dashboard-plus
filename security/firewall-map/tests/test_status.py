@@ -72,6 +72,23 @@ class StatusTest(unittest.TestCase):
                 self.assertNotIn("key_id", json.dumps(blacklist))
                 self.assertNotIn("secret", json.dumps(blacklist))
 
+    def test_last_sample_while_running(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(STATUS, "widget_in_use", return_value=True), \
+                mock.patch.object(STATUS, "recording_wanted", return_value=True), \
+                mock.patch.object(STATUS.geodb, "settings", return_value={}):
+            pidfile, timings = os.path.join(directory, "pid"), os.path.join(directory, "timings.json")
+            with open(timings, "w") as handle:
+                json.dump({"at": 1000.0, "states": 1225, "wall": 0.042, "cpu": 0.03, "programs": 0.01,
+                           "phases": {"walk": 0.02}, "background": False}, handle)
+            with mock.patch.object(STATUS, "PID_FILE", pidfile), mock.patch.object(STATUS, "COLLECTOR_TIMINGS", timings), \
+                    mock.patch.object(STATUS, "REQUEST_MARKER", os.path.join(directory, "last_request")):
+                self.assertIsNone(STATUS.collector()["last_sample"])
+                with open(pidfile, "w") as handle:
+                    handle.write(str(os.getpid()))
+                sample = STATUS.collector()["last_sample"]
+                self.assertEqual((sample["wall"], sample["cpu"], sample["states"]), (0.042, 0.03, 1225))
+
 
 if __name__ == "__main__":
     unittest.main()

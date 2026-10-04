@@ -33,7 +33,10 @@ import subprocess
 import sys
 import threading
 
-from .common import PFCTL, RULES_DEBUG, host_port, normalize_ip, private_ip, public_ip
+from .common import (
+    PFCTL, RULES_DEBUG, host_port, ip_object, normalize_ip, private_ip, public_ip, remote_target, service_name,
+    service_port_label,
+)
 
 
 IFCONFIG = "/sbin/ifconfig"
@@ -42,6 +45,8 @@ AGE = re.compile(r"\bage (?:(?P<days>\d+)d)?(?P<h>\d+):(?P<m>\d+):(?P<s>\d+)")
 RLABEL = re.compile(r"\brlabel ([^,\s]+)")
 AGE_UNITS = (("days", 86400), ("h", 3600), ("m", 60), ("s", 1))
 STATE_ID = re.compile(r"\bid: (?P<id>[0-9a-f]+) creatorid: (?P<creator>[0-9a-f]+)")
+# the whole "age ..., expires in ..., pkts, bytes" line as pfctl prints it
+DETAIL = re.compile(r"age (?:(\d+)d)?(\d+):(\d+):(\d+), expires in [^,]*, (\d+):(\d+) pkts, (\d+):(\d+) bytes")
 
 
 class _Record:
@@ -105,9 +110,14 @@ class PfState(_Record):
     __slots__ = ("interface", "protocol", "state", "direction", "src", "dst", "nat", "id", "origif", "age",
                  "packets_in", "packets_out", "bytes_in", "bytes_out", "rule")
 
-    def __init__(self, **fields):
-        for key in self.__slots__:
-            setattr(self, key, fields.get(key))
+    def __init__(self, interface=None, protocol=None, state=None, direction=None, src=None, dst=None, nat=None,
+                 id=None, origif=None, age=None, packets_in=None, packets_out=None, bytes_in=None, bytes_out=None,
+                 rule=None):
+        # one assignment per field: this runs once per state and sample
+        self.interface, self.protocol, self.state, self.direction = interface, protocol, state, direction
+        self.src, self.dst, self.nat, self.id, self.origif, self.age = src, dst, nat, id, origif, age
+        self.packets_in, self.packets_out, self.bytes_in, self.bytes_out = packets_in, packets_out, bytes_in, bytes_out
+        self.rule = rule
 
     __hash__ = None
 
@@ -150,42 +160,61 @@ def _state_header(line):
         # LAN-internal state (or the LAN side of a NAT pair): never drawn, skip its details
         return None
     # the same few interface, protocol and state names repeat across the whole table: one copy each
-    return {
-        "interface": sys.intern(parts[0]),
-        "protocol": sys.intern(parts[1]),
-        "state": sys.intern(parts[-1]),
-        "direction": direction,
-        "src": left if direction == "out" else right,
-        "dst": right if direction == "out" else left,
-        "nat": endpoint(parts[3]) if translated else None,
-    }
-
-
-def _counters_record(header, line):
-    """The record for a state from its header and its "age ..., pkts, bytes" detail line."""
-    counters = COUNTERS.search(line)
-    if not counters:
-        return None
-    age = AGE.search(line)
-    return PfState(
-        **header,
-        age=sum(int(age.group(unit) or 0) * seconds for unit, seconds in AGE_UNITS) if age else None,
-        **{key: int(value) for key, value in counters.groupdict().items()},
-        # the rule that created the state (same label as in the firewall log)
-        rule=sys.intern((RLABEL.search(line) or [None, ""])[1]) or None if "rlabel" in line else None,
+    # (interface, protocol, state, direction, src, dst, nat), in PfState's order
+    return (
+        sys.intern(parts[0]),
+        sys.intern(parts[1]),
+        sys.intern(parts[-1]),
+        direction,
+        left if direction == "out" else right,
+        right if direction == "out" else left,
+        endpoint(parts[3]) if translated else None,
     )
+
+
+def _counters_record(header, line, stripped=None):
+    """The record for a state from its header and its "age ..., pkts, bytes" detail line."""
+    # the usual layout in one match; anything else takes the field by field search below
+    detail = DETAIL.match(line.lstrip() if stripped is None else stripped)
+    if detail:
+        days, hours, minutes, seconds, packets_in, packets_out, bytes_in, bytes_out = detail.groups()
+        age = (int(days) * 86400 if days else 0) + int(hours) * 3600 + int(minutes) * 60 + int(seconds)
+        counters = (int(packets_in), int(packets_out), int(bytes_in), int(bytes_out))
+    else:
+        found = COUNTERS.search(line)
+        if not found:
+            return None
+        age = AGE.search(line)
+        age = sum(int(age.group(unit) or 0) * seconds for unit, seconds in AGE_UNITS) if age else None
+        counters = tuple(int(value) for value in found.groups())
+    # the rule that created the state (same label as in the firewall log)
+    rule = sys.intern((RLABEL.search(line) or [None, ""])[1]) or None if "rlabel" in line else None
+    return PfState(*header, None, None, age, *counters, rule)
+
+
+# what each header line of the previous walk parsed to (None: a state the map skips). States
+# outlive many samples and their header lines repeat word for word, so most are parsed once;
+# the records then share their Endpoints with the previous sample's (they are never changed)
+_known_headers = {}
+_UNKNOWN = object()
 
 
 def parse_states(output, limit=None):
     """Parse `pfctl -vv -s state` (its text, or its lines as they arrive) using the same endpoint
     fields as OPNsense's state API. Past `limit` states it stops (TooManyStates): the table can grow
     during the walk (a flood), after its size was checked."""
+    global _known_headers
+    known, seen = _known_headers, {}
     records = []
     header = None
     skipping = False
     for line in (output.splitlines() if isinstance(output, str) else output):
-        if not line.startswith((" ", "\t")):
-            header = _state_header(line)
+        first = line[:1]
+        if first != " " and first != "\t":
+            header = known.get(line, _UNKNOWN)
+            if header is _UNKNOWN:
+                header = _state_header(line)
+            seen[line] = header
             skipping = header is None
             continue
         # dispatch on the detail line's first word: running every pattern over every line was
@@ -193,28 +222,31 @@ def parse_states(output, limit=None):
         if skipping:
             continue  # detail lines of a skipped state must not attach to the previous record
         stripped = line.lstrip()
-        if stripped.startswith("id:"):
+        start = stripped[:3]
+        if start == "id:":
             state_id = STATE_ID.search(stripped)
-            if state_id and records and records[-1].get("id") is None:
-                records[-1]["id"] = f"{state_id.group('id')}/{state_id.group('creator')}"
-        elif stripped.startswith("origif:"):
-            if records and records[-1].get("origif") is None:
+            if state_id and records and records[-1].id is None:
+                records[-1].id = "%s/%s" % state_id.groups()
+        elif start == "ori" and stripped.startswith("origif:"):
+            if records and records[-1].origif is None:
                 # the interface the state was created on: for NAT states, the egress (WAN, VPN, ...)
-                records[-1]["origif"] = sys.intern(stripped.split()[1])
-        elif header is not None and stripped.startswith("age "):
-            record = _counters_record(header, line)
+                records[-1].origif = sys.intern(stripped.split()[1])
+        elif start == "age" and header is not None and stripped.startswith("age "):
+            record = _counters_record(header, line, stripped)
             if record:
                 records.append(record)
                 header = None
                 if limit is not None and len(records) > limit:
                     raise TooManyStates(len(records), limit)
+    # only this walk's lines are kept: the cache never outgrows the state table
+    _known_headers = seen
     return records
 
 
 def _network_device(address, networks, exclude_device=None):
     """Interface whose configured network contains address, optionally excluding one device."""
     try:
-        parsed = ipaddress.ip_address(address)
+        parsed = ip_object(address)
     except (TypeError, ValueError):
         return None
     for network, device in networks or []:
@@ -524,13 +556,97 @@ def state_outside(record, pair):
     return outside_key(record["protocol"], public["address"], public["port"], remote, far["port"])
 
 
+class StateFacts:
+    """What the map reads from a state's endpoints, worked out once per state and kept while the
+    state lasts: its flow (firewall, remote), inside host, who started it, its service and the
+    tuple Suricata sees. Only the counters, the age and the TCP state change between samples.
+
+    The flow tracker, the Suricata correlation and the threat history all walk the same sample;
+    view() gives each of them the same answers, so none recomputes them per state.
+    """
+
+    class Facts:
+        __slots__ = ("src", "dst", "nat", "origif", "rule", "pair", "inside", "lan_key", "src_is_remote",
+                     "remote_started", "service_port", "service", "port_label", "target", "rule_key", "outside",
+                     "inside_text", "public", "remote")
+
+        def __init__(self, record, local_addresses, networks):
+            src, dst, nat = record["src"], record["dst"], record["nat"]
+            self.src, self.dst, self.nat = src, dst, nat
+            self.origif, self.rule = record.get("origif"), record.get("rule")
+            # the inside-facing half of a NATed connection (see lan_rule_index)
+            self.lan_key = None
+            if self.rule and not nat and private_ip(src["address"]) and public_ip(dst["address"]):
+                self.lan_key = (record["protocol"], src["address"], src["port"], dst["address"], dst["port"])
+            self.inside = self.src_is_remote = self.remote_started = self.service_port = self.service = None
+            self.port_label = self.target = self.rule_key = self.outside = self.inside_text = None
+            self.public = self.remote = None
+            self.pair = pair = flow_endpoints(record, local_addresses, networks)
+            if pair is None:
+                return
+            self.inside = inside = inside_endpoint(record, networks, local_addresses)
+            self.src_is_remote = src["address"] == pair[1]
+            self.remote_started, self.service_port = orientation(record, pair[1], networks, local_addresses)
+            self.service = service_name(record["protocol"], self.service_port)
+            self.port_label = service_port_label(record["protocol"], self.service_port)
+            self.target = (remote_target(record, pair[1], pair[0], inside, self.service_port)
+                           if self.remote_started else None)
+            # rule_for(): the inside-facing state's rule, looked up per sample
+            self.rule_key = None
+            if inside:
+                far = src if self.src_is_remote else dst
+                self.rule_key = (record["protocol"], inside["address"], inside["port"], far["address"], far["port"])
+            self.inside_text = host_port(inside["address"], inside["port"]) if inside else None
+            self.outside = key = state_outside(record, pair)
+            if key is not None:
+                self.public, self.remote = host_port(key[1], key[2]), host_port(key[3], key[4])
+
+        def rule_of(self, record, lan_rules):
+            """rule_for() of this state in this sample."""
+            if self.rule_key is not None and lan_rules:
+                rule = lan_rules.get(self.rule_key)
+                if rule:
+                    return rule
+            return record.rule
+
+    def __init__(self):
+        self.context = None
+        self.known = {}
+
+    def view(self, records, local_addresses, networks=None):
+        """([(record, facts)] in sample order, lan_rule_index(records)) for one sample."""
+        # what the facts depend on besides the state itself (the collector replaces both, never edits them)
+        context = (local_addresses, networks)
+        known = self.known if context == self.context else {}
+        self.context = context
+        fresh = {}
+        views = []
+        lan_rules = {}
+        facts_of = StateFacts.Facts
+        for record in records:
+            state_id = record.id
+            facts = known.get(state_id)
+            # the same state (and the same parsed header line: lines that differ never share Endpoints)
+            if facts is None or facts.src is not record.src or facts.dst is not record.dst \
+                    or facts.nat is not record.nat or facts.origif != record.origif or facts.rule != record.rule:
+                facts = facts_of(record, local_addresses, networks)
+            if state_id is not None:
+                fresh[state_id] = facts
+            if facts.lan_key is not None:
+                lan_rules[facts.lan_key] = facts.rule
+            views.append((record, facts))
+        self.known = fresh
+        return views, lan_rules
+
+
 # A sample costs up to about 6 kB of memory per state at its peak: the parsed records (under
 # 1 kB), the flow tracker's and the correlator's entries, and the previous sample's, still alive
 # while the next one is built (measured over consecutive samples of 20,000 and 50,000 states;
-# the high end when every state has its own remote address). The map walks at most as many states
+# the high end when every state has its own remote address). The header lines and StateFacts
+# kept between samples add under 1 kB per state. The map walks at most as many states
 # as fit in a small share of the firewall's RAM (a 4 GB box: about 35,000), so a flood or a very
 # busy firewall pauses the sampling instead of risking memory; never fewer than MIN, never more
-# than MAX. Parsing takes about 20 µs per state on a fast CPU and longer on appliance CPUs; a walk
+# than MAX. Parsing takes under 10 µs per state on a fast CPU and longer on appliance CPUs; a walk
 # that runs past SAMPLE_TIMEOUT is stopped (see sample_states).
 BYTES_PER_STATE = 6000
 STATE_MEMORY_SHARE = 0.05

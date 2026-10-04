@@ -34,7 +34,7 @@ import threading
 from array import array
 from bisect import bisect_left
 
-from .common import ABUSEIPDB_BLACKLIST, PFCTL, REPUTATION_KIND, REPUTATION_MAX_AGE, STATE_DIR, log_warning
+from .common import ABUSEIPDB_BLACKLIST, PFCTL, REPUTATION_KIND, REPUTATION_MAX_AGE, STATE_DIR, ip_object, log_warning
 from .config import aliases as configured_aliases
 from .pf import blocked_rule_tables, pf_tables
 
@@ -44,6 +44,8 @@ BLOCKLIST_ALIAS_TYPES = {"urltable", "url", "urljson", "external"}
 BLOCKLIST_TABLE_PREFIXES = ("crowdsec", "__qfeeds", "qfeeds", "spamhaus", "firehol", "abuse", "fwmap_")
 BLOCKLIST_MAX_ENTRIES = 500000
 BLOCKLIST_MAX_TOTAL = 1000000
+# addresses whose lists are remembered between samples (the map shows a few hundred at a time)
+LOOKUP_CACHE_SIZE = 20000
 # addresses an operator marked, and AbuseIPDB's daily blacklist, always count as threats
 WATCHLIST_TABLE = "FWMAP_Watchlist"
 ABUSEIPDB_LIST = "AbuseIPDB blacklist"
@@ -167,6 +169,8 @@ class BlocklistIndex:
         self.fingerprint = None
         # lists too large to use, each logged once (the check repeats every few minutes)
         self.oversized = set()
+        # (index, {address: lists}): the map asks about the same addresses on every sample
+        self._lookups = (self.index, {})
 
     # one bit per table in a 64-bit mask
     MAX_TABLES = 62
@@ -268,11 +272,24 @@ class BlocklistIndex:
         return self.index[0]
 
     def lookup(self, address):
+        """The lists naming address, remembered per address until the index is replaced."""
+        index = self.index
+        index_seen, known = self._lookups
+        if index_seen is not index or len(known) >= LOOKUP_CACHE_SIZE:
+            known = {}
+            self._lookups = (index, known)
+        lists = known.get(address)
+        if lists is None:
+            lists = known[address] = self._lookup(address, index)
+        return list(lists)
+
+    @staticmethod
+    def _lookup(address, index):
         try:
-            parsed = ipaddress.ip_address(address)
-        except ValueError:
+            parsed = ip_object(address)
+        except (TypeError, ValueError):
             return []
-        names, compact = self.index
+        names, compact = index
         value = int(parsed)
         mask = 0
         bits = parsed.max_prefixlen

@@ -292,5 +292,76 @@ class StateGuardTest(unittest.TestCase):
             self.assertEqual(PF.state_count(), 1246)
 
 
+class SampleCacheTest(unittest.TestCase):
+    """What a state's header and endpoints parse to is kept between samples; nothing else changes."""
+
+    ROUTED = ("all tcp 2a01:4f8:1:3::20[51234] -> 2606:4700::1111[443]       ESTABLISHED:ESTABLISHED\n"
+              "   age 1d02:03:04, expires in 23:59:58, 10:20 pkts, 1000:2000 bytes, rule 7, rlabel lan\n"
+              "   id: 00000000000000a1 creatorid: 12345678\n"
+              "   origif: igb1\n")
+    LAN = ("all tcp 192.168.30.30:51858 -> 34.209.15.107:8883       ESTABLISHED:ESTABLISHED\n"
+           "   age 00:00:05, expires in 23:59:37, 4:2 pkts, 400:200 bytes, rule 3, rlabel iot\n"
+           "   id: 00000000000000a2 creatorid: 12345678\n"
+           "   origif: vlan03\n")
+    NETWORKS = [(ipaddress.ip_network("2a01:4f8:1:3::/64"), "igb0"), (ipaddress.ip_network("2a01:4f8:1:2::/64"), "igb1")]
+    LOCAL = {"1.2.3.163", "2a01:4f8:1:2::1"}
+
+    def setUp(self):
+        patcher = mock.patch.object(PF, "_known_headers", {})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_repeated_walk_parses_the_same_and_shares_endpoints(self):
+        text = NAT_OUT + self.ROUTED + self.LAN
+        first = PF.parse_states(text)
+        self.assertIs(first[0].nat, PF.parse_states(text)[0].nat)
+        second = PF.parse_states(iter(text.splitlines(keepends=True)))
+        self.assertEqual(first, second)
+        self.assertEqual(second[1]["age"], 93784)
+        # a changed TCP state is a new header line
+        closing = PF.parse_states(text.replace("ESTABLISHED:ESTABLISHED", "FIN_WAIT_2:FIN_WAIT_2", 1))
+        self.assertEqual(closing[0]["state"], "FIN_WAIT_2:FIN_WAIT_2")
+        self.assertEqual(closing[0]["src"], first[0]["src"])
+
+    def test_an_unusual_detail_line_is_still_read(self):
+        record, = PF.parse_states(self.LAN.replace("4:2 pkts, 400:200 bytes", "4:2 pkts,  400:200 bytes")
+                                  .replace("expires in 23:59:37", "expires in 1d23:59:37"))
+        self.assertEqual((record.age, record.bytes_in, record.bytes_out, record.rule), (5, 400, 200, "iot"))
+
+    def facts_match_the_functions(self, records, local, networks):
+        views, lan_rules = PF.StateFacts().view(records, local, networks)
+        self.assertEqual(lan_rules, PF.lan_rule_index(records))
+        for record, facts in views:
+            pair = PF.flow_endpoints(record, local, networks)
+            self.assertEqual(facts.pair, pair)
+            if pair is None:
+                continue
+            self.assertIs(facts.inside, PF.inside_endpoint(record, networks, local))
+            self.assertEqual((facts.remote_started, facts.service_port), PF.orientation(record, pair[1], networks, local))
+            self.assertEqual(facts.outside, PF.state_outside(record, pair))
+            self.assertEqual(facts.rule_of(record, lan_rules), PF.rule_for(record, pair, lan_rules, networks, local))
+
+    def test_facts_are_what_the_functions_say(self):
+        # the inside-facing state of NAT_OUT, created by the operator's rule
+        nat_pair = NAT_OUT.replace("1.2.3.163:19421 (192.168.30.30:51858)", "192.168.30.30:51858") \
+            .replace("allow-opts", "rule 3, rlabel iot")
+        records = PF.parse_states(NAT_OUT + self.ROUTED + self.LAN + nat_pair + nat_state(10, 20))
+        self.facts_match_the_functions(records, self.LOCAL, self.NETWORKS)
+        self.facts_match_the_functions(records, {"1.2.3.163"}, [])
+
+    def test_facts_are_kept_while_the_state_lasts(self):
+        facts = PF.StateFacts()
+        text = NAT_OUT + self.ROUTED
+        (_, first), _ = facts.view(PF.parse_states(text), self.LOCAL, self.NETWORKS)[0]
+        (_, again), _ = facts.view(PF.parse_states(text.replace("429:258", "500:300")), self.LOCAL, self.NETWORKS)[0]
+        self.assertIs(again, first)
+        # other firewall addresses, or the same id on other endpoints: worked out again
+        (_, other), _ = facts.view(PF.parse_states(text), {"1.2.3.163"}, self.NETWORKS)[0]
+        self.assertIsNot(other, first)
+        moved = PF.parse_states(text.replace("34.209.15.107", "34.209.15.108"))
+        (_, moved_facts), _ = facts.view(moved, {"1.2.3.163"}, self.NETWORKS)[0]
+        self.assertEqual(moved_facts.pair, ("1.2.3.163", "34.209.15.108"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -111,5 +111,16 @@ class BlocklistTest(unittest.TestCase):
             self.assertEqual(PF.blocked_rule_tables(rules), {"Drop"})
 
 
+class LookupCacheTest(unittest.TestCase):
+    def test_a_new_index_is_looked_up_afresh(self):
+        index = BLOCKLISTS.BlocklistIndex()
+        index.index = BLOCKLISTS.BlocklistIndex.build({"spamhaus_drop": ["45.56.0.0/16"]})
+        self.assertEqual(index.lookup("45.56.79.53"), ["spamhaus_drop"])
+        index.lookup("45.56.79.53").append("changed by a caller")
+        self.assertEqual(index.lookup("45.56.79.53"), ["spamhaus_drop"])
+        index.index = BLOCKLISTS.BlocklistIndex.build({"crowdsec_blacklists": ["45.56.79.53"]})
+        self.assertEqual(index.lookup("45.56.79.53"), ["crowdsec_blacklists"])
+
+
 if __name__ == "__main__":
     unittest.main()

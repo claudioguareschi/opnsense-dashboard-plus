@@ -65,6 +65,7 @@
             minutes: {{ lang._('%s min')|json_encode }},
             hours: {{ lang._('%s h')|json_encode }},
             days: {{ lang._('%s days')|json_encode }},
+            sample: {{ lang._('%s ms (CPU %s ms)')|json_encode }},
         });
         const PROVIDERS = plain({
             auto: {{ lang._('Automatic')|json_encode }}, maxmind: 'MaxMind GeoLite2', maxmind_paid: 'MaxMind GeoIP2 City', dbip: 'DB-IP Lite',
@@ -97,6 +98,9 @@
                 : `<span class="text-muted"><i class="fa fa-circle-stop fa-fw"></i> ${escape(T.stopped)}</span>`);
             $('#collector-update').html(when(c.last_map_update, now));
             $('#collector-recording').text(!c.recording ? T.recording_off : c.widget_in_use ? T.recording_on : T.recording_no_widget);
+            const sample = c.last_sample;
+            const ms = (seconds) => Math.round(seconds * 1000).toLocaleString();
+            $('#collector-sample').text(sample ? T.sample.replace('%s', ms(sample.wall)).replace('%s', ms(sample.cpu)) : '—');
 
             const db = data.database || {};
             const provider = PROVIDERS[db.provider] || db.provider || '';
@@ -182,6 +186,7 @@
             <tr><td style="width: 25%;">{{ lang._('Status') }}</td><td id="collector-status"></td></tr>
             <tr><td>{{ lang._('Last map update') }}</td><td id="collector-update"></td></tr>
             <tr><td>{{ lang._('Background recording') }}</td><td id="collector-recording"></td></tr>
+            <tr><td>{{ lang._('Last sample') }}</td><td id="collector-sample"></td></tr>
         </tbody>
     </table>
 </div>

@@ -67,9 +67,9 @@ from lib.blocklists import (
 from lib.blocks import BlockTracker, FilterLogTail, block_event_time, block_summary, parse_block
 from lib.cache import CacheStore, GeoCache
 from lib.common import (
-    HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, SNAPSHOT_DIR, SNAPSHOT_REQUEST_DIR, host_port,
-    log_error, log_notice, log_warning, remote_target, requested, secure_umask, service_name, service_port_label,
-    write_json, write_text,
+    COLLECTOR_TIMINGS, HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, SNAPSHOT_DIR,
+    SNAPSHOT_REQUEST_DIR, host_port, log_error, log_notice, log_warning, requested, secure_umask, write_json,
+    write_text,
 )
 from lib.config import interface_names, settings, widget_in_use
 from lib.ids import (
@@ -79,8 +79,7 @@ from lib.ids import (
 from lib.leases import HostnameResolver, describe_inside, describe_target, lease_names
 from firewallmap_snapshots import valid_id as snapshot_valid_id
 from lib.pf import (
-    TooManyStates, flow_endpoints, host_info, inside_endpoint, lan_rule_index, orientation,
-    port_forwards, rule_descriptions, rule_for, sample_states,
+    StateFacts, TooManyStates, flow_endpoints, host_info, port_forwards, rule_descriptions, sample_states,
 )
 
 
@@ -96,6 +95,8 @@ MAX_FAILURE_BACKOFF = 30.0
 # while the state table is too large to walk, check its size this often
 TOO_MANY_STATES_INTERVAL = 30.0
 COLLECTOR_LOCK = f"{RUN_DIR}/collector.lock"
+# the last sample's timings are written at most this often
+TIMINGS_WRITE_SECONDS = 10.0
 RELOAD_MARKER = f"{RUN_DIR}/reload"
 # rule descriptions, interface names, DHCP names and port forwards
 METADATA_REFRESH_SECONDS = 60
@@ -116,13 +117,11 @@ SNAPSHOT_STATES_TOTAL = 5000
 
 
 def _ranked(counts, limit=None):
-    """Keys of {key: weight}, heaviest first."""
-    ranked = [key for key, _ in sorted(counts.items(), key=lambda item: -item[1])]
+    """Keys of {key: weight}, heaviest first (equal weights in the order they were added)."""
+    if limit == 1:
+        return [max(counts, key=counts.get)] if counts else []
+    ranked = sorted(counts, key=counts.get, reverse=True)
     return ranked[:limit] if limit is not None else ranked
-
-
-def _bump(counts, key, weight):
-    counts[key] = counts.get(key, 0) + weight
 
 
 class FlowTracker:
@@ -135,72 +134,79 @@ class FlowTracker:
         self.flows = {}
         self.sampled_at = None
 
-    def _delta(self, record, current, elapsed):
-        """Bytes and packets this state moved since the previous sample."""
-        previous = self.counters.get(record["id"])
-        if previous is not None:
-            return tuple(max(0, now_value - before) for now_value, before in zip(current, previous))
-        if elapsed is not None and record.get("age") is not None and record["age"] <= 2 * elapsed:
-            # a state created since the previous sample: everything it counted is new
-            return current
-        return (0, 0, 0)
+    def _totals(self, records, local_addresses, elapsed, networks=None, sample=None):
+        """{(local, remote): totals} for this sample, and the counters to diff the next one against.
 
-    @staticmethod
-    def _add(total, record, pair, current, delta, rule, networks=None, local_addresses=None):
-        """Fold one state into its flow's totals for this sample."""
-        # PF counts initiator->responder first; src is the initiator in parse_states()
-        remote_initiated, service_port = orientation(record, pair[1], networks, local_addresses)
-        weight = delta[0] + delta[1] + 1
-        inside_side = inside_endpoint(record, networks, local_addresses)
-        if remote_initiated:
-            total["remote_started"] += weight
-            # what the remote side connected to: a port-forward target or the firewall itself
-            _bump(total["targets"], remote_target(record, pair[1], pair[0], inside_side, service_port), weight)
-        else:
-            total["local_started"] += weight
-        if inside_side:
-            _bump(total["inside"], inside_side["address"], weight)
-        if record.get("origif"):
-            _bump(total["egress"], record["origif"], weight)
-        service = service_name(record["protocol"], service_port)
-        _bump(total["services"], service, weight)
-        total["ports"].setdefault(service, service_port_label(record["protocol"], service_port))
-        if record.get("age") is not None and record["age"] > total["oldest"]:
-            total["oldest"] = record["age"]
-        # bytes moved so far by the connections open now, and the rules that let them through
-        total["bytes_toward"] += current[0]
-        total["bytes_away"] += current[1]
-        if rule:
-            _bump(total["rules"], rule, 1)
-        total["toward"] += delta[0]
-        total["away"] += delta[1]
-        total["packets"] += delta[2]
-        total["states"] += 1
-        total["protocols"].add(record["protocol"])
-
-    def _totals(self, records, local_addresses, elapsed, networks=None):
-        """{(local, remote): totals} for this sample, and the counters to diff the next one against."""
+        sample: StateFacts.view() of these records, when the caller already has it. This runs for
+        every state of every sample, so each state is folded into its flow's totals in place.
+        """
         counters = {}
         totals = {}
-        lan_rules = lan_rule_index(records)
-        for record in records:
-            pair = flow_endpoints(record, local_addresses, networks)
-            if pair is None or record.get("id") is None:
+        previous_counters = self.counters
+        views, lan_rules = sample if sample is not None else StateFacts().view(records, local_addresses, networks)
+        for record, facts in views:
+            pair = facts.pair
+            state_id = record.id
+            if pair is None or state_id is None:
                 continue
-            src_is_remote = record["src"]["address"] == pair[1]
-            toward, away = (
-                (record["bytes_in"], record["bytes_out"]) if src_is_remote
-                else (record["bytes_out"], record["bytes_in"])
-            )
-            current = (toward, away, record["packets_in"] + record["packets_out"])
-            counters[record["id"]] = current
-            total = totals.setdefault(pair, {
-                "toward": 0, "away": 0, "packets": 0, "states": 0, "protocols": set(), "services": {},
-                "inside": {}, "egress": {}, "remote_started": 0, "local_started": 0, "targets": {},
-                "ports": {}, "oldest": 0, "bytes_toward": 0, "bytes_away": 0, "rules": {},
-            })
-            self._add(total, record, pair, current, self._delta(record, current, elapsed),
-                      rule_for(record, pair, lan_rules, networks, local_addresses), networks, local_addresses)
+            if facts.src_is_remote:
+                toward, away = record.bytes_in, record.bytes_out
+            else:
+                toward, away = record.bytes_out, record.bytes_in
+            packets = record.packets_in + record.packets_out
+            counters[state_id] = current = (toward, away, packets)
+            age = record.age
+            # what the state moved since the previous sample
+            previous = previous_counters.get(state_id)
+            if previous is not None:
+                delta = (max(0, toward - previous[0]), max(0, away - previous[1]), max(0, packets - previous[2]))
+            elif elapsed is not None and age is not None and age <= 2 * elapsed:
+                # a state created since the previous sample: everything it counted is new
+                delta = current
+            else:
+                delta = (0, 0, 0)
+            total = totals.get(pair)
+            if total is None:
+                total = totals[pair] = {
+                    "toward": 0, "away": 0, "packets": 0, "states": 0, "protocols": set(), "services": {},
+                    "inside": {}, "egress": {}, "remote_started": 0, "local_started": 0, "targets": {},
+                    "ports": {}, "oldest": 0, "bytes_toward": 0, "bytes_away": 0, "rules": {},
+                }
+            # PF counts initiator->responder first; src is the initiator in parse_states()
+            weight = delta[0] + delta[1] + 1
+            if facts.remote_started:
+                total["remote_started"] += weight
+                # what the remote side connected to: a port-forward target or the firewall itself
+                counts, key = total["targets"], facts.target
+                counts[key] = counts.get(key, 0) + weight
+            else:
+                total["local_started"] += weight
+            if facts.inside:
+                counts, key = total["inside"], facts.inside.address
+                counts[key] = counts.get(key, 0) + weight
+            key = record.origif
+            if key:
+                counts = total["egress"]
+                counts[key] = counts.get(key, 0) + weight
+            service = facts.service
+            counts = total["services"]
+            counts[service] = counts.get(service, 0) + weight
+            total["ports"].setdefault(service, facts.port_label)
+            if age is not None and age > total["oldest"]:
+                total["oldest"] = age
+            # bytes moved so far by the connections open now, and the rules that let them through
+            total["bytes_toward"] += toward
+            total["bytes_away"] += away
+            rule = (lan_rules.get(facts.rule_key) if facts.rule_key is not None and lan_rules else None) \
+                or record.rule
+            if rule:
+                counts = total["rules"]
+                counts[rule] = counts.get(rule, 0) + 1
+            total["toward"] += delta[0]
+            total["away"] += delta[1]
+            total["packets"] += delta[2]
+            total["states"] += 1
+            total["protocols"].add(record.protocol)
         return totals, counters
 
     def _update_flow(self, flow, total, elapsed, now):
@@ -225,9 +231,9 @@ class FlowTracker:
         if total["toward"] + total["away"] > 0:
             flow["last_active"] = now
 
-    def update(self, records, local_addresses, now, networks=None):
+    def update(self, records, local_addresses, now, networks=None, sample=None):
         elapsed = (now - self.sampled_at) if self.sampled_at is not None else None
-        totals, self.counters = self._totals(records, local_addresses, elapsed, networks)
+        totals, self.counters = self._totals(records, local_addresses, elapsed, networks, sample)
         self.sampled_at = now
         # a flow disappears together with its last PF state
         for pair in list(self.flows):
@@ -374,7 +380,8 @@ class ThreatRecorder:
             "city": location.get("city"),
         }.items() if value}
 
-    def update(self, records, collector, now):
+    def update(self, records, collector, now, sample=None):
+        """sample: StateFacts.view() of records, when the caller already has it."""
         if self.recorded is not None and now - self.recorded < THREAT_RECORD_SECONDS:
             return
         self.recorded = now
@@ -383,7 +390,7 @@ class ThreatRecorder:
             if self.db is None:
                 self.db = threats.connect(self.path)
             seen = threats.observe(records, lambda address: threat_lists_for(address, blocklists, reputation, correlator),
-                                   collector.local_addresses, collector.networks)
+                                   collector.local_addresses, collector.networks, sample)
             seen.update(ips_drops(correlator, seen, self.last_wall, blocklists, reputation))
             seen.update(firewall_blocks(correlator, seen, self.last_wall, blocklists, reputation))
             if collector.geo is not None and seen:
@@ -465,6 +472,40 @@ def request_reload(path=RELOAD_MARKER):
     write_text(path, str(time.time_ns()))
 
 
+class SampleTimer:
+    """Where one sample's time went: seconds per phase (wall time; "parse" is the CPU time spent
+    reading pfctl's output during the walk), and the whole sample's wall and CPU time (the
+    collector's own plus that of the programs it ran: pfctl, ifconfig). The Status page shows it,
+    so anyone can check the cost on their own hardware."""
+
+    def __init__(self):
+        self.phases = {}
+        self.started = time.perf_counter()
+        self.cpu = time.process_time()
+        self.children = self._children()
+        self.mark = self.started
+
+    @staticmethod
+    def _children():
+        times = os.times()
+        return times.children_user + times.children_system
+
+    def phase(self, name):
+        """The time since the previous phase ended goes to `name`."""
+        now = time.perf_counter()
+        self.phases[name] = self.phases.get(name, 0.0) + now - self.mark
+        self.mark = now
+
+    def report(self, states, background):
+        programs = self._children() - self.children
+        return {
+            "at": time.time(), "states": states, "background": background,
+            "wall": round(time.perf_counter() - self.started, 4),
+            "cpu": round(time.process_time() - self.cpu + programs, 4), "programs": round(programs, 4),
+            "phases": {name: round(value, 4) for name, value in self.phases.items()},
+        }
+
+
 def status_document(status, **fields):
     return {"status": status, **fields, "sampled_at": datetime.now(timezone.utc).isoformat(),
             "flows": [], "locations": []}
@@ -493,6 +534,10 @@ class Collector:
         self.blocklists = BlocklistIndex()
         self.reputation = Reputation(self.store)
         self.recorder = ThreatRecorder()
+        self.facts = StateFacts()
+        # the last sample's timings (SampleTimer.report) and when they were last written
+        self.timings = None
+        self.timings_written = None
         self.descriptions, self.interfaces, self.leases = {}, {}, {}
         self.local_addresses, self.role, self.networks = set(), None, []
         self.values = {}
@@ -550,8 +595,9 @@ class Collector:
                 self.checked["blocklists"] = now
         self.reputation.refresh(now)
 
-    def ingest(self, records, now, wall, foreground):
-        """Feed one sample to the trackers: states, blocked attempts from the log, Suricata alerts."""
+    def ingest(self, records, now, wall, foreground, sample=None):
+        """Feed one sample to the trackers: states, blocked attempts from the log, Suricata alerts.
+        sample: StateFacts.view() of records, when the caller already has it."""
         lines = self.log.lines()
         if foreground and not self.backlog_loaded:
             # the 10-minute hit window starts full
@@ -570,7 +616,7 @@ class Collector:
                 self.blocks.add(event, at)
             # blocked attempts stay matchable for late alerts even with no map open
             self.correlator.observe_block(event, wall, self.descriptions)
-        self.correlator.observe_states(records, self.local_addresses, wall, self.descriptions, self.networks)
+        self.correlator.observe_states(records, self.local_addresses, wall, self.descriptions, self.networks, sample)
         if foreground and not self.eve_loaded:
             self.eve_loaded = True
             # older alerts can only be address history: their connections are not indexed yet
@@ -616,8 +662,23 @@ class Collector:
         payload["provider"] = self.provider
         return payload
 
-    def publish_summary(self, now):
-        write_json(OUTPUT_FILE, self.build_payload(now))
+    def publish_summary(self, now, timer=None):
+        payload = self.build_payload(now)
+        if timer:
+            timer.phase("payload")
+        write_json(OUTPUT_FILE, payload)
+        if timer:
+            timer.phase("write")
+
+    def save_timings(self, timer, states, background, now):
+        """Keep the sample's timings; the Status page reads them from a file written every few seconds."""
+        self.timings = timer.report(states, background)
+        if self.timings_written is None or now - self.timings_written >= TIMINGS_WRITE_SECONDS:
+            try:
+                write_json(COLLECTOR_TIMINGS, self.timings)
+                self.timings_written = now
+            except OSError:
+                pass
 
     def state_rows(self, records, remotes):
         """The PF states behind the given remote addresses, as the map page's States dialog lists them."""
@@ -669,7 +730,9 @@ class Collector:
     def step(self):
         """One iteration. Returns the seconds to rest before the next, or None to stop."""
         started = time.monotonic()
+        timer = SampleTimer()
         self.refresh_settings(started)
+        timer.phase("settings")
         background = idle(self.started_at)
         if background != self.background:
             log_notice("no map open: recording threats in the background" if background and self.recording
@@ -685,6 +748,7 @@ class Collector:
             # next check earlier, never later, or repeated passes would postpone it forever
             self.checked["settings"] = min(self.checked["settings"], started - SETTINGS_REFRESH_SECONDS + 5)
             return self._rest(started, background)
+        walk_cpu = time.process_time()
         try:
             records = sample_states()
         except TooManyStates as error:
@@ -708,20 +772,32 @@ class Collector:
             log_notice("sampling resumed: the state table is below the limit again")
         self.failures = 0
         self.too_many_states = False
+        # the walk is parsed as pfctl writes it: the walk's wall time includes the parsing, which is
+        # our CPU time during the walk
+        timer.phases["parse"] = time.process_time() - walk_cpu
+        timer.phase("walk")
         now = time.monotonic()
         wall = time.time()
         self.refresh_metadata(now)
+        timer.phase("metadata")
+        sample = self.facts.view(records, self.local_addresses, self.networks)
+        timer.phase("facts")
         if not background:
-            self.tracker.update(records, self.local_addresses, now, self.networks)
-        self.ingest(records, now, wall, foreground=not background)
+            self.tracker.update(records, self.local_addresses, now, self.networks, sample)
+            timer.phase("tracker")
+        self.ingest(records, now, wall, foreground=not background, sample=sample)
+        timer.phase("ingest")
         # while the map is open the queue is always fed; the setting and the widget only decide
         # whether recording continues in the background
-        self.recorder.update(records, self, now)
+        self.recorder.update(records, self, now, sample)
+        timer.phase("threats")
         if not background:
-            self.publish_summary(now)
+            self.publish_summary(now, timer)
             self.save_requested_snapshots(records, now)
         # locations resolved for the queue in the background are saved too (at most once a minute)
         self.geo.save()
+        timer.phase("other")
+        self.save_timings(timer, len(records), background, now)
         return self._rest(started, background)
 
     def _rest(self, started, background):

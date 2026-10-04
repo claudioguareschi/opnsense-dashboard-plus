@@ -44,9 +44,9 @@ import sqlite3
 import sys
 import time
 
-from lib.common import CACHE_DB, THREATS_DB, is_icmp, log_error, remote_target, secure_umask, service_name
+from lib.common import CACHE_DB, THREATS_DB, is_icmp, log_error, secure_umask, service_name
 from lib.leases import lease_names
-from lib.pf import flow_endpoints, inside_endpoint, orientation
+from lib.pf import StateFacts
 
 DATABASE = THREATS_DB
 STATUSES = ("new", "reviewed", "dismissed", "blocked")
@@ -138,13 +138,15 @@ def merge(old, new):
     return result[:MAX_ITEMS]
 
 
-def observe(records, lists_for, local_addresses, networks=None):
-    """Group the current states that touch a flagged address: {remote: summary}."""
+def observe(records, lists_for, local_addresses, networks=None, sample=None):
+    """Group the current states that touch a flagged address: {remote: summary}. sample:
+    StateFacts.view() of records, when the caller already has it."""
     seen = {}
     # an address appears in many states: ask the lists once per address and sample
     verdicts = {}
-    for record in records:
-        pair = flow_endpoints(record, local_addresses, networks)
+    views, _ = sample if sample is not None else StateFacts().view(records, local_addresses, networks)
+    for record, facts in views:
+        pair = facts.pair
         if pair is None:
             continue
         remote = pair[1]
@@ -157,25 +159,23 @@ def observe(records, lists_for, local_addresses, networks=None):
             "lists": lists, "inbound": 0, "outbound": 0, "targets": [], "inside": [], "services": [], "bytes": 0,
             "youngest": None, "service_ports": {},
         })
-        if record.get("age") is not None:
-            entry["youngest"] = record["age"] if entry["youngest"] is None else min(entry["youngest"], record["age"])
-        inside = inside_endpoint(record, networks, local_addresses)
-        remote_started, service_port = orientation(record, remote, networks, local_addresses)
-        if remote_started:
+        if record.age is not None:
+            entry["youngest"] = record.age if entry["youngest"] is None else min(entry["youngest"], record.age)
+        inside, service_port = facts.inside, facts.service_port
+        if facts.remote_started:
             entry["inbound"] += 1
-            target = remote_target(record, remote, pair[0], inside, service_port)
-            if target not in entry["targets"]:
-                entry["targets"].append(target)
+            if facts.target not in entry["targets"]:
+                entry["targets"].append(facts.target)
         else:
             entry["outbound"] += 1
-        if inside and inside["address"] not in entry["inside"]:
-            entry["inside"].append(inside["address"])
-        service = service_name(record["protocol"], service_port)
+        if inside and inside.address not in entry["inside"]:
+            entry["inside"].append(inside.address)
+        service = facts.service
         if service not in entry["services"]:
             entry["services"].append(service)
-            if not is_icmp(record["protocol"]) and service_port:
-                entry["service_ports"][service] = f'{service_port}/{record["protocol"]}'
-        entry["bytes"] += record.get("bytes_in", 0) + record.get("bytes_out", 0)
+            if not is_icmp(record.protocol) and service_port:
+                entry["service_ports"][service] = f"{service_port}/{record.protocol}"
+        entry["bytes"] += record.bytes_in + record.bytes_out
     return seen
 
 

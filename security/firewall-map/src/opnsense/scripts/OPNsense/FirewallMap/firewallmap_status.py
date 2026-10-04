@@ -40,7 +40,7 @@ import firewallmap_geodb as geodb
 from firewallmap_collector import IDLE_SECONDS, recording_wanted
 from lib.config import abuseipdb_key, settings, widget_in_use
 from lib.blocklists import FEEDS
-from lib.common import OUTPUT_FILE, REQUEST_MARKER, geodb_view, read_json, secure_umask
+from lib.common import COLLECTOR_TIMINGS, OUTPUT_FILE, REQUEST_MARKER, geodb_view, read_json, secure_umask
 
 PID_FILE = "/var/run/firewallmap.pid"
 
@@ -64,6 +64,7 @@ def collector(now=None):
         pid = None
     requested = modified(REQUEST_MARKER)
     watched = requested is not None and now - requested < IDLE_SECONDS
+    timings = read_json(COLLECTOR_TIMINGS) if pid is not None else {}
     return {
         "running": pid is not None,
         "mode": ("live" if watched else "background") if pid is not None else "stopped",
@@ -72,6 +73,9 @@ def collector(now=None):
         "recording": settings().get("record_threats", "1") != "0",
         "widget_in_use": widget_in_use(),
         "recording_wanted": recording_wanted(),
+        # how long the last sample took (written by a running collector every few seconds)
+        "last_sample": {key: timings.get(key) for key in ("at", "states", "wall", "cpu", "programs", "phases")}
+        if timings.get("wall") is not None else None,
     }
 
 

@@ -36,8 +36,7 @@ from .blocks import MAX_BLOCK_SOURCES
 from .common import (connection_target, host_port, location_fields, normalize_ip, public_ip,
                      service_name, service_port_label, split_host_port)
 from .leases import describe_inside
-from .pf import (flow_endpoints, forward_target, inside_address, inside_endpoint, lan_rule_index,
-                 orientation, outside_key, rule_for, state_outside)
+from .pf import StateFacts, forward_target, inside_address, outside_key
 
 
 # Suricata's alert log (EVE JSON); read locally, only alert events
@@ -128,41 +127,46 @@ class Correlator:
                       "ambiguous": 0, "no_ports": 0, "pending": 0}
         self.unmatched_samples = []
         self.forwards = []
+        # recent and blocked are kept in the order they were seen as long as the clock never went
+        # back: expiring them then stops at the first entry still fresh
+        self._newest = None
+        self._in_order = True
 
-    def observe_states(self, records, local_addresses, now, descriptions=None, networks=None):
+    def _seen(self, at):
+        if self._newest is not None and at < self._newest:
+            self._in_order = False
+        self._newest = at if self._newest is None else max(self._newest, at)
+
+    def observe_states(self, records, local_addresses, now, descriptions=None, networks=None, sample=None):
+        """Index this sample's states by their outside tuple. sample: StateFacts.view() of records,
+        when the caller already has it."""
         current = {}
         ambiguous = set()
-        lan_rules = lan_rule_index(records)
-        for record in records:
-            pair = flow_endpoints(record, local_addresses, networks)
-            if pair is None:
+        views, lan_rules = sample if sample is not None else StateFacts().view(records, local_addresses, networks)
+        descriptions = descriptions or {}
+        for record, facts in views:
+            if facts.pair is None:
                 continue
-            key = state_outside(record, pair)
+            key = facts.outside
             if key is None:
                 continue
-            inside = inside_endpoint(record, networks, local_addresses)
-            rule = rule_for(record, pair, lan_rules, networks, local_addresses)
-            connection = make_connection(
-                key,
-                inside=host_port(inside["address"], inside["port"]) if inside else None,
-                remote_started=orientation(record, pair[1], networks, local_addresses)[0],
-                bytes_in=record.get("bytes_in", 0),
-                bytes_out=record.get("bytes_out", 0),
-                age=record.get("age"),
-                rule=rule,
-                rule_description=(descriptions or {}).get(rule or "", ""),
-                interface=record.get("origif"),
-                state=record.get("state"),
-                decision="pass",
-                source="state",
-                seen=now,
-            )
+            rule = facts.rule_of(record, lan_rules)
+            # make_connection()'s shape in one step: this runs for every state of every sample
+            connection = {
+                "key": key, "protocol": key[0], "public": facts.public, "remote": facts.remote,
+                "inside": facts.inside_text, "remote_started": facts.remote_started,
+                "bytes_in": record.bytes_in, "bytes_out": record.bytes_out, "age": record.age, "rule": rule,
+                "rule_description": descriptions.get(rule or "", ""), "interface": record.origif,
+                "state": record.state, "decision": "pass", "source": "state", "seen": now,
+            }
             previous = current.get(key)
             if previous and previous["inside"] != connection["inside"]:
                 ambiguous.add(key)
             current[key] = connection
         self.current = current
         self.ambiguous_keys = ambiguous
+        if current:
+            self._seen(now)
         for key, connection in current.items():
             self.recent.pop(key, None)
             self.recent[key] = connection
@@ -172,6 +176,7 @@ class Correlator:
         key = outside_key(event["protocol"], event["destination"], event.get("port"), event["source"],
                           event.get("source_port"))
         self.blocked.pop(key, None)
+        self._seen(at)
         inside, _ = forward_target(self.forwards, event["protocol"], event.get("port"))
         self.blocked[key] = make_connection(
             key, time=at, seen=at, inside=inside, remote_started=True, decision="block", source="firewall log",
@@ -181,7 +186,13 @@ class Correlator:
     def _expire(self, now):
         self._flagged = None
         for store in (self.recent, self.blocked):
-            for key in [key for key, item in store.items() if now - item.get("seen", item.get("time", now)) > CORRELATION_SECONDS]:
+            expired = []
+            for key, item in store.items():
+                if now - item.get("seen", item.get("time", now)) > CORRELATION_SECONDS:
+                    expired.append(key)
+                elif self._in_order:
+                    break
+            for key in expired:
                 del store[key]
             while len(store) > MAX_CORRELATION_KEYS:
                 del store[next(iter(store))]

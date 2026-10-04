@@ -89,5 +89,16 @@ class HostnameResolverTest(unittest.TestCase):
             self.assertEqual(again.get("8.8.8.8"), "dns.google")
 
 
+class DescribeInsideTest(unittest.TestCase):
+    def test_new_interface_networks_are_used(self):
+        import ipaddress
+        lan = [(ipaddress.ip_network("192.168.1.0/24"), "igb0")]
+        self.assertEqual(LEASES.describe_inside("192.168.1.5", {"192.168.1.5": "nas"}, lan, {"igb0": "LAN"}),
+                         {"ip": "192.168.1.5", "name": "nas", "interface": "LAN"})
+        vlan = [(ipaddress.ip_network("192.168.1.0/24"), "vlan01")]
+        self.assertEqual(LEASES.describe_inside("192.168.1.5", {}, vlan, {})["interface"], "vlan01")
+        self.assertIsNone(LEASES.describe_inside("10.0.0.1", {}, vlan, {})["interface"])
+
+
 if __name__ == "__main__":
     unittest.main()

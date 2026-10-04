@@ -47,6 +47,8 @@ OUTPUT_FILE = f"{RUN_DIR}/flows.json"
 REQUEST_MARKER = f"{RUN_DIR}/last_request"
 # touched only when a viewer has hostname lookups enabled; reverse DNS runs while it is fresh
 HOSTNAME_MARKER = f"{RUN_DIR}/hostnames_request"
+# how long the collector's last sample took, per phase (the Status page shows it)
+COLLECTOR_TIMINGS = f"{RUN_DIR}/collector_timings.json"
 RC_SCRIPT = "/usr/local/etc/rc.d/firewallmap"
 CACHE_DB = f"{STATE_DIR}/cache.db"
 # the threat review history (statuses and notes): operator data, kept apart from the caches so a
@@ -137,6 +139,13 @@ def service_name(protocol, port):
     if port is None:
         return protocol.upper()
     return SERVICES.get((protocol, port), f"{protocol.upper()}/{port}")
+
+
+@functools.lru_cache(maxsize=65536)
+def ip_object(value):
+    """ipaddress.ip_address(value), parsed once per address (the same few thousand addresses are
+    looked up on every sample); raises ValueError for anything else, as ip_address does."""
+    return ipaddress.ip_address(value)
 
 
 @functools.lru_cache(maxsize=65536)

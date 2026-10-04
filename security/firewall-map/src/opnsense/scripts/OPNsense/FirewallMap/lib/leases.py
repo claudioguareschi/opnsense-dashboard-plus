@@ -32,7 +32,7 @@ import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from .common import service_name
+from .common import ip_object, service_name
 
 
 HOSTNAME_TTL = 6 * 3600
@@ -110,10 +110,22 @@ def lease_names(kea=KEA_LEASES, dnsmasq=DNSMASQ_LEASES, kea_configs=KEA_CONFIGS,
     return leases
 
 
+# (networks, {address: device}): the same inside hosts are described on every sample
+_devices = (None, {})
+
+
 def describe_inside(address, names, networks, interfaces):
-    parsed = ipaddress.ip_address(address)
-    device = next((device for network, device in networks
-                   if network.version == parsed.version and parsed in network), None)
+    global _devices
+    seen_networks, devices = _devices
+    if seen_networks is not networks or len(devices) >= 4096:
+        devices = {}
+        _devices = (networks, devices)
+    if address in devices:
+        device = devices[address]
+    else:
+        parsed = ip_object(address)
+        device = devices[address] = next((device for network, device in networks
+                                          if network.version == parsed.version and parsed in network), None)
     return {
         "ip": address,
         "name": names.get(address),

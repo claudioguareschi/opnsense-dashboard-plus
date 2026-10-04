@@ -284,5 +284,34 @@ class BoundsTest(unittest.TestCase):
         self.assertIn(str(99 // 3), flow["alerts"])
 
 
+class CorrelationExpiryTest(unittest.TestCase):
+    LOCAL = {"1.2.3.163"}
+
+    @staticmethod
+    def states(*remotes):
+        return PF.parse_states("".join(
+            f"all tcp 192.168.1.2:443 (1.2.3.163:443) <- {remote}:51234       ESTABLISHED:ESTABLISHED\n"
+            f"   age 00:00:01, expires in 23:59:37, 5:9 pkts, 400:9000 bytes\n   id: {index:02x} creatorid: 01\n"
+            for index, remote in enumerate(remotes, 1)))
+
+    def remotes(self, correlator):
+        return [key[3] for key in correlator.recent]
+
+    def test_closed_connections_expire_in_the_order_they_were_seen(self):
+        correlator = IDS.Correlator()
+        correlator.observe_states(self.states("94.154.43.1", "94.154.43.2"), self.LOCAL, 1000.0)
+        correlator.observe_states(self.states("94.154.43.2"), self.LOCAL, 1300.0)
+        correlator.observe_states(self.states("94.154.43.3"), self.LOCAL, 1000.0 + IDS.CORRELATION_SECONDS + 1)
+        self.assertEqual(self.remotes(correlator), ["94.154.43.2", "94.154.43.3"])
+
+    def test_a_clock_set_back_still_expires_every_old_connection(self):
+        correlator = IDS.Correlator()
+        correlator.observe_states(self.states("94.154.43.1"), self.LOCAL, 5000.0)
+        # the clock goes back: the entry seen "later" now sits in front of older ones
+        correlator.observe_states(self.states("94.154.43.2"), self.LOCAL, 1000.0)
+        correlator.observe_states(self.states("94.154.43.3"), self.LOCAL, 1000.0 + IDS.CORRELATION_SECONDS + 1)
+        self.assertEqual(self.remotes(correlator), ["94.154.43.1", "94.154.43.3"])
+
+
 if __name__ == "__main__":
     unittest.main()

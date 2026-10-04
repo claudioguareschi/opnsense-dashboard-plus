@@ -145,6 +145,7 @@ class CollectorLoopTest(unittest.TestCase):
             return {"192.168.1.2": "mail"}
         patches = {
             "OUTPUT_FILE": self.output,
+            "COLLECTOR_TIMINGS": os.path.join(self.directory, "collector_timings.json"),
             "sample_states": lambda: PF.parse_states(nat_state(self.bytes, self.bytes)),
             "host_info": lambda: ({"1.2.3.163"}, None, []),
             "recording_wanted": lambda values=None: True,
@@ -299,6 +300,23 @@ class ThreatRecorderTest(unittest.TestCase):
             self.assertEqual((row["address"], row["samples"], row["lists"]), ("45.56.79.53", 1, ["Test list"]))
             self.assertEqual(row["remote"]["hostname"], "scanner.example")
             self.assertEqual(row["remote"]["org"], "Example")
+
+
+class SampleTimingTest(CollectorLoopTest):
+    def test_each_sample_records_where_its_time_went(self):
+        self.collector.step()
+        with open(os.path.join(self.directory, "collector_timings.json")) as handle:
+            written = json.load(handle)
+        self.assertEqual(written, self.collector.timings)
+        self.assertEqual((written["states"], written["background"]), (1, False))
+        for phase in ("walk", "parse", "facts", "tracker", "ingest", "threats", "payload", "write"):
+            self.assertGreaterEqual(written["phases"][phase], 0.0)
+        self.assertGreaterEqual(written["wall"], written["phases"]["payload"])
+        # kept in memory every sample, written to the file every few seconds
+        self.collector.step()
+        self.assertNotEqual(self.collector.timings, written)
+        with open(os.path.join(self.directory, "collector_timings.json")) as handle:
+            self.assertEqual(json.load(handle), written)
 
 
 if __name__ == "__main__":
