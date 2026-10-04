@@ -36,6 +36,17 @@ export function flowService(flow) {
   return serviceCategory((flow.services || [])[0]);
 }
 
+/** Match both regular flow host objects and IDS host:port strings. */
+export function insideHostMatches(inside, host) {
+  if (!host) {
+    return true;
+  }
+  if (typeof inside === 'string') {
+    return inside === host || inside.startsWith(`${host}:`);
+  }
+  return inside?.ip === host;
+}
+
 function flowMatches(flow, locations) {
   const f = state.filters;
   const dest = locations.get(flow.dest) || {};
@@ -57,7 +68,7 @@ function flowMatches(flow, locations) {
   if (f.iface && !(flow.inside || []).some((inside) => inside.interface === f.iface)) {
     return false;
   }
-  if (f.host && !(flow.inside || []).some((inside) => inside.ip === f.host)) {
+  if (f.host && !(flow.inside || []).some((inside) => insideHostMatches(inside, f.host))) {
     return false;
   }
   if (f.country && dest.country !== f.country) {
@@ -102,7 +113,7 @@ function idsFlowMatches(flow) {
   if (f.traffic === 'blocked' || (f.traffic === 'threats' && flow.severity > 2 && !(flow.lists || []).length)) {
     return false;
   }
-  if (f.host && !(flow.inside || '').startsWith(`${f.host}:`) && flow.inside !== f.host) {
+  if (f.host && !insideHostMatches(flow.inside, f.host)) {
     return false;
   }
   if (f.service || f.iface) {

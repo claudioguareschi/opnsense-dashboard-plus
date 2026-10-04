@@ -21,6 +21,21 @@ export function indexFlowsByDestination(data) {
   return flows;
 }
 
+/** Keep the last details for endpoint objects that are still visible during fade-out. */
+export function retainVisibleEndpointFlows(current, previous, visibleEndpoints) {
+  const flows = new Map(current);
+  for (const endpoint of visibleEndpoints || []) {
+    if (!endpoint.fading || flows.has(endpoint.id)) {
+      continue;
+    }
+    const previousFlows = previous.get(endpoint.id);
+    if (previousFlows) {
+      flows.set(endpoint.id, previousFlows);
+    }
+  }
+  return flows;
+}
+
 /** Return only the flows belonging to the endpoint currently under the pointer. */
 export function endpointMembers(index, endpoint) {
   return index.get(endpoint?.id) || [];

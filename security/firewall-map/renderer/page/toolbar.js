@@ -45,7 +45,10 @@ function fillSelect($select, values, current, allLabel) {
     withIcons($select);
     $select.selectpicker('refresh');
   }
+  // The native value and Bootstrap Select's button are separate states.  Polling can rebuild the
+  // option list while a host is selected, so restore both or the button may display another item.
   $select.val(current);
+  $select.selectpicker('val', current);
 }
 
 /** The filter's icon on every option, so bootstrap-select shows it on the button. */

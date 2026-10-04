@@ -28,7 +28,7 @@
 import {Deck, MapView} from '@deck.gl/core';
 import {GeoJsonLayer, IconLayer, PathLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
 import {buildArcs, continuePhases, buildBlocks, clearOfHomes, HOME_CLEARANCE, idsArcData, marchingPulses, mercatorY, pulses, unitsPerPixel} from './arcs.js';
-import {endpointMembers, indexFlowsByDestination} from './endpoint-flows.js';
+import {endpointMembers, indexFlowsByDestination, retainVisibleEndpointFlows} from './endpoint-flows.js';
 import {createFollow} from './follow.js';
 import {DEFAULT_OPTIONS} from './options.js';
 import {palette, rgb} from './palette.js';
@@ -498,7 +498,8 @@ export function createFirewallMap(container, options = {}) {
     locationsShown = endpointFader.update(arcData.locations, now);
     alertPoints = alertFader.update(data.alerts || [], now);
     locationIndex = new Map((data.locations || []).map((location) => [location.id, location]));
-    flowsByDestination = indexFlowsByDestination(data);
+    flowsByDestination = retainVisibleEndpointFlows(
+      indexFlowsByDestination(data), flowsByDestination, locationsShown);
     baseLayers = [
       new GeoJsonLayer({
         id: 'firewall-map-world',
@@ -518,6 +519,14 @@ export function createFirewallMap(container, options = {}) {
     const layerList = compose();
     scheduleFrame();
     return layerList;
+  }
+
+  /** Filter changes are a new view, not traffic disappearing; do not fade the old selection out. */
+  function resetTransitions() {
+    [arcFader, blockFader, endpointFader, alertFader].forEach((fader) => fader.clear());
+    flowsByDestination = new Map();
+    clearKey = null;
+    cleared = {};
   }
 
   function settle() {
@@ -555,6 +564,7 @@ export function createFirewallMap(container, options = {}) {
     refit() {
       follow.update(true);
     },
+    resetTransitions,
     legend,
     setSettings(next) {
       settings = {...DEFAULT_OPTIONS, ...next};

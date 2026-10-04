@@ -30,7 +30,7 @@ import {test} from 'node:test';
 // the page's modules read their translations from the page; none are needed here
 globalThis.window = globalThis.window || {};
 const {state, resetFilters} = await import('../page/context.js');
-const {filtered} = await import('../page/filters.js');
+const {filtered, insideHostMatches} = await import('../page/filters.js');
 
 const summary = {
   status: 'ok',
@@ -71,4 +71,11 @@ test('only places that are drawn stay in the locations', () => {
   state.filters.country = 'Germany';
   const ids = filtered(summary).locations.map((location) => location.id);
   assert.deepEqual(ids.sort(), ['192.0.2.1', '203.0.113.1']);
+});
+
+test('host filters match regular and IDS host representations', () => {
+  assert.equal(insideHostMatches({ip: '10.0.0.5'}, '10.0.0.5'), true);
+  assert.equal(insideHostMatches('10.0.0.5:443', '10.0.0.5'), true);
+  assert.equal(insideHostMatches('10.0.0.6:443', '10.0.0.5'), false);
+  assert.equal(insideHostMatches({ip: '10.0.0.6'}, '10.0.0.5'), false);
 });
