@@ -19,6 +19,8 @@ export default class DashboardPlusInterfaces extends DashboardPlusWidget(BaseWid
     constructor(config) {
         super(config);
         this.configurable = true;
+        // Every refresh runs two pluginctl processes on the firewall (0.8 s of CPU).
+        this.tickTimeout = 30;
         this.cachedInterfaces = [];
         this.currentConfig = null;
     }

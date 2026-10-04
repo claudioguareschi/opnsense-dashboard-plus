@@ -13,6 +13,7 @@ export default class DashboardPlusGateways extends DashboardPlusWidget(BaseWidge
         super(config);
         this.configurable = true;
         this.cachedGateways = [];
+        this.listed = false;
         this.currentConfig = null;
     }
 
@@ -36,9 +37,31 @@ export default class DashboardPlusGateways extends DashboardPlusWidget(BaseWidge
         `);
     }
 
+    /* The configured gateways, with their status when they were listed. */
     async _fetchGateways() {
         const data = await this.ajaxCall('/api/routing/settings/search_gateway');
         return data.rows || [];
+    }
+
+    /*
+     * The listed gateways with their current status. Listing the gateways runs pluginctl on the
+     * firewall (0.4 s of CPU), so it happens once and again when the options open; the status
+     * alone costs a fraction of that.
+     */
+    async _refreshStatus() {
+        const data = await this.ajaxCall('/api/routes/gateway/status');
+        const items = new Map((data.items || []).map(item => [item.name, item]));
+        return this.cachedGateways.map(gateway => {
+            const item = items.get(gateway.name);
+            // the same fields the gateway list carries, from the same status data
+            return item ? {
+                ...gateway,
+                status: item.status_translated ?? gateway.status,
+                delay: item.delay,
+                stddev: item.stddev,
+                loss: item.loss
+            } : gateway;
+        });
     }
 
     _state(gateway) {
@@ -138,12 +161,16 @@ export default class DashboardPlusGateways extends DashboardPlusWidget(BaseWidge
     }
 
     async onWidgetTick() {
-        this.cachedGateways = await this._fetchGateways();
+        this.cachedGateways = this.listed ? await this._refreshStatus() : await this._fetchGateways();
+        this.listed = true;
         this._render();
     }
 
     async getWidgetOptions() {
-        const gateways = this.cachedGateways.length ? this.cachedGateways : await this._fetchGateways();
+        // list the gateways again, so the options show the current configuration
+        const gateways = await this._fetchGateways();
+        this.cachedGateways = gateways;
+        this.listed = true;
         return {
             gateways: {
                 title: this.translations.gateways,

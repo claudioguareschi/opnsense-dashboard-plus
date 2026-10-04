@@ -3,7 +3,7 @@
  * All rights reserved.
  */
 
-const {escapeHtml, renderTitle, ensureStyle, fill, DashboardPlusWidget} =
+const {escapeHtml, renderTitle, ensureStyle, fill, sharedRequest, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
 export default class DashboardPlusThermalSensors extends DashboardPlusWidget(BaseWidget) {
@@ -64,9 +64,17 @@ export default class DashboardPlusThermalSensors extends DashboardPlusWidget(Bas
         this.fitToContent();
     }
 
+    /* The temperatures of the request System Metrics+ and System Information+ share. */
+    async _fetchSensors() {
+        const metrics = await sharedRequest(this, '/api/dashboardplus/system/metrics');
+        if (metrics?.status !== 'ok') {
+            throw new Error('Temperatures are unavailable');
+        }
+        return Array.isArray(metrics.temperatures) ? metrics.temperatures : [];
+    }
+
     async getWidgetOptions() {
-        const data = await this.ajaxCall('/api/diagnostics/system/system_temperature');
-        const sensors = Array.isArray(data) ? data : [];
+        const sensors = await this._fetchSensors();
         return {
             sensors: {
                 title: this.translations.sensors,
@@ -86,8 +94,7 @@ export default class DashboardPlusThermalSensors extends DashboardPlusWidget(Bas
     }
 
     async onWidgetTick() {
-        const data = await this.ajaxCall('/api/diagnostics/system/system_temperature');
-        this.sensors = Array.isArray(data) ? data : [];
+        this.sensors = await this._fetchSensors();
         this._renderSensors();
     }
 }

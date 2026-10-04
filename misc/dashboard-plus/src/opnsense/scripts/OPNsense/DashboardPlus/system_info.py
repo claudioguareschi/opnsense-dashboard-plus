@@ -24,13 +24,16 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Collect static system information for the Dashboard Plus widget."""
+"""Collect system information and live metrics for the Dashboard Plus widgets."""
 
 import glob
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
+import time
 
 
 DMIDECODE = "/usr/local/sbin/dmidecode"
@@ -39,10 +42,38 @@ SYSCTL = "/sbin/sysctl"
 DMESG = "/sbin/dmesg"
 MOUNT = "/sbin/mount"
 BECTL = "/sbin/bectl"
+PFCTL = "/sbin/pfctl"
+SWAPINFO = "/usr/sbin/swapinfo"
+DF = "/bin/df"
+NETSTAT = "/usr/bin/netstat"
 SOCKSTAT = "/usr/bin/sockstat"
 RESOLV_CONF = "/etc/resolv.conf"
 UNBOUND_CONF = "/var/unbound/unbound.conf"
 UNBOUND_INCLUDES = "/var/unbound/etc/*.conf"
+CACHE_DIRECTORY = "/var/run/dashboardplus"
+SENSORS_CACHE = CACHE_DIRECTORY + "/sensors.json"
+SLOW_METRICS_CACHE = CACHE_DIRECTORY + "/metrics.json"
+# Mbufs, swap and filesystems change slowly and cost the most to read (netstat -m alone
+# takes 0.1 s of CPU): they are read again at most once a minute, the rest on every refresh.
+SLOW_METRICS_TTL = 60
+# The filesystems System Metrics+ shows.
+FILESYSTEMS = ("/", "/tmp", "/var/log")
+# Everything a refresh reads from sysctl, in one call: memory as OPNsense's own System
+# Resources endpoint computes it, the load average, the CPU frequency, and the boot time
+# that the cached temperature sensor list belongs to.
+METRICS_SYSCTLS = (
+    "kern.boottime",
+    "hw.physmem",
+    "vm.stats.vm.v_page_count",
+    "vm.stats.vm.v_inactive_count",
+    "vm.stats.vm.v_cache_count",
+    "vm.stats.vm.v_free_count",
+    "kstat.zfs.misc.arcstats.size",
+    "vm.loadavg",
+    "dev.cpu.0.freq",
+    "dev.cpu.0.freq_levels",
+    "hw.clockrate",
+)
 
 QAT_DEVICES = {
     0x0435: ("Intel QAT DH895XCC", "discrete", False),
@@ -176,6 +207,279 @@ def collect_cpu_frequency():
         sysctl_value("dev.cpu.0.freq") or sysctl_value("hw.clockrate"),
         sysctl_value("dev.cpu.0.freq_levels"),
     )
+
+
+def run_output(command):
+    """Run a fixed command and return its output, even when it exits non-zero.
+
+    sysctl -i and df print what they could read and still fail for the rest.
+    """
+    try:
+        result = subprocess.run(command, capture_output=True, check=False, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return result.stdout
+
+
+def parse_sysctl_values(output):
+    """Parse sysctl -e output, one "name=value" per line."""
+    values = {}
+    for line in output.splitlines():
+        name, separator, value = line.partition("=")
+        if separator and name and " " not in name:
+            values[name] = value.strip()
+    return values
+
+
+def parse_boottime(value):
+    """The seconds of kern.boottime ("{ sec = 1727000000, usec = 123456 } Sun Sep 22 ...")."""
+    match = re.search(r"\bsec\s*=\s*(\d+)", value or "")
+    return int(match.group(1)) if match else None
+
+
+def php_round(value):
+    """Round half away from zero, as PHP's round() does."""
+    return int(value + 0.5) if value >= 0 else -int(-value + 0.5)
+
+
+def memory_metrics(values):
+    """Memory in MiB, computed as OPNsense's System Resources endpoint computes it.
+
+    Used memory is the share of pages that are neither inactive, cached nor free, applied
+    to the physical memory, truncated to whole MiB; the ARC size is reported beside it for
+    the widget to subtract.
+    """
+    physical = int_value(values.get("hw.physmem"))
+    pages = int_value(values.get("vm.stats.vm.v_page_count"))
+    if not physical or not pages:
+        return None
+    idle = sum(
+        int_value(values.get(name)) or 0
+        for name in (
+            "vm.stats.vm.v_inactive_count",
+            "vm.stats.vm.v_cache_count",
+            "vm.stats.vm.v_free_count",
+        )
+    )
+    used = php_round((pages - idle) / pages * physical)
+    arc = int_value(values.get("kstat.zfs.misc.arcstats.size")) or 0
+    return {
+        "total_mib": int(physical / 1024 / 1024),
+        "used_mib": int(used / 1024 / 1024),
+        "arc_mib": int(arc / 1024 / 1024),
+    }
+
+
+def load_average(value):
+    """vm.loadavg ("{ 0.52 0.48 0.45 }") as "0.52, 0.48, 0.45"."""
+    return ", ".join(value.strip("{} ").split()) if value else ""
+
+
+def parse_temperature_oids(output):
+    """The temperature sensors in sysctl -aF output, in its order.
+
+    A sensor is an OID in deciKelvin (format "IK", which sysctl prints in Celsius) named as
+    a temperature, like dev.cpu.N.temperature and hw.acpi.thermal.tzN.temperature, or an
+    amdtemp sensor. Settings in the same format (ACPI trip points, coretemp's tjmax) are
+    left out.
+    """
+    oids = []
+    for line in output.splitlines():
+        name, separator, rest = line.partition(":")
+        if not separator:
+            name, separator, rest = line.partition("=")
+        name = name.strip()
+        if not separator or not name or " " in name or name in oids:
+            continue
+        if not any(re.fullmatch(r"IK\d*", token) for token in rest.split()):
+            continue
+        if name.rsplit(".", 1)[-1] == "temperature" or re.fullmatch(r"dev\.amdtemp\.\d+\.\w+\.sensor\d+", name):
+            oids.append(name)
+    return oids
+
+
+def temperature_readings(oids, values):
+    """The readings of the sensors in oids, shaped like OPNsense's temperature endpoint.
+
+    The API controller adds the translated type.
+    """
+    readings = []
+    for oid in oids:
+        temperature = values.get(oid, "").replace("C", "").strip()
+        try:
+            float(temperature)
+        except ValueError:
+            continue
+        readings.append({
+            "device": oid,
+            "device_seq": re.sub(r"[^0-9+-]", "", oid),
+            "temperature": temperature,
+            "type": "zone" if "hw.acpi" in oid else "cpu",
+        })
+    return readings
+
+
+def parse_pf_info(output):
+    """The current number of pf states, from pfctl -si."""
+    match = re.search(r"^\s*current entries\s+(\d+)", output, re.MULTILINE)
+    return int(match.group(1)) if match else None
+
+
+def parse_pf_memory(output):
+    """The pf state limit, from pfctl -sm."""
+    match = re.search(r"^\s*states\s+hard limit\s+(\d+)", output, re.MULTILINE)
+    return int(match.group(1)) if match else None
+
+
+def parse_swapinfo(output):
+    """Swap devices from swapinfo -k, sizes in KiB; the "Total" line of several is left out."""
+    devices = []
+    for line in output.splitlines()[1:]:
+        fields = line.split()
+        if len(fields) < 4 or fields[0] == "Total":
+            continue
+        total, used = int_value(fields[1]), int_value(fields[2])
+        if total is not None and used is not None:
+            devices.append({"device": fields[0], "total": total, "used": used})
+    return devices
+
+
+def parse_df(output):
+    """Filesystems from df -hT --libxo json, with the fields of OPNsense's disk endpoint."""
+    try:
+        filesystems = json.loads(output)["storage-system-information"]["filesystem"]
+    except (ValueError, KeyError, TypeError):
+        return []
+    devices = []
+    for filesystem in filesystems if isinstance(filesystems, list) else []:
+        device = {
+            "device": filesystem.get("name", ""),
+            "type": filesystem.get("type", ""),
+            "blocks": filesystem.get("blocks", filesystem.get("total-blocks", "")),
+            "used": filesystem.get("used", filesystem.get("used-blocks", "")),
+            "available": filesystem.get("available", filesystem.get("available-blocks", "")),
+            "used_pct": filesystem.get("used-percent", ""),
+            "mountpoint": filesystem.get("mounted-on", ""),
+        }
+        # /tmp on the root filesystem is reported as "/" a second time
+        if device["mountpoint"] and device not in devices:
+            devices.append(device)
+    return devices
+
+
+def parse_netstat_mbufs(output):
+    """Mbuf clusters in use or cached, and their limit, from netstat -m --libxo json.
+
+    These are the numbers OPNsense's Mbuf endpoint reports (cluster-total, cluster-max).
+    """
+    try:
+        data = json.loads(output)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    statistics = data.get("mbuf-statistics") or data.get("statistics", {}).get("mbuf-statistics")
+    if not isinstance(statistics, dict):
+        return None
+    current = int_value(statistics.get("cluster-total"))
+    limit = int_value(statistics.get("cluster-max"))
+    if current is None or not limit:
+        return None
+    return {"current": current, "limit": limit}
+
+
+def read_json(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_json(path, data):
+    """Replace path atomically; a cache that cannot be written is only a cache miss."""
+    directory = os.path.dirname(path)
+    try:
+        os.makedirs(directory, mode=0o755, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(dir=directory, prefix=".tmp-")
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(data, handle, sort_keys=True)
+            os.replace(temporary, path)
+        except OSError:
+            os.unlink(temporary)
+            raise
+    except OSError:
+        pass
+
+
+def discover_sensor_oids(boottime, cache_path=SENSORS_CACHE):
+    """Walk every sysctl once to find the temperature sensors, and keep the list for this boot."""
+    oids = parse_temperature_oids(run_output([SYSCTL, "-aF"]))
+    if boottime is not None:
+        write_json(cache_path, {"boottime": boottime, "oids": oids})
+    return oids
+
+
+def collect_slow_metrics():
+    return {
+        "mbufs": parse_netstat_mbufs(run_output([NETSTAT, "-m", "--libxo", "json"])),
+        "swap": parse_swapinfo(run_output([SWAPINFO, "-k"])),
+        "filesystems": parse_df(run_output([DF, "-hT", "--libxo", "json", *FILESYSTEMS])),
+    }
+
+
+def slow_metrics(now, cache_path=SLOW_METRICS_CACHE, collector=collect_slow_metrics):
+    """Mbufs, swap and filesystems, read again once the cached ones are a minute old."""
+    cache = read_json(cache_path) or {}
+    taken = cache.get("time")
+    if isinstance(taken, (int, float)) and 0 <= now - taken < SLOW_METRICS_TTL and isinstance(cache.get("metrics"), dict):
+        return cache["metrics"]
+    metrics = collector()
+    write_json(cache_path, {"time": now, "metrics": metrics})
+    return metrics
+
+
+def read_sysctls(names):
+    return parse_sysctl_values(run_output([SYSCTL, "-i", "-e", *names]))
+
+
+def collect_metrics(now=None, sensors_cache=SENSORS_CACHE, slow_cache=SLOW_METRICS_CACHE,
+                    sysctls=read_sysctls, discover=discover_sensor_oids, slow=slow_metrics, command=run_output):
+    """The live metrics of System Metrics+, Thermal Sensors+ and System Information+.
+
+    One sysctl call reads memory, load, CPU frequency, the boot time and the sensors found
+    earlier in this boot. When the boot time is not the one the sensor list was found in,
+    the sensors are found again and the new ones read with a second call.
+    """
+    now = time.time() if now is None else now
+    cache = read_json(sensors_cache) or {}
+    known = cache.get("oids") if isinstance(cache.get("oids"), list) else []
+    values = sysctls([*METRICS_SYSCTLS, *known])
+    boottime = parse_boottime(values.get("kern.boottime"))
+    if boottime is not None and cache.get("boottime") == boottime and "oids" in cache:
+        oids = known
+    else:
+        oids = discover(boottime, sensors_cache)
+        missing = [oid for oid in oids if oid not in values]
+        if missing:
+            values.update(sysctls(missing))
+
+    return {
+        "memory": memory_metrics(values),
+        "load": load_average(values.get("vm.loadavg")),
+        "cpu": cpu_frequency(
+            values.get("dev.cpu.0.freq") or values.get("hw.clockrate"),
+            values.get("dev.cpu.0.freq_levels"),
+        ),
+        "temperatures": temperature_readings(oids, values),
+        "states": {
+            "current": parse_pf_info(command([PFCTL, "-si"])),
+            "limit": parse_pf_memory(command([PFCTL, "-sm"])),
+        },
+        **slow(now, slow_cache),
+    }
 
 
 def pci_tuple(address, dmi=False):
@@ -632,7 +936,7 @@ def collect():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "frequency":
-        print(json.dumps(collect_cpu_frequency(), sort_keys=True))
+    if len(sys.argv) > 1 and sys.argv[1] == "metrics":
+        print(json.dumps(collect_metrics(), sort_keys=True))
     else:
         print(json.dumps(collect(), sort_keys=True))

@@ -48,11 +48,26 @@ class SystemController extends ApiControllerBase
         return $result;
     }
 
-    public function frequencyAction()
+    /**
+     * Memory, load, CPU frequency, temperatures, pf states, mbufs, swap and filesystems in
+     * one request, for System Metrics+, Thermal Sensors+ and System Information+.
+     */
+    public function metricsAction()
     {
         $backend = new Backend();
-        $result = json_decode($backend->configdRun('dashboardplus system frequency'), true);
+        $result = json_decode($backend->configdRun('dashboardplus system metrics'), true);
 
-        return is_array($result) ? $result : [];
+        if (!is_array($result)) {
+            return ['status' => 'failed'];
+        }
+
+        // the sensor types as OPNsense's own temperature endpoint translates them
+        foreach ($result['temperatures'] ?? [] as $index => $sensor) {
+            $result['temperatures'][$index]['type_translated'] =
+                ($sensor['type'] ?? '') == 'zone' ? gettext('Zone') : gettext('CPU');
+        }
+        $result['status'] = 'ok';
+
+        return $result;
     }
 }
