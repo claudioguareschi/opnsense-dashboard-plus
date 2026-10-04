@@ -272,9 +272,6 @@
             <no_recent_queries>No recent external queries</no_recent_queries>
             <configured>Configured</configured>
             <no_upstreams>No forward zones configured</no_upstreams>
-            <recently_resolved>Latest matching query resolved</recently_resolved>
-            <recent_error>Latest matching query returned an error</recent_error>
-            <no_recent_zone_activity>No recent query for this zone</no_recent_zone_activity>
             <updated>Updated</updated>
             <fetch_failed>Unable to read DNS health data</fetch_failed>
             <open_unbound>Open Unbound</open_unbound>

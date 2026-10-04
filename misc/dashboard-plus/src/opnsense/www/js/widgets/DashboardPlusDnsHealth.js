@@ -145,10 +145,11 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 min-width: 0;
                 padding: 0.32em 0;
             }
-            .dashboard-plus-dns-health-upstream-dot {
+            .dashboard-plus-dns-health-upstream-icon {
                 text-align: center;
                 align-self: center;
                 line-height: 1;
+                opacity: 0.72;
             }
             .dashboard-plus-dns-health-upstream-name {
                 overflow: hidden;
@@ -470,24 +471,6 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         });
     }
 
-    _zoneHealth(zone) {
-        const name = String(zone.domain || '').replace(/\.$/, '').toLowerCase();
-        if (!name) {
-            return {icon: 'minus-circle', color: 'text-muted', title: this.translations.no_recent_zone_activity};
-        }
-        const query = (this.data.recent?.queries || []).find(item => {
-            const domain = String(item.domain || '').toLowerCase();
-            return domain === name || domain.endsWith(`.${name}`);
-        });
-        if (!query) {
-            return {icon: 'minus-circle', color: 'text-muted', title: this.translations.no_recent_zone_activity};
-        }
-        if (['SERVFAIL', 'REFUSED'].includes(query.rcode)) {
-            return {icon: 'times-circle-o', color: 'text-danger', title: this.translations.recent_error};
-        }
-        return {icon: 'circle', color: 'text-success', title: this.translations.recently_resolved};
-    }
-
     _renderRecent() {
         const $recent = $(`#${this._elementId('recent')}`);
         const queries = (this.data.recent?.queries || []).slice(0, 5);
@@ -533,14 +516,11 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
 
         const upstreams = this.data.upstreams || [];
         $(`#${this._elementId('upstreams')}`).html(upstreams.length ? upstreams.map(upstream => `
-            ${(() => {
-                const health = this._zoneHealth(upstream);
-                return `<div class="dashboard-plus-dns-health-upstream">
-                    <i class="fa fa-fw fa-${health.icon} ${health.color} dashboard-plus-dns-health-upstream-dot" title="${escapeHtml(health.title)}" aria-hidden="true"></i>
-                    <div class="dashboard-plus-dns-health-upstream-name" title="${escapeHtml(upstream.domain || upstream.description || upstream.server)}">${escapeHtml(upstream.domain || upstream.description || upstream.server)}</div>
-                    <div class="dashboard-plus-dns-health-upstream-server">${escapeHtml(upstream.server)}</div>
-                </div>`;
-            })()}`).join('') : `<div class="dashboard-plus-dns-health-empty">${escapeHtml(this.translations.no_upstreams)}</div>`);
+            <div class="dashboard-plus-dns-health-upstream">
+                <i class="fa fa-fw fa-server dashboard-plus-dns-health-upstream-icon" title="${escapeHtml(this.translations.upstreams)}" aria-hidden="true"></i>
+                <div class="dashboard-plus-dns-health-upstream-name" title="${escapeHtml(upstream.domain || upstream.description || upstream.server)}">${escapeHtml(upstream.domain || upstream.description || upstream.server)}</div>
+                <div class="dashboard-plus-dns-health-upstream-server">${escapeHtml(upstream.server)}</div>
+            </div>`).join('') : `<div class="dashboard-plus-dns-health-empty">${escapeHtml(this.translations.no_upstreams)}</div>`);
         this._renderTypes();
         this._renderRecent();
 
