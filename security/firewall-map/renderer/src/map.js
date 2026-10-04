@@ -28,6 +28,7 @@
 import {Deck, MapView} from '@deck.gl/core';
 import {GeoJsonLayer, IconLayer, PathLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
 import {buildArcs, continuePhases, buildBlocks, clearOfHomes, HOME_CLEARANCE, idsArcData, marchingPulses, mercatorY, pulses, unitsPerPixel} from './arcs.js';
+import {endpointMembers, indexFlowsByDestination} from './endpoint-flows.js';
 import {createFollow} from './follow.js';
 import {DEFAULT_OPTIONS} from './options.js';
 import {palette, rgb} from './palette.js';
@@ -68,7 +69,7 @@ export function createFirewallMap(container, options = {}) {
   const text = textTable(options.text);
   const card = cards(text);
   let locationIndex = new Map();
-  let flowsByDest = new Map();
+  let flowsByDestination = new Map();
   let lastData = {locations: [], flows: []};
   const initialZoom = fitZoom(container.clientWidth);
   let viewState = {longitude: 0, latitude: VIEW_LATITUDE, zoom: initialZoom, minZoom: initialZoom, maxZoom: 6};
@@ -160,7 +161,7 @@ export function createFirewallMap(container, options = {}) {
         countryCode: object.dest.country_code, title: object.dest.city || object.dest.region || object.dest.country,
         members: object.members};
     }
-    if (layerId === 'firewall-map-endpoints' && !object.local && !(flowsByDest.get(`${object.lat},${object.lon}`) || []).length) {
+    if (layerId === 'firewall-map-endpoints' && !object.local && !endpointMembers(flowsByDestination, object).length) {
       // an endpoint that only exists because of Suricata: its own connection, or its alert history
       const flow = (lastData.ids_flows || []).find((item) => item.dest === object.id);
       if (flow) {
@@ -172,7 +173,7 @@ export function createFirewallMap(container, options = {}) {
         title: object.city || object.country, alert: alert || {source: object.id, lists: []}};
     }
     if (layerId === 'firewall-map-endpoints' && !object.local) {
-      const members = flowsByDest.get(`${object.lat},${object.lon}`) || [];
+      const members = endpointMembers(flowsByDestination, object);
       return {kind: 'flow', addresses: members.map((member) => member.dest), country: object.country,
         countryCode: object.country_code, title: object.city || object.region || object.country, members};
     }
@@ -187,7 +188,7 @@ export function createFirewallMap(container, options = {}) {
       return card.firewall(object, (lastData.flows || []).filter((flow) => flow.origin === object.id));
     }
     if (layer.id === 'firewall-map-endpoints') {
-      return card.flows(object, flowsByDest.get(`${object.lat},${object.lon}`) || [], locationIndex, lastData.hostnames, settings.asn);
+      return card.flows(object, endpointMembers(flowsByDestination, object), locationIndex, lastData.hostnames, settings.asn);
     }
     if (layer.id === 'firewall-map-blocks' || layer.id === 'firewall-map-block-sources') {
       return card.block(object, settings.asn);
@@ -497,19 +498,7 @@ export function createFirewallMap(container, options = {}) {
     locationsShown = endpointFader.update(arcData.locations, now);
     alertPoints = alertFader.update(data.alerts || [], now);
     locationIndex = new Map((data.locations || []).map((location) => [location.id, location]));
-    flowsByDest = new Map();
-    for (const flow of data.flows || []) {
-      const dest = locationIndex.get(flow.dest);
-      if (dest) {
-        const key = `${dest.lat},${dest.lon}`;
-        const flows = flowsByDest.get(key);
-        if (flows) {
-          flows.push(flow);
-        } else {
-          flowsByDest.set(key, [flow]);
-        }
-      }
-    }
+    flowsByDestination = indexFlowsByDestination(data);
     baseLayers = [
       new GeoJsonLayer({
         id: 'firewall-map-world',
