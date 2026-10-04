@@ -3,7 +3,7 @@
  * All rights reserved.
  */
 
-const {escapeHtml, renderTitle, mergeOrder, makeSortable, isDragging, ensureTableStyle, DashboardPlusWidget} =
+const {escapeHtml, renderTitle, mergeOrder, makeSortable, isDragging, ensureStyle, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
 const METRICS = ['rtt', 'rttd', 'loss'];
@@ -25,11 +25,11 @@ export default class DashboardPlusGateways extends DashboardPlusWidget(BaseWidge
     }
 
     getMarkup() {
-        ensureTableStyle();
+        ensureStyle();
         return $(`
             <div>
                 <div class="flextable-container dashboard-plus-table" id="${this._tableId()}" role="table"></div>
-                <div id="${this.id}-empty" style="display: none; padding: 0.75em;">
+                <div id="${this.id}-empty" class="dashboard-plus-empty" style="display: none;">
                     <a href="/ui/routing/configuration">${escapeHtml(this.translations.unconfigured)}</a>
                 </div>
             </div>
@@ -39,14 +39,6 @@ export default class DashboardPlusGateways extends DashboardPlusWidget(BaseWidge
     async _fetchGateways() {
         const data = await this.ajaxCall('/api/routing/settings/search_gateway');
         return data.rows || [];
-    }
-
-    _statusColors(state) {
-        return {
-            online: {color: '#2ca02c', background: 'rgba(44, 160, 44, 0.18)'},
-            offline: {color: '#d62728', background: 'rgba(214, 39, 40, 0.16)'},
-            warning: {color: '#e06c00', background: 'rgba(255, 127, 14, 0.18)'}
-        }[state] ?? {color: '#777777', background: 'rgba(119, 119, 119, 0.14)'};
     }
 
     _state(gateway) {
@@ -76,26 +68,27 @@ export default class DashboardPlusGateways extends DashboardPlusWidget(BaseWidge
             <div></div>
             <div role="columnheader">${title('gateway')}</div>
             ${fields.map(field => `<div class="dashboard-plus-number" role="columnheader">${title(field)}</div>`).join('')}
-            <div role="columnheader" style="text-align: center;">${title('status')}</div>
+            <div role="columnheader" class="dashboard-plus-center">${title('status')}</div>
         </div>`;
     }
 
     _row(gateway, fields) {
         const {label, state} = this._state(gateway);
-        const colors = this._statusColors(state);
+        // the theme's label colors; disabled, unmonitored and unknown gateways stay gray
+        const color = {online: 'success', offline: 'danger', warning: 'warning'}[state] ?? 'default';
         const measured = state !== 'disabled' && state !== 'unmonitored';
         const values = {rtt: gateway.delay, rttd: gateway.stddev, loss: gateway.loss};
         const metric = value => escapeHtml(measured && value && value !== '~' ? value : '—');
         const icon = gateway.disabled
-            ? `<i class="fa fa-times-circle-o" style="font-size: 1.3em; color: #777777;" title="${escapeHtml(this.translations.disabled)}"></i>`
-            : `<i class="fa fa-check-circle-o" style="font-size: 1.3em;" title="${escapeHtml(this.translations.enabled)}"></i>`;
+            ? `<i class="fa fa-fw fa-circle-xmark text-muted" title="${escapeHtml(this.translations.disabled)}"></i>`
+            : `<i class="fa fa-fw fa-circle-check" title="${escapeHtml(this.translations.enabled)}"></i>`;
         // the default-gateway globe sits beside both lines, centered like the status icon
         const defaultMarker = gateway.defaultgw
             ? `<i class="fa fa-globe dashboard-plus-side-icon" aria-label="${escapeHtml(this.translations.default_gateway)}" title="${escapeHtml(this.translations.default_gateway)}"></i>`
             : '';
-        return `<div class="flextable-row dashboard-plus-row" role="row" data-sort-id="${escapeHtml(gateway.uuid)}" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}" style="cursor: grab;">
+        return `<div class="flextable-row dashboard-plus-row dashboard-plus-grab" role="row" data-sort-id="${escapeHtml(gateway.uuid)}" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}">
             <div role="cell">${icon}</div>
-            <div role="cell" class="dashboard-plus-gateway-name dashboard-plus-named" style="line-height: 1.35;">
+            <div role="cell" class="dashboard-plus-gateway-name dashboard-plus-named">
                 <div>
                     <div class="dashboard-plus-ellipsis"><a href="/ui/routing/configuration#edit=${encodeURIComponent(gateway.uuid)}" target="_blank" rel="noopener noreferrer">${escapeHtml(gateway.name)}</a></div>
                     <div class="dashboard-plus-ellipsis dashboard-plus-muted dashboard-plus-small">${escapeHtml(gateway.gateway || '—')}</div>
@@ -103,9 +96,7 @@ export default class DashboardPlusGateways extends DashboardPlusWidget(BaseWidge
                 ${defaultMarker}
             </div>
             ${fields.map(field => `<div role="cell" class="dashboard-plus-number dashboard-plus-small">${metric(values[field])}</div>`).join('')}
-            <div role="cell" style="text-align: center;">
-                <span class="dashboard-plus-pill" style="color: ${colors.color}; background: ${colors.background};">${escapeHtml(label)}</span>
-            </div>
+            <div role="cell" class="dashboard-plus-center"><span class="label label-${color} dashboard-plus-pill">${escapeHtml(label)}</span></div>
         </div>`;
     }
 

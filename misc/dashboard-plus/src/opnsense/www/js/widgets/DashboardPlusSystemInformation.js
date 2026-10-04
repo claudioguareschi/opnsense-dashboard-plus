@@ -24,7 +24,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-const {escapeHtml, renderTitle, DashboardPlusWidget} =
+const {escapeHtml, renderTitle, fill, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
 export default class DashboardPlusSystemInformation extends DashboardPlusWidget(BaseTableWidget) {
@@ -92,16 +92,11 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
         const servers = dns.servers || [];
         const lines = [];
         if (dns.resolver) {
-            const details = [t.dns_local];
-            if (!dns.running) {
-                details.push(t.dns_not_running);
-            } else if (dns.mode === 'recursive') {
-                details.push(t.dns_recursive);
-            }
-            let line = `${dns.resolver} (${details.join(', ')})`;
-            if (dns.running && dns.mode === 'forwarding') {
-                line += `, ${t.dns_forwarding_to} ${dns.forwarders.join(', ')}${dns.tls ? ` ${t.dns_over_tls}` : ''}`;
-            }
+            const forwarders = (dns.forwarders || []).join(', ');
+            const phrase = !dns.running ? t.dns_local_not_running
+                : dns.mode === 'recursive' ? t.dns_local_recursive
+                : dns.mode === 'forwarding' ? (dns.tls ? t.dns_local_forwarding_tls : t.dns_local_forwarding) : t.dns_local;
+            const line = fill(phrase, {resolver: dns.resolver, servers: forwarders});
             lines.push(escapeHtml(line));
             if (servers.length > 0) {
                 lines.push(`${escapeHtml(t.dns_fallback)}: ${escapeHtml(servers.join(', '))}`);
@@ -134,8 +129,8 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
         if (!(cpu.threads && cpu.packages && cpu.cores && cpu.threads_per_core)) {
             return null;
         }
-        return `${cpu.threads} CPU${cpu.threads === 1 ? '' : 's'} : ${cpu.packages} package(s) x ` +
-            `${cpu.cores} core(s) x ${cpu.threads_per_core} hardware threads`;
+        return fill(this.translations.cpu_topology,
+            {threads: cpu.threads, packages: cpu.packages, cores: cpu.cores, threads_per_core: cpu.threads_per_core});
     }
 
     _rows(system, time, details) {

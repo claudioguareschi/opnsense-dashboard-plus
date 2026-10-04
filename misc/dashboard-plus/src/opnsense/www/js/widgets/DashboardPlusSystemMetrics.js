@@ -3,7 +3,7 @@
  * All rights reserved.
  */
 
-const {renderTitle, DashboardPlusWidget} =
+const {escapeHtml, renderTitle, ensureStyle, fill, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
 export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(BaseWidget) {
@@ -94,15 +94,16 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
     _gaugeMarkup(component, label, extra = '') {
         // A 270 degree ring; the fill is the same arc drawn with a dash of the used percentage.
         const arc = 'M 23.13 76.87 A 38 38 0 1 1 76.87 76.87';
+        // the arc's color is the theme's (text-success, -warning, -danger), drawn in currentColor
         return `
-            <div data-component="${component}" id="${this.id}-${component}-gauge" style="text-align: center; min-width: 0;">
-                <svg viewBox="0 0 100 92" style="width: 100%; max-width: 96px; display: block; margin: 0 auto;" role="img" aria-label="${label}">
-                    <path d="${arc}" fill="none" stroke="rgba(119,119,119,0.12)" stroke-width="9" stroke-linecap="round"/>
-                    <path class="gauge-fill" d="${arc}" pathLength="100" stroke-dasharray="0 100" fill="none" stroke="#2ca02c" stroke-width="9" stroke-linecap="round" style="transition: stroke-dasharray 0.2s ease;"/>
-                    <text class="gauge-value" x="50" y="57" text-anchor="middle" fill="currentColor" style="font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums;">--</text>
+            <div data-component="${component}" id="${this.id}-${component}-gauge" class="dashboard-plus-gauge">
+                <svg viewBox="0 0 100 92" role="img" aria-label="${label}">
+                    <path class="gauge-track" d="${arc}"/>
+                    <path class="gauge-fill text-success" d="${arc}" pathLength="100" stroke-dasharray="0 100"/>
+                    <text class="gauge-value" x="50" y="57" text-anchor="middle">--</text>
                 </svg>
-                <div style="font-weight: 600; margin-top: -0.4em; white-space: nowrap;">${label}${extra}</div>
-                <div class="gauge-detail" style="font-size: 0.85em; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></div>
+                <div class="gauge-label">${label}${extra}</div>
+                <div class="gauge-detail"></div>
             </div>`;
     }
 
@@ -114,7 +115,7 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
         const clamped = Math.max(0, Math.min(percent, 100));
         const fill = gauge.querySelector('.gauge-fill');
         fill.setAttribute('stroke-dasharray', `${clamped} 100`);
-        fill.setAttribute('stroke', this._usageColor(clamped));
+        fill.setAttribute('class', `gauge-fill text-${this._usageColor(clamped)}`);
         gauge.querySelector('.gauge-value').textContent = `${percent.toFixed(0)}%`;
         gauge.querySelector('.gauge-detail').textContent = detail;
         gauge.title = tooltip;
@@ -132,8 +133,9 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
         row.style.gridTemplateColumns = `repeat(${columns}, 1fr)`;
     }
 
+    /* The theme's colors for a usage: busy from 50%, critical from 80%. */
     _usageColor(percent) {
-        return percent >= 80 ? '#d94f00' : percent >= 50 ? '#ff7f0e' : '#2ca02c';
+        return percent >= 80 ? 'danger' : percent >= 50 ? 'warning' : 'success';
     }
 
     _expandTemperatureScale(celsius) {
@@ -165,80 +167,52 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
     }
 
     _renderFilesystems(devices) {
-        const container = document.getElementById(`${this.id}-filesystems`);
-        if (!container || !Array.isArray(devices)) {
+        const $container = $(`#${this.id}-filesystems`);
+        if (!$container.length || !Array.isArray(devices)) {
             return;
         }
-        container.replaceChildren();
-        const byMountpoint = new Map();
-        for (const filesystem of devices) {
-            byMountpoint.set(filesystem.mountpoint, filesystem);
-        }
-        for (const mountpoint of ['/', '/tmp', '/var/log']) {
+        const byMountpoint = new Map(devices.map(filesystem => [filesystem.mountpoint, filesystem]));
+        $container.html(['/', '/tmp', '/var/log'].filter(mountpoint => byMountpoint.has(mountpoint)).map(mountpoint => {
             const filesystem = byMountpoint.get(mountpoint);
-            if (!filesystem) {
-                continue;
-            }
             const percent = Math.max(0, Math.min(parseFloat(filesystem.used_pct) || 0, 100));
-            const row = document.createElement('div');
-            row.style.cssText = 'display: grid; grid-template-columns: 28% 72%; padding: 0.35em 0; text-align: left;';
-            const mount = document.createElement('span');
-            mount.style.cssText = 'padding-right: 0.75em;';
-            mount.textContent = filesystem.mountpoint;
-            const usage = document.createElement('div');
-            usage.style.paddingLeft = '0.75em';
-            const bar = document.createElement('div');
-            bar.style.cssText = 'height: 0.75em; background: rgba(119,119,119,0.12); border-radius: 0.375em; overflow: hidden;';
-            const fill = document.createElement('div');
-            fill.style.cssText = `height: 100%; width: ${percent}%; background: ${this._usageColor(percent)}; transition: width 0.2s ease;`;
-            bar.append(fill);
-            const details = document.createElement('div');
-            details.style.cssText = 'font-size: 0.9em; margin-top: 0.15em;';
-            details.textContent = `${percent.toFixed(0)}% · ${filesystem.used} / ${filesystem.blocks} (${filesystem.type})`;
-            usage.append(bar, details);
-            row.append(mount, usage);
-            container.append(row);
-        }
+            return `<div class="dashboard-plus-filesystem">
+                <span>${escapeHtml(filesystem.mountpoint)}</span>
+                <div>
+                    <div class="progress dashboard-plus-bar"><div class="progress-bar progress-bar-${this._usageColor(percent)}" role="progressbar"
+                        aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100" style="width: ${percent}%;"></div></div>
+                    <div class="dashboard-plus-filesystem-detail dashboard-plus-tabular">${escapeHtml(`${percent.toFixed(0)}% · ${filesystem.used} / ${filesystem.blocks} (${filesystem.type})`)}</div>
+                </div>
+            </div>`;
+        }).join(''));
     }
 
     getMarkup() {
+        ensureStyle();
+        const heading = (title, value = '') => `<div class="dashboard-plus-inner"><div class="dashboard-plus-panel-head">
+            <h3>${title}</h3>${value}</div></div>`;
         return $(`
-            <div class="dashboard-plus-system-metrics" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1em; padding: 0 0.25em;">
+            <div class="dashboard-plus-metrics">
                 <section>
-                    <div style="width: 95%; margin: 0 auto;">
-                        <div style="display: flex; justify-content: space-between; align-items: baseline; margin: 0 0.25em;">
-                            <h3 style="margin: 0;">${this.translations.cpu}</h3>
-                            <span id="${this.id}-cpu-current">--</span>
-                        </div>
-                    </div>
-                    <div id="${this.id}-cpu-load" style="font-size: 0.9em; margin: 0.25em 0;"></div>
-                    <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="${this.id}-cpu-chart" style="width: 100%; height: 90px;"></canvas></div>
+                    ${heading(this.translations.cpu, `<span id="${this.id}-cpu-current">--</span>`)}
+                    <div id="${this.id}-cpu-load" class="dashboard-plus-metrics-load"></div>
+                    <div class="canvas-container-noaspectratio dashboard-plus-chart"><canvas id="${this.id}-cpu-chart"></canvas></div>
                 </section>
                 <section>
-                    <div style="width: 95%; margin: 0 auto;">
-                        <div style="display: flex; justify-content: space-between; align-items: baseline; margin: 0 0.25em;">
-                            <h3 style="margin: 0;">${this.translations.temperature}</h3>
-                            <span id="${this.id}-temperature-current">--</span>
-                        </div>
-                    </div>
-                    <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="${this.id}-temperature-chart" style="width: 100%; height: 90px;"></canvas></div>
+                    ${heading(this.translations.temperature, `<span id="${this.id}-temperature-current">--</span>`)}
+                    <div class="canvas-container-noaspectratio dashboard-plus-chart"><canvas id="${this.id}-temperature-chart"></canvas></div>
                 </section>
-                <section style="grid-column: 1 / -1;">
-                    <div id="${this.id}-gauges" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5em; width: 95%; margin: 0 auto;">
+                <section class="dashboard-plus-wide">
+                    <div id="${this.id}-gauges" class="dashboard-plus-inner dashboard-plus-gauges">
                         ${this._gaugeMarkup('memory', this.translations.memory)}
                         ${this._gaugeMarkup('states', this.translations.states,
-                            ` <a href="/ui/diagnostics/firewall/states" style="font-weight: normal; font-size: 0.9em;">${this.translations.show_states}</a>`)}
+                            ` <a href="/ui/diagnostics/firewall/states" class="gauge-link">${this.translations.show_states}</a>`)}
                         ${this._gaugeMarkup('mbufs', this.translations.mbufs)}
                         ${this._gaugeMarkup('swap', this.translations.swap)}
                     </div>
                 </section>
-                <section style="grid-column: 1 / -1;">
-                    <div style="width: 95%; margin: 0 auto;">
-                        <div style="display: flex; align-items: baseline; margin: 0 0.25em;">
-                            <h3 style="margin: 0;">${this.translations.filesystems}</h3>
-                        </div>
-                    </div>
-                    <div id="${this.id}-filesystems" style="width: 95%; margin: 0.25em auto 0;"></div>
+                <section class="dashboard-plus-wide">
+                    ${heading(this.translations.filesystems)}
+                    <div id="${this.id}-filesystems" class="dashboard-plus-inner dashboard-plus-filesystems"></div>
                 </section>
             </div>
         `);
@@ -340,7 +314,7 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
             const pressureUsed = Math.max(0, used - arc);
             const percent = total > 0 ? (pressureUsed / total) * 100 : 0;
             this._setGauge('memory', percent, this._formatKiBPair(pressureUsed * 1024, total * 1024),
-                `${pressureUsed} MiB / ${this._formatTotalMemory(total)} ${this.translations.used}`);
+                fill(this.translations.used_count, {used: `${pressureUsed} MiB`, total: this._formatTotalMemory(total)}));
         }
         $(`#${this.id}-cpu-load`).text(`${this.translations.load}: ${time.loadavg || this.translations.unavailable}`);
 
@@ -365,7 +339,7 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
             const percent = (stateCurrent / stateLimit) * 100;
             this._setGauge('states', percent,
                 `${this._compactNumber(stateCurrent)} / ${this._compactNumber(stateLimit)}`,
-                `${stateCurrent.toLocaleString()} / ${stateLimit.toLocaleString()} ${this.translations.states.toLowerCase()}`);
+                fill(this.translations.states_count, {current: stateCurrent.toLocaleString(), limit: stateLimit.toLocaleString()}));
         }
 
         const mbuf = mbufs?.['mbuf-statistics'];
@@ -376,7 +350,7 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
             const percent = (mbufCurrent / mbufLimit) * 100;
             this._setGauge('mbufs', percent,
                 `${this._compactNumber(mbufCurrent)} / ${this._compactNumber(mbufLimit)}`,
-                `${mbufCurrent.toLocaleString()} / ${mbufLimit.toLocaleString()} ${this.translations.mbuf_clusters}`);
+                fill(this.translations.mbufs_count, {current: mbufCurrent.toLocaleString(), limit: mbufLimit.toLocaleString()}));
         }
 
         const swapDevices = Array.isArray(swap?.swap) ? swap.swap : [];
@@ -385,7 +359,7 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
         if (swapTotal > 0) {
             const percent = (swapUsed / swapTotal) * 100;
             this._setGauge('swap', percent, this._formatKiBPair(swapUsed, swapTotal),
-                `${this._formatKiB(swapUsed)} / ${this._formatKiB(swapTotal)} ${this.translations.used}`);
+                fill(this.translations.used_count, {used: this._formatKiB(swapUsed), total: this._formatKiB(swapTotal)}));
         }
 
         this._renderFilesystems(disks?.devices);

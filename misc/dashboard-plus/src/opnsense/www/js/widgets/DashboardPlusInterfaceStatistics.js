@@ -3,7 +3,7 @@
  * All rights reserved.
  */
 
-const {escapeHtml, renderTitle, mergeOrder, makeSortable, isDragging, ensureTableStyle, DashboardPlusWidget} =
+const {escapeHtml, renderTitle, mergeOrder, makeSortable, isDragging, ensureStyle, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
 const FIELDS = ['bytes', 'packets', 'errors', 'collisions'];
@@ -27,7 +27,7 @@ export default class DashboardPlusInterfaceStatistics extends DashboardPlusWidge
     }
 
     getMarkup() {
-        ensureTableStyle();
+        ensureStyle();
         return $(`<div class="flextable-container dashboard-plus-table" id="${this._tableId()}" role="table"></div>`);
     }
 
@@ -62,7 +62,7 @@ export default class DashboardPlusInterfaceStatistics extends DashboardPlusWidge
             // FreeBSD counts collisions for the interface as a whole, not per direction.
             collisions: () => `<div class="dashboard-plus-number dashboard-plus-small" role="cell">${number('collisions').toLocaleString()}<br>&nbsp;</div>`
         };
-        return `<div class="flextable-row dashboard-plus-row" role="row" data-sort-id="${escapeHtml(id)}" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}" style="cursor: grab;">
+        return `<div class="flextable-row dashboard-plus-row dashboard-plus-grab" role="row" data-sort-id="${escapeHtml(id)}" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}">
             <div class="dashboard-plus-ellipsis dashboard-plus-ifstats-name" role="cell">
                 <a href="/interfaces.php?if=${encodeURIComponent(id)}" title="${escapeHtml(intf.name)}">${escapeHtml(intf.name)}</a>
             </div>

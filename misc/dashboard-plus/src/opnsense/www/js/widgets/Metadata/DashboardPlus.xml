@@ -22,6 +22,7 @@
             <boot_method>Boot Method</boot_method>
             <boot_environment>Boot Environment</boot_environment>
             <current>Current</current>
+            <cpu_topology>{threads} CPUs: {packages} package(s) × {cores} core(s) × {threads_per_core} hardware threads</cpu_topology>
             <next>Next</next>
             <maximum>Max</maximum>
             <version>Version</version>
@@ -35,13 +36,13 @@
             <pti>Kernel PTI</pti>
             <mds>MDS Mitigation</mds>
             <uptime>Uptime</uptime>
-            <datetime>Current Date/Time</datetime>
+            <datetime>Current date/time</datetime>
             <dns_servers>DNS</dns_servers>
-            <dns_local>local</dns_local>
-            <dns_recursive>recursive</dns_recursive>
-            <dns_forwarding_to>forwarding to</dns_forwarding_to>
-            <dns_over_tls>over TLS</dns_over_tls>
-            <dns_not_running>not running</dns_not_running>
+            <dns_local>{resolver} (local)</dns_local>
+            <dns_local_recursive>{resolver} (local, recursive)</dns_local_recursive>
+            <dns_local_not_running>{resolver} (local, not running)</dns_local_not_running>
+            <dns_local_forwarding>{resolver} (local), forwarding to {servers}</dns_local_forwarding>
+            <dns_local_forwarding_tls>{resolver} (local), forwarding to {servers} over TLS</dns_local_forwarding_tls>
             <dns_fallback>Fallback</dns_fallback>
             <not_set>Not set</not_set>
             <unavailable>Unavailable</unavailable>
@@ -103,11 +104,12 @@
             <states>States</states>
             <show_states>Show</show_states>
             <mbufs>Mbufs</mbufs>
-            <mbuf_clusters>mbuf clusters</mbuf_clusters>
+            <mbufs_count>{current} / {limit} mbuf clusters</mbufs_count>
+            <states_count>{current} / {limit} states</states_count>
             <swap>Swap</swap>
             <filesystems>Filesystems</filesystems>
             <load>Load</load>
-            <used>used</used>
+            <used_count>{used} / {total} used</used_count>
             <unavailable>Unavailable</unavailable>
             <time_window>Time window</time_window>
             <seconds_20>20 seconds</seconds_20>
@@ -124,7 +126,7 @@
             <title>Thermal Sensors+</title>
             <dashboard_title>Thermal Sensors</dashboard_title>
             <sensors>Sensors</sensors>
-            <core>Core</core>
+            <core>Core {number}</core>
             <no_sensors>No sensors selected</no_sensors>
         </translations>
     </dashboardplusthermalsensors>
@@ -174,7 +176,7 @@
             <unmonitored>Unmonitored</unmonitored>
             <default_gateway>Default gateway</default_gateway>
             <drag_to_reorder>Drag to reorder</drag_to_reorder>
-            <unconfigured>No gateways configured. Click to configure gateways.</unconfigured>
+            <unconfigured>No Gateways configured. Click to configure gateways.</unconfigured>
         </translations>
     </dashboardplusgateways>
     <dashboardplusinterfaces>

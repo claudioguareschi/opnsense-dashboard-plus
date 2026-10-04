@@ -3,7 +3,7 @@
  * All rights reserved.
  */
 
-const {escapeHtml, renderTitle, ensureTableStyle, DashboardPlusWidget} =
+const {escapeHtml, renderTitle, ensureStyle, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
 export default class DashboardPlusFirewallLogs extends DashboardPlusWidget(BaseWidget) {
@@ -25,12 +25,9 @@ export default class DashboardPlusFirewallLogs extends DashboardPlusWidget(BaseW
     }
 
     getMarkup() {
-        ensureTableStyle();
-        // The interface and rule go on a second line so the addresses keep room for
-        // "address:port".
+        ensureStyle();
         return $(`
-            <div class="flextable-container dashboard-plus-table" id="${this._tableId()}" role="table"
-                style="--dashboard-plus-columns: auto auto minmax(0, 1fr) minmax(0, 1fr);">
+            <div class="flextable-container dashboard-plus-table dashboard-plus-logs" id="${this._tableId()}" role="table">
                 <div class="flextable-header dashboard-plus-row" role="row">
                     ${[
                         this.translations.action,
@@ -43,14 +40,11 @@ export default class DashboardPlusFirewallLogs extends DashboardPlusWidget(BaseW
         `);
     }
 
+    /* The icons of OPNsense's own Firewall widget, in the theme's colors. */
     _actionIcon(action) {
-        if (action === 'pass') {
-            return `<i class="fa fa-check-circle-o" style="color: #2ca02c; font-size: 1.35em;" title="${escapeHtml(this.translations.pass)}"></i>`;
-        }
-        if (action === 'block') {
-            return `<i class="fa fa-times-circle-o" style="color: #d62728; font-size: 1.35em;" title="${escapeHtml(this.translations.block)}"></i>`;
-        }
-        return `<i class="fa fa-exchange" style="color: #777777;" title="${escapeHtml(action)}"></i>`;
+        const [icon, color, title] = action === 'pass' ? ['play', 'text-success', this.translations.pass]
+            : action === 'block' ? ['circle-minus', 'text-danger', this.translations.block] : ['right-left', 'text-muted', action];
+        return `<i class="fa fa-fw fa-${icon} ${color} dashboard-plus-action" title="${escapeHtml(title)}"></i>`;
     }
 
     /* The time of day in the column, the full date and time on hover. */
@@ -93,7 +87,7 @@ export default class DashboardPlusFirewallLogs extends DashboardPlusWidget(BaseW
 
     _clearRows() {
         this._rows().remove();
-        $(`#${this._tableId()}`).children('.dashboard-plus-logs-empty').remove();
+        $(`#${this._tableId()}`).children('.dashboard-plus-empty').remove();
         this.seen.clear();
     }
 
@@ -104,16 +98,16 @@ export default class DashboardPlusFirewallLogs extends DashboardPlusWidget(BaseW
         }
         this.seen.add(digest);
         const $row = $(`
-            <div class="flextable-row dashboard-plus-row" role="row" style="align-items: start; row-gap: 0.1em;">
+            <div class="flextable-row dashboard-plus-row" role="row">
                 <div role="cell">${this._actionIcon(entry.action)}</div>
-                <div role="cell" class="dashboard-plus-nowrap" style="font-variant-numeric: tabular-nums;">${this._time(entry.__timestamp__)}</div>
+                <div role="cell" class="dashboard-plus-nowrap dashboard-plus-tabular">${this._time(entry.__timestamp__)}</div>
                 <div role="cell">${this._endpoint(entry.src, entry.srcport)}</div>
                 <div role="cell">${this._endpoint(entry.dst, entry.dstport)}</div>
-                <div role="cell" class="dashboard-plus-small" style="grid-column: 2 / -1;">${escapeHtml(this.interfaceNames[entry.interface] || entry.interface || '—')} · ${this._rule(entry)}</div>
+                <div role="cell" class="dashboard-plus-small dashboard-plus-detail">${escapeHtml(this.interfaceNames[entry.interface] || entry.interface || '—')} · ${this._rule(entry)}</div>
             </div>
         `).attr('data-digest', digest);
         const $table = $(`#${this._tableId()}`);
-        $table.children('.dashboard-plus-logs-empty').remove();
+        $table.children('.dashboard-plus-empty').remove();
         $table.children('.flextable-header').after($row);
 
         const limit = parseInt(this.currentConfig.rows, 10) || 5;
@@ -133,7 +127,7 @@ export default class DashboardPlusFirewallLogs extends DashboardPlusWidget(BaseW
         (Array.isArray(recent) ? [...recent] : []).reverse().forEach(entry => this._addEntry(entry));
         if (!this._rows().length) {
             $(`#${this._tableId()}`).append(
-                `<div class="dashboard-plus-logs-empty dashboard-plus-span" style="padding: 0.75em;">${escapeHtml(this.translations.no_entries)}</div>`
+                `<div class="dashboard-plus-empty dashboard-plus-span">${escapeHtml(this.translations.no_entries)}</div>`
             );
         }
         this.openEventSource('/api/diagnostics/firewall/stream_log', event => {

@@ -3,7 +3,7 @@
  * All rights reserved.
  */
 
-const {escapeHtml, renderTitle, mergeOrder, makeSortable, isDragging, ensureTableStyle, DashboardPlusWidget} =
+const {escapeHtml, renderTitle, mergeOrder, makeSortable, isDragging, ensureStyle, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
 // Tunnel devices have no media line; name the tunnel type instead.
@@ -37,11 +37,10 @@ export default class DashboardPlusInterfaces extends DashboardPlusWidget(BaseWid
     }
 
     getMarkup() {
-        ensureTableStyle();
+        ensureStyle();
         // Two lines per interface at any width: name and link on the first, addresses and
         // duplex under them, so nothing stacks or wraps mid-word when the column narrows.
-        return $(`<div class="flextable-container dashboard-plus-table" id="${this._tableId()}" role="table"
-            style="--dashboard-plus-columns: auto minmax(0, 1fr) auto; row-gap: 0;"></div>`);
+        return $(`<div class="flextable-container dashboard-plus-table dashboard-plus-interfaces" id="${this._tableId()}" role="table"></div>`);
     }
 
     _availableInterfaces(data) {
@@ -73,29 +72,29 @@ export default class DashboardPlusInterfaces extends DashboardPlusWidget(BaseWid
     _linkState(intf) {
         const status = String(intf.status || '').toLowerCase();
         if (status === 'up') {
-            return {icon: 'fa-arrow-up', color: '#2ca02c', title: this.translations.up};
+            return {icon: 'arrow-up', color: 'text-success', title: this.translations.up};
         }
         if (status === 'down') {
-            return {icon: 'fa-arrow-down', color: '#d62728', title: this.translations.down};
+            return {icon: 'arrow-down', color: 'text-danger', title: this.translations.down};
         }
-        return {icon: 'fa-minus', color: '#777777', title: this.translations.unavailable};
+        return {icon: 'minus', color: 'text-muted', title: this.translations.unavailable};
     }
 
     _row(intf) {
         const link = this._linkState(intf);
         const media = this._media(intf);
         const addresses = [intf.addr4, intf.addr6].filter(Boolean);
-        const icon = this._tunnelType(intf) !== null ? 'fa-exchange' : 'fa-sitemap';
-        return `<div class="flextable-row dashboard-plus-row" role="row" data-sort-id="${escapeHtml(intf.identifier)}" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}" style="row-gap: 0.15em; align-items: start; cursor: grab;">
-            <div role="cell" style="grid-row: 1 / span 2;"><i class="fa ${icon}" aria-hidden="true"></i></div>
+        const icon = this._tunnelType(intf) !== null ? 'right-left' : 'sitemap';
+        return `<div class="flextable-row dashboard-plus-row dashboard-plus-grab" role="row" data-sort-id="${escapeHtml(intf.identifier)}" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}">
+            <div role="cell" class="dashboard-plus-interface-icon"><i class="fa fa-fw fa-${icon}" aria-hidden="true"></i></div>
             <div role="cell" class="dashboard-plus-ellipsis dashboard-plus-interface-name">
                 <a href="/interfaces.php?if=${encodeURIComponent(intf.identifier)}" title="${escapeHtml(intf.identifier)}">${escapeHtml(intf.description)}</a>
             </div>
-            <div role="cell" class="dashboard-plus-nowrap" style="text-align: right;">
-                <i class="fa ${link.icon}" title="${escapeHtml(link.title)}" style="color: ${link.color};"></i> ${escapeHtml(media.type)}
+            <div role="cell" class="dashboard-plus-nowrap dashboard-plus-number">
+                <i class="fa fa-fw fa-${link.icon} ${link.color}" title="${escapeHtml(link.title)}"></i> ${escapeHtml(media.type)}
             </div>
             <div role="cell" class="dashboard-plus-muted dashboard-plus-small">${addresses.map(escapeHtml).join('<br>') || '—'}</div>
-            <div role="cell" class="dashboard-plus-muted dashboard-plus-small dashboard-plus-nowrap" style="text-align: right;">${escapeHtml(media.duplex)}</div>
+            <div role="cell" class="dashboard-plus-muted dashboard-plus-small dashboard-plus-number">${escapeHtml(media.duplex)}</div>
         </div>`;
     }
 
@@ -105,7 +104,7 @@ export default class DashboardPlusInterfaces extends DashboardPlusWidget(BaseWid
             return;
         }
         const rows = this._orderedInterfaces().map(intf => this._row(intf));
-        $table.html(rows.join('') || `<div class="dashboard-plus-span" style="padding: 0.75em;">${escapeHtml(this.translations.no_interfaces)}</div>`);
+        $table.html(rows.join('') || `<div class="dashboard-plus-span dashboard-plus-empty">${escapeHtml(this.translations.no_interfaces)}</div>`);
     }
 
     async onMarkupRendered() {

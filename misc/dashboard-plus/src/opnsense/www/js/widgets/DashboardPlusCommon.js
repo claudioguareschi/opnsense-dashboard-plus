@@ -51,7 +51,7 @@ export function makeSortable($container, {itemSelector, handleSelector, placehol
     const handle = handleSelector ? `${itemSelector} ${handleSelector}` : itemSelector;
     const clear = () => {
         delete $container[0].dataset.dragging;
-        $dragged?.css({opacity: '', outline: ''});
+        $dragged?.removeClass('dashboard-plus-dragging');
         $placeholder?.remove();
         $dragged = null;
         $placeholder = null;
@@ -61,14 +61,11 @@ export function makeSortable($container, {itemSelector, handleSelector, placehol
     $container.on('dragstart', handle, event => {
         $dragged = $(event.currentTarget).closest(itemSelector);
         $container[0].dataset.dragging = '1';
-        $dragged.css({opacity: 0.4, outline: '2px dashed #d94f00'});
-        $placeholder = $(`<div class="${placeholderClass}"></div>`)
+        $dragged.addClass('dashboard-plus-dragging');
+        // the theme's accent (text-primary) outlines the drop place
+        $placeholder = $(`<div class="${placeholderClass} text-primary dashboard-plus-drop"></div>`)
             .attr('aria-label', label)
-            .css({
-                height: $dragged.outerHeight(),
-                border: '2px dashed #d94f00',
-                background: 'rgba(217, 79, 0, 0.08)'
-            });
+            .css('height', $dragged.outerHeight());
         event.originalEvent.dataTransfer.effectAllowed = 'move';
         // Firefox starts a drag only when it carries data
         event.originalEvent.dataTransfer.setData('text/plain', $dragged.attr('data-sort-id') ?? '');
@@ -109,13 +106,15 @@ export function isDragging($container) {
 }
 
 /*
- * Table layout shared by the list widgets. The stock flextable classes give the native width,
+ * The Dashboard Plus styles, added to the page once with the widget code (so a cached stylesheet
+ * can never pair with a newer widget). Colors are the theme's: Bootstrap's text-* classes, labels
+ * and progress bars. The list widgets use the stock flextable classes for the native width,
  * separators and hover; the table is one CSS grid and each row a subgrid of it, so every row
- * shares the same column widths and gutter at any widget width. A widget sets the columns
- * with the --dashboard-plus-columns property on its table.
+ * shares the same column widths and gutter at any widget width. A widget sets the columns with
+ * the --dashboard-plus-columns property of its table class.
  */
 // The doubled classes outrank the theme's .flextable-container and .flextable-row rules.
-const TABLE_STYLE = `
+const STYLE = `
     .dashboard-plus-table.dashboard-plus-table { display: grid; grid-template-columns: var(--dashboard-plus-columns); column-gap: 0.75em; }
     .dashboard-plus-table > .dashboard-plus-row.dashboard-plus-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; text-align: left; }
     .dashboard-plus-table > .dashboard-plus-span { grid-column: 1 / -1; }
@@ -130,13 +129,70 @@ const TABLE_STYLE = `
     .dashboard-plus-row .dashboard-plus-named > :first-child { min-width: 0; }
     .dashboard-plus-row .dashboard-plus-side-icon { flex: none; font-size: 1em; opacity: 0.7; }
     @container (max-width: 6em) { .dashboard-plus-row .dashboard-plus-side-icon { display: none; } }
-    .dashboard-plus-pill { display: inline-block; padding: 0.2em 0.7em; border-radius: 999px; font-size: 0.88em; font-weight: 600; white-space: nowrap; }
+    .dashboard-plus-row .dashboard-plus-center { text-align: center; }
+    .dashboard-plus-tabular { font-variant-numeric: tabular-nums; }
+    .dashboard-plus-empty { padding: 0.75em; }
+    .dashboard-plus-dragging { opacity: 0.4; outline: 2px dashed currentColor; }
+    .dashboard-plus-drop { border: 2px dashed currentColor; }
+    .dashboard-plus-grab { cursor: grab; }
+    /* labels rounded into pills: Bootstrap 3 badges come in gray only */
+    .label.dashboard-plus-pill { border-radius: 10em; padding: 0.25em 0.75em; font-size: 85%; vertical-align: middle; }
+    .dashboard-plus-bar.progress { height: 0.75em; margin: 0.2em 0 0; }
+    .dashboard-plus-gateway-name { line-height: 1.35; }
+
+    /* System Metrics+ and Traffic Graph+: panels with a heading, charts, gauges, bars */
+    .dashboard-plus-inner { width: 95%; margin: 0 auto; }
+    .dashboard-plus-panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1em; margin: 0 0.25em; }
+    .dashboard-plus-panel-head h3 { margin: 0; }
+    .dashboard-plus-chart { margin: 0 0.5em; }
+    .dashboard-plus-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1em; padding: 0 0.25em; }
+    .dashboard-plus-metrics .dashboard-plus-wide { grid-column: 1 / -1; }
+    .dashboard-plus-metrics canvas { width: 100%; height: 90px; }
+    .dashboard-plus-metrics-load { font-size: 0.9em; margin: 0.25em 0; }
+    .dashboard-plus-gauges { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5em; }
+    .dashboard-plus-gauge { text-align: center; min-width: 0; }
+    .dashboard-plus-gauge svg { width: 100%; max-width: 96px; display: block; margin: 0 auto; }
+    .dashboard-plus-gauge path { fill: none; stroke: currentColor; stroke-width: 9; stroke-linecap: round; }
+    .dashboard-plus-gauge .gauge-track { opacity: 0.12; }
+    .dashboard-plus-gauge .gauge-fill { transition: stroke-dasharray 0.2s ease; }
+    .dashboard-plus-gauge .gauge-value { fill: currentColor; font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .dashboard-plus-gauge .gauge-label { font-weight: 600; margin-top: -0.4em; white-space: nowrap; }
+    .dashboard-plus-gauge .gauge-link { font-weight: normal; font-size: 0.9em; }
+    .dashboard-plus-gauge .gauge-detail { font-size: 0.85em; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dashboard-plus-filesystems { margin-top: 0.25em; }
+    .dashboard-plus-filesystem { display: grid; grid-template-columns: 28% 72%; padding: 0.35em 0; text-align: left; }
+    .dashboard-plus-filesystem > span { padding-right: 0.75em; }
+    .dashboard-plus-filesystem > div { padding-left: 0.75em; }
+    .dashboard-plus-filesystem .dashboard-plus-bar.progress { margin: 0; }
+    .dashboard-plus-filesystem-detail { font-size: 0.9em; margin-top: 0.15em; }
+
+    .dashboard-plus-traffic { padding: 0 0.25em; }
+    .dashboard-plus-legend { display: flex; flex-wrap: wrap; gap: 0.2em 1em; white-space: nowrap; }
+    .dashboard-plus-combined-legend { gap: 0.2em 0.75em; margin: 0 0.5em 0.35em; font-size: 0.82em; }
+    .dashboard-plus-combined-chart { height: 180px; }
+    .dashboard-plus-dot { display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; vertical-align: -0.05em; }
+
+    /* Thermal Sensors+ */
+    .dashboard-plus-sensors { width: 95%; margin: 0.25em auto; }
+    .dashboard-plus-sensor { padding: 0.35em 0; }
+    .dashboard-plus-sensor-head { display: flex; justify-content: space-between; align-items: baseline; }
+
+    /* Interfaces+: two lines per interface, the icon beside both */
+    .dashboard-plus-interfaces { --dashboard-plus-columns: auto minmax(0, 1fr) auto; row-gap: 0; }
+    .dashboard-plus-interfaces > .dashboard-plus-row.dashboard-plus-row { row-gap: 0.15em; align-items: start; }
+    .dashboard-plus-interfaces .dashboard-plus-interface-icon { grid-row: 1 / span 2; }
+
+    /* Firewall Logs+: the interface and rule go on a second line, so the addresses keep room */
+    .dashboard-plus-logs { --dashboard-plus-columns: auto auto minmax(0, 1fr) minmax(0, 1fr); }
+    .dashboard-plus-logs > .dashboard-plus-row.dashboard-plus-row { align-items: start; row-gap: 0.1em; }
+    .dashboard-plus-logs .dashboard-plus-action { font-size: 1.2em; }
+    .dashboard-plus-logs .dashboard-plus-detail { grid-column: 2 / -1; }
 `;
 
-/* Add the shared table styles to the page once. */
-export function ensureTableStyle() {
-    if (!document.getElementById('dashboard-plus-table-style')) {
-        $('<style id="dashboard-plus-table-style"></style>').text(TABLE_STYLE).appendTo('head');
+/* Add the Dashboard Plus styles to the page once. */
+export function ensureStyle() {
+    if (!document.getElementById('dashboard-plus-style')) {
+        $('<style id="dashboard-plus-style"></style>').text(STYLE).appendTo('head');
     }
 }
 
@@ -231,6 +287,14 @@ export const DashboardPlusWidget = Base => class extends Base {
     onWidthChanged(width) {
     }
 };
+
+/*
+ * A translated phrase with its {placeholders} filled in, e.g. "Core {number}". Whole phrases keep
+ * the word order of each language; fragments joined in code would force the English one.
+ */
+export function fill(template, values) {
+    return String(template).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
 
 /* Bits per second with at most one decimal, e.g. "2.5 Mb/s". */
 export function formatBitRate(value) {

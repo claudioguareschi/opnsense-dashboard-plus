@@ -3,7 +3,7 @@
  * All rights reserved.
  */
 
-const {escapeHtml, renderTitle, mergeOrder, makeSortable, formatBitRate, DashboardPlusWidget} =
+const {escapeHtml, renderTitle, mergeOrder, makeSortable, formatBitRate, ensureStyle, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
 export default class DashboardPlusTraffic extends DashboardPlusWidget(BaseWidget) {
@@ -76,27 +76,24 @@ export default class DashboardPlusTraffic extends DashboardPlusWidget(BaseWidget
         const color = this.directionColors;
         return `
             <div class="dashboard-plus-traffic-interface" data-sort-id="${escapeHtml(id)}">
-                <div style="width: 95%; margin: 0 auto;">
-                    <div class="dashboard-plus-traffic-heading" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}" style="display: flex; justify-content: space-between; align-items: center; margin: 0 0.25em; cursor: grab;">
-                        <h3 style="margin: 0;">${escapeHtml(name)}</h3>
-                        <div style="display: flex; gap: 1em; white-space: nowrap;">
-                            <span><i style="display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; background: ${color.inbytes.line};"></i> ${escapeHtml(this.translations.in)}</span>
-                            <span><i style="display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; background: ${color.outbytes.line};"></i> ${escapeHtml(this.translations.out)}</span>
+                <div class="dashboard-plus-inner">
+                    <div class="dashboard-plus-panel-head dashboard-plus-traffic-heading dashboard-plus-grab" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}">
+                        <h3>${escapeHtml(name)}</h3>
+                        <div class="dashboard-plus-legend">
+                            <span><i class="dashboard-plus-dot" style="background: ${color.inbytes.line};"></i> ${escapeHtml(this.translations.in)}</span>
+                            <span><i class="dashboard-plus-dot" style="background: ${color.outbytes.line};"></i> ${escapeHtml(this.translations.out)}</span>
                         </div>
                     </div>
                 </div>
-                <div class="canvas-container-noaspectratio" style="margin: 0 0.5em;"><canvas id="${escapeHtml(canvasId)}"></canvas></div>
+                <div class="canvas-container-noaspectratio dashboard-plus-chart"><canvas id="${escapeHtml(canvasId)}"></canvas></div>
             </div>`;
     }
 
     _renderCombinedLegend(entries) {
         const $legend = $(`#${this._elementId('combined-legend')}`).empty();
         entries.forEach(({label, color}) => {
-            $legend.append(`
-                <span style="display: inline-flex; align-items: center; gap: 0.35em;">
-                    <i style="display: inline-block; width: 0.75em; height: 0.75em; border-radius: 50%; background: ${color};"></i>${escapeHtml(label)}
-                </span>
-            `);
+            // the dot takes the series color of the chart
+            $legend.append(`<span><i class="dashboard-plus-dot" style="background: ${color};"></i> ${escapeHtml(label)}</span>`);
         });
     }
 
@@ -172,7 +169,7 @@ export default class DashboardPlusTraffic extends DashboardPlusWidget(BaseWidget
         const label = compact ? this.translations.expand : this.translations.compact;
         const $toggle = $(`#${this.id}-traffic-view-toggle`);
         $toggle.attr({title: label, 'aria-label': label});
-        $toggle.find('i').attr('class', compact ? 'fa fa-expand' : 'fa fa-compress');
+        $toggle.find('i').attr('class', compact ? 'fa fa-expand fa-xs' : 'fa fa-compress fa-xs');
     }
 
     _toggleDisplay() {
@@ -223,14 +220,15 @@ export default class DashboardPlusTraffic extends DashboardPlusWidget(BaseWidget
     }
 
     getMarkup() {
+        ensureStyle();
         return $(
-            `<div class="dashboard-plus-traffic-container" style="padding: 0 0.25em;">
+            `<div class="dashboard-plus-traffic">
                 <div id="${this._elementId('combined')}" style="display: none;">
                     <h3>${escapeHtml(this.translations.trafficin)}</h3>
-                    <div id="${this._elementId('combined-legend')}" style="display: flex; flex-wrap: wrap; gap: 0.2em 0.75em; margin: 0 0.5em 0.35em; font-size: 0.82em;"></div>
-                    <div class="canvas-container-noaspectratio" style="height: 180px; margin: 0 0.5em;"><canvas id="${this._elementId('in')}"></canvas></div>
+                    <div id="${this._elementId('combined-legend')}" class="dashboard-plus-legend dashboard-plus-combined-legend"></div>
+                    <div class="canvas-container-noaspectratio dashboard-plus-chart dashboard-plus-combined-chart"><canvas id="${this._elementId('in')}"></canvas></div>
                     <h3>${escapeHtml(this.translations.trafficout)}</h3>
-                    <div class="canvas-container-noaspectratio" style="height: 180px; margin: 0 0.5em;"><canvas id="${this._elementId('out')}"></canvas></div>
+                    <div class="canvas-container-noaspectratio dashboard-plus-chart dashboard-plus-combined-chart"><canvas id="${this._elementId('out')}"></canvas></div>
                 </div>
                 <div id="${this._elementId('per-interface')}"></div>
             </div>`
@@ -240,8 +238,9 @@ export default class DashboardPlusTraffic extends DashboardPlusWidget(BaseWidget
     async onMarkupRendered() {
         renderTitle(this);
         const $header = $(`#${this.id}-title`).closest('.widget-header');
+        // the same link icon as the dashboard's own breakout link in the header
         $header.find('.widget-header-left').append(
-            `<button type="button" id="${this.id}-traffic-view-toggle" style="border: 0; background: transparent; color: #d94f00; cursor: pointer; padding: 0; font-size: 0.9em;" title="${escapeHtml(this.translations.compact)}" aria-label="${escapeHtml(this.translations.compact)}"><i class="fa fa-compress"></i></button>`
+            `<a href="#" role="button" id="${this.id}-traffic-view-toggle" title="${escapeHtml(this.translations.compact)}" aria-label="${escapeHtml(this.translations.compact)}"><i class="fa fa-compress fa-xs"></i></a>`
         );
         $(`#${this.id}-traffic-view-toggle`).on('click', event => {
             event.preventDefault();

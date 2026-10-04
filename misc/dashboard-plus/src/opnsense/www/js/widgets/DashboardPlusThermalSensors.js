@@ -3,7 +3,7 @@
  * All rights reserved.
  */
 
-const {renderTitle, DashboardPlusWidget} =
+const {escapeHtml, renderTitle, ensureStyle, fill, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
 export default class DashboardPlusThermalSensors extends DashboardPlusWidget(BaseWidget) {
@@ -21,56 +21,40 @@ export default class DashboardPlusThermalSensors extends DashboardPlusWidget(Bas
 
     _sensorLabel(sensor) {
         if (sensor.type === 'cpu') {
-            return `${this.translations.core} ${sensor.device_seq}`;
+            return fill(this.translations.core, {number: sensor.device_seq});
         }
         return `${sensor.type_translated} ${sensor.device_seq}`;
     }
 
+    /* The theme's progress bar colors: hot from 70 °C, critical from 80 °C. */
     _sensorColor(celsius) {
-        return celsius >= 80 ? '#d62728' : celsius >= 70 ? '#ff7f0e' : '#2ca02c';
+        return celsius >= 80 ? 'danger' : celsius >= 70 ? 'warning' : 'success';
     }
 
     _renderSensors() {
-        const container = document.getElementById(`${this.id}-sensors`);
-        if (!container) {
-            return;
-        }
+        const $container = $(`#${this.id}-sensors`);
         const selected = this.currentConfig?.sensors || this.sensors.map(sensor => sensor.device);
-        const sensors = this.sensors.filter(sensor => selected.includes(sensor.device));
-        container.replaceChildren();
+        const sensors = this.sensors.filter(sensor => selected.includes(sensor.device) && Number.isFinite(parseFloat(sensor.temperature)));
         if (sensors.length === 0) {
-            const empty = document.createElement('div');
-            empty.textContent = this.translations.no_sensors;
-            container.append(empty);
+            $container.html(`<div class="dashboard-plus-empty">${escapeHtml(this.translations.no_sensors)}</div>`);
             return;
         }
-        for (const sensor of sensors) {
+        $container.html(sensors.map(sensor => {
             const celsius = parseFloat(sensor.temperature);
-            if (!Number.isFinite(celsius)) {
-                continue;
-            }
-            const row = document.createElement('div');
-            row.style.cssText = 'padding: 0.35em 0;';
-            const header = document.createElement('div');
-            header.style.cssText = 'display: flex; justify-content: space-between; align-items: baseline;';
-            const label = document.createElement('span');
-            label.textContent = this._sensorLabel(sensor);
-            const value = document.createElement('span');
-            value.textContent = `${celsius.toFixed(1)} °C`;
-            header.append(label, value);
-            const bar = document.createElement('div');
-            bar.style.cssText = 'margin-top: 0.2em; height: 0.75em; background: rgba(119,119,119,0.12); border-radius: 0.375em; overflow: hidden;';
-            const fill = document.createElement('div');
-            fill.style.cssText = `height: 100%; width: ${Math.min(celsius, 100)}%; background: ${this._sensorColor(celsius)}; transition: width 0.2s ease;`;
-            bar.append(fill);
-            row.append(header, bar);
-            container.append(row);
-        }
+            const width = Math.min(Math.max(celsius, 0), 100);
+            return `<div class="dashboard-plus-sensor">
+                <div class="dashboard-plus-sensor-head"><span>${escapeHtml(this._sensorLabel(sensor))}</span>
+                    <span class="dashboard-plus-tabular">${escapeHtml(celsius.toFixed(1))} °C</span></div>
+                <div class="progress dashboard-plus-bar"><div class="progress-bar progress-bar-${this._sensorColor(celsius)}" role="progressbar"
+                    aria-valuenow="${width}" aria-valuemin="0" aria-valuemax="100" style="width: ${width}%;"></div></div>
+            </div>`;
+        }).join(''));
     }
 
     getMarkup() {
+        ensureStyle();
         return $(`
-            <div id="${this.id}-sensors" style="width: 95%; margin: 0.25em auto;"></div>
+            <div id="${this.id}-sensors" class="dashboard-plus-sensors"></div>
         `);
     }
 
