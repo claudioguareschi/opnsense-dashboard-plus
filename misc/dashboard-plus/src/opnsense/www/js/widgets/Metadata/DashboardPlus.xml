@@ -241,7 +241,7 @@
         <translations>
             <title>DNS Health+</title>
             <dashboard_title>DNS Health</dashboard_title>
-            <resolver>Resolver</resolver>
+            <resolver>Unbound</resolver>
             <running>Running</running>
             <stopped>Stopped</stopped>
             <disabled>Disabled</disabled>
@@ -250,6 +250,8 @@
             <waiting>Waiting for data</waiting>
             <recursive>Unbound recursive</recursive>
             <forwarding>Unbound forwarding</forwarding>
+            <local_recursive>Mode: local, recursive</local_recursive>
+            <local_forwarding>Mode: local, forwarding</local_forwarding>
             <queries>Queries</queries>
             <total>total</total>
             <cache_hit>Cache hit rate</cache_hit>

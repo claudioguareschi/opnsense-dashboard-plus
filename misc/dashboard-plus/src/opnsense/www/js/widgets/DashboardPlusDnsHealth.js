@@ -60,7 +60,6 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 height: 0.7em;
                 border-radius: 50%;
                 background: currentColor;
-                box-shadow: 0 0 0 3px currentColor;
                 opacity: 0.8;
             }
             .dashboard-plus-dns-health-label {
@@ -136,12 +135,14 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 display: grid;
                 gap: 0.25em;
                 padding: 0 0.65em 0.65em;
+                max-height: 10em;
+                overflow-y: auto;
             }
             .dashboard-plus-dns-health-upstream {
                 display: grid;
-                grid-template-columns: 1.2em minmax(0, 1fr) auto;
+                grid-template-columns: auto minmax(0, 1fr) auto;
                 align-items: center;
-                gap: 0.55em;
+                column-gap: 0.65em;
                 min-width: 0;
                 padding: 0.32em 0;
             }
@@ -376,10 +377,10 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         const unbound = this.data.settings?.unbound || {};
         const forwarding = String(unbound.forwarding?.enabled ?? '') === '1';
         if (forwarding) {
-            return this.translations.forwarding;
+            return this.translations.local_forwarding;
         }
         if (this._status().state === 'healthy') {
-            return this.translations.recursive;
+            return this.translations.local_recursive;
         }
         return this.translations.unavailable;
     }
@@ -473,7 +474,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
 
     _renderRecent() {
         const $recent = $(`#${this._elementId('recent')}`);
-        const queries = (this.data.recent?.queries || []).slice(0, 5);
+        const queries = this.data.recent?.queries || [];
         $recent.css('--dashboard-plus-dns-health-recent-height', `${this.recentRows * 2.1}em`);
         $recent.html(queries.length ? queries.map(query => {
             const lookup = this._asNumber(query.lookup_ms);

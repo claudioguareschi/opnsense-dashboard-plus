@@ -63,7 +63,7 @@ class DnsController extends ApiControllerBase
 
             // Unbound calls both a recursive lookup and a forward-zone lookup "Recursion".
             // Local answers and cache hits never leave the resolver and are not activity here.
-            if (($record['source'] ?? '') !== 'Recursion' || count($queries) >= 20) {
+            if (($record['source'] ?? '') !== 'Recursion' || count($queries) >= 25) {
                 continue;
             }
             $domain = rtrim((string)($record['domain'] ?? ''), '.');
