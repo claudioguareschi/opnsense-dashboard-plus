@@ -3,6 +3,7 @@
         <filename>VnstatPlus.js</filename>
         <endpoints>
             <endpoint>/api/vnstat/service/*</endpoint>
+            <endpoint>/api/vnstatplus/interfaces/list</endpoint>
         </endpoints>
         <translations>
             <title>VNStat Traffic+</title>

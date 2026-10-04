@@ -17,7 +17,7 @@ export default class VnstatPlus extends BaseWidget {
         this.showKpi = true;
         this.showChart = true;
         this.showHistory = true;
-        this.barRange = '3';
+        this.barRange = '12';
         this.chartOffset = 0;
         this.trafficChart = null;
         this.fetchPromise = null;
@@ -38,8 +38,8 @@ export default class VnstatPlus extends BaseWidget {
     }
 
     async getWidgetOptions() {
-        const data = await this.ajaxCall('/api/vnstat/service/interface_list');
-        const interfaces = (data?.interfaces ?? []).map(name => ({value: name, label: name}));
+        const data = await this.ajaxCall('/api/vnstatplus/interfaces/list');
+        const interfaces = data?.interfaces ?? [];
 
         return {
             excluded_interfaces: {
@@ -85,7 +85,7 @@ export default class VnstatPlus extends BaseWidget {
                     {value: '6', label: this.translations.latest_six},
                     {value: '12', label: this.translations.latest_twelve}
                 ],
-                default: '3'
+                default: '12'
             }
         };
     }
@@ -108,10 +108,13 @@ export default class VnstatPlus extends BaseWidget {
         const refreshId = this._elementId('refresh');
 
         return $(`
-            <div id="${rootId}" class="vnstat-plus-root" style="padding: 0 0.35em 0.35em;">
+            <div id="${rootId}" class="vnstat-plus-root">
                 <style>
+                    #${rootId} { width: 95%; margin: 0.25em auto; }
                     #${rootId} .vnstat-plus-controls { display: flex; flex-wrap: wrap; gap: 0.4em; align-items: center; margin: 0 0 0.55em; }
-                    #${rootId} .vnstat-plus-controls select { min-width: 7em; flex: 1 1 7em; }
+                    #${rootId} .vnstat-plus-controls select { min-width: 7em; flex: 1 1 7em; color: #d94f00; border-color: #d94f00; background-color: transparent; }
+                    #${rootId} .vnstat-plus-controls select:focus { border-color: #d94f00; box-shadow: 0 0 0 0.15rem rgba(217,79,0,0.2); }
+                    #${rootId} .vnstat-plus-controls option { color: inherit; background: var(--vnstat-plus-select-background); }
                     #${rootId} .vnstat-plus-controls button { flex: 0 0 auto; }
                     #${rootId} .vnstat-plus-chart-navigation { display: flex; gap: 0.25em; }
                     #${rootId} .vnstat-plus-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.45em; margin-bottom: 0.7em; }
@@ -125,6 +128,7 @@ export default class VnstatPlus extends BaseWidget {
                     #${rootId} .vnstat-plus-section-title { color: var(--vnstat-plus-muted); font-size: 0.9em; font-weight: 600; margin: 0.7em 0 0.4em; text-align: left; }
                     #${rootId} .vnstat-plus-chart { height: 16em; min-height: 12em; position: relative; }
                     #${rootId} .vnstat-plus-chart canvas { height: 100% !important; width: 100% !important; }
+                    #${rootId} .vnstat-plus-legend { display: flex; flex-wrap: wrap; gap: 0.2em 1em; margin: 0.45em 0 0; font-size: 0.82em; }
                     #${rootId} .vnstat-plus-bar-row { display: grid; grid-template-columns: 6.2em minmax(0, 1fr) 5.2em; gap: 0.45em; align-items: center; font-size: 0.82em; position: relative; outline: none; }
                     #${rootId} .vnstat-plus-bar-label, #${rootId} .vnstat-plus-bar-total { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                     #${rootId} .vnstat-plus-bar-total { text-align: right; color: var(--vnstat-plus-muted); }
@@ -136,8 +140,10 @@ export default class VnstatPlus extends BaseWidget {
                     #${rootId} .vnstat-plus-legend { display: flex; gap: 0.9em; color: var(--vnstat-plus-muted); font-size: 0.78em; margin: 0.5em 0 0.7em 6.65em; }
                     #${rootId} .vnstat-plus-dot { display: inline-block; width: 0.7em; height: 0.7em; border-radius: 50%; margin-right: 0.25em; }
                     #${rootId} .vnstat-plus-table-wrap { overflow-x: auto; }
+                    #${rootId} .vnstat-plus-table-wrap { max-height: 10.5em; overflow-y: auto; }
                     #${rootId} table { width: 100%; margin-bottom: 0; font-size: 0.82em; }
                     #${rootId} th { color: var(--vnstat-plus-muted); font-weight: 600; }
+                    #${rootId} thead th { position: sticky; top: 0; background: var(--vnstat-plus-table-background); z-index: 1; }
                     #${rootId} th:not(:first-child), #${rootId} td:not(:first-child) { text-align: right; }
                     #${rootId} .vnstat-plus-empty { color: #999; padding: 1em 0; text-align: center; }
                     @media (max-width: 420px) {
@@ -162,9 +168,14 @@ export default class VnstatPlus extends BaseWidget {
                     </span>
                     <button id="${refreshId}" type="button" class="btn btn-default" title="${this._escape(this.translations.refresh)}" aria-label="${this._escape(this.translations.refresh)}"><i class="fa fa-refresh"></i></button>
                 </div>
-                <div id="${this._elementId('summary')}" class="vnstat-plus-summary"></div>
                 <div id="${this._elementId('chart-title')}" class="vnstat-plus-section-title">${this._escape(this.translations.traffic_chart)}</div>
                 <div id="${this._elementId('chart')}" class="vnstat-plus-chart"></div>
+                <div id="${this._elementId('legend')}" class="vnstat-plus-legend">
+                    <span><i class="vnstat-plus-dot" style="background:var(--vnstat-plus-rx);"></i>${this._escape(this.translations.download)}</span>
+                    <span><i class="vnstat-plus-dot" style="background:var(--vnstat-plus-tx);"></i>${this._escape(this.translations.upload)}</span>
+                    <span><i class="vnstat-plus-dot" style="background:var(--vnstat-plus-total);"></i>${this._escape(this.translations.total)}</span>
+                </div>
+                <div id="${this._elementId('summary')}" class="vnstat-plus-summary"></div>
                 <div id="${this._elementId('history-title')}" class="vnstat-plus-section-title">${this._escape(this.translations.history)}</div>
                 <div id="${this._elementId('table')}" class="vnstat-plus-table-wrap"></div>
             </div>
@@ -262,7 +273,7 @@ export default class VnstatPlus extends BaseWidget {
         this.showKpi = sections.includes('kpi');
         this.showChart = sections.includes('chart');
         this.showHistory = sections.includes('history');
-        this.barRange = ['current', '1', '3', '6', '12'].includes(config.bar_range) ? config.bar_range : '3';
+        this.barRange = ['current', '1', '3', '6', '12'].includes(config.bar_range) ? config.bar_range : '12';
         this._populateRangeDropdown();
         this._applyVisibility();
     }
@@ -289,19 +300,21 @@ export default class VnstatPlus extends BaseWidget {
         const widget = $root.closest('.widget')[0] || $root[0];
         const widgetStyle = getComputedStyle(widget);
         const rootStyle = $root[0].style;
-        rootStyle.setProperty('--vnstat-plus-rx', readSemanticColor('text-info'));
-        rootStyle.setProperty('--vnstat-plus-tx', readSemanticColor('text-warning'));
-        rootStyle.setProperty('--vnstat-plus-total', readSemanticColor('text-success'));
+        rootStyle.setProperty('--vnstat-plus-rx', '#2ca02c');
+        rootStyle.setProperty('--vnstat-plus-tx', '#ff7f0e');
+        rootStyle.setProperty('--vnstat-plus-total', '#a0cbe8');
         rootStyle.setProperty('--vnstat-plus-muted', readSemanticColor('text-muted'));
         rootStyle.setProperty('--vnstat-plus-border', readSemanticColor('text-muted'));
         rootStyle.setProperty('--vnstat-plus-tooltip-bg', readUsableColor(widget, 'backgroundColor', '#20242b'));
         rootStyle.setProperty('--vnstat-plus-tooltip-text', readUsableColor(widget, 'color', '#f4f4f4'));
         rootStyle.setProperty('--vnstat-plus-tooltip-border', widgetStyle.color || '#888');
+        rootStyle.setProperty('--vnstat-plus-select-background', readUsableColor(widget, 'backgroundColor', '#ffffff'));
+        rootStyle.setProperty('--vnstat-plus-table-background', readUsableColor(widget, 'backgroundColor', '#ffffff'));
     }
 
     _applyVisibility() {
         $(`#${this._elementId('summary')}`).toggle(this.showKpi);
-        $(`#${this._elementId('chart-title')}, #${this._elementId('chart')}`).toggle(this.showChart);
+        $(`#${this._elementId('chart-title')}, #${this._elementId('chart')}, #${this._elementId('legend')}`).toggle(this.showChart);
         $(`#${this._elementId('history-title')}, #${this._elementId('table')}`).toggle(this.showHistory);
         $(`#${this._elementId('range')}, #${this._elementId('previous')}, #${this._elementId('next')}`).toggle(this.showChart);
     }
@@ -314,10 +327,10 @@ export default class VnstatPlus extends BaseWidget {
             year: this.translations.years
         };
         const values = {
-            hour: [6, 12, 24],
-            day: [7, 14, 30],
-            month: [3, 6, 12],
-            year: [1, 3, 5]
+            hour: [24, 12, 6],
+            day: [30, 14, 7],
+            month: [12, 6, 3],
+            year: [5, 3, 1]
         };
         return (values[this.currentPeriod] || values.month).map(value => ({
             value: String(value),
@@ -340,23 +353,24 @@ export default class VnstatPlus extends BaseWidget {
     }
 
     async _populateInterfaceDropdown() {
-        const data = await this.ajaxCall('/api/vnstat/service/interface_list');
+        const data = await this.ajaxCall('/api/vnstatplus/interfaces/list');
         if (!data?.interfaces) {
             return;
         }
 
-        const names = data.interfaces.filter(name => !this.excludedInterfaces.includes(name));
+        const interfaces = data.interfaces.filter(item => !this.excludedInterfaces.includes(item.value));
         const $select = $(`#${this._elementId('interface')}`);
         $select.empty();
-        names.forEach(name => {
-            $select.append($('<option></option>').val(name).text(name));
+        interfaces.forEach(item => {
+            $select.append($('<option></option>').val(item.value).text(item.label));
         });
 
+        const names = interfaces.map(item => item.value);
         if (this.currentInterface && names.includes(this.currentInterface)) {
             $select.val(this.currentInterface);
-        } else if (names.includes('WAN')) {
-            this.currentInterface = 'WAN';
-            $select.val('WAN');
+        } else if (interfaces.some(item => item.label === 'WAN')) {
+            this.currentInterface = interfaces.find(item => item.label === 'WAN').value;
+            $select.val(this.currentInterface);
         } else if (names.length > 0) {
             this.currentInterface = names[0];
             $select.val(names[0]);
@@ -392,7 +406,7 @@ export default class VnstatPlus extends BaseWidget {
         }
 
         const entries = traffic.slice().sort((a, b) => this._dateToSortKey(a) - this._dateToSortKey(b));
-        const tableLimits = {hour: 12, day: 14, month: 12, year: 5};
+        const tableLimits = {hour: 25, day: 25, month: 25, year: 25};
         const tableEntries = entries.slice(-tableLimits[this.currentPeriod]);
         const chart = this._chartEntries(entries);
         this._renderSummary(entries[entries.length - 1]);
@@ -442,7 +456,7 @@ export default class VnstatPlus extends BaseWidget {
         const theme = getComputedStyle(root);
         const color = name => theme.getPropertyValue(name).trim();
         const fillColor = value => value.startsWith('rgb(') ? value.replace('rgb(', 'rgba(').replace(')', ', 0.2)') : value;
-        const labels = entries.map(entry => this._formatDate(entry));
+        const labels = entries.map(entry => this._formatChartLabel(entry));
         const rx = entries.map(entry => Number(entry.rx) || 0);
         const tx = entries.map(entry => Number(entry.tx) || 0);
         const total = entries.map((entry, index) => rx[index] + tx[index]);
@@ -452,19 +466,23 @@ export default class VnstatPlus extends BaseWidget {
             data: {
                 labels,
                 datasets: [
-                    {label: this.translations.download, data: rx, borderColor: color('--vnstat-plus-rx'), backgroundColor: fillColor(color('--vnstat-plus-rx')), fill: true, tension: 0.22, pointRadius: 2},
-                    {label: this.translations.upload, data: tx, borderColor: color('--vnstat-plus-tx'), backgroundColor: fillColor(color('--vnstat-plus-tx')), fill: true, tension: 0.22, pointRadius: 2},
-                    {label: this.translations.total, data: total, borderColor: color('--vnstat-plus-total'), borderDash: [5, 3], fill: false, tension: 0.22, pointRadius: 2}
+                    {label: this.translations.download, data: rx, borderColor: color('--vnstat-plus-rx'), backgroundColor: fillColor(color('--vnstat-plus-rx')), fill: true, tension: 0.22, pointRadius: 0, borderWidth: 2},
+                    {label: this.translations.upload, data: tx, borderColor: color('--vnstat-plus-tx'), backgroundColor: fillColor(color('--vnstat-plus-tx')), fill: true, tension: 0.22, pointRadius: 0, borderWidth: 2},
+                    {label: this.translations.total, data: total, borderColor: color('--vnstat-plus-total'), backgroundColor: fillColor(color('--vnstat-plus-total')), fill: true, tension: 0.22, pointRadius: 0, borderWidth: 2}
                 ]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 interaction: {mode: 'index', intersect: false},
+                elements: {line: {cubicInterpolationMode: 'monotone', clip: 0}},
                 plugins: {
                     colorschemes: false,
-                    legend: {position: 'bottom'},
-                    tooltip: {callbacks: {label: context => `${context.dataset.label}: ${this._formatBytes(context.raw)}`}}
+                    legend: {display: false},
+                    tooltip: {callbacks: {
+                        label: context => `${context.dataset.label}: ${this._formatBytes(context.raw)}`,
+                        labelColor: context => ({borderColor: context.dataset.borderColor, backgroundColor: context.dataset.borderColor})
+                    }}
                 },
                 scales: {
                     y: {beginAtZero: true, ticks: {callback: value => this._formatBytes(value)}},
@@ -556,6 +574,20 @@ export default class VnstatPlus extends BaseWidget {
             return `${date.year}-${String(date.month).padStart(2, '0')}-${String(date.day).padStart(2, '0')} ${String(entry.time?.hour ?? 0).padStart(2, '0')}:00`;
         }
         return `${date.year}-${String(date.month).padStart(2, '0')}-${String(date.day).padStart(2, '0')}`;
+    }
+
+    _formatChartLabel(entry) {
+        const date = entry.date || {};
+        if (this.currentPeriod === 'hour') {
+            return [`${date.year}-${String(date.month).padStart(2, '0')}-${String(date.day).padStart(2, '0')}`, `${String(entry.time?.hour ?? 0).padStart(2, '0')}:00`];
+        }
+        if (this.currentPeriod === 'day') {
+            return [`${date.year}-${String(date.month).padStart(2, '0')}`, String(date.day).padStart(2, '0')];
+        }
+        if (this.currentPeriod === 'month') {
+            return [String(date.year), String(date.month).padStart(2, '0')];
+        }
+        return [String(date.year), ''];
     }
 
     _dateToSortKey(entry) {

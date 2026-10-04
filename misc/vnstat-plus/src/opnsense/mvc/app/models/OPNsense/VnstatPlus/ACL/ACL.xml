@@ -1,0 +1,8 @@
+<acl>
+    <page-dashboard-widget-vnstat-plus>
+        <name>Dashboard: VNStat+ interface labels</name>
+        <patterns>
+            <pattern>api/vnstatplus/interfaces/list</pattern>
+        </patterns>
+    </page-dashboard-widget-vnstat-plus>
+</acl>
