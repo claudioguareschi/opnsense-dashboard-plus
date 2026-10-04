@@ -112,9 +112,11 @@ export default class VnstatPlus extends BaseWidget {
                 <style>
                     #${rootId} { width: 95%; margin: 0.25em auto; }
                     #${rootId} .vnstat-plus-controls { display: flex; flex-wrap: wrap; gap: 0.4em; align-items: center; margin: 0 0 0.55em; }
-                    #${rootId} .vnstat-plus-controls select { min-width: 7em; flex: 1 1 7em; color: #d94f00; border-color: #d94f00; background-color: transparent; }
-                    #${rootId} .vnstat-plus-controls select:focus { border-color: #d94f00; box-shadow: 0 0 0 0.15rem rgba(217,79,0,0.2); }
-                    #${rootId} .vnstat-plus-controls option { color: inherit; background: var(--vnstat-plus-select-background); }
+                    #${rootId} .vnstat-plus-controls .bootstrap-select { min-width: 7em; flex: 1 1 7em; }
+                    #${rootId} .vnstat-plus-controls .bootstrap-select > .dropdown-toggle { height: 2.55em; padding: 0.45em 0.7em; border-color: rgba(127,127,127,0.3); background: var(--vnstat-plus-select-background); color: inherit; }
+                    #${rootId} .vnstat-plus-controls .bootstrap-select.open > .dropdown-toggle,
+                    #${rootId} .vnstat-plus-controls .bootstrap-select > .dropdown-toggle:focus { border-color: #d94f00; box-shadow: 0 0 0 0.15rem rgba(217,79,0,0.2); }
+                    #${rootId} .vnstat-plus-controls .bootstrap-select .dropdown-menu > li.selected > a { background: #d94f00; color: #fff; }
                     #${rootId} .vnstat-plus-controls button { flex: 0 0 auto; }
                     #${rootId} .vnstat-plus-chart-navigation { display: flex; gap: 0.25em; }
                     #${rootId} .vnstat-plus-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.45em; margin-bottom: 0.7em; }
@@ -128,7 +130,7 @@ export default class VnstatPlus extends BaseWidget {
                     #${rootId} .vnstat-plus-section-title { color: var(--vnstat-plus-muted); font-size: 0.9em; font-weight: 600; margin: 0.7em 0 0.4em; text-align: left; }
                     #${rootId} .vnstat-plus-chart { height: 16em; min-height: 12em; position: relative; }
                     #${rootId} .vnstat-plus-chart canvas { height: 100% !important; width: 100% !important; }
-                    #${rootId} .vnstat-plus-legend { display: flex; flex-wrap: wrap; gap: 0.2em 1em; margin: 0.45em 0 0; font-size: 0.82em; }
+                    #${rootId} .vnstat-plus-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.3em 1.2em; margin: 0.55em 0 0.75em; font-size: 0.9em; }
                     #${rootId} .vnstat-plus-bar-row { display: grid; grid-template-columns: 6.2em minmax(0, 1fr) 5.2em; gap: 0.45em; align-items: center; font-size: 0.82em; position: relative; outline: none; }
                     #${rootId} .vnstat-plus-bar-label, #${rootId} .vnstat-plus-bar-total { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                     #${rootId} .vnstat-plus-bar-total { text-align: right; color: var(--vnstat-plus-muted); }
@@ -137,8 +139,7 @@ export default class VnstatPlus extends BaseWidget {
                     #${rootId} .vnstat-plus-bar-tx { background: var(--vnstat-plus-tx); }
                     #${rootId} .vnstat-plus-tooltip { display: none; position: absolute; left: 6.65em; bottom: calc(100% + 0.35em); z-index: 5; max-width: 90%; padding: 0.35em 0.55em; border: 1px solid var(--vnstat-plus-tooltip-border); border-radius: 4px; background: var(--vnstat-plus-tooltip-bg); color: var(--vnstat-plus-tooltip-text); white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
                     #${rootId} .vnstat-plus-bar-row:hover .vnstat-plus-tooltip, #${rootId} .vnstat-plus-bar-row:focus .vnstat-plus-tooltip { display: block; }
-                    #${rootId} .vnstat-plus-legend { display: flex; gap: 0.9em; color: var(--vnstat-plus-muted); font-size: 0.78em; margin: 0.5em 0 0.7em 6.65em; }
-                    #${rootId} .vnstat-plus-dot { display: inline-block; width: 0.7em; height: 0.7em; border-radius: 50%; margin-right: 0.25em; }
+                    #${rootId} .vnstat-plus-dot { display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; margin-right: 0.3em; vertical-align: -0.05em; }
                     #${rootId} .vnstat-plus-table-wrap { overflow-x: auto; }
                     #${rootId} .vnstat-plus-table-wrap { max-height: 10.5em; overflow-y: auto; }
                     #${rootId} table { width: 100%; margin-bottom: 0; font-size: 0.82em; }
@@ -153,14 +154,14 @@ export default class VnstatPlus extends BaseWidget {
                     }
                 </style>
                 <div class="vnstat-plus-controls">
-                    <select id="${interfaceId}" class="form-control" aria-label="${this._escape(this.translations.interface)}"></select>
-                    <select id="${periodId}" class="form-control" aria-label="${this._escape(this.translations.period)}">
-                        <option value="hour">${this._escape(this.translations.period_hourly)}</option>
-                        <option value="day">${this._escape(this.translations.period_daily)}</option>
-                        <option value="month" selected>${this._escape(this.translations.period_monthly)}</option>
-                        <option value="year">${this._escape(this.translations.period_yearly)}</option>
+                    <select id="${interfaceId}" class="selectpicker" data-live-search="true" aria-label="${this._escape(this.translations.interface)}"></select>
+                    <select id="${periodId}" class="selectpicker" aria-label="${this._escape(this.translations.period)}">
+                        <option value="hour" data-icon="fa fa-clock-o">${this._escape(this.translations.period_hourly)}</option>
+                        <option value="day" data-icon="fa fa-calendar">${this._escape(this.translations.period_daily)}</option>
+                        <option value="month" data-icon="fa fa-calendar" selected>${this._escape(this.translations.period_monthly)}</option>
+                        <option value="year" data-icon="fa fa-calendar">${this._escape(this.translations.period_yearly)}</option>
                     </select>
-                    <select id="${rangeId}" class="form-control" aria-label="${this._escape(this.translations.bar_range)}">
+                    <select id="${rangeId}" class="selectpicker" aria-label="${this._escape(this.translations.bar_range)}">
                     </select>
                     <span class="vnstat-plus-chart-navigation">
                         <button id="${previousId}" type="button" class="btn btn-default" title="${this._escape(this.translations.previous)}" aria-label="${this._escape(this.translations.previous)}"><i class="fa fa-chevron-left"></i></button>
@@ -203,6 +204,7 @@ export default class VnstatPlus extends BaseWidget {
             this.barRange = prefs.barRange;
         }
         this._populateRangeDropdown();
+        this._initSelectPickers();
 
         $root.on('change.vnstat-plus-widget', `#${this._elementId('period')}`, async event => {
             this.currentPeriod = event.target.value;
@@ -348,8 +350,29 @@ export default class VnstatPlus extends BaseWidget {
             return;
         }
         $range.empty();
-        options.forEach(option => $range.append($('<option></option>').val(option.value).text(option.label)));
+        options.forEach(option => $range.append($('<option></option>').val(option.value).attr('data-icon', 'fa fa-calendar').text(option.label)));
         $range.val(this.barRange);
+        this._refreshSelectPicker($range);
+    }
+
+    _initSelectPickers() {
+        if (typeof $.fn.selectpicker !== 'function') {
+            return;
+        }
+        $(`#${this._elementId('root')} select.selectpicker`).each((_, select) => {
+            const $select = $(select);
+            if ($select.parent().hasClass('bootstrap-select')) {
+                $select.selectpicker('refresh');
+            } else {
+                $select.selectpicker({style: 'btn-default btn-sm', size: 8});
+            }
+        });
+    }
+
+    _refreshSelectPicker($select) {
+        if (typeof $.fn.selectpicker === 'function' && $select.parent().hasClass('bootstrap-select')) {
+            $select.selectpicker('refresh');
+        }
     }
 
     async _populateInterfaceDropdown() {
@@ -362,7 +385,7 @@ export default class VnstatPlus extends BaseWidget {
         const $select = $(`#${this._elementId('interface')}`);
         $select.empty();
         interfaces.forEach(item => {
-            $select.append($('<option></option>').val(item.value).text(item.label));
+            $select.append($('<option></option>').val(item.value).attr('data-icon', 'fa fa-sitemap').text(item.label));
         });
 
         const names = interfaces.map(item => item.value);
@@ -377,6 +400,7 @@ export default class VnstatPlus extends BaseWidget {
         } else {
             this.currentInterface = null;
         }
+        this._refreshSelectPicker($select);
         this._savePrefs();
     }
 

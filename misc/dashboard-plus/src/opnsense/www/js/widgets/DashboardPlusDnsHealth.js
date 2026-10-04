@@ -35,8 +35,8 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
     _addStyle() {
         const css = `
             .dashboard-plus-dns-health {
-                width: 100%;
-                max-width: none;
+                width: 95%;
+                margin: 0.25em auto;
                 box-sizing: border-box;
                 color: inherit;
             }
