@@ -26,10 +26,13 @@
 
 """Return the latest Firewall Map flow summary written by the collector.
 
-The dashboard polls this through configd, so it must stay cheap: it only reads
-the compact JSON document the persistent collector rewrites every 2 seconds, marks
-the collector as in use, and starts it if it is not running (it stops by itself
-when no dashboard has asked for a while).
+The dashboard polls through configd every 2 seconds. flow_summary.sh answers most polls without
+Python (it marks the collector as in use and prints the summary while it is fresh); it runs this
+script when there is more to do: the summary is old or missing (the collector is started, it stops
+by itself when no dashboard has asked for a while), or the geolocation database is missing or its
+download reports errors. The API applies the viewer's block threshold and host name setting.
+
+    flow_summary.py [hostnames] [minimum]    minimum: apply the block threshold here (older API)
 """
 
 import json
@@ -114,7 +117,7 @@ def apply_block_threshold(payload, minimum):
     return payload
 
 
-def main(want_hostnames=False, block_minimum=1):
+def main(want_hostnames=False, block_minimum=None):
     mark_request()
     if want_hostnames:
         mark_request(HOSTNAME_MARKER)
@@ -134,7 +137,8 @@ def main(want_hostnames=False, block_minimum=1):
         payload["geodb"] = view
     if not want_hostnames:
         payload.pop("hostnames", None)
-    return apply_block_threshold(payload, block_minimum)
+    # the API applies the viewer's threshold (FlowSummary.php), to this document as to the shell's
+    return payload if block_minimum is None else apply_block_threshold(payload, block_minimum)
 
 
 if __name__ == "__main__":
@@ -142,6 +146,7 @@ if __name__ == "__main__":
     # everything else here, not configd's default
     secure_umask()
     arguments = sys.argv[1:]
-    minimum = next((int(value) for value in arguments if value.isdigit()), 1)
-    print(json.dumps(main(want_hostnames="hostnames" in arguments, block_minimum=max(1, min(minimum, 100))),
+    minimum = next((int(value) for value in arguments if value.isdigit()), None)
+    print(json.dumps(main(want_hostnames="hostnames" in arguments,
+                          block_minimum=None if minimum is None else max(1, min(minimum, 100))),
                      separators=(",", ":")))

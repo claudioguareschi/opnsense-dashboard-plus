@@ -29,6 +29,7 @@ namespace OPNsense\FirewallMap\Api;
 
 use OPNsense\Base\ApiControllerBase;
 use OPNsense\Core\Backend;
+use OPNsense\FirewallMap\FlowSummary;
 
 class FlowController extends ApiControllerBase
 {
@@ -36,19 +37,18 @@ class FlowController extends ApiControllerBase
      * Return the latest capped, geo-enriched flow summary from the collector.
      *
      * The collector samples PF counters every 2 seconds in the background; this
-     * request only reads its output, so dashboard polling never walks the
-     * state table or performs GeoIP lookups.
+     * request only reads its output (through configd: the file is root's), so
+     * dashboard polling never walks the state table or performs GeoIP lookups.
      */
     public function summaryAction()
     {
         $backend = new Backend();
         /* reverse DNS only runs while a viewer who enabled it is polling */
-        $mode = $this->request->get('hostnames') === '1' ? 'hostnames' : 'plain';
+        $hostnames = $this->request->get('hostnames') === '1';
         /* per-viewer threshold: blocked sources need this many hits before they are drawn */
         $minimum = max(1, min(100, (int)($this->request->get('blocks_min') ?? 1)));
-        $output = $backend->configdpRun('firewallmap flow summary', [$mode, (string)$minimum]);
-        $result = json_decode($output ?? '', true);
+        $output = $backend->configdpRun('firewallmap flow summary', [$hostnames ? 'hostnames' : 'plain']);
 
-        return is_array($result) ? $result : ['status' => 'failed', 'flows' => []];
+        return FlowSummary::fromBackend($output, $hostnames, $minimum);
     }
 }
