@@ -22,6 +22,8 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         this.refreshSeconds = 30;
         this.tickTimeout = 30;
         this.queryChart = null;
+        this.queryRateChart = null;
+        this.queryRateSamples = [];
         this.recentRows = 5;
     }
 
@@ -220,6 +222,26 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 width: 100% !important;
                 height: 100% !important;
             }
+            .dashboard-plus-dns-health-rate-chart {
+                height: 10em;
+                position: relative;
+                padding: 0 0.45em 0.55em;
+            }
+            .dashboard-plus-dns-health-rate-chart canvas {
+                width: 100% !important;
+                height: 100% !important;
+            }
+            .dashboard-plus-dns-health-rate-empty {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 100%;
+                opacity: 0.65;
+                font-size: 0.82em;
+            }
+            .dashboard-plus-dns-health-forward-zones {
+                margin: 0.7em 0.4em 0;
+            }
             .dashboard-plus-dns-health-type-legend {
                 display: grid;
                 gap: 0.25em;
@@ -305,10 +327,17 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                         </div>
                     </section>
                     <section class="dashboard-plus-dns-health-panel">
-                        <div class="dashboard-plus-dns-health-panel-head">${escapeHtml(this.translations.upstreams)}</div>
-                        <div id="${this._elementId('upstreams')}" class="dashboard-plus-dns-health-upstreams"></div>
+                        <div class="dashboard-plus-dns-health-panel-head">${escapeHtml(this.translations.requests_per_minute)}</div>
+                        <div class="dashboard-plus-dns-health-rate-chart">
+                            <canvas id="${this._elementId('rate-chart')}"></canvas>
+                            <div id="${this._elementId('rate-empty')}" class="dashboard-plus-dns-health-rate-empty">${escapeHtml(this.translations.waiting)}</div>
+                        </div>
                     </section>
                 </div>
+                <section class="dashboard-plus-dns-health-forward-zones dashboard-plus-dns-health-panel">
+                    <div class="dashboard-plus-dns-health-panel-head">${escapeHtml(this.translations.upstreams)}</div>
+                    <div id="${this._elementId('upstreams')}" class="dashboard-plus-dns-health-upstreams"></div>
+                </section>
                 <section class="dashboard-plus-dns-health-recent dashboard-plus-dns-health-panel">
                     <div class="dashboard-plus-dns-health-panel-head">${escapeHtml(this.translations.recent_external_queries)}</div>
                     <div id="${this._elementId('recent')}" class="dashboard-plus-dns-health-recent-list"></div>
@@ -403,23 +432,11 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         const cacheHits = this._asNumber(statsTotal.cachehits);
         const cacheMisses = this._asNumber(statsTotal.cachemiss);
         const cacheTotal = cacheHits !== null && cacheMisses !== null ? cacheHits + cacheMisses : null;
-        let rate = null;
-        const now = Date.now();
-        if (totalQueries !== null && this.previousSample) {
-            const elapsed = (now - this.previousSample.at) / 1000;
-            const delta = totalQueries - this.previousSample.queries;
-            if (elapsed > 0 && delta >= 0) {
-                rate = delta / elapsed;
-            }
-        }
-        if (totalQueries !== null) {
-            this.previousSample = {queries: totalQueries, at: now};
-        }
         const blocked = this._asNumber(this.data.totals?.blocked?.total ?? this.data.totals?.blocked);
         const dnsTotal = this._asNumber(this.data.totals?.total);
         const recursiveSeconds = this._asNumber(this.data.stats?.data?.total?.recursion?.time?.avg);
         return {
-            rate,
+            rate: this.queryRateSamples.at(-1)?.ratePerSecond ?? null,
             totalQueries,
             cacheHits,
             cacheMisses,
@@ -430,6 +447,60 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             local: this._asNumber(this.data.totals?.local?.total),
             lookup: recursiveSeconds === null ? null : recursiveSeconds * 1000
         };
+    }
+
+    _recordQueryRate(totalQueries) {
+        const now = Date.now();
+        if (totalQueries !== null && this.previousSample) {
+            const elapsed = (now - this.previousSample.at) / 1000;
+            const delta = totalQueries - this.previousSample.queries;
+            if (elapsed > 0 && delta >= 0) {
+                this.queryRateSamples.push({at: now, ratePerSecond: delta / elapsed});
+                this.queryRateSamples = this.queryRateSamples.slice(-30);
+            }
+        }
+        if (totalQueries !== null) {
+            this.previousSample = {queries: totalQueries, at: now};
+        }
+    }
+
+    _renderQueryRate() {
+        this.queryRateChart?.destroy();
+        this.queryRateChart = null;
+        const chart = typeof Chart === 'undefined' ? null : Chart;
+        const canvas = document.getElementById(this._elementId('rate-chart'));
+        const $empty = $(`#${this._elementId('rate-empty')}`);
+        $empty.toggle(!this.queryRateSamples.length);
+        $(canvas).toggle(Boolean(this.queryRateSamples.length));
+        if (!canvas || !chart || !this.queryRateSamples.length) {
+            return;
+        }
+        const color = '#2ca02c';
+        this.queryRateChart = new chart(canvas.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: this.queryRateSamples.map(sample => new Date(sample.at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})),
+                datasets: [{
+                    label: this.translations.requests_per_minute,
+                    data: this.queryRateSamples.map(sample => sample.ratePerSecond * 60),
+                    borderColor: color,
+                    backgroundColor: 'rgba(44, 160, 44, 0.16)',
+                    fill: true,
+                    tension: 0.22,
+                    pointRadius: 0,
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {colorschemes: false, legend: {display: false}},
+                scales: {
+                    y: {beginAtZero: true, ticks: {maxTicksLimit: 5, callback: value => this._formatCount(value)}},
+                    x: {ticks: {maxRotation: 0, autoSkip: true, maxTicksLimit: 5}}
+                }
+            }
+        });
     }
 
     _renderTypes() {
@@ -526,6 +597,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 <div class="dashboard-plus-dns-health-upstream-server">${escapeHtml(upstream.server)}</div>
             </div>`).join('') : `<div class="dashboard-plus-dns-health-empty">${escapeHtml(this.translations.no_upstreams)}</div>`);
         this._renderTypes();
+        this._renderQueryRate();
         this._renderRecent();
 
         const displayError = this.loading ? '' : this.error || this.totalsError;
@@ -582,6 +654,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             upstreams: value(3, {rows: []})?.rows || [],
             recent: value(4, {queries: [], types: {}})
         };
+        this._recordQueryRate(this._asNumber(this.data.stats?.data?.total?.num?.queries));
         this.loading = false;
         this._refreshTotals();
     }
