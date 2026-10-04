@@ -30,7 +30,7 @@
 #
 # <feed checkout> is a checkout of this repository's `packages` branch. The given release
 # packages (default: everything in ./dist) replace older versions of the same package in
-# repo/<series>, and the whole catalogue is signed again: pkg lists only what is in the folder
+# repo/<series>, and the whole catalog is signed again: pkg lists only what is in the folder
 # at signing time, so every package of the feed must be present. Commit and push the feed
 # checkout afterwards.
 
@@ -58,8 +58,8 @@ for PACKAGE in "$@"; do
     cp "${PACKAGE}" "${DIR}/"
 done
 pkg repo "${DIR}" "rsa:${KEY}"
-# pkg 2.x writes the catalogue as *.pkg, older pkg as *.tzst; a client may ask for either name,
-# so a leftover *.tzst must never keep serving an old catalogue
+# pkg 2.x writes the catalog as *.pkg, older pkg as *.tzst; a client may ask for either name,
+# so a leftover *.tzst must never keep serving an old catalog
 for ARCHIVE in packagesite data; do
     cp "${DIR}/${ARCHIVE}.pkg" "${DIR}/${ARCHIVE}.tzst"
 done

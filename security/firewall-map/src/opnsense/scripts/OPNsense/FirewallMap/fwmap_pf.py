@@ -103,8 +103,7 @@ def _counters_record(header, line):
         "id": None,
         "origif": None,
         "age": (
-            int(age.group("days") or 0) * 86400 + int(age.group("h")) * 3600
-            + int(age.group("m")) * 60 + int(age.group("s"))
+            sum(int(age.group(unit) or 0) * seconds for unit, seconds in (("days", 86400), ("h", 3600), ("m", 60), ("s", 1)))
         ) if age else None,
         **{key: int(value) for key, value in counters.groupdict().items()},
         # the rule that created the state (same label as in the firewall log)
@@ -163,8 +162,9 @@ def inside_address(address, networks=None, local_addresses=None, exclude_device=
     """
     if private_ip(address):
         return True
-    return (address not in (local_addresses or set())
-            and _network_device(address, networks, exclude_device) is not None)
+    if address in (local_addresses or set()):
+        return False
+    return _network_device(address, networks, exclude_device) is not None
 
 
 def _origin_address(record, local_addresses, networks):
@@ -282,8 +282,8 @@ def orientation(record, remote, networks=None, local_addresses=None):
     # behind outbound NAT the source port that matters is the inside host's, not the translated one
     source, target = (inside_endpoint(record, networks, local_addresses) or record["src"])["port"], record["dst"]["port"]
     # the client side must look ephemeral: keeps NFS (reserved port to 2049) and IKE (500 to 4500) outbound
-    if (record["protocol"] in ("tcp", "udp") and source and target and source.isdigit() and target.isdigit()
-            and int(source) < 1024 and int(target) >= 10000):
+    numeric = record["protocol"] in ("tcp", "udp") and source and target and source.isdigit() and target.isdigit()
+    if numeric and int(source) < 1024 and int(target) >= 10000:
         return True, source
     return False, target
 
@@ -470,7 +470,7 @@ def state_outside(record, pair):
     nat = record["nat"]
     # pfctl prints the wire side first for outbound states ("wire (original) -> remote") and last
     # for inbound ones ("original (wire) <- remote"); the outbound NAT source port, including the
-    # firewall's own randomised DNS ports, is only right on the wire side
+    # firewall's own randomized DNS ports, is only right on the wire side
     if record["direction"] == "out":
         public = record["src"]
     else:

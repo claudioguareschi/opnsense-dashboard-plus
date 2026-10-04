@@ -369,7 +369,6 @@ export default class FirewallMap extends BaseWidget {
         }
     }
 
-    /** Curated feeds picked in the dialog become URL table aliases; returns the names that failed. */
     /** Send only what the administrator changed, so an unrelated save never overwrites another's choices. */
     async _saveFirewallWide(values) {
         const geo = this.geoSettings;

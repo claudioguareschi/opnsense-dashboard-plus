@@ -5,7 +5,7 @@
   "description": "Builds the plugin's browser scripts: firewall-map-renderer.js (src/, vite.config.js) with its third-party license file, firewall-map-page.js (page/, vite.page.config.js) and the development-only firewall-map-diagnostics.js (page/diagnostics.js, vite.diagnostics.config.js). Run tools/build-renderer.sh from the repository root: it installs the pinned versions from package-lock.json (npm ci), builds, tests and copies the results into src/opnsense/www/js.",
   "scripts": {
     "build": "vite build && vite build --config vite.page.config.js && vite build --config vite.diagnostics.config.js",
-    "test": "node test.mjs"
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@deck.gl/core": "9.4.0",

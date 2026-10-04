@@ -45,6 +45,23 @@ class SettingsController extends ApiControllerBase
         return is_array($status) ? $status : [];
     }
 
+    /** The AbuseIPDB list download status, read directly: this runs on every widget and page load. */
+    private function blacklistStatus()
+    {
+        $file = '/var/db/firewallmap/abuseipdb.json';
+        return is_file($file) ? (json_decode((string)file_get_contents($file), true) ?: []) : [];
+    }
+
+    /** What the blocklist aliases follow: the switch, the chosen lists and whether an AbuseIPDB key exists. */
+    private function aliasInputs($general)
+    {
+        return [
+            (string)$general->blocklist_aliases,
+            (string)$general->threat_lists,
+            (string)$general->abuseipdb_key !== '',
+        ];
+    }
+
     public function getAction()
     {
         $general = (new FirewallMap())->general;
@@ -52,8 +69,7 @@ class SettingsController extends ApiControllerBase
             'provider' => (string)$general->provider,
             'update_days' => (string)$general->update_days,
             'abuseipdb_configured' => (string)$general->abuseipdb_key !== '',
-            // read directly: this runs on every widget and page load
-            'abuseipdb_blacklist' => json_decode((string)@file_get_contents('/var/db/firewallmap/abuseipdb.json'), true) ?: [],
+            'abuseipdb_blacklist' => $this->blacklistStatus(),
             'threat_lists' => (string)$general->threat_lists,
             'record_threats' => (string)$general->record_threats,
             'blocklist_aliases' => (string)$general->blocklist_aliases,
@@ -74,7 +90,7 @@ class SettingsController extends ApiControllerBase
         $ensure = false;
         $fetchBlacklist = false;
         /* the aliases follow the switch, the chosen lists and whether an AbuseIPDB key exists */
-        $aliasesBefore = [(string)$general->blocklist_aliases, (string)$general->threat_lists, (string)$general->abuseipdb_key !== ''];
+        $aliasesBefore = $this->aliasInputs($general);
         $listsBefore = (string)$general->threat_lists;
         /* the database is only re-checked when something that decides which one to fetch changed */
         $databaseBefore = [(string)$general->provider, (string)$general->update_days, (string)$general->license_key];
@@ -120,7 +136,7 @@ class SettingsController extends ApiControllerBase
         if (!empty($messages)) {
             return ['result' => 'failed', 'validations' => $messages];
         }
-        $aliasesAfter = [(string)$general->blocklist_aliases, (string)$general->threat_lists, (string)$general->abuseipdb_key !== ''];
+        $aliasesAfter = $this->aliasInputs($general);
         $aliasChanged = false;
         if ($aliasesAfter !== $aliasesBefore) {
             [$aliasModel, $aliasChanged, $aliasError] = BlocklistAliases::reconcile(

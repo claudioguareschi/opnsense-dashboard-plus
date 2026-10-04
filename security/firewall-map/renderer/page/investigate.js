@@ -35,7 +35,7 @@ function scoreBadge(score) {
   return `<span class="fwmap-pill fwmap-pill-${kind}">${escapeHtml(score)}%</span>`;
 }
 
-export function investigationCard(result) {
+function investigationCard(result) {
   if (result.status !== 'ok') {
     return `<div class="text-danger">${escapeHtml(result.error || T.action_failed)}</div>`;
   }

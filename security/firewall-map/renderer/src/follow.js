@@ -57,15 +57,13 @@ function union(boxes) {
 
 /**
  * map: {container, getView(), setView(view), landed(), arcs()} from the renderer.
- * options: {follow, followResumeMs, onFollowChange} from create().
+ * options: {follow, onFollowChange} from create().
  */
 export function createFollow(map, options = {}) {
   let follow = Boolean(options.follow);
-  let held = false;
   let hovering = false;
   let flying = false;
   let flightFrame = null;
-  let resumeTimer = null;
   // what live arcs covered at each check over the last FOLLOW_WINDOW_MS
   let seen = [];
   // a re-frame asked for (toggle, filter, first data) that runs at the next chance
@@ -166,7 +164,7 @@ export function createFollow(map, options = {}) {
     }
     seen = seen.filter((entry) => now - entry.time <= FOLLOW_WINDOW_MS);
     pendingFit = pendingFit || immediately;
-    if (!follow || held || hovering || flying || !seen.length) {
+    if (!follow || hovering || flying || !seen.length) {
       return;
     }
     const width = map.container.clientWidth;
@@ -215,27 +213,16 @@ export function createFollow(map, options = {}) {
       if (!follow) {
         return;
       }
-      if (options.followResumeMs) {
-        // the dashboard widget has no toggle: pause, and pick up again once the user leaves it be
-        clearTimeout(resumeTimer);
-        held = true;
-        resumeTimer = setTimeout(() => {
-          held = false;
-          update(true);
-        }, options.followResumeMs);
-        return;
-      }
       follow = false;
       options.onFollowChange?.(false);
     },
     diagnostics() {
       const view = map.getView();
-      return {follow, held, hovering, flying, pendingFit, window: seen.length,
+      return {follow, hovering, flying, pendingFit, window: seen.length,
         view: {longitude: view.longitude, latitude: view.latitude, zoom: view.zoom},
         target: target(map.container.clientWidth, map.container.clientHeight, liveBounds())};
     },
     destroy() {
-      clearTimeout(resumeTimer);
       cancelFlight();
       map.container.removeEventListener('pointerleave', stopHovering);
     },

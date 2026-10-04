@@ -50,7 +50,8 @@ class InvestigateController extends ApiControllerBase
         }
         // "abuseipdb" for the Reputation card's check; anything else looks up every source
         $sources = $this->request->getPost('sources') === 'abuseipdb' ? 'abuseipdb' : 'all';
-        $result = json_decode((new Backend())->configdpRun('firewallmap investigate', [$address, $sources]) ?? '', true);
+        $output = (new Backend())->configdpRun('firewallmap investigate', [$address, $sources]);
+        $result = json_decode($output ?? '', true);
         return is_array($result) ? $result : ['status' => 'failed', 'error' => 'no response'];
     }
 }

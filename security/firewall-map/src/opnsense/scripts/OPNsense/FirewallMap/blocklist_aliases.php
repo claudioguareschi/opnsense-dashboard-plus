@@ -46,7 +46,8 @@ if ($stored === null || isset($stored->blocklist_aliases)) {
 }
 $model = new FirewallMap();
 $general = $model->general;
-$general->blocklist_aliases = (BlocklistAliases::anyExisting() || (string)($stored->abuseipdb_alias ?? '') === '1') ? '1' : '0';
+$wanted = BlocklistAliases::anyExisting() || (string)($stored->abuseipdb_alias ?? '') === '1';
+$general->blocklist_aliases = $wanted ? '1' : '0';
 [$aliases, $changed, $error] = BlocklistAliases::reconcile(
     (string)$general->blocklist_aliases === '1',
     (string)$general->threat_lists,

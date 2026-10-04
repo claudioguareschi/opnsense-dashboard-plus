@@ -244,6 +244,7 @@ def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, inte
             continue
         target = entry["destination"]
         per_minute = blocks.per_minute(entry, now)
+        busiest_ports = sorted(entry["ports"].items(), key=lambda item: -item[1])[:5]
         result.append({
             "source": address,
             "target": target,
@@ -253,9 +254,9 @@ def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, inte
             "hits_per_minute": per_minute,
             "total": entry["total"],
             "threat": per_minute >= THREAT_HITS_PER_MINUTE,
-            "ports": [name for name, _ in sorted(entry["ports"].items(), key=lambda item: -item[1])][:5],
+            "ports": [name for name, _ in busiest_ports],
             # the same service names and ports as permitted flows, busiest first
-            "services": [_service(port, hits) for port, hits in sorted(entry["ports"].items(), key=lambda item: -item[1])][:5],
+            "services": [_service(port, hits) for port, hits in busiest_ports],
             "port_count": len(entry["ports"]),
             "seconds": round(now - entry.get("first", now)),
             "rule": descriptions.get(entry["rule"], ""),

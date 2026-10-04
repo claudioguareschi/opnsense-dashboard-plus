@@ -29,7 +29,7 @@ import {DEFAULT_OPTIONS} from './options.js';
 import {serviceCategory} from './palette.js';
 import {idsOutcome} from './summaries.js';
 
-export const ARC_SAMPLES = 32;
+const ARC_SAMPLES = 32;
 // blocked traffic: pulses race into the firewall
 const BLOCK_PULSE_PERIOD = 1.1;
 const HEAVY_TOP_MIN_RATE = 10000;
@@ -37,7 +37,7 @@ const HEAVY_TOP_MIN_RATE = 10000;
 const FASTEST_LOG_RATE = 7;
 // a direction counts as "both ways" when the smaller side carries at least this share
 const BIDIRECTIONAL_SHARE = 0.25;
-/** The arc and map entries for connections Suricata alerted on (see the collector's Correlator). */
+/** How long the arc of a closed connection Suricata alerted on stays, fading out (see the collector's Correlator). */
 export const IDS_ARC_FADE_SECONDS = 60;
 
 export function mercatorY(latitude) {
@@ -168,6 +168,7 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
       direction = 'out';
     }
     const strength = Math.min(1, Math.log10(1 + rate) / FASTEST_LOG_RATE);
+    const busiest = members.reduce((top, member) => ((member.rate ?? 0) > (top.rate ?? 0) ? member : top), members[0]);
     arcs.push({
       key,
       lane,
@@ -180,8 +181,8 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
       members,
       // color follows the dominant direction; pulses show both when traffic flows both ways
       toward: inShare >= 0.5,
-      service: serviceCategory(members.slice().sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))[0]?.services?.[0]),
-      egress: members.slice().sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))[0]?.egress || 'Unknown',
+      service: serviceCategory(busiest?.services?.[0]),
+      egress: busiest?.egress || 'Unknown',
       threat: members.some((member) => member.threat),
       contained: !members.some((member) => member.threat) && members.some((member) => member.contained),
       ids: members[0].ids_flow || null,

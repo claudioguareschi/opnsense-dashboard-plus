@@ -33,7 +33,7 @@ import {ic} from './icons.js';
 const HISTORY_POINTS = 60;
 const TALKER_ROWS = 20;
 /** "VLAN10_MGMT" reads as "MGMT (VLAN10)"; the configured name stays in the tooltip. */
-export function shortInterface(name) {
+function shortInterface(name) {
   const match = /^VLAN(\d+)[_ -]+(.+)$/i.exec(plain(name || ''));
   return match ? `${match[2]} (VLAN${match[1]})` : plain(name || '');
 }

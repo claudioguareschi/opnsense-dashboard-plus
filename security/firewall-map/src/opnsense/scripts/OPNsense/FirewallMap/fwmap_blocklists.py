@@ -261,6 +261,11 @@ class BlocklistIndex:
             self._refresh(tables)
         return True
 
+    @property
+    def names(self):
+        """The lists in the index, in their bit order."""
+        return self.index[0]
+
     def lookup(self, address):
         try:
             parsed = ipaddress.ip_address(address)
@@ -288,11 +293,13 @@ class BlocklistIndex:
         return [name for bit, name in enumerate(names) if mask & (1 << bit)]
 
 
-def threat_lists_for(address, blocklists, reputation, alerts=None):
+def threat_lists_for(address, blocklists, reputation, ids_evidence=None):
+    """The threat lists an address is on: chosen lists, the AbuseIPDB verdict and, with
+    `ids_evidence` (anything with flags(address): the Correlator, an AlertTracker), IDS alerts."""
     lists = blocklists.lookup(address) if blocklists else []
     if reputation is not None and address in reputation.flagged:
         lists = lists + [REPUTATION_LIST]
-    if alerts is not None and alerts.flags(address):
+    if ids_evidence is not None and ids_evidence.flags(address):
         lists = lists + [IDS_LIST]
     return lists
 

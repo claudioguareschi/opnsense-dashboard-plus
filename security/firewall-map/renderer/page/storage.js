@@ -1,5 +1,3 @@
-<?php
-
 /*
  * Copyright (C) 2026 Claudio Guareschi <cguareschimd@gmail.com>
  * All rights reserved.
@@ -25,28 +23,22 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-namespace OPNsense\FirewallMap;
 
-/**
- * Full-size Firewall Map+ view, opened from the dashboard widget's link button.
- */
-class IndexController extends \OPNsense\Base\IndexController
-{
-    /** A script's modification time as its cache-busting version, 0 when it is not installed. */
-    private function version($script)
-    {
-        $file = '/usr/local/opnsense/www/js/' . $script;
-        return is_file($file) ? filemtime($file) : 0;
-    }
+/* The viewer's own preferences in localStorage (follow, panel sizes, the timeline). Storage can be
+ * blocked (a private window): a choice then lasts for this page only. */
 
-    public function indexAction()
-    {
-        $this->view->title = gettext('Firewall Map');
-        /* cache_safe() keys on the firmware version; the plugin's renderer changes independently */
-        $this->view->rendererVersion = $this->version('firewall-map-renderer.js');
-        $this->view->pageVersion = $this->version('firewall-map-page.js');
-        /* the ?debug=1 panel: installed by development packages only */
-        $this->view->diagnosticsVersion = $this->version('firewall-map-diagnostics.js');
-        $this->view->pick('OPNsense/FirewallMap/index');
-    }
+export function readStorage(key) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch (_) {
+    return null;
+  }
+}
+
+export function writeStorage(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (_) {
+    // blocked storage: nothing to keep
+  }
 }

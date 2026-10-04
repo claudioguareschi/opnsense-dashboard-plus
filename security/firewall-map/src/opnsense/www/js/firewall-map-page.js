@@ -124,6 +124,7 @@
 			follow: config.follow === "1"
 		};
 	}
+	/** The same as a query string, for a request that does not build it itself (the page). */
 	function snapshotQuery(settings) {
 		return `?blocks_min=${settings.blockMin ?? DEFAULT_OPTIONS.blockMin}${settings.hostnames ? "&hostnames=1" : ""}`;
 	}
@@ -1218,11 +1219,7 @@
 		rerender();
 	}
 	//#endregion
-	//#region page/layout.js
-	var LAYOUT_KEY = "firewallmap.layout";
-	var FOLLOW_KEY = "firewallmap.follow";
-	var KEY_STEP_PX = 24;
-	var KEY_STEP_SHARE = .05;
+	//#region page/storage.js
 	function readStorage(key) {
 		try {
 			return window.localStorage.getItem(key);
@@ -1235,6 +1232,12 @@
 			window.localStorage.setItem(key, value);
 		} catch (_) {}
 	}
+	//#endregion
+	//#region page/layout.js
+	var LAYOUT_KEY = "firewallmap.layout";
+	var FOLLOW_KEY = "firewallmap.follow";
+	var KEY_STEP_PX = 24;
+	var KEY_STEP_SHARE = .05;
 	/**
 	* Follow traffic: the choice made on this page wins; until one is made, the dashboard widget's
 	* "Follow traffic" option decides, so the two never disagree silently.
@@ -1782,14 +1785,7 @@
 		setTab: () => {},
 		setFollow: () => {}
 	};
-	function storage(key, value) {
-		try {
-			if (value === void 0) return window.localStorage.getItem(key);
-			window.localStorage.setItem(key, value);
-		} catch (_) {}
-		return null;
-	}
-	var timelineOpen = storage(TIMELINE_KEY) === "1";
+	var timelineOpen = readStorage(TIMELINE_KEY) === "1";
 	/** "Fri 3 Oct, 16:42:10" in the browser's language. */
 	function takenText(meta, withDate = true) {
 		const date = /* @__PURE__ */ new Date((meta?.taken || 0) * 1e3);
@@ -2171,7 +2167,7 @@
 		$("#fwmap-banner").on("click", ".fwmap-snap-note-btn", () => editNote()).on("click", ".fwmap-snap-download", () => download()).on("click", ".fwmap-snap-delete", () => remove());
 		$("#fwmap-timeline").on("click", ".fwmap-tl-toggle", () => {
 			timelineOpen = !timelineOpen;
-			storage(TIMELINE_KEY, timelineOpen ? "1" : "0");
+			writeStorage(TIMELINE_KEY, timelineOpen ? "1" : "0");
 			renderTimeline();
 		}).on("click", ".fwmap-tl-step", function() {
 			step(Number($(this).data("step")));

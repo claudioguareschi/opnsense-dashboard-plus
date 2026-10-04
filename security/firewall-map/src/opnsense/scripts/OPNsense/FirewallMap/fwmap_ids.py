@@ -302,8 +302,8 @@ class Correlator:
             flow.setdefault("closed", now)
         connection = self.current.get(key) or flow["connection"]
         inside = split_host_port(connection.get("inside") or "")[0] if flow["kind"] != "blocked" else ""
-        groups = [{"flow_id": flow_id, "signatures": sorted(
-                      signatures.values(), key=lambda item: (item["severity"], -item["count"]))[:5]}
+        groups = [{"flow_id": flow_id,
+                   "signatures": sorted(signatures.values(), key=lambda item: (item["severity"], -item["count"]))[:5]}
                   for flow_id, signatures in flow["alerts"].items()]
         items = self._alert_items(flow)
         return {

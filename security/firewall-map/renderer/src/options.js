@@ -52,12 +52,12 @@ export function parseSettings(config = {}) {
   };
 }
 
-/** The snapshot request for these settings: the viewer's block threshold and reverse DNS choice. */
-/** The same as parameters, for a request that builds the query itself (the widget's ajaxCall). */
+/** The live data request's parameters: the viewer's block threshold and reverse DNS choice. */
 export function snapshotParams(settings) {
   return {blocks_min: settings.blockMin ?? DEFAULT_OPTIONS.blockMin, ...(settings.hostnames ? {hostnames: 1} : {})};
 }
 
+/** The same as a query string, for a request that does not build it itself (the page). */
 export function snapshotQuery(settings) {
   return `?blocks_min=${settings.blockMin ?? DEFAULT_OPTIONS.blockMin}${settings.hostnames ? '&hostnames=1' : ''}`;
 }

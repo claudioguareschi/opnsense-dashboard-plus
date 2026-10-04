@@ -295,9 +295,17 @@ copied into a fork of opnsense/plugins as they are.
 `build.sh` is the only step needed for either package. The Dashboard Plus widgets are plain
 JavaScript and ship as written. Firewall Map+'s map renderer is the one part with its own build:
 its sources in `security/firewall-map/renderer` are bundled with Vite into
-`firewall-map-renderer.js` and `firewall-map-page.js` (in `src/opnsense/www/js/`), and those built
-files are committed, so rebuild them only after changing the renderer sources. See
-`renderer/package.json`.
+`firewall-map-renderer.js` (with `firewall-map-renderer.LICENSE`, the licenses of the bundled
+deck.gl and luma.gl libraries) and `firewall-map-page.js` in `src/opnsense/www/js/`. Those built
+files are committed, so rebuild them only after changing the renderer sources:
+
+```sh
+tools/build-renderer.sh           # npm ci with the pinned versions, build, test, copy into src/
+tools/build-renderer.sh --check   # rebuild and confirm the committed files are identical
+```
+
+It needs Node.js 20 or newer. Development packages also ship `firewall-map-diagnostics.js`, a
+diagnostics panel (add `?debug=1` to the map's address); release packages leave it out.
 
 ### Publishing (maintainer)
 
@@ -313,7 +321,7 @@ tools/publish.sh /path/to/packages-branch-checkout
 
 then commit and push that checkout, and tag the release commit on `main` as `v<version>`.
 Every package of the feed must be in the folder when it is signed; `publish.sh` replaces older
-versions and signs the whole catalogue.
+versions and signs the whole catalog.
 
 ## Changelog
 

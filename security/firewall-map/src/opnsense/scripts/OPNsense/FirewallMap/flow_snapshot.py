@@ -27,7 +27,7 @@
 """Return the latest Firewall Map flow summary written by the collector.
 
 The dashboard polls this through configd, so it must stay cheap: it only reads
-the compact JSON document the persistent collector rewrites every second, marks
+the compact JSON document the persistent collector rewrites every 2 seconds, marks
 the collector as in use, and starts it if it is not running (it stops by itself
 when no dashboard has asked for a while).
 """

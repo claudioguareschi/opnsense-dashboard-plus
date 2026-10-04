@@ -25,28 +25,28 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
 namespace OPNsense\FirewallMap;
 
 /**
- * Full-size Firewall Map+ view, opened from the dashboard widget's link button.
+ * Arguments the API passes to the plugin's configd actions. configd splits on spaces and reads
+ * one 4 kB message, so free text travels as base64url (only [A-Za-z0-9_-] reach configd) and is
+ * cut to a byte budget on a character boundary.
  */
-class IndexController extends \OPNsense\Base\IndexController
+class ConfigdArgument
 {
-    /** A script's modification time as its cache-busting version, 0 when it is not installed. */
-    private function version($script)
+    /** A saved snapshot's id (firewallmap_snapshots.py, ID_PATTERN). */
+    public const SNAPSHOT_ID = '/^\d{8}T\d{6}Z-[0-9a-f]{4}$/';
+
+    /** `$text`, trimmed and cut to `$bytes` bytes, as base64url; `$empty` when there is none. */
+    public static function text($text, $bytes, $empty = '-')
     {
-        $file = '/usr/local/opnsense/www/js/' . $script;
-        return is_file($file) ? filemtime($file) : 0;
+        $text = mb_strcut(trim((string)$text), 0, $bytes, 'UTF-8');
+        return $text === '' ? $empty : rtrim(strtr(base64_encode($text), '+/', '-_'), '=');
     }
 
-    public function indexAction()
+    public static function isSnapshotId($id)
     {
-        $this->view->title = gettext('Firewall Map');
-        /* cache_safe() keys on the firmware version; the plugin's renderer changes independently */
-        $this->view->rendererVersion = $this->version('firewall-map-renderer.js');
-        $this->view->pageVersion = $this->version('firewall-map-page.js');
-        /* the ?debug=1 panel: installed by development packages only */
-        $this->view->diagnosticsVersion = $this->version('firewall-map-diagnostics.js');
-        $this->view->pick('OPNsense/FirewallMap/index');
+        return is_string($id) && preg_match(self::SNAPSHOT_ID, $id) === 1;
     }
 }

@@ -45,7 +45,12 @@ export function mix(a, b, amount) {
 
 const ORANGE = [240, 140, 0];
 
-/** WCAG relative luminance of an [r, g, b] color. */
+/** Perceived brightness of an [r, g, b] color, 0 to 1 (Rec. 709 weights, no gamma): a quick light/dark test. */
+function brightness(color) {
+  return (0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]) / 255;
+}
+
+/** WCAG relative luminance of an [r, g, b] color (gamma-corrected), for contrast ratios. */
 function relativeLuminance(color) {
   const channel = (value) => {
     const c = value / 255;
@@ -54,7 +59,7 @@ function relativeLuminance(color) {
   return 0.2126 * channel(color[0]) + 0.7152 * channel(color[1]) + 0.0722 * channel(color[2]);
 }
 
-export function contrast(a, b) {
+function contrast(a, b) {
   const [light, dark] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
   return (light + 0.05) / (dark + 0.05);
 }
@@ -63,7 +68,7 @@ export function contrast(a, b) {
  * The theme's color pushed away from the background until it stands out by `ratio` (WCAG
  * contrast for graphics and large text is 3:1): lighter on dark themes, darker on light ones.
  */
-export function standOut(color, background, dark, ratio = 3) {
+function standOut(color, background, dark, ratio = 3) {
   const target = dark ? [255, 255, 255] : [0, 0, 0];
   let result = color.slice(0, 3);
   for (let step = 1; step <= 10 && contrast(result, background) < ratio; step += 1) {
@@ -114,7 +119,7 @@ export function palette(theme = DEFAULT_THEME) {
 export function cssVariables(colors) {
   const color = (value) => `rgb(${value.slice(0, 3).join(', ')})`;
   // readable text on a solid status color
-  const on = (value) => ((0.2126 * value[0] + 0.7152 * value[1] + 0.0722 * value[2]) / 255 > 0.6 ? 'rgb(40, 30, 0)' : '#fff');
+  const on = (value) => (brightness(value) > 0.6 ? 'rgb(40, 30, 0)' : '#fff');
   return {
     '--fwmap-accent': color(colors.accent),
     '--fwmap-on-accent': on(colors.accent),
@@ -170,8 +175,7 @@ export function readTheme(element) {
   const warning = document.createElement('span');
   warning.className = 'text-warning';
   const amber = probeColor(warning) || [240, 173, 78];
-  const luminance = (0.2126 * background[0] + 0.7152 * background[1] + 0.0722 * background[2]) / 255;
-  return {dark: luminance < 0.5, background, text, accent, success: green, warning: amber};
+  return {dark: brightness(background) < 0.5, background, text, accent, success: green, warning: amber};
 }
 
 // categories for "color by service"; each flow uses its busiest service

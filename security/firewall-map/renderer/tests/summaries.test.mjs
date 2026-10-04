@@ -1,5 +1,3 @@
-<?php
-
 /*
  * Copyright (C) 2026 Claudio Guareschi <cguareschimd@gmail.com>
  * All rights reserved.
@@ -25,28 +23,22 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-namespace OPNsense\FirewallMap;
 
-/**
- * Full-size Firewall Map+ view, opened from the dashboard widget's link button.
- */
-class IndexController extends \OPNsense\Base\IndexController
-{
-    /** A script's modification time as its cache-busting version, 0 when it is not installed. */
-    private function version($script)
-    {
-        $file = '/usr/local/opnsense/www/js/' . $script;
-        return is_file($file) ? filemtime($file) : 0;
-    }
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {idsOutcome, outcome} from '../src/summaries.js';
 
-    public function indexAction()
-    {
-        $this->view->title = gettext('Firewall Map');
-        /* cache_safe() keys on the firmware version; the plugin's renderer changes independently */
-        $this->view->rendererVersion = $this->version('firewall-map-renderer.js');
-        $this->view->pageVersion = $this->version('firewall-map-page.js');
-        /* the ?debug=1 panel: installed by development packages only */
-        $this->view->diagnosticsVersion = $this->version('firewall-map-diagnostics.js');
-        $this->view->pick('OPNsense/FirewallMap/index');
-    }
-}
+test('one verdict for flagged and stopped traffic everywhere', () => {
+  assert.equal(outcome({flagged: true, stopped: false}), 'danger');
+  assert.equal(outcome({flagged: true, stopped: true}), 'contained');
+  assert.equal(outcome({flagged: false, stopped: true}), 'blocked');
+  assert.equal(outcome({flagged: false, stopped: false}), 'ok');
+});
+
+test('an IDS connection is flagged by a severe alert or a threat list, stopped by a block or an IPS drop', () => {
+  assert.equal(idsOutcome({severity: 1, kind: 'current'}), 'danger');
+  assert.equal(idsOutcome({severity: 3, lists: ['Spamhaus DROP'], kind: 'current'}), 'danger');
+  assert.equal(idsOutcome({severity: 3, kind: 'current'}), 'ok');
+  assert.equal(idsOutcome({severity: 2, kind: 'blocked'}), 'contained');
+  assert.equal(idsOutcome({severity: 3, kind: 'current', ips_dropped: true}), 'blocked');
+});

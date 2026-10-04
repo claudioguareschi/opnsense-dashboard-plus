@@ -231,8 +231,8 @@ def _record(db, seen, now):
         # only a connection opened after the block reopens it; existing and closing states
         # (TIME_WAIT lingers for a minute or more) are not new traffic
         youngest = entry.get("youngest")
-        if (status == "blocked" and youngest is not None
-                and now - youngest > (row[2] or 0) + BLOCK_SLACK_SECONDS):
+        blocked_since = (row[2] or 0) + BLOCK_SLACK_SECONDS
+        if status == "blocked" and youngest is not None and now - youngest > blocked_since:
             data["seen_after_block"] = True
             status = "new"
         db.execute("UPDATE threats SET last_seen = ?, samples = samples + 1, data = ?, status = ?, disposition = ? "
@@ -251,8 +251,8 @@ def merge_connections(old, new):
         if previous.get("ids") and not item.get("ids"):
             item = {**item, "ids": previous["ids"]}
         merged[item["key"]] = item
-    ordered = sorted(merged.values(), key=lambda item: (not item.get("ids"), item.get("decision") == "block",
-                                                         -(item.get("seen") or 0)))
+    ordered = sorted(merged.values(),
+                     key=lambda item: (not item.get("ids"), item.get("decision") == "block", -(item.get("seen") or 0)))
     return ordered[:MAX_CONNECTIONS]
 
 
@@ -481,7 +481,10 @@ def decode_query(value):
 
 def main(arguments, path=DATABASE):
     command = arguments[0] if arguments else "list"
-    argument = lambda index: arguments[index] if len(arguments) > index else None  # noqa: E731
+
+    def argument(index):
+        return arguments[index] if len(arguments) > index else None
+
     db = connect(path)
     if command == "set" and len(arguments) >= 3:
         note = decode_note(arguments[3]) if len(arguments) > 3 and arguments[3] != "-" else None

@@ -26,14 +26,14 @@
 
 """Persistent PF state sampler for Firewall Map+.
 
-Samples the PF state table every second, keeps per-state byte/packet counters
+Samples the PF state table every 2 seconds, keeps per-state byte/packet counters
 between samples and aggregates counter deltas into public (firewall, remote)
 flows. Only a compact, capped, geo-enriched summary is written to disk for the
 dashboard API to read; the browser never triggers a PF walk or a GeoIP lookup.
 
 A flow is active only while its counters advance. Idle flows fade out over
 FADE_SECONDS and a flow is dropped as soon as its last PF state disappears.
-All GeoLite lookups are local (mmdblookup against the installed database).
+All geolocation lookups are local (mmdblookup against the installed MaxMind or DB-IP database).
 
 This module is the orchestrator; parsing, caches, threat lists, names, blocks and
 Suricata correlation live in the fwmap_* modules next to it.
@@ -553,9 +553,9 @@ class Collector:
             self.descriptions, self.interfaces, self.leases = rule_descriptions(), interface_names(), lease_names()
             self.correlator.forwards = port_forwards()
             self.checked["metadata"] = now
-        if (self._due("blocklists", now, BLOCKLIST_REFRESH_SECONDS)
-                and self.blocklists.refresh(chosen_threat_lists(self.values.get("threat_lists")))):
-            self.checked["blocklists"] = now
+        if self._due("blocklists", now, BLOCKLIST_REFRESH_SECONDS):
+            if self.blocklists.refresh(chosen_threat_lists(self.values.get("threat_lists"))):
+                self.checked["blocklists"] = now
         self.reputation.refresh(now)
 
     def ingest(self, records, now, wall, foreground):
@@ -615,7 +615,7 @@ class Collector:
         # (not loopback or the IPsec encapsulation device: no inside host lives behind them)
         payload["interfaces"] = sorted({name for device, name in self.interfaces.items()
                                         if not re.match(r"^(lo|enc)\d+$", device)}, key=str.lower)
-        payload["threat_lists"] = list(self.blocklists.index[0]) + ([REPUTATION_LIST] if self.reputation.scores else [])
+        payload["threat_lists"] = list(self.blocklists.names) + ([REPUTATION_LIST] if self.reputation.scores else [])
         if origin and geo.get(origin) and not any(location["id"] == origin for location in payload["locations"]):
             location = geo.get(origin)
             payload["locations"].append({

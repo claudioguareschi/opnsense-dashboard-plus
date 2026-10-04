@@ -28,6 +28,7 @@ namespace OPNsense\FirewallMap\Api;
 
 use OPNsense\Base\ApiControllerBase;
 use OPNsense\Core\Backend;
+use OPNsense\FirewallMap\ConfigdArgument;
 
 /**
  * Saved map snapshots: everyone who may view the map takes, lists, reads and annotates them (see ACL);
@@ -35,15 +36,6 @@ use OPNsense\Core\Backend;
  */
 class SnapshotsController extends ApiControllerBase
 {
-    private const ID_PATTERN = '/^\d{8}T\d{6}Z-[0-9a-f]{4}$/';
-
-    /** Free text travels as base64url so configd only ever sees [A-Za-z0-9_-]; "-" means none. */
-    private function encodeText($text, $length)
-    {
-        $text = mb_substr(trim((string)$text), 0, $length);
-        return $text === '' ? '-' : rtrim(strtr(base64_encode($text), '+/', '-_'), '=');
-    }
-
     private function run($action, $parameters = [])
     {
         $result = json_decode((new Backend())->configdpRun("firewallmap snapshot {$action}", $parameters) ?? '', true);
@@ -56,7 +48,7 @@ class SnapshotsController extends ApiControllerBase
             return ['result' => 'failed'];
         }
         $user = $this->session->has('Username') ? $this->session->get('Username') : '';
-        return $this->run('save', [$this->encodeText($user, 64)]);
+        return $this->run('save', [ConfigdArgument::text($user, 256)]);
     }
 
     public function listAction()
@@ -66,7 +58,7 @@ class SnapshotsController extends ApiControllerBase
 
     public function getAction($id = null)
     {
-        if (!preg_match(self::ID_PATTERN, (string)$id)) {
+        if (!ConfigdArgument::isSnapshotId($id)) {
             return ['result' => 'failed', 'error' => 'unknown snapshot'];
         }
         $minimum = max(1, min(100, (int)($this->request->get('blocks_min') ?? 1)));
@@ -75,9 +67,9 @@ class SnapshotsController extends ApiControllerBase
 
     public function noteAction($id = null)
     {
-        if (!$this->request->isPost() || !preg_match(self::ID_PATTERN, (string)$id)) {
+        if (!$this->request->isPost() || !ConfigdArgument::isSnapshotId($id)) {
             return ['result' => 'failed'];
         }
-        return $this->run('note', [(string)$id, $this->encodeText($this->request->getPost('note') ?? '', 500)]);
+        return $this->run('note', [(string)$id, ConfigdArgument::text($this->request->getPost('note') ?? '', 1500)]);
     }
 }

@@ -26,28 +26,13 @@
 
 /* The page layout: resizable panels (remembered per browser) and the follow-traffic toggle. */
 import {state, T} from './context.js';
+import {readStorage, writeStorage} from './storage.js';
 
 const LAYOUT_KEY = 'firewallmap.layout';
 const FOLLOW_KEY = 'firewallmap.follow';
 // arrow keys move a splitter by this many pixels (side panel) or this share (the two side boxes)
 const KEY_STEP_PX = 24;
 const KEY_STEP_SHARE = 0.05;
-
-function readStorage(key) {
-  try {
-    return window.localStorage.getItem(key);
-  } catch (_) {
-    return null;  // private windows or blocked storage
-  }
-}
-
-function writeStorage(key, value) {
-  try {
-    window.localStorage.setItem(key, value);
-  } catch (_) {
-    // private windows or blocked storage: the choice lasts for this page only
-  }
-}
 
 /**
  * Follow traffic: the choice made on this page wins; until one is made, the dashboard widget's

@@ -35,7 +35,7 @@ class FlowController extends ApiControllerBase
     /**
      * Return the latest capped, geo-enriched flow summary from the collector.
      *
-     * The collector samples PF counters every second in the background; this
+     * The collector samples PF counters every 2 seconds in the background; this
      * request only reads its output, so dashboard polling never walks the
      * state table or performs GeoIP lookups.
      */
@@ -46,7 +46,8 @@ class FlowController extends ApiControllerBase
         $mode = $this->request->get('hostnames') === '1' ? 'hostnames' : 'plain';
         /* per-viewer threshold: blocked sources need this many hits before they are drawn */
         $minimum = max(1, min(100, (int)($this->request->get('blocks_min') ?? 1)));
-        $result = json_decode($backend->configdpRun('firewallmap flow snapshot', [$mode, (string)$minimum]) ?? '', true);
+        $output = $backend->configdpRun('firewallmap flow snapshot', [$mode, (string)$minimum]);
+        $result = json_decode($output ?? '', true);
 
         return is_array($result) ? $result : ['status' => 'failed', 'flows' => []];
     }

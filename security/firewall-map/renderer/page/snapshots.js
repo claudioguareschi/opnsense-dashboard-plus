@@ -34,24 +34,13 @@ import {escapeHtml, formatBytes, hostPort, plural} from '../src/format.js';
 import {confirmAction, getJSON, notifyFailure, postJSON} from './api.js';
 import {state, T} from './context.js';
 import {ic} from './icons.js';
+import {readStorage, writeStorage} from './storage.js';
 
 const TIMELINE_KEY = 'firewallmap.timeline';
 // the page's hooks into main.js (set by bindSnapshots), so this module needs no circular import
 let hooks = {refresh: () => {}, renderTabs: () => {}, renderDetails: () => {}, setTab: () => {}, setFollow: () => {}};
 
-function storage(key, value) {
-  try {
-    if (value === undefined) {
-      return window.localStorage.getItem(key);
-    }
-    window.localStorage.setItem(key, value);
-  } catch (_) {
-    // private windows or blocked storage: the choice lasts for this page only
-  }
-  return null;
-}
-
-let timelineOpen = storage(TIMELINE_KEY) === '1';
+let timelineOpen = readStorage(TIMELINE_KEY) === '1';
 
 /** "Fri 3 Oct, 16:42:10" in the browser's language. */
 export function takenText(meta, withDate = true) {
@@ -77,7 +66,7 @@ function countsText(meta) {
   return parts.map((part, index) => (index ? part : escapeHtml(part))).join(' · ');
 }
 
-export async function loadSnapshots() {
+async function loadSnapshots() {
   try {
     const result = await getJSON('/api/firewallmap/snapshots/list');
     state.snapshots = result.snapshots || [];
@@ -94,7 +83,7 @@ export async function loadSnapshots() {
 }
 
 /** The camera: a flash, a saved snapshot, a note that offers to open it. Nothing to fill in. */
-export async function takeSnapshot() {
+async function takeSnapshot() {
   const frame = document.getElementById('fwmap-map');
   window.FirewallMapRenderer.host.flash(frame);
   const $button = $('#fwmap-camera').prop('disabled', true);
@@ -125,7 +114,7 @@ export async function takeSnapshot() {
   }
 }
 
-export async function openSnapshot(id) {
+async function openSnapshot(id) {
   try {
     const result = await getJSON(`/api/firewallmap/snapshots/get/${encodeURIComponent(id)}?blocks_min=${state.settings?.blockMin ?? 3}`);
     if (result.result !== 'ok') {
@@ -440,7 +429,7 @@ export function renderSnapshotList() {
 }
 
 /** The header switch, the camera, the frame, banner and timeline, and the tab if it is open. */
-export function renderChrome() {
+function renderChrome() {
   const snapshot = state.mode === 'snapshot';
   $('#fwmap-map').toggleClass('fwmap-frozen', snapshot);
   $('#fwmap-mode-live').toggleClass('active', !snapshot).attr('aria-pressed', String(!snapshot));
@@ -486,7 +475,7 @@ export function bindSnapshots(pageHooks) {
   $('#fwmap-timeline')
     .on('click', '.fwmap-tl-toggle', () => {
       timelineOpen = !timelineOpen;
-      storage(TIMELINE_KEY, timelineOpen ? '1' : '0');
+      writeStorage(TIMELINE_KEY, timelineOpen ? '1' : '0');
       renderTimeline();
     })
     .on('click', '.fwmap-tl-step', function () {

@@ -4,3 +4,4 @@ node_modules/
 __pycache__/
 *.pyc
 dist-firewall-map*/
+.DS_Store

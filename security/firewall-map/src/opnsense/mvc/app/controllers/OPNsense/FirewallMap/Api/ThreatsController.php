@@ -28,6 +28,7 @@ namespace OPNsense\FirewallMap\Api;
 
 use OPNsense\Base\ApiControllerBase;
 use OPNsense\Core\Backend;
+use OPNsense\FirewallMap\ConfigdArgument;
 
 /**
  * Threat history organized by observed disposition (administrators only, see ACL).
@@ -42,23 +43,13 @@ class ThreatsController extends ApiControllerBase
        text by a third (2400 bytes: 800 characters of CJK, 600 emoji, 2400 of Latin text) */
     private const NOTE_BYTES = 2400;
 
-    /**
-     * Free text travels as base64url so configd only ever sees [A-Za-z0-9_-]. Cut to `$bytes`
-     * bytes on a character boundary; `$empty` stands for no text.
-     */
-    private function encodeText($text, $bytes, $empty = '-')
-    {
-        $text = mb_strcut(trim((string)$text), 0, $bytes, 'UTF-8');
-        return $text === '' ? $empty : rtrim(strtr(base64_encode($text), '+/', '-_'), '=');
-    }
-
     /** One page of a tab; `q` searches what the queue displays, `offset` and `limit` page it. */
     public function listAction($status = null)
     {
         $status = in_array($status, self::VIEWS, true) || $status === 'counts' ? $status : 'all';
         $offset = max(0, (int)($this->request->get('offset') ?? 0));
         $limit = max(1, min(500, (int)($this->request->get('limit') ?? 100)));
-        $query = $this->encodeText($this->request->get('q') ?? '', 200);
+        $query = ConfigdArgument::text($this->request->get('q') ?? '', 200);
         $result = json_decode((new Backend())->configdpRun(
             'firewallmap threats list',
             [$status, (string)$offset, (string)$limit, $query]
@@ -80,7 +71,10 @@ class ThreatsController extends ApiControllerBase
             return ['result' => 'failed', 'error' => 'unknown status'];
         }
         /* "-": no note sent, keep the old one; "=": an empty note, clear it */
-        $note = $this->request->hasPost('note') ? $this->encodeText($this->request->getPost('note'), self::NOTE_BYTES, '=') : '-';
+        $note = '-';
+        if ($this->request->hasPost('note')) {
+            $note = ConfigdArgument::text($this->request->getPost('note'), self::NOTE_BYTES, '=');
+        }
         $result = json_decode(
             (new Backend())->configdpRun('firewallmap threats set', [$address, $status, $note]) ?? '',
             true
@@ -99,8 +93,9 @@ class ThreatsController extends ApiControllerBase
         if (!in_array($from, self::VIEWS, true) || !in_array($to, self::STATUSES, true)) {
             return ['result' => 'failed', 'error' => 'unknown status'];
         }
-        $query = $this->encodeText($this->request->getPost('query') ?? '', 200);
-        $result = json_decode((new Backend())->configdpRun('firewallmap threats bulk', [$from, $to, $query]) ?? '', true);
+        $query = ConfigdArgument::text($this->request->getPost('query') ?? '', 200);
+        $output = (new Backend())->configdpRun('firewallmap threats bulk', [$from, $to, $query]);
+        $result = json_decode($output ?? '', true);
         return is_array($result) ? $result : ['result' => 'failed', 'error' => 'no response'];
     }
 
@@ -114,7 +109,7 @@ class ThreatsController extends ApiControllerBase
         if (!in_array($status, ['dismissed', 'reviewed'], true)) {
             return ['result' => 'failed', 'error' => 'only dismissed or reviewed entries can be deleted'];
         }
-        $query = $this->encodeText($this->request->getPost('query') ?? '', 200);
+        $query = ConfigdArgument::text($this->request->getPost('query') ?? '', 200);
         $result = json_decode((new Backend())->configdpRun('firewallmap threats purge', [$status, $query]) ?? '', true);
         return is_array($result) ? $result : ['result' => 'failed', 'error' => 'no response'];
     }
