@@ -135,6 +135,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             .dashboard-plus-dns-health-upstreams {
                 display: grid;
                 gap: 0.25em;
+                padding: 0 0.65em 0.65em;
             }
             .dashboard-plus-dns-health-upstream {
                 display: grid;
@@ -189,10 +190,12 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 min-width: 0;
                 border: 1px solid rgba(127, 127, 127, 0.24);
                 border-radius: 3px;
-                padding: 0.6em 0.65em;
+                padding: 0;
             }
             .dashboard-plus-dns-health-panel-head {
-                margin-bottom: 0.45em;
+                margin: 0;
+                padding: 0.65em 0.65em 0.45em;
+                text-align: left;
                 font-size: 0.86em;
                 font-weight: 600;
             }
@@ -201,6 +204,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 grid-template-columns: minmax(7em, 1fr) minmax(7em, 1fr);
                 align-items: center;
                 gap: 0.5em;
+                padding: 0 0.65em 0.65em;
             }
             .dashboard-plus-dns-health-types-chart {
                 width: min(100%, 10em);
@@ -234,6 +238,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             .dashboard-plus-dns-health-recent-list {
                 max-height: var(--dashboard-plus-dns-health-recent-height, 12em);
                 overflow-y: auto;
+                padding: 0 0.65em 0.65em;
             }
             .dashboard-plus-dns-health-recent-row {
                 display: grid;
@@ -295,9 +300,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                         </div>
                     </section>
                     <section class="dashboard-plus-dns-health-panel">
-                        <div class="dashboard-plus-dns-health-section-head">
-                            <span class="dashboard-plus-dns-health-panel-head">${escapeHtml(this.translations.upstreams)}</span>
-                        </div>
+                        <div class="dashboard-plus-dns-health-panel-head">${escapeHtml(this.translations.upstreams)}</div>
                         <div id="${this._elementId('upstreams')}" class="dashboard-plus-dns-health-upstreams"></div>
                     </section>
                 </div>
