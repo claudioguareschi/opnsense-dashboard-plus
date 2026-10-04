@@ -3,7 +3,7 @@
  * All rights reserved.
  */
 
-const {escapeHtml, renderTitle, ensureTableStyle, DashboardPlusWidget} =
+const {escapeHtml, renderTitle, ensureStyle, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
 const SERVICE_STYLE_ID = 'dashboard-plus-services-style';
@@ -156,7 +156,7 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
     }
 
     getMarkup() {
-        ensureTableStyle();
+        ensureStyle();
         this._addStyle();
         return $(`
             <div id="${this._elementId('root')}" class="dashboard-plus-services">

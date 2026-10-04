@@ -1,10 +1,11 @@
-Dashboard Plus adds nine widgets to the OPNsense dashboard, next to the
+Dashboard Plus adds ten widgets to the OPNsense dashboard, next to the
 built-in ones: System Information+, Traffic Graph+, System Metrics+, Thermal
-Sensors+, Interface Statistics+, Gateways+, Interfaces+, Firewall Logs+ and Services+.
+Sensors+, Interface Statistics+, Gateways+, Interfaces+, Firewall Logs+, DNS
+Health+ and Services+.
 They extend the standard widgets with hardware, firmware and CPU security
 details, configurable time windows, per-interface colors, field selection
 and drag-to-reorder, without modifying the OPNsense core.
 
-The "Dashboard Plus widgets" privilege also allows reading the live firewall
-log, gateway status, pf state counts and interface details, and controlling
-services from Services+.
+Privileges remain scoped to the data each widget uses. Services+ control and
+DNS Health+ status are separate Dashboard privileges; native OPNsense data
+continues to require its existing OPNsense privilege.

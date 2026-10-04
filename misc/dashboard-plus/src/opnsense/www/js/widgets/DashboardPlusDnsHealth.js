@@ -57,20 +57,9 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 width: 0.7em;
                 height: 0.7em;
                 border-radius: 50%;
-                background: var(--success, #2ca02c);
-                box-shadow: 0 0 0 3px rgba(44, 160, 44, 0.12);
-            }
-            .dashboard-plus-dns-health-dot.warning {
-                background: var(--warning, #e06c00);
-                box-shadow: 0 0 0 3px rgba(224, 108, 0, 0.12);
-            }
-            .dashboard-plus-dns-health-dot.danger {
-                background: var(--danger, #d62728);
-                box-shadow: 0 0 0 3px rgba(214, 39, 40, 0.12);
-            }
-            .dashboard-plus-dns-health-dot.muted {
-                background: #777;
-                box-shadow: 0 0 0 3px rgba(119, 119, 119, 0.12);
+                background: currentColor;
+                box-shadow: 0 0 0 3px currentColor;
+                opacity: 0.8;
             }
             .dashboard-plus-dns-health-label {
                 min-width: 0;
@@ -99,7 +88,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             }
             .dashboard-plus-dns-health-metrics {
                 display: grid;
-                grid-template-columns: repeat(3, minmax(0, 1fr));
+                grid-template-columns: repeat(auto-fit, minmax(9em, 1fr));
                 gap: 0.5em;
                 padding: 0.7em 0.4em;
             }
@@ -154,7 +143,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 width: 0.55em;
                 height: 0.55em;
                 border-radius: 50%;
-                background: var(--success, #2ca02c);
+                background: currentColor;
             }
             .dashboard-plus-dns-health-upstream-main {
                 min-width: 0;
@@ -175,10 +164,6 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             }
             .dashboard-plus-dns-health-badge {
                 flex: none;
-                padding: 0.16em 0.48em;
-                border-radius: 999px;
-                color: var(--success, #2ca02c);
-                background: rgba(44, 160, 44, 0.12);
                 font-size: 0.72em;
                 white-space: nowrap;
             }
@@ -195,19 +180,10 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 opacity: 0.68;
                 font-size: 0.76em;
             }
-            .dashboard-plus-dns-health-footer a {
-                flex: none;
-                color: #d94f00;
-            }
+            .dashboard-plus-dns-health-footer a { flex: none; }
             .dashboard-plus-dns-health-error {
                 padding: 0.6em 0.4em 0.15em;
-                color: var(--danger, #d62728);
                 font-size: 0.8em;
-            }
-            @media (max-width: 24em) {
-                .dashboard-plus-dns-health-metrics {
-                    grid-template-columns: 1fr;
-                }
             }
         `;
         const existing = document.getElementById(STYLE_ID);
@@ -224,7 +200,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             <div id="${this._elementId('root')}" class="dashboard-plus-dns-health">
                 <div class="dashboard-plus-dns-health-header">
                     <div class="dashboard-plus-dns-health-identity">
-                        <span id="${this._elementId('dot')}" class="dashboard-plus-dns-health-dot muted" aria-hidden="true"></span>
+                        <span id="${this._elementId('dot')}" class="dashboard-plus-dns-health-dot text-muted" aria-hidden="true"></span>
                         <div class="dashboard-plus-dns-health-label">
                             <div class="dashboard-plus-dns-health-eyebrow">${escapeHtml(this.translations.resolver)}</div>
                             <div id="${this._elementId('state')}" class="dashboard-plus-dns-health-state">${escapeHtml(this.translations.loading)}</div>
@@ -338,7 +314,12 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         const status = this._status();
         const stats = this._stats();
         const dot = $(`#${this._elementId('dot')}`);
-        dot.removeClass('healthy warning danger muted').addClass(status.state);
+        dot.removeClass('text-success text-warning text-danger text-muted').addClass({
+            healthy: 'text-success',
+            warning: 'text-warning',
+            danger: 'text-danger',
+            muted: 'text-muted'
+        }[status.state]);
         $(`#${this._elementId('state')}`).text(status.label);
         $(`#${this._elementId('mode')}`).text(this._mode());
         $(`#${this._elementId('metrics')}`).html([
@@ -355,16 +336,17 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         $(`#${this._elementId('upstream-count')}`).text(upstreams.length ? `${upstreams.length} ${this.translations.configured}` : '');
         $(`#${this._elementId('upstreams')}`).html(upstreams.length ? upstreams.map(upstream => `
             <div class="dashboard-plus-dns-health-upstream">
-                <span class="dashboard-plus-dns-health-upstream-dot" aria-hidden="true"></span>
+                <span class="dashboard-plus-dns-health-upstream-dot text-success" aria-hidden="true"></span>
                 <div class="dashboard-plus-dns-health-upstream-main">
                     <div class="dashboard-plus-dns-health-upstream-name">${escapeHtml(upstream.description || upstream.server)}</div>
                     <div class="dashboard-plus-dns-health-upstream-server">${escapeHtml(upstream.server)}</div>
                 </div>
-                <span class="dashboard-plus-dns-health-badge">${escapeHtml(this.translations.configured)}</span>
+                <span class="label label-success dashboard-plus-dns-health-badge">${escapeHtml(this.translations.configured)}</span>
             </div>`).join('') : `<div class="dashboard-plus-dns-health-empty">${escapeHtml(this.translations.no_upstreams)}</div>`);
 
         const displayError = this.error || this.totalsError;
-        $(`#${this._elementId('error')}`).text(displayError).toggle(Boolean(displayError));
+        $(`#${this._elementId('error')}`).text(displayError).toggle(Boolean(displayError))
+            .toggleClass('text-danger', Boolean(displayError));
         $(`#${this._elementId('updated')}`).text(displayError ? this.translations.fetch_failed :
             `${this.translations.updated} ${new Date().toLocaleTimeString()}`);
         this.config.callbacks?.updateGrid?.();

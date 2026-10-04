@@ -1,0 +1,3 @@
+VNStat Plus adds an extended, configurable traffic-history widget to the
+OPNsense dashboard. It uses the official os-vnstat plugin API and is installed
+alongside that plugin, which supplies VNStat itself and the dashboard data.
