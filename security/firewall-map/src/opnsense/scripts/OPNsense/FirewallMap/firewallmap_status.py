@@ -77,6 +77,12 @@ def collector(now=None):
 
 def database():
     status = geodb.status()
+    # while MaxMind keeps failing, the map looks addresses up in the DB-IP Lite stand-in: show its files
+    looked_up = geodb.lookup_provider(settings())
+    if looked_up != status["active_provider"]:
+        status.update(active_provider=looked_up, standin=True,
+                      city=geodb.file_info(geodb.DATABASES[looked_up]["city"]),
+                      asn=geodb.file_info(geodb.DATABASES[looked_up]["asn"]))
     paths = geodb.DATABASES[status["active_provider"]]
     for kind in ("city", "asn"):
         if status.get(kind):

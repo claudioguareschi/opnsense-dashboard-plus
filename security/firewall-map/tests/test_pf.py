@@ -257,6 +257,13 @@ class StateGuardTest(unittest.TestCase):
                 PF.sample_states()
         self.assertEqual(walked, [])
 
+    def test_the_walk_stops_past_the_limit(self):
+        three = NAT_OUT * 3
+        self.assertEqual(len(PF.parse_states(three, limit=3)), 3)
+        with self.assertRaises(PF.TooManyStates) as raised:
+            PF.parse_states(three, limit=2)
+        self.assertEqual(raised.exception.limit, 2)
+
     def test_the_limit_follows_the_firewalls_memory(self):
         gigabyte = 1024 ** 3
         self.assertEqual(PF.state_limit(4 * gigabyte), 35000)

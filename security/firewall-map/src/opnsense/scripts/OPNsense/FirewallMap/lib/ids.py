@@ -122,6 +122,8 @@ class Correlator:
         self.pending = deque(maxlen=MAX_PENDING_ALERTS)
         self.ambiguous_keys = set()
         self.flows = {}    # key -> {"connection", "kind", "alerts": {flow_id: {...}}}
+        # addresses with flagging evidence on their connection, built once per change of flows
+        self._flagged = None
         self.stats = {"alerts": 0, "current": 0, "recent": 0, "blocked": 0, "unmatched": 0,
                       "ambiguous": 0, "no_ports": 0, "pending": 0}
         self.unmatched_samples = []
@@ -177,6 +179,7 @@ class Correlator:
             interface=event.get("interface"))
 
     def _expire(self, now):
+        self._flagged = None
         for store in (self.recent, self.blocked):
             for key in [key for key, item in store.items() if now - item.get("seen", item.get("time", now)) > CORRELATION_SECONDS]:
                 del store[key]
@@ -249,6 +252,7 @@ class Correlator:
         self.stats["pending"] = len(still)
 
     def _attach(self, key, kind, connection, alert, now):
+        self._flagged = None
         flow = self.flows.get(key)
         if flow is None:
             flow = self.flows[key] = {"key": key, "kind": kind, "connection": connection, "alerts": {},
@@ -279,10 +283,11 @@ class Correlator:
 
     def flags(self, address):
         """Evidence on the connection itself: an allowed connection with a severity 1-2 alert."""
-        for key, flow in self.flows.items():
-            if key[3] == address and flow["kind"] != "blocked" and self._severity(flow) <= ALERT_FLAG_SEVERITY:
-                return True
-        return False
+        if self._flagged is None:
+            # asked once per address of a sample: one walk of the connections, not one per address
+            self._flagged = {key[3] for key, flow in self.flows.items()
+                             if flow["kind"] != "blocked" and self._severity(flow) <= ALERT_FLAG_SEVERITY}
+        return address in self._flagged
 
     @staticmethod
     def _severity(flow):

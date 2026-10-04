@@ -30,6 +30,7 @@ scripts never parse config.xml.
 
 import json
 import os
+import time
 
 from .common import STATE_DIR
 
@@ -43,21 +44,38 @@ _cache = {}
 
 
 def _read(path):
-    """The rendered file as a dict, read again only when it changes; {} while it is missing."""
+    """The rendered file as a dict, read again only when it changes; {} while it is missing.
+
+    configd rewrites the file in place, so a read can land in the middle of a write: an unreadable
+    file is read again shortly, and otherwise the last good values stay (nothing falls back to the
+    defaults for a moment)."""
     try:
         stat = os.stat(path)
     except OSError:
         return {}
     key = (stat.st_mtime_ns, stat.st_size)
     cached = _cache.get(path)
-    if cached is None or cached[0] != key:
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    for attempt in range(3):
+        if attempt:
+            time.sleep(0.1)
         try:
             with open(path) as handle:
                 document = json.load(handle)
         except (OSError, ValueError):
-            document = {}
-        cached = _cache[path] = (key, document if isinstance(document, dict) else {})
-    return cached[1]
+            continue
+        if isinstance(document, dict):
+            _cache[path] = (key, document)
+            return document
+    # still being written, or damaged: keep what was read before, and try again on the next call
+    return cached[1] if cached is not None else {}
+
+
+def readable(path=SETTINGS_FILE):
+    """Whether the settings were read (an absent or unreadable file gives only the defaults):
+    a step that would undo something on the defaults (emptying a table) runs only then."""
+    return bool(_read(path))
 
 
 def settings(path=SETTINGS_FILE):

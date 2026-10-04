@@ -71,7 +71,7 @@ class SnapshotTest(unittest.TestCase):
     def answer(self, payload):
         def collector():
             for _ in range(100):
-                names = os.listdir(self.requests) if os.path.isdir(self.requests) else []
+                names = [name for name in (os.listdir(self.requests) if os.path.isdir(self.requests) else []) if name.endswith(".request")]
                 if names:
                     snapshot_id = names[0][:-len(".request")]
                     COMMON.write_json(os.path.join(self.snapshots, f"{snapshot_id}.json"), payload)
@@ -93,7 +93,7 @@ class SnapshotTest(unittest.TestCase):
         result = self.save()
         self.assertEqual(result["result"], "saved")
         self.assertTrue(result["snapshot"]["partial"])
-        self.assertFalse(os.listdir(self.requests))
+        self.assertFalse([name for name in os.listdir(self.requests) if name.endswith(".request")])
 
     def test_without_current_data_nothing_is_saved(self):
         result = self.save()

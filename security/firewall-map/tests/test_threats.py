@@ -252,6 +252,21 @@ class ThreatHistoryFileTest(unittest.TestCase):
             THREATS.move_from_cache(db, cache)
             self.assertEqual(db.execute("SELECT count(*) FROM threats").fetchone()[0], 1)
 
+    def test_a_failed_move_is_tried_again(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = os.path.join(directory, "cache.db")
+            database = os.path.join(directory, "threats.db")
+            os.mkdir(cache)  # not a database: it cannot be attached
+            with mock.patch.object(THREATS, "DATABASE", database), mock.patch.object(THREATS, "CACHE_DB", cache), \
+                    mock.patch.object(THREATS, "log_error"):
+                THREATS.connect(database).close()
+                check = sqlite3.connect(database)
+                self.assertEqual(check.execute("PRAGMA user_version").fetchone()[0], 0)
+                check.close()
+                os.rmdir(cache)
+                db = THREATS.connect(database)
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], THREATS.SCHEMA_VERSION)
+                db.close()
 
 if __name__ == "__main__":
     unittest.main()

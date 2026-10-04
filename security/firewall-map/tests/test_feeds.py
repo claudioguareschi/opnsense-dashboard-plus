@@ -49,6 +49,13 @@ class FeedTest(unittest.TestCase):
         with mock.patch.object(FEEDS, "aliases", return_value=[{"name": "FWMAP_FireHOL_L1", "enabled": True}]):
             self.assertEqual([feed["name"] for feed in FEEDS.feeds_in_use({"threat_lists": ""})], ["FWMAP_FireHOL_L1"])
 
+    def test_an_oversized_list_is_refused_not_cut(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.side_effect = lambda size: b"10.20.0.0/16\n" * (size // 13 + 1)
+        with mock.patch.object(FEEDS, "MAX_BYTES", 100), mock.patch.object(FEEDS.urllib.request, "urlopen", return_value=response):
+            with self.assertRaises(ValueError):
+                FEEDS.download("https://example.invalid/list.txt")
+
     def test_update_downloads_once_a_day_and_keeps_the_last_copy(self):
         feed = next(item for item in BLOCKLISTS.FEEDS if item["name"] == "FWMAP_Spamhaus_DROP")
         with tempfile.TemporaryDirectory() as directory, \

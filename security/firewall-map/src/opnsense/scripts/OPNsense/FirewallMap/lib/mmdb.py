@@ -49,7 +49,10 @@ class Reader:
 
     def __init__(self, path):
         with open(path, "rb") as handle:
-            self._map = mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ)
+            try:
+                self._map = mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ)
+            except ValueError:  # an empty file cannot be mapped
+                raise InvalidDatabaseError("empty database file") from None
         try:
             self._setup()
         except Exception:
@@ -115,7 +118,8 @@ class Reader:
             node = self._record(node, bit)
         if node == self.node_count:
             return None
-        if node < self.node_count:
+        if node < self.node_count + DATA_SEPARATOR:
+            # a node, or a record pointing into the separator between the tree and the data
             raise InvalidDatabaseError("search tree does not end in data")
         value, _ = self._decoder.decode(self._decoder.base + node - self.node_count - DATA_SEPARATOR)
         return value
@@ -125,7 +129,11 @@ class Reader:
 
 
 class Decoder:
-    """Values of the data section (or the metadata), starting at absolute file offsets."""
+    """Values of the data section (or the metadata), starting at absolute file offsets. A damaged
+    file never raises anything but InvalidDatabaseError: every read stays inside the section, a
+    pointer may not lead to another pointer, and nesting is bounded."""
+
+    MAX_DEPTH = 32
 
     def __init__(self, data, base, limit):
         self.data = data
@@ -134,60 +142,76 @@ class Decoder:
 
     def decode(self, offset):
         """(value, offset after it)."""
-        if offset >= self.limit:
-            raise InvalidDatabaseError("data offset outside the data section")
-        control = self.data[offset]
+        try:
+            return self._decode(offset, 0)
+        except InvalidDatabaseError:
+            raise
+        except (IndexError, ValueError, struct.error, RecursionError) as error:
+            raise InvalidDatabaseError(f"damaged data section ({error})") from None
+
+    def _bytes(self, offset, size):
+        if offset < 0 or offset + size > self.limit:
+            raise InvalidDatabaseError("data runs past the end of the section")
+        return self.data[offset:offset + size]
+
+    def _decode(self, offset, depth, pointer_allowed=True):
+        if depth > self.MAX_DEPTH:
+            raise InvalidDatabaseError("data nested too deeply")
+        control = self._bytes(offset, 1)[0]
         offset += 1
         kind = control >> 5
         if kind == 1:  # pointer: the value lives elsewhere
+            if not pointer_allowed:
+                raise InvalidDatabaseError("pointer to a pointer")
             size = (control >> 3) & 0x3
             value = control & 0x7
+            raw = int.from_bytes(self._bytes(offset, size + 1), "big")
             if size == 0:
-                pointer = (value << 8) | self.data[offset]
+                pointer = (value << 8) | raw
             elif size == 1:
-                pointer = ((value << 16) | int.from_bytes(self.data[offset:offset + 2], "big")) + 2048
+                pointer = ((value << 16) | raw) + 2048
             elif size == 2:
-                pointer = ((value << 24) | int.from_bytes(self.data[offset:offset + 3], "big")) + 526336
+                pointer = ((value << 24) | raw) + 526336
             else:
-                pointer = int.from_bytes(self.data[offset:offset + 4], "big")
-            target, _ = self.decode(self.base + pointer)
+                pointer = raw
+            target, _ = self._decode(self.base + pointer, depth + 1, pointer_allowed=False)
             return target, offset + size + 1
         if kind == 0:  # extended type
-            kind = 7 + self.data[offset]
+            kind = 7 + self._bytes(offset, 1)[0]
             offset += 1
         size = control & 0x1F
         if size >= 29:
             extra = size - 28
-            number = int.from_bytes(self.data[offset:offset + extra], "big")
+            number = int.from_bytes(self._bytes(offset, extra), "big")
             offset += extra
             size = (29, 285, 65821)[extra - 1] + number
         if kind == 2:
-            return self.data[offset:offset + size].decode("utf-8", "replace"), offset + size
+            return self._bytes(offset, size).decode("utf-8", "replace"), offset + size
         if kind == 7:
             result = {}
             for _ in range(size):
-                key, offset = self.decode(offset)
-                result[key], offset = self.decode(offset)
+                key, offset = self._decode(offset, depth + 1)
+                result[key], offset = self._decode(offset, depth + 1)
             return result, offset
         if kind == 11:
             items = []
             for _ in range(size):
-                item, offset = self.decode(offset)
+                item, offset = self._decode(offset, depth + 1)
                 items.append(item)
             return items, offset
         if kind == 3:
-            return struct.unpack_from(">d", self.data, offset)[0], offset + 8
+            return struct.unpack(">d", self._bytes(offset, 8))[0], offset + 8
         if kind == 15:
-            return struct.unpack_from(">f", self.data, offset)[0], offset + 4
+            return struct.unpack(">f", self._bytes(offset, 4))[0], offset + 4
         if kind in (5, 6, 9, 10):
-            return int.from_bytes(self.data[offset:offset + size], "big"), offset + size
+            return int.from_bytes(self._bytes(offset, size), "big"), offset + size
         if kind == 8:
-            value = int.from_bytes(self.data[offset:offset + size], "big")
+            value = int.from_bytes(self._bytes(offset, size), "big")
             return (value - (1 << 32) if value & 0x80000000 else value) if size == 4 else value, offset + size
         if kind == 14:
             return bool(size), offset
         if kind == 4:
-            return bytes(self.data[offset:offset + size]), offset + size
+            return bytes(self._bytes(offset, size)), offset + size
         raise InvalidDatabaseError(f"unknown data type {kind}")
 
 

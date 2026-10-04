@@ -59,6 +59,29 @@ class SettingsFileTest(unittest.TestCase):
             os.utime(path, ns=(1, 2))
             self.assertEqual((CONFIG.settings(path)["provider"], CONFIG.settings(path)["update_days"]), ("auto", 3))
 
+    def test_a_file_being_written_keeps_the_last_good_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "firewallmap.json")
+            self.write(path, {"general": {"provider": "dbip", "blocklist_aliases": "1"}})
+            self.assertEqual(CONFIG.settings(path)["provider"], "dbip")
+            with open(path, "w") as handle:
+                handle.write('{"general": {"prov')  # configd caught in the middle of a write
+            os.utime(path, ns=(3, 4))
+            with mock.patch.object(CONFIG.time, "sleep"):
+                self.assertEqual(CONFIG.settings(path)["blocklist_aliases"], "1")
+                self.assertTrue(CONFIG.readable(path))
+            # a process that never read it: defaults, and not readable (nothing destructive runs)
+            CONFIG._cache.pop(path)
+            with mock.patch.object(CONFIG.time, "sleep"):
+                self.assertFalse(CONFIG.readable(path))
+
+    def test_the_abuseipdb_table_is_not_emptied_without_settings(self):
+        from support import ABUSEIPDB
+        calls = []
+        with mock.patch.object(ABUSEIPDB, "readable", return_value=False):
+            result = ABUSEIPDB.sync_pf_table(run=lambda *a, **k: calls.append(a))
+        self.assertEqual((result["loaded"], calls), (False, []))
+
     def test_defaults_without_the_file(self):
         missing = "/nonexistent/firewallmap.json"
         self.assertEqual(CONFIG.settings(missing)["provider"], "auto")

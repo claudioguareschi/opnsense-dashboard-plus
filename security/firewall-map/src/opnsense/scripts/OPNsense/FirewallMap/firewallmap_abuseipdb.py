@@ -49,7 +49,7 @@ import firewallmap_investigate as investigate
 from lib.common import (
     ABUSEIPDB_BLACKLIST, PFCTL, STATE_DIR, log_notice, log_warning, read_json, secure_umask, write_json, write_text,
 )
-from lib.config import abuseipdb_key, aliases, settings
+from lib.config import abuseipdb_key, aliases, readable, settings
 
 LIST_FILE = ABUSEIPDB_BLACKLIST
 STATUS_FILE = f"{STATE_DIR}/abuseipdb.json"
@@ -106,7 +106,12 @@ def sync_pf_table(settings=None, run=subprocess.run):
     Called after every download, at boot and when the option changes. With the option off the
     table is dropped, unless an alias of that name is still defined (it is then not ours to empty).
     """
-    enabled, defined = alias_settings() if settings is None else settings
+    if settings is None:
+        if not readable():
+            # never empty the table on default values: the settings file is missing or being written
+            return {"enabled": None, "loaded": False, "error": "settings unavailable"}
+        settings = alias_settings()
+    enabled, defined = settings
     if enabled:
         if not os.path.exists(LIST_FILE):
             return {"enabled": True, "loaded": False, "error": "no blacklist downloaded yet"}

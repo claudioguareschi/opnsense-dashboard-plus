@@ -81,23 +81,26 @@ def connect(path=DATABASE):
     # list request)
     if db.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
         db.execute("CREATE INDEX IF NOT EXISTS threats_view ON threats(status, disposition, last_seen DESC)")
-        if path == DATABASE:
-            move_from_cache(db)
-        db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        # a move that failed (cache.db locked or unreadable) is tried again on the next connection
+        if path != DATABASE or move_from_cache(db):
+            db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return db
 
 
-def move_from_cache(db, cache=CACHE_DB):
-    """Earlier releases kept the history in cache.db: copy it here once, then drop it there."""
+def move_from_cache(db, cache=None):
+    """Earlier releases kept the history in cache.db: copy it here once, then drop it there. True
+    when done or when there is nothing to move, False when it has to be tried again."""
+    cache = cache or CACHE_DB
     if not os.path.exists(cache) or db.execute("SELECT 1 FROM threats LIMIT 1").fetchone():
-        return
+        return True
     try:
         db.execute("ATTACH DATABASE ? AS old", (cache,))
-    except sqlite3.Error:
-        return
+    except sqlite3.Error as error:
+        log_error(f"could not open the cache to move the threat history out of it: {error}")
+        return False
     try:
         if not db.execute("SELECT 1 FROM old.sqlite_master WHERE type = 'table' AND name = 'threats'").fetchone():
-            return
+            return True
         here = [row[1] for row in db.execute("PRAGMA main.table_info(threats)")]
         there = {row[1] for row in db.execute("PRAGMA old.table_info(threats)")}
         columns = ", ".join(column for column in here if column in there)
@@ -105,10 +108,12 @@ def move_from_cache(db, cache=CACHE_DB):
         db.execute(f"INSERT OR IGNORE INTO main.threats ({columns}) SELECT {columns} FROM old.threats")
         db.execute("DROP TABLE old.threats")
         db.execute("COMMIT")
+        return True
     except sqlite3.Error as error:
         if db.in_transaction:
             db.execute("ROLLBACK")
         log_error(f"could not move the threat history out of the cache: {error}")
+        return False
     finally:
         db.execute("DETACH DATABASE old")
 

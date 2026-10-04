@@ -69,6 +69,45 @@ class ServiceController extends ApiMutableServiceControllerBase
         if (!$this->request->isPost()) {
             return ['status' => 'failed'];
         }
+        $backend = new Backend();
+        /* ask configd for the feed tables before taking the config lock, not while holding it */
+        $feeds = BlocklistAliases::feeds();
+        Config::getInstance()->lock();
+        $general = (new FirewallMap())->general;
+        [$aliases, $changes, $error] = BlocklistAliases::reconcile(
+            (string)$general->blocklist_aliases === '1',
+            (string)$general->threat_lists,
+            $general->abuseipdb_key->getValue() !== '',
+            $feeds
+        );
+        if ($error === null && $changes) {
+            $aliases->serializeToConfig();
+            Config::getInstance()->save();
+        }
+        Config::getInstance()->unlock();
+        $log = new Syslog('firewallmap', null, LOG_DAEMON);
+        if ($error !== null) {
+            $log->warning("settings not applied: {$error}");
+            return ['status' => 'failed', 'status_msg' => $error];
+        }
+        if ($changes) {
+            BlocklistAliases::apply();
+            $log->notice('blocklist aliases: ' . implode(', ', $changes));
+        }
+        $log->notice('settings applied');
+        /* the scripts read the settings from the file this template renders, never from config.xml */
+        $backend->configdRun('template reload OPNsense/FirewallMap');
+        /* reload in place: keep live flow and alert history while the chosen list index is rebuilt */
+        $backend->configdRun('firewallmap reload');
+        $backend->configdRun('firewallmap feeds update', true);
+        /* downloads only for a new key, or once a day: the free plan allows only a few a day */
+        $backend->configdRun('firewallmap abuseipdb update', true);
+        $backend->configdRun('firewallmap abuseipdb sync', true);
+        $backend->configdRun('firewallmap ensure', true);
+        /* a new key or provider downloads now, not after an earlier failure's wait */
+        $backend->configdRun('firewallmap geodb retry', true);
+        return ['status' => 'ok'];
+    }
 
     /** The collector, the geolocation database and the threat-list downloads. */
     public function overviewAction()

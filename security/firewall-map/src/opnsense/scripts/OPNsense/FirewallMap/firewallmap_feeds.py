@@ -84,7 +84,12 @@ def parse_feed(text):
 def download(url):
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-        return response.read(MAX_BYTES).decode("utf-8", "replace")
+        data = response.read(MAX_BYTES + 1)
+    # a cut list would end in a cut line ("10.20.0.0/16" read as "10.20.0.0/1"): refuse it, and
+    # the previous copy stays in use
+    if len(data) > MAX_BYTES:
+        raise ValueError(f"list larger than {MAX_BYTES // (1024 * 1024)} MB")
+    return data.decode("utf-8", "replace")
 
 
 def update(force=False, fetch=download, now=None, feeds=None):

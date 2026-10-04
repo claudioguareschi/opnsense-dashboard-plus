@@ -82,43 +82,6 @@ class SettingsController extends ApiMutableModelControllerBase
         ];
     }
 
-        $backend = new Backend();
-        Config::getInstance()->lock();
-        $general = $this->getModel()->general;
-        [$aliases, $changes, $error] = BlocklistAliases::reconcile(
-            (string)$general->blocklist_aliases === '1',
-            (string)$general->threat_lists,
-            $general->abuseipdb_key->getValue() !== ''
-        );
-        if ($error === null && $changes) {
-            $aliases->serializeToConfig();
-            Config::getInstance()->save();
-        }
-        Config::getInstance()->unlock();
-        $log = new Syslog('firewallmap', null, LOG_DAEMON);
-        if ($error !== null) {
-            $log->warning("settings not applied: {$error}");
-            return ['status' => 'failed', 'status_msg' => $error];
-        }
-        if ($changes) {
-            BlocklistAliases::apply();
-            $log->notice('blocklist aliases: ' . implode(', ', $changes));
-        }
-        $log->notice('settings applied');
-        /* the scripts read the settings from the file this template renders, never from config.xml */
-        $backend->configdRun('template reload OPNsense/FirewallMap');
-        /* reload in place: keep live flow and alert history while the chosen list index is rebuilt */
-        $backend->configdRun('firewallmap reload');
-        $backend->configdRun('firewallmap feeds update', true);
-        /* downloads only for a new key, or once a day: the free plan allows only a few a day */
-        $backend->configdRun('firewallmap abuseipdb update', true);
-        $backend->configdRun('firewallmap abuseipdb sync', true);
-        $backend->configdRun('firewallmap ensure', true);
-        /* a new key or provider downloads now, not after an earlier failure's wait */
-        $backend->configdRun('firewallmap geodb retry', true);
-        return ['status' => 'ok'];
-    }
-
     /**
      * "Retry now" on the map's geolocation card: download the database without waiting out the
      * earlier failure. Runs in the background; the map shows its progress.

@@ -41,6 +41,7 @@ and note edits never read or rewrite the large one.
 
 import base64
 import binascii
+import fcntl
 import json
 import os
 import re
@@ -131,11 +132,12 @@ def request_full(snapshot_id, user, wait=WAIT_SECONDS, directory=SNAPSHOT_DIR, r
 def save(user, now=None, wait=WAIT_SECONDS, directory=SNAPSHOT_DIR, requests=SNAPSHOT_REQUEST_DIR,
          summary_file=OUTPUT_FILE):
     now = time.time() if now is None else now
-    newest = metas(directory)[:1]
-    if newest and 0 <= now - (newest[0].get("taken") or 0) < MIN_INTERVAL_SECONDS:
-        return {"result": "failed", "error": "too_soon", "snapshot": newest[0]}
-    snapshot_id = new_id(now)
     os.makedirs(directory, exist_ok=True)
+    os.makedirs(requests, exist_ok=True)
+    if not reserve(now, requests):
+        newest = metas(directory)[:1]
+        return {"result": "failed", "error": "too_soon", "snapshot": newest[0] if newest else None}
+    snapshot_id = new_id(now)
     partial = False
     if not request_full(snapshot_id, user, wait, directory, requests):
         # the collector did not answer: keep what the map shows, when it is current
@@ -154,6 +156,24 @@ def save(user, now=None, wait=WAIT_SECONDS, directory=SNAPSHOT_DIR, requests=SNA
     write_json(meta_path(snapshot_id, directory), meta)
     prune(directory=directory)
     return {"result": "saved", "snapshot": meta}
+
+
+def reserve(now, directory=SNAPSHOT_REQUEST_DIR):
+    """Take the save slot (at most one save every MIN_INTERVAL_SECONDS): checked and taken under a
+    lock, since a save then waits seconds for the collector and configd runs requests in parallel."""
+    with open(os.path.join(directory, "last_save"), "a+") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        handle.seek(0)
+        try:
+            last = float(handle.read().strip() or 0)
+        except ValueError:
+            last = 0.0
+        if 0 <= now - last < MIN_INTERVAL_SECONDS:
+            return False
+        handle.seek(0)
+        handle.truncate()
+        handle.write(f"{now}\n")
+    return True
 
 
 def metas(directory=SNAPSHOT_DIR):

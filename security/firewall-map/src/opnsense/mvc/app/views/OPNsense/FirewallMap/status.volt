@@ -48,6 +48,7 @@
             key_unused: "{{ lang._('Not needed') }}",
             entries: "{{ lang._('%s entries') }}",
             started: "{{ lang._('Download started') }}",
+            standin: "{{ lang._('%s standing in while the download fails') }}",
         };
         const PROVIDERS = {
             auto: "{{ lang._('Automatic') }}", maxmind: 'MaxMind GeoLite2', maxmind_paid: 'MaxMind GeoIP2 City', dbip: 'DB-IP Lite',
@@ -83,7 +84,8 @@
 
             const db = data.database || {};
             const provider = PROVIDERS[db.provider] || db.provider || '';
-            const active = db.active_provider && db.active_provider !== db.provider && db.provider !== 'auto'
+            const active = db.standin ? ` (${T.standin.replace('%s', PROVIDERS[db.active_provider] || db.active_provider)})`
+                : db.active_provider && db.active_provider !== db.provider && db.provider !== 'auto'
                 ? ` (${PROVIDERS[db.active_provider] || db.active_provider})` : '';
             $('#geo-provider').text(provider + active);
             $('#geo-key').text(!db.key_required ? T.key_unused

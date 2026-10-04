@@ -109,6 +109,23 @@ class ReaderTest(unittest.TestCase):
             with self.assertRaises(LookupError):
                 CACHE.mmdb_lookup(path, "8.8.8.8")
 
+    def test_damaged_data_is_an_invalid_database(self):
+        # a truncated string, a pointer to itself, a pointer to a pointer: only InvalidDatabaseError
+        truncated = bytes([(2 << 5) | 20]) + b"short"
+        self_pointer = bytes([(1 << 5) | 0, 0])
+        pointer_to_pointer = bytes([(1 << 5) | 0, 2, (1 << 5) | 0, 0])
+        for data in (truncated, self_pointer, pointer_to_pointer):
+            decoder = mmdb.Decoder(data, 0, len(data))
+            with self.assertRaises(mmdb.InvalidDatabaseError):
+                decoder.decode(0)
+        with tempfile.TemporaryDirectory() as directory:
+            empty = os.path.join(directory, "empty.mmdb")
+            open(empty, "wb").close()
+            with self.assertRaises(mmdb.InvalidDatabaseError):
+                mmdb.Reader(empty)
+            with self.assertRaises(LookupError):
+                CACHE.mmdb_lookup(empty, "8.8.8.8")
+
     def test_location_from_the_database(self):
         with tempfile.TemporaryDirectory() as directory:
             city = os.path.join(directory, "city.mmdb")

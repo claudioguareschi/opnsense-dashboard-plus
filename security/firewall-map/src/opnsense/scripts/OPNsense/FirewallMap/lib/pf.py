@@ -176,9 +176,10 @@ def _counters_record(header, line):
     )
 
 
-def parse_states(output):
+def parse_states(output, limit=None):
     """Parse `pfctl -vv -s state` (its text, or its lines as they arrive) using the same endpoint
-    fields as OPNsense's state API."""
+    fields as OPNsense's state API. Past `limit` states it stops (TooManyStates): the table can grow
+    during the walk (a flood), after its size was checked."""
     records = []
     header = None
     skipping = False
@@ -205,6 +206,8 @@ def parse_states(output):
             if record:
                 records.append(record)
                 header = None
+                if limit is not None and len(records) > limit:
+                    raise TooManyStates(len(records), limit)
     return records
 
 
@@ -540,8 +543,11 @@ SAMPLE_TIMEOUT = 10
 
 
 class TooManyStates(RuntimeError):
-    def __init__(self, count, limit):
-        super().__init__(f"{count} states (limit {limit})")
+    """More states than the map may walk, or a walk too slow to finish (the sampling pauses)."""
+
+    def __init__(self, count, limit, slow=False):
+        super().__init__(f"reading {count} states took over {SAMPLE_TIMEOUT} s (limit {limit})" if slow
+                         else f"{count} states (limit {limit})")
         self.count = count
         self.limit = limit
 
@@ -582,14 +588,26 @@ def sample_states(limit=None):
         raise TooManyStates(count, limit)
     # parsed line by line as pfctl writes: the whole text (about 230 bytes per state) and its list of
     # lines are never held next to the records
+    timed_out = []
+
+    def stop_slow_walk():
+        timed_out.append(True)
+        process.kill()
+
     with subprocess.Popen([PFCTL, "-vv", "-s", "state"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                           text=True) as process:
-        watchdog = threading.Timer(SAMPLE_TIMEOUT, process.kill)
+        watchdog = threading.Timer(SAMPLE_TIMEOUT, stop_slow_walk)
         watchdog.start()
         try:
-            records = parse_states(process.stdout)
+            records = parse_states(process.stdout, limit)
+        except TooManyStates:
+            process.kill()  # stopped early: pfctl must not block on a pipe nobody reads
+            raise
         finally:
             watchdog.cancel()
+    if timed_out:
+        # a slow CPU with plenty of RAM: as with too many states, sampling pauses and says why
+        raise TooManyStates(count if count is not None else len(records), limit, slow=True)
     if process.returncode != 0:
         raise RuntimeError("pfctl failed")
     return records
