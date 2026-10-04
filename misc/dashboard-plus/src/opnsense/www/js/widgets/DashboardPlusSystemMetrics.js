@@ -3,7 +3,7 @@
  * All rights reserved.
  */
 
-const {escapeHtml, renderTitle, ensureStyle, fill, DashboardPlusWidget} =
+const {escapeHtml, renderTitle, ensureStyle, fill, sharedRequest, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
 export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(BaseWidget) {
@@ -297,29 +297,24 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
     }
 
     async onWidgetTick() {
-        const [resources, time, temperature, states, mbufs, swap, disks] = await Promise.all([
-            this.ajaxCall('/api/diagnostics/system/system_resources'),
-            this.ajaxCall('/api/diagnostics/system/system_time'),
-            this.ajaxCall('/api/diagnostics/system/system_temperature'),
-            this.ajaxCall('/api/diagnostics/firewall/pf_states'),
-            this.ajaxCall('/api/diagnostics/system/system_mbuf'),
-            this.ajaxCall('/api/diagnostics/system/system_swap'),
-            this.ajaxCall('/api/diagnostics/system/system_disk')
-        ]);
-        const memory = resources.memory;
-        if (memory?.total !== undefined) {
-            const total = parseInt(memory.total_frmt, 10);
-            const used = parseInt(memory.used_frmt, 10);
-            const arc = parseInt(memory.arc_frmt, 10) || 0;
-            const pressureUsed = Math.max(0, used - arc);
+        // One request for everything below, shared with Thermal Sensors+ and System Information+.
+        const metrics = await sharedRequest(this, '/api/dashboardplus/system/metrics');
+        if (metrics?.status !== 'ok') {
+            throw new Error('System metrics are unavailable');
+        }
+        // In MiB, computed as OPNsense's System Resources endpoint computes them.
+        const memory = metrics.memory;
+        if (memory) {
+            const total = memory.total_mib;
+            const pressureUsed = Math.max(0, memory.used_mib - (memory.arc_mib || 0));
             const percent = total > 0 ? (pressureUsed / total) * 100 : 0;
             this._setGauge('memory', percent, this._formatKiBPair(pressureUsed * 1024, total * 1024),
                 fill(this.translations.used_count, {used: `${pressureUsed} MiB`, total: this._formatTotalMemory(total)}));
         }
-        $(`#${this.id}-cpu-load`).text(`${this.translations.load}: ${time.loadavg || this.translations.unavailable}`);
+        $(`#${this.id}-cpu-load`).text(`${this.translations.load}: ${metrics.load || this.translations.unavailable}`);
 
-        const readings = Array.isArray(temperature)
-            ? temperature.filter(reading => Number.isFinite(parseFloat(reading.temperature)))
+        const readings = Array.isArray(metrics.temperatures)
+            ? metrics.temperatures.filter(reading => Number.isFinite(parseFloat(reading.temperature)))
             : [];
         if (readings.length > 0) {
             const hottest = readings.reduce((current, reading) =>
@@ -333,8 +328,8 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
             $(`#${this.id}-temperature-current`).text(this.translations.unavailable);
         }
 
-        const stateCurrent = parseInt(states?.current, 10);
-        const stateLimit = parseInt(states?.limit, 10);
+        const stateCurrent = parseInt(metrics.states?.current, 10);
+        const stateLimit = parseInt(metrics.states?.limit, 10);
         if (Number.isFinite(stateCurrent) && Number.isFinite(stateLimit) && stateLimit > 0) {
             const percent = (stateCurrent / stateLimit) * 100;
             this._setGauge('states', percent,
@@ -342,10 +337,10 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
                 fill(this.translations.states_count, {current: stateCurrent.toLocaleString(), limit: stateLimit.toLocaleString()}));
         }
 
-        const mbuf = mbufs?.['mbuf-statistics'];
         // Clusters in use against the cluster limit, as the core Mbuf widget reports it.
-        const mbufCurrent = parseInt(mbuf?.['cluster-total'], 10);
-        const mbufLimit = parseInt(mbuf?.['cluster-max'], 10);
+        // Mbufs, swap and filesystems are read on the firewall at most once a minute.
+        const mbufCurrent = parseInt(metrics.mbufs?.current, 10);
+        const mbufLimit = parseInt(metrics.mbufs?.limit, 10);
         if (Number.isFinite(mbufCurrent) && Number.isFinite(mbufLimit) && mbufLimit > 0) {
             const percent = (mbufCurrent / mbufLimit) * 100;
             this._setGauge('mbufs', percent,
@@ -353,7 +348,7 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
                 fill(this.translations.mbufs_count, {current: mbufCurrent.toLocaleString(), limit: mbufLimit.toLocaleString()}));
         }
 
-        const swapDevices = Array.isArray(swap?.swap) ? swap.swap : [];
+        const swapDevices = Array.isArray(metrics.swap) ? metrics.swap : [];
         const swapTotal = swapDevices.reduce((total, device) => total + (parseInt(device.total, 10) || 0), 0);
         const swapUsed = swapDevices.reduce((total, device) => total + (parseInt(device.used, 10) || 0), 0);
         if (swapTotal > 0) {
@@ -362,6 +357,6 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
                 fill(this.translations.used_count, {used: this._formatKiB(swapUsed), total: this._formatKiB(swapTotal)}));
         }
 
-        this._renderFilesystems(disks?.devices);
+        this._renderFilesystems(metrics.filesystems);
     }
 }

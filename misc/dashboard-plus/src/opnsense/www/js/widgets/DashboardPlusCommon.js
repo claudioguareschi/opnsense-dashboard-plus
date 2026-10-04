@@ -241,6 +241,39 @@ export const DashboardPlusWidget = Base => class extends Base {
         this.manualHeight = parseInt(config?.widget?.manual_height, 10) || null;
         this.lastWidth = undefined;
         this.heightManaged = false;
+        this._pauseWhileHidden();
+    }
+
+    /*
+     * A dashboard in a background tab refreshes nothing: browsers still fire its timers (once a
+     * minute), and every refresh starts work on the firewall. The widget's own onWidgetTick runs
+     * again once, as soon as the tab is visible, when a refresh was skipped meanwhile.
+     */
+    _pauseWhileHidden() {
+        const tick = this.onWidgetTick;
+        if (typeof tick !== 'function') {
+            return;
+        }
+        let skipped = false;
+        this.onWidgetTick = (...args) => {
+            if (document.hidden) {
+                skipped = true;
+                return Promise.resolve();
+            }
+            skipped = false;
+            return tick.apply(this, args);
+        };
+        this._onVisibilityChange = () => {
+            if (!document.hidden && skipped) {
+                Promise.resolve(this.onWidgetTick()).catch(error => console.error(error));
+            }
+        };
+        document.addEventListener('visibilitychange', this._onVisibilityChange);
+    }
+
+    onWidgetClose() {
+        super.onWidgetClose?.();
+        document.removeEventListener('visibilitychange', this._onVisibilityChange);
     }
 
     _gridItem() {
@@ -312,6 +345,33 @@ export const DashboardPlusWidget = Base => class extends Base {
     onWidthChanged(width) {
     }
 };
+
+// How long widgets reuse one answer: they refresh every 10 s, a few seconds apart.
+const SHARED_REQUEST_AGE = 4000;
+
+/*
+ * GET url through the widget's ajaxCall, sharing the answer with every widget that asks for the
+ * same url within a few seconds, so System Metrics+, Thermal Sensors+ and System Information+ on
+ * one dashboard make one request per refresh. The answer is shared: callers must not modify it.
+ * The cache is kept on the page, not in this module: each widget imports this file with its own
+ * query string, which can make separate copies of it.
+ */
+export function sharedRequest(widget, url) {
+    const requests = window.dashboardPlusRequests ??= new Map();
+    const cached = requests.get(url);
+    if (cached && Date.now() - cached.time < SHARED_REQUEST_AGE) {
+        return cached.promise;
+    }
+    const promise = widget.ajaxCall(url);
+    requests.set(url, {time: Date.now(), promise});
+    // a failed request is not shared: the next widget asks again
+    promise.catch(() => {
+        if (requests.get(url)?.promise === promise) {
+            requests.delete(url);
+        }
+    });
+    return promise;
+}
 
 /*
  * A translated phrase with its {placeholders} filled in, e.g. "Core {number}". Whole phrases keep

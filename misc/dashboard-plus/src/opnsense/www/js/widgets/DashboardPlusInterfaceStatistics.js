@@ -13,7 +13,8 @@ export default class DashboardPlusInterfaceStatistics extends DashboardPlusWidge
         super(config);
         this.configurable = true;
         this.currentConfig = null;
-        this.tickTimeout = 1;
+        // the shortest refresh interval; onWidgetTick skips the ticks before the chosen one
+        this.tickTimeout = 5;
         this.lastRefresh = 0;
         this.interfaces = null;
     }
@@ -101,9 +102,19 @@ export default class DashboardPlusInterfaceStatistics extends DashboardPlusWidge
         this.fitToContent();
     }
 
+    async getWidgetConfig() {
+        const config = await super.getWidgetConfig();
+        // the 1 second choice is gone: every refresh starts a PHP process on the firewall
+        if (String(config.refresh_interval) === '1') {
+            config.refresh_interval = '5';
+        }
+        return config;
+    }
+
     async onWidgetTick() {
-        const refreshInterval = (parseInt(this.currentConfig.refresh_interval, 10) || 5) * 1000;
-        if (this.lastRefresh && Date.now() - this.lastRefresh < refreshInterval) {
+        const refreshInterval = (parseInt(this.currentConfig.refresh_interval, 10) || 10) * 1000;
+        // a second of slack, so a tick a little early does not wait a whole tick more
+        if (this.lastRefresh && Date.now() - this.lastRefresh < refreshInterval - 1000) {
             return;
         }
         this.lastRefresh = Date.now();
@@ -135,11 +146,11 @@ export default class DashboardPlusInterfaceStatistics extends DashboardPlusWidge
                 type: 'select',
                 id: 'dashboard-plus-interface-statistics-refresh-interval',
                 options: [
-                    {value: '1', label: this.translations.second_1},
                     {value: '5', label: this.translations.seconds_5},
-                    {value: '10', label: this.translations.seconds_10}
+                    {value: '10', label: this.translations.seconds_10},
+                    {value: '30', label: this.translations.seconds_30}
                 ],
-                default: '5'
+                default: '10'
             }
         };
     }

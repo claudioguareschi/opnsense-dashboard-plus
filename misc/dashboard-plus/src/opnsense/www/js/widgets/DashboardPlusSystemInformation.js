@@ -26,7 +26,7 @@
 
 const {
     escapeHtml, renderTitle, fill, ensureStyle, DashboardPlusWidget, mergeOrder, makeSortable, isDragging,
-    isEditMode, watchEditMode
+    isEditMode, watchEditMode, sharedRequest
 } = await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
 // Every section, in the default order. Boot Environment and Crypto Hardware show only where the
@@ -305,9 +305,10 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
             this.loaded = true;
             return;
         }
-        const [time, frequency] = await Promise.all([
+        // The CPU frequency comes with the metrics System Metrics+ and Thermal Sensors+ share.
+        const [time, metrics] = await Promise.all([
             this.ajaxCall('/api/diagnostics/system/system_time'),
-            this.ajaxCall('/api/dashboardplus/system/frequency')
+            sharedRequest(this, '/api/dashboardplus/system/metrics')
         ]);
         if (time?.uptime) {
             $(`#${this.id}-uptime`).text(time.uptime);
@@ -315,7 +316,7 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
         if (time?.datetime) {
             $(`#${this.id}-datetime`).text(time.datetime);
         }
-        const text = this._frequency(frequency);
+        const text = this._frequency(metrics?.cpu);
         if (text) {
             $(`#${this.id}-frequency`).text(text);
         }
