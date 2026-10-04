@@ -116,11 +116,14 @@ function showGeo(summary) {
 /** One request at a time, never stacked on a slow firewall; nothing while the page is hidden. */
 function poll(query) {
   let timer = null;
+  // a request is on its way: showing the page again then must not start a second loop
+  let running = false;
   const tick = async () => {
     timer = null;
     if (document.hidden) {
       return;
     }
+    running = true;
     try {
       const summary = await getJSON(`/api/firewallmap/flow/summary${query}`);
       const problem = host().problemText(summary, T);
@@ -147,6 +150,8 @@ function poll(query) {
       if (state.mode === 'live') {
         $('#fwmap-status').text(T.unavailable);
       }
+    } finally {
+      running = false;
     }
     if (!document.hidden) {
       timer = setTimeout(tick, POLL_MS);
@@ -154,7 +159,7 @@ function poll(query) {
   };
   // shown again: poll at once instead of waiting out an interval
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && timer === null) {
+    if (!document.hidden && timer === null && !running) {
       tick();
       refreshQueueCount();
     }

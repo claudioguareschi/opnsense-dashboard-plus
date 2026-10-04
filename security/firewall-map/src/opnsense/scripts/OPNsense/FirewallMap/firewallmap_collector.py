@@ -400,7 +400,7 @@ class ThreatRecorder:
                 log_notice("threat recording works again")
                 self.failing = False
             # hourly by age; at once when a burst of flagged addresses overfills history
-            over = self.db.execute("SELECT count(*) FROM threats").fetchone()[0] > threats.KEEP_ROWS
+            over = self.db.execute("SELECT count(*) FROM threats").fetchone()[0] > threats.KEEP_ROWS + threats.KEEP_TOUCHED
             if over or self.pruned is None or now - self.pruned >= THREAT_PRUNE_SECONDS:
                 threats.prune(self.db)
                 self.pruned = now

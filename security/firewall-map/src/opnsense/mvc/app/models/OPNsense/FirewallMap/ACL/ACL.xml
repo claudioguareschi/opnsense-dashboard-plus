@@ -2,7 +2,8 @@
     <page-dashboard-widget-firewall-map>
         <name>Dashboard: Firewall Map widget</name>
         <patterns>
-            <pattern>api/firewallmap/flow/summary</pattern>
+            <!-- the summary is requested with parameters (?blocks_min=…): an exact pattern never matches -->
+            <pattern>api/firewallmap/flow/*</pattern>
             <pattern>api/firewallmap/snapshots/*</pattern>
             <pattern>ui/firewallmap</pattern>
             <pattern>ui/firewallmap/index</pattern>

@@ -279,8 +279,6 @@
         may_have_closed: {{ lang._('this connection may have closed since')|json_encode }},
         states_at: {{ lang._('States at')|json_encode }},
         current_states: {{ lang._('Current states')|json_encode }},
-        // the renderer's words: legend, hover cards and flow sentences ({name} is filled in)
-        map_ids_line: {{ lang._('Suricata: {signature} (severity {severity}{category})')|json_encode }},
     });
 </script>
 <script src="/ui/js/firewall-map-renderer.js?v={{ rendererVersion }}"></script>

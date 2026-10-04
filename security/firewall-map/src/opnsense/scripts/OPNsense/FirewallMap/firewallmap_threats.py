@@ -54,6 +54,12 @@ DISPOSITIONS = ("passed", "firewall_blocked", "ips_dropped")
 VIEWS = (*DISPOSITIONS, "all", "reviewed", "dismissed")
 KEEP_SECONDS = 90 * 86400
 KEEP_ROWS = 5000
+# entries the operator touched (reviewed, dismissed, blocked or annotated) have their own room, so
+# a flood of new entries never pushes out a decision or a note
+KEEP_TOUCHED = 1000
+TOUCHED = "(status != 'new' OR coalesce(note, '') != '')"
+# a touched entry ages from its last sighting or its last status change, whichever is later
+TOUCHED_AGE = "max(last_seen, coalesce(status_changed, 0))"
 MAX_ITEMS = 8  # per list kept for one address (targets, inside hosts, services, lists)
 MAX_NOTE = 1000
 SCHEMA_VERSION = 1
@@ -252,11 +258,15 @@ def merge_connections(old, new):
 
 def prune(db, now=None):
     now = time.time() if now is None else now
-    db.execute("DELETE FROM threats WHERE last_seen < ?", (now - KEEP_SECONDS,))
+    cutoff = now - KEEP_SECONDS
+    db.execute(f"DELETE FROM threats WHERE NOT {TOUCHED} AND last_seen < ?", (cutoff,))
+    db.execute(f"DELETE FROM threats WHERE {TOUCHED} AND {TOUCHED_AGE} < ?", (cutoff,))
     # over the row limit, blocked and dropped attempts go first: a flood of them (scanners hitting
     # block rules) must not push out the flagged traffic that got through
-    db.execute("DELETE FROM threats WHERE address NOT IN (SELECT address FROM threats "
-               "ORDER BY disposition = 'passed' DESC, last_seen DESC LIMIT ?)", (KEEP_ROWS,))
+    db.execute(f"DELETE FROM threats WHERE NOT {TOUCHED} AND address NOT IN (SELECT address FROM threats "
+               f"WHERE NOT {TOUCHED} ORDER BY disposition = 'passed' DESC, last_seen DESC LIMIT ?)", (KEEP_ROWS,))
+    db.execute(f"DELETE FROM threats WHERE {TOUCHED} AND address NOT IN (SELECT address FROM threats "
+               f"WHERE {TOUCHED} ORDER BY {TOUCHED_AGE} DESC LIMIT ?)", (KEEP_TOUCHED,))
 
 
 def inside_names():

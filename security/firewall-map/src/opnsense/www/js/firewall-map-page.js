@@ -2599,9 +2599,11 @@
 	/** One request at a time, never stacked on a slow firewall; nothing while the page is hidden. */
 	function poll(query) {
 		let timer = null;
+		let running = false;
 		const tick = async () => {
 			timer = null;
 			if (document.hidden) return;
+			running = true;
 			try {
 				const summary = await getJSON(`/api/firewallmap/flow/summary${query}`);
 				const problem = host().problemText(summary, T);
@@ -2624,11 +2626,13 @@
 			} catch (error) {
 				console.error("Firewall Map+: flow update failed", error);
 				if (state.mode === "live") $("#fwmap-status").text(T.unavailable);
+			} finally {
+				running = false;
 			}
 			if (!document.hidden) timer = setTimeout(tick, POLL_MS);
 		};
 		document.addEventListener("visibilitychange", () => {
-			if (!document.hidden && timer === null) {
+			if (!document.hidden && timer === null && !running) {
 				tick();
 				refreshQueueCount();
 			}

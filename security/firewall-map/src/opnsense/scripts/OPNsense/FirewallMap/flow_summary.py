@@ -123,11 +123,13 @@ def main(want_hostnames=False, block_minimum=1):
         start_collector()
         payload = {"status": "starting", "flows": [], "locations": []}
     geodb = read_json(GEODB_STATUS)
-    missing = payload.get("status") == "no_database" and payload.get("reason") == "database_missing"
-    if (missing and geodb.get("state") != "downloading" and not geodb.get("errors")) or geodb_retry_due(geodb):
-        fetch_database()
-    # the download's progress or its errors (a failed AS database also while the map works)
+    # the download's progress or its errors (a failed AS database also while the map works). A
+    # download that died midway (a reboot, a kill) stops counting as running once its progress is
+    # stale, so the next poll starts it again; the updater's lock refuses a second one that runs.
     view = geodb_view(geodb)
+    missing = payload.get("status") == "no_database" and payload.get("reason") == "database_missing"
+    if (missing and view["state"] != "downloading" and not geodb.get("errors")) or geodb_retry_due(geodb):
+        fetch_database()
     if payload.get("status") == "no_database" or view["state"] == "failed":
         payload["geodb"] = view
     if not want_hostnames:

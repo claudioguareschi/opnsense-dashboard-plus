@@ -92,6 +92,22 @@ class SnapshotMainTest(unittest.TestCase):
             SUMMARY.main()
         self.assertEqual(popen.call_count, 1)
 
+    def test_a_download_that_died_midway_is_started_again(self):
+        self.write({"status": "no_database", "reason": "database_missing", "flows": []})
+        status = os.path.join(self.directory, "geodb.json")
+        with mock.patch.object(SUMMARY, "GEODB_STATUS", status), \
+                mock.patch.object(SUMMARY.subprocess, "Popen") as popen:
+            # still running: progress written seconds ago
+            with open(status, "w") as handle:
+                json.dump({"state": "downloading", "progress": {"edition": "GeoLite2-City", "updated": time.time()}}, handle)
+            self.assertEqual(SUMMARY.main()["geodb"]["state"], "downloading")
+            self.assertEqual(popen.call_count, 0)
+            # died an hour ago (a reboot during the first download): started again, shown as idle
+            with open(status, "w") as handle:
+                json.dump({"state": "downloading", "progress": {"edition": "GeoLite2-City", "updated": time.time() - 3600}}, handle)
+            self.assertEqual(SUMMARY.main()["geodb"]["state"], "idle")
+            self.assertEqual(popen.call_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -408,9 +408,15 @@ def update(force=False, retry=False):
             write_status({**last, "state": "downloading", "provider": provider,
                           "progress": {"edition": edition, "done": done, "total": total, "updated": now}})
 
-        updated, errors = fetch_databases(provider, paths, key, values["update_days"], force, report)
-        failures = 0 if not errors else (0 if retry else last.get("failures") or 0) + 1
-        fallback = fall_back(provider, paths, failures, values["update_days"], last.get("fallback"), report)
+        try:
+            updated, errors = fetch_databases(provider, paths, key, values["update_days"], force, report)
+            failures = 0 if not errors else (0 if retry else last.get("failures") or 0) + 1
+            fallback = fall_back(provider, paths, failures, values["update_days"], last.get("fallback"), report)
+        except BaseException:
+            # never leave "downloading" behind for an error that ends the run (a kill or a reboot
+            # cannot be caught: the map then sees the progress go stale)
+            write_status({**last, "state": "idle"})
+            raise
         now = time.time()
         if errors:
             log_warning(f"geolocation download failed ({failures} in a row): next try in {int(retry_delay(failures) // 60)} min")

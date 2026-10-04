@@ -40,7 +40,7 @@ import firewallmap_geodb as geodb
 from firewallmap_collector import IDLE_SECONDS, recording_wanted
 from lib.config import abuseipdb_key, settings, widget_in_use
 from lib.blocklists import FEEDS
-from lib.common import OUTPUT_FILE, REQUEST_MARKER, read_json, secure_umask
+from lib.common import OUTPUT_FILE, REQUEST_MARKER, geodb_view, read_json, secure_umask
 
 PID_FILE = "/var/run/firewallmap.pid"
 
@@ -81,7 +81,8 @@ def database():
     for kind in ("city", "asn"):
         if status.get(kind):
             status[kind].update({"edition": paths["editions"][kind], "built": geodb.built(paths[kind])})
-    status["state"] = geodb.read_status().get("state")
+    # a download that died midway is not shown as running (its progress went stale)
+    status["state"] = geodb_view(geodb.read_status())["state"]
     return status
 
 

@@ -521,14 +521,19 @@ def state_outside(record, pair):
     return outside_key(record["protocol"], public["address"], public["port"], remote, far["port"])
 
 
-# Walking the state table costs about 2 kB of memory and 20 µs per state. The map walks at most
-# as many states as fit in a small share of the firewall's RAM (a 4 GB box: about 100,000), so a
-# flood or a very busy firewall stops the sampling instead of risking memory; never fewer than
-# MIN, and never more than MAX, which already takes about 5 s per sample.
-BYTES_PER_STATE = 2048
+# A sample costs up to about 6 kB of memory per state at its peak: the parsed records (under
+# 1 kB), the flow tracker's and the correlator's entries, and the previous sample's, still alive
+# while the next one is built (measured over consecutive samples of 20,000 and 50,000 states;
+# the high end when every state has its own remote address). The map walks at most as many states
+# as fit in a small share of the firewall's RAM (a 4 GB box: about 35,000), so a flood or a very
+# busy firewall pauses the sampling instead of risking memory; never fewer than MIN, never more
+# than MAX. Parsing takes about 20 µs per state on a fast CPU, longer on appliance CPUs.
+BYTES_PER_STATE = 6000
 STATE_MEMORY_SHARE = 0.05
-MIN_SAMPLED_STATES = 25000
+MIN_SAMPLED_STATES = 10000
 MAX_SAMPLED_STATES = 250000
+# when the RAM cannot be read: what a 4 GB firewall gets
+DEFAULT_SAMPLED_STATES = 35000
 STATE_COUNT = re.compile(r"current entries\s+(\d+)")
 # a sample that takes longer is stopped (pfctl stuck, or a table far over the cap)
 SAMPLE_TIMEOUT = 10
@@ -565,7 +570,7 @@ def state_limit(memory=None):
     """How many states the map may walk on this firewall, from its RAM (see STATE_MEMORY_SHARE)."""
     memory = physical_memory() if memory is None else memory
     if not memory:
-        return 100000
+        return DEFAULT_SAMPLED_STATES
     limit = int(memory * STATE_MEMORY_SHARE / BYTES_PER_STATE) // 5000 * 5000
     return max(MIN_SAMPLED_STATES, min(MAX_SAMPLED_STATES, limit))
 

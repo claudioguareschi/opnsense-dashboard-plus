@@ -205,6 +205,29 @@ class ThreatQueueTest(unittest.TestCase):
             self.assertEqual({row[0] for row in db.execute("SELECT address FROM threats")},
                              {"198.51.100.1", "203.0.113.2"})
 
+    def test_prune_keeps_entries_the_operator_touched(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = THREATS.connect(os.path.join(directory, "cache.db"))
+            insert = ("INSERT INTO threats (address, first_seen, last_seen, samples, data, disposition, status, note, "
+                      "status_changed) VALUES (?, ?, ?, 1, '{}', 'firewall_blocked', ?, ?, ?)")
+            # blocked with a note an hour ago, then a flood of newer blocked scanners
+            db.execute(insert, ("198.51.100.77", 1.0, 1.0, "blocked", "our pentester", 1.0))
+            db.executemany(insert, [(f"203.0.113.{n}", 10.0 + n, 10.0 + n, "new", "", None) for n in range(5)])
+            with mock.patch.object(THREATS, "KEEP_ROWS", 2):
+                THREATS.prune(db, now=20.0)
+            self.assertEqual({row[0] for row in db.execute("SELECT address FROM threats")},
+                             {"198.51.100.77", "203.0.113.3", "203.0.113.4"})
+            # a touched entry ages from its status change, not only from its last sighting
+            db.execute("UPDATE threats SET status_changed = ? WHERE address = '198.51.100.77'", (THREATS.KEEP_SECONDS,))
+            THREATS.prune(db, now=THREATS.KEEP_SECONDS + 5)
+            self.assertIn("198.51.100.77", {row[0] for row in db.execute("SELECT address FROM threats")})
+            # touched entries have a cap of their own: the oldest decision goes first
+            db.executemany(insert, [(f"192.0.2.{n}", 30.0, 30.0, "dismissed", "", THREATS.KEEP_SECONDS + n) for n in range(3)])
+            with mock.patch.object(THREATS, "KEEP_TOUCHED", 2):
+                THREATS.prune(db, now=THREATS.KEEP_SECONDS + 5)
+            touched = {row[0] for row in db.execute(f"SELECT address FROM threats WHERE {THREATS.TOUCHED}")}
+            self.assertEqual(touched, {"192.0.2.1", "192.0.2.2"})
+
 
 class ThreatHistoryFileTest(unittest.TestCase):
     def test_history_moves_out_of_the_cache_once(self):

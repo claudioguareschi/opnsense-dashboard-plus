@@ -259,8 +259,8 @@ class StateGuardTest(unittest.TestCase):
 
     def test_the_limit_follows_the_firewalls_memory(self):
         gigabyte = 1024 ** 3
-        self.assertEqual(PF.state_limit(4 * gigabyte), 100000)
-        self.assertEqual(PF.state_limit(8 * gigabyte), 205000)
+        self.assertEqual(PF.state_limit(4 * gigabyte), 35000)
+        self.assertEqual(PF.state_limit(8 * gigabyte), 70000)
         # a small box keeps a floor, a big one a ceiling (a sample must stay quick)
         self.assertEqual(PF.state_limit(gigabyte // 2), PF.MIN_SAMPLED_STATES)
         self.assertEqual(PF.state_limit(64 * gigabyte), PF.MAX_SAMPLED_STATES)
