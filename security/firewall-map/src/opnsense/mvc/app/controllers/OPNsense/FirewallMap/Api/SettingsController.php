@@ -26,30 +26,37 @@
  */
 namespace OPNsense\FirewallMap\Api;
 
-use OPNsense\Base\ApiControllerBase;
+use OPNsense\Base\ApiMutableModelControllerBase;
 use OPNsense\Core\Backend;
 use OPNsense\Core\Config;
 use OPNsense\FirewallMap\BlocklistAliases;
-use OPNsense\FirewallMap\FirewallMap;
 
 /**
  * Firewall-wide Firewall Map+ settings, edited from the widget's settings dialog: the geolocation
  * provider and key, the AbuseIPDB key, the threat lists, threat recording and the blocklist
- * aliases. The keys are write-only: they are never returned to the browser.
+ * aliases. OPNsense's standard settings controller (config lock, field-keyed validation messages,
+ * the {"firewallmap": {"general": {...}}} shape), with two differences:
+ * - the keys are write-only: never returned; an empty key keeps the stored one, "-" removes it;
+ * - saving applies what changed: the blocklist aliases, the list index, downloads.
  */
-class SettingsController extends ApiControllerBase
+class SettingsController extends ApiMutableModelControllerBase
 {
-    private function status()
-    {
-        $status = json_decode((new Backend())->configdRun('firewallmap geodb status'), true);
-        return is_array($status) ? $status : [];
-    }
+    protected static $internalModelName = 'firewallmap';
+    protected static $internalModelClass = 'OPNsense\FirewallMap\FirewallMap';
+
+    private const KEYS = ['license_key', 'abuseipdb_key'];
 
     /** The AbuseIPDB list download status, read directly: this runs on every widget and page load. */
     private function blacklistStatus()
     {
         $file = '/var/db/firewallmap/abuseipdb.json';
         return is_file($file) ? (json_decode((string)file_get_contents($file), true) ?: []) : [];
+    }
+
+    private function databaseStatus()
+    {
+        $status = json_decode((new Backend())->configdRun('firewallmap geodb status'), true);
+        return is_array($status) ? $status : [];
     }
 
     /** What the blocklist aliases follow: the switch, the chosen lists and whether an AbuseIPDB key exists. */
@@ -62,118 +69,110 @@ class SettingsController extends ApiControllerBase
         ];
     }
 
-    public function getAction()
+    private function snapshot($general)
     {
-        $general = (new FirewallMap())->general;
         return [
-            'provider' => (string)$general->provider,
-            'update_days' => (string)$general->update_days,
-            'abuseipdb_configured' => (string)$general->abuseipdb_key !== '',
-            'abuseipdb_blacklist' => $this->blacklistStatus(),
-            'threat_lists' => (string)$general->threat_lists,
-            'record_threats' => (string)$general->record_threats,
-            'blocklist_aliases' => (string)$general->blocklist_aliases,
-            'database' => $this->status(),
+            'aliases' => $this->aliasInputs($general),
+            'lists' => (string)$general->threat_lists,
+            'record' => (string)$general->record_threats,
+            'abuse_key' => (string)$general->abuseipdb_key,
+            'database' => [(string)$general->provider, (string)$general->update_days, (string)$general->license_key],
         ];
     }
 
+    /** The settings without the keys, and the status the dialog shows beside them. */
+    public function getAction()
+    {
+        $result = parent::getAction();
+        $general = $this->getModel()->general;
+        foreach (self::KEYS as $key) {
+            $result[static::$internalModelName]['general'][$key] = '';
+        }
+        $result['status'] = [
+            'abuseipdb_configured' => (string)$general->abuseipdb_key !== '',
+            'abuseipdb_blacklist' => $this->blacklistStatus(),
+            'database' => $this->databaseStatus(),
+        ];
+        return $result;
+    }
+
+    /** The posted settings, with the write-only keys handled: empty keeps the stored key, "-" removes it. */
+    private function postedGeneral()
+    {
+        $posted = $this->request->getPost(static::$internalModelName);
+        $general = is_array($posted) && is_array($posted['general'] ?? null) ? $posted['general'] : [];
+        foreach (self::KEYS as $key) {
+            if (array_key_exists($key, $general)) {
+                $value = trim((string)$general[$key]);
+                if ($value === '') {
+                    unset($general[$key]);
+                } else {
+                    $general[$key] = $value === '-' ? '' : $value;
+                }
+            }
+        }
+        return $general;
+    }
+
+    /** Core's setAction (lock, set, validate, save), plus the keys, the aliases and what to apply. */
     public function setAction()
     {
         if (!$this->request->isPost()) {
             return ['result' => 'failed'];
         }
-        /* before loading any model, as core does: a concurrent save (another administrator, an HA
-           sync) cannot then be overwritten with what this request read */
         Config::getInstance()->lock();
-        $model = new FirewallMap();
-        $general = $model->general;
-        $ensure = false;
-        $fetchBlacklist = false;
-        /* the aliases follow the switch, the chosen lists and whether an AbuseIPDB key exists */
-        $aliasesBefore = $this->aliasInputs($general);
-        $listsBefore = (string)$general->threat_lists;
-        /* the database is only re-checked when something that decides which one to fetch changed */
-        $databaseBefore = [(string)$general->provider, (string)$general->update_days, (string)$general->license_key];
-        foreach (['provider', 'update_days'] as $field) {
-            if ($this->request->hasPost($field) && $this->request->getPost($field) !== '') {
-                $general->$field = $this->request->getPost($field);
-            }
+        $model = $this->getModel();
+        $before = $this->snapshot($model->general);
+        $model->setNodes(['general' => $this->postedGeneral()]);
+        $result = $this->validate();
+        if (!empty($result['result'])) {
+            return $result;
         }
-        if ($this->request->hasPost('record_threats')) {
-            $general->record_threats = $this->request->getPost('record_threats') === '1' ? '1' : '0';
-            $ensure = $general->record_threats == '1';
-        }
-        if ($this->request->hasPost('blocklist_aliases')) {
-            $general->blocklist_aliases = $this->request->getPost('blocklist_aliases') === '1' ? '1' : '0';
-        }
-        if ($this->request->hasPost('threat_lists')) {
-            $general->threat_lists = (string)$this->request->getPost('threat_lists');
-        }
-        if ($this->request->hasPost('abuseipdb_key')) {
-            /* write-only like the MaxMind key: empty keeps it, "-" removes it */
-            $abuse = trim((string)$this->request->getPost('abuseipdb_key'));
-            if ($abuse === '-') {
-                $general->abuseipdb_key = '';
-            } elseif ($abuse !== '') {
-                /* the free plan allows only a few list downloads a day: fetch again only for a new key */
-                $fetchBlacklist = $abuse !== (string)$general->abuseipdb_key;
-                $general->abuseipdb_key = $abuse;
-            }
-        }
-        if ($this->request->hasPost('license_key')) {
-            $key = trim((string)$this->request->getPost('license_key'));
-            if ($key === '-') {
-                /* explicit reset: fall back to the GeoIP alias key */
-                $general->license_key = '';
-            } elseif ($key !== '') {
-                $general->license_key = $key;
-            }
-        }
-        $messages = [];
-        foreach ($model->performValidation() as $message) {
-            $messages[] = $message->getMessage();
-        }
-        if (!empty($messages)) {
-            return ['result' => 'failed', 'validations' => $messages];
-        }
-        $aliasesAfter = $this->aliasInputs($general);
-        $aliasChanged = false;
-        if ($aliasesAfter !== $aliasesBefore) {
-            [$aliasModel, $aliasChanged, $aliasError] = BlocklistAliases::reconcile(
-                (string)$general->blocklist_aliases === '1',
-                (string)$general->threat_lists,
-                (string)$general->abuseipdb_key !== ''
+        $aliasesChanged = false;
+        if ($this->aliasInputs($model->general) !== $before['aliases']) {
+            [$aliases, $aliasesChanged, $error] = BlocklistAliases::reconcile(
+                (string)$model->general->blocklist_aliases === '1',
+                (string)$model->general->threat_lists,
+                (string)$model->general->abuseipdb_key !== ''
             );
-            if ($aliasError !== null) {
-                return ['result' => 'failed', 'validations' => [$aliasError]];
+            if ($error !== null) {
+                $field = static::$internalModelName . '.general.blocklist_aliases';
+                return ['result' => 'failed', 'validations' => [$field => $error]];
+            }
+            if ($aliasesChanged) {
+                $aliases->serializeToConfig();
             }
         }
-        $model->serializeToConfig();
-        if ($aliasChanged) {
-            $aliasModel->serializeToConfig();
-        }
-        Config::getInstance()->save();
-        /* Reload in place: preserve live flow/alert history while rebuilding the chosen list index. */
-        (new Backend())->configdRun('firewallmap reload');
-        if ($aliasChanged || $aliasesAfter[0] !== $aliasesBefore[0]) {
+        $result = $this->save(false, true);
+        $this->apply($before, $aliasesChanged);
+        return $result;
+    }
+
+    /** What saving changed, applied: list index, aliases, downloads, threat recording. */
+    private function apply($before, $aliasesChanged)
+    {
+        $after = $this->snapshot($this->getModel()->general);
+        $backend = new Backend();
+        /* reload in place: keep live flow and alert history while the chosen list index is rebuilt */
+        $backend->configdRun('firewallmap reload');
+        if ($aliasesChanged || $after['aliases'][0] !== $before['aliases'][0]) {
             /* alias definitions only: no firewall rule is created or changed */
             BlocklistAliases::apply();
         }
-        if ((string)$general->threat_lists !== $listsBefore) {
-            (new Backend())->configdRun('firewallmap feeds update', true);
+        if ($after['lists'] !== $before['lists']) {
+            $backend->configdRun('firewallmap feeds update', true);
         }
-        if ($fetchBlacklist) {
-            (new Backend())->configdRun('firewallmap abuseipdb refresh', true);
+        /* the free plan allows only a few list downloads a day: fetch again only for a new key */
+        if ($after['abuse_key'] !== '' && $after['abuse_key'] !== $before['abuse_key']) {
+            $backend->configdRun('firewallmap abuseipdb refresh', true);
         }
-        if ($ensure) {
-            (new Backend())->configdRun('firewallmap ensure', true);
+        if ($after['record'] === '1' && $before['record'] !== '1') {
+            $backend->configdRun('firewallmap ensure', true);
         }
-        $databaseAfter = [(string)$general->provider, (string)$general->update_days, (string)$general->license_key];
-        if ($databaseAfter !== $databaseBefore) {
-            // a new key or provider: download now, not after an earlier failure's wait
-            (new Backend())->configdRun('firewallmap geodb retry', true);
+        if ($after['database'] !== $before['database']) {
+            /* a new key or provider: download now, not after an earlier failure's wait */
+            $backend->configdRun('firewallmap geodb retry', true);
         }
-        return ['result' => 'saved'];
     }
 
     /**

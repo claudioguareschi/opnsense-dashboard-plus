@@ -2810,7 +2810,7 @@
 			colorMode: state.colorMode
 		};
 		try {
-			state.pluginSettings = await getJSON("/api/firewallmap/settings/get");
+			state.pluginSettings = host().pluginSettings(await getJSON("/api/firewallmap/settings/get"));
 			state.isAdmin = Boolean(state.pluginSettings.provider);
 			state.abuseConfigured = Boolean(state.pluginSettings.abuseipdb_configured);
 		} catch (_) {

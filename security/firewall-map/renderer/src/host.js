@@ -319,3 +319,22 @@ export function geoNoteHtml(summary, text, dismissed = null) {
 export function geoNoteKey(summary) {
   return (summary?.geodb?.errors || []).map((error) => `${error.edition}:${error.code}`).join('|');
 }
+
+/**
+ * The plugin's firewall-wide settings as the widget and the page use them, from the standard
+ * settings API answer ({"firewallmap": {"general": {...}}, "status": {...}}): option fields come
+ * as {value: {value: label, selected}} maps, the keys are never sent.
+ */
+export function pluginSettings(answer) {
+  const general = answer?.firewallmap?.general || {};
+  const selected = (field) => (typeof field === 'object' && field !== null
+    ? Object.keys(field).find((key) => Number(field[key]?.selected)) || '' : String(field ?? ''));
+  return {
+    provider: selected(general.provider),
+    update_days: String(general.update_days ?? ''),
+    threat_lists: String(general.threat_lists ?? ''),
+    record_threats: String(general.record_threats ?? ''),
+    blocklist_aliases: String(general.blocklist_aliases ?? ''),
+    ...(answer?.status || {}),
+  };
+}

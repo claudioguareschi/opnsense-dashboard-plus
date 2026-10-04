@@ -69,7 +69,8 @@ export default class FirewallMap extends BaseWidget {
     async _loadGeoSettings() {
         // only administrators may read (and change) the firewall-wide database settings
         try {
-            this.geoSettings = await this._adminCall('/api/firewallmap/settings/get');
+            const renderer = await this._loadRenderer();
+            this.geoSettings = renderer.host.pluginSettings(await this._adminCall('/api/firewallmap/settings/get'));
         } catch (_) {
             this.geoSettings = null;
             return null;
@@ -398,10 +399,11 @@ export default class FirewallMap extends BaseWidget {
             return;
         }
         try {
-            const result = await this._adminCall('/api/firewallmap/settings/set', JSON.stringify(update), 'POST');
+            // OPNsense's standard settings shape; the server keeps a key that is left empty
+            const result = await this._adminCall('/api/firewallmap/settings/set', JSON.stringify({firewallmap: {general: update}}), 'POST');
             if (result.result !== 'saved') {
                 console.error('Firewall Map+: settings not saved', result);
-                this._settingsError((result.validations || []).join(' ') || result.result);
+                this._settingsError(Object.values(result.validations || {}).flat().join(' ') || result.result);
             }
         } catch (error) {
             console.error('Firewall Map+: settings not saved', error);

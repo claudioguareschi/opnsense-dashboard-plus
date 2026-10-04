@@ -317,7 +317,7 @@ async function loadSettings() {
   state.settings = {...parseSettings(config), colorMode: state.colorMode};
   // investigation actions are offered to administrators (who can read the plugin settings)
   try {
-    state.pluginSettings = await getJSON('/api/firewallmap/settings/get');
+    state.pluginSettings = host().pluginSettings(await getJSON('/api/firewallmap/settings/get'));
     state.isAdmin = Boolean(state.pluginSettings.provider);
     state.abuseConfigured = Boolean(state.pluginSettings.abuseipdb_configured);
   } catch (_) {
