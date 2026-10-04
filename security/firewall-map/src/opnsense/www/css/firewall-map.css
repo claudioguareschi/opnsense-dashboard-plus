@@ -171,7 +171,9 @@ body.fwmap-resizing, body.fwmap-resizing * { user-select: none !important; }
 .fwmap-kv { margin: 0; }
 .fwmap-kv th { font-weight: normal; opacity: .7; width: 40%; }
 .fwmap-kv td { overflow-wrap: anywhere; }
-.fwmap-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0 14px; }
+/* two tables side by side while both fit whole, otherwise one above the other */
+.fwmap-two { display: flex; flex-wrap: wrap; gap: 0 14px; }
+.fwmap-two .fwmap-kv { flex: 1 1 auto; width: auto; }
 .fwmap-two .fwmap-kv th { width: 1%; white-space: nowrap; }
 .fwmap-sig { margin-bottom: 5px; }
 .fwmap-actions { padding: 9px 14px; border-top: 1px solid rgba(128, 128, 128, .18); }
