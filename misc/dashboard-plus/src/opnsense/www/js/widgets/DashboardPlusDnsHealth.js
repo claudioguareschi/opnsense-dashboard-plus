@@ -57,6 +57,8 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             }
             .dashboard-plus-dns-health-dot {
                 flex: none;
+                width: 1em;
+                height: 1em;
                 margin: 0 0.25em;
                 background: currentColor;
                 opacity: 0.8;
