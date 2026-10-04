@@ -145,8 +145,8 @@ body.fwmap-resizing, body.fwmap-resizing * { user-select: none !important; }
 .fwmap-d-name { font-size: 1.38em; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
 .fwmap-d-line { margin-top: 2px; display: flex; flex-wrap: wrap; gap: 2px 10px; opacity: .8; }
 .fwmap-d-line b { font-weight: 500; }
-.fwmap-d-verdict { text-align: right; }
-.fwmap-d-verdict-sub { font-size: .88em; opacity: .65; margin-top: 4px; }
+.fwmap-d-verdict { text-align: center; }
+.fwmap-d-verdict-sub { font-size: .88em; opacity: .65; margin-top: 8px; }
 .fwmap-picker { margin: 0 0 8px; font-size: .88em; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
 .fwmap-pick { padding: 0 6px; border-radius: 8px; }
 .fwmap-pick.active { background: rgba(128, 128, 128, .2); font-weight: 600; }
