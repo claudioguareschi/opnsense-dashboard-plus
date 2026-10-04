@@ -273,13 +273,16 @@ class ThreatHistoryFileTest(unittest.TestCase):
                 old.execute("CREATE TABLE threats (address TEXT PRIMARY KEY, first_seen REAL, last_seen REAL, samples INTEGER, "
                             "data TEXT, status TEXT DEFAULT 'new', note TEXT DEFAULT '', status_changed REAL)")
                 old.execute("INSERT INTO threats VALUES ('203.0.113.9', 1, 2, 3, '{}', 'reviewed', 'seen before', 2)")
-                old.execute("INSERT INTO threats VALUES ('198.51.100.1', 1, 2, 3, '{}', 'dismissed', '', 2)")
+                old.execute("INSERT INTO threats VALUES ('198.51.100.1', 1, 2, 3, '{}', 'dismissed', 'scanner', 2)")
+                old.execute("INSERT INTO threats VALUES ('198.51.100.2', 1, 2, 3, '{}', 'new', '', NULL)")
                 old.commit()
                 old.close()
                 db = THREATS.connect(database)
                 self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], THREATS.SCHEMA_VERSION)
-                rows = dict(db.execute("SELECT address, status FROM threats"))
-                self.assertEqual(rows, {"203.0.113.9": "reviewed", "198.51.100.1": "new"})
+                # the entry recorded since keeps the operator's earlier decision and note
+                rows = {row[0]: row[1:] for row in db.execute("SELECT address, status, note FROM threats")}
+                self.assertEqual(rows, {"203.0.113.9": ("reviewed", "seen before"), "198.51.100.1": ("dismissed", "scanner"),
+                                        "198.51.100.2": ("new", "")})
                 db.close()
 
 

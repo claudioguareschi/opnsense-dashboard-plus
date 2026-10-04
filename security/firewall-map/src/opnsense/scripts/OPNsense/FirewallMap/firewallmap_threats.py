@@ -106,6 +106,16 @@ def move_from_cache(db, cache=None):
         there = {row[1] for row in db.execute("PRAGMA old.table_info(threats)")}
         columns = ", ".join(column for column in here if column in there)
         db.execute("BEGIN IMMEDIATE")
+        if {"status", "note", "status_changed"} <= there:
+            # an address recorded again before an earlier failed move keeps the operator's decision
+            db.execute(
+                "UPDATE main.threats SET "
+                "status = (SELECT o.status FROM old.threats o WHERE o.address = main.threats.address), "
+                "note = (SELECT o.note FROM old.threats o WHERE o.address = main.threats.address), "
+                "status_changed = (SELECT o.status_changed FROM old.threats o WHERE o.address = main.threats.address) "
+                "WHERE status = 'new' AND coalesce(note, '') = '' AND address IN "
+                "(SELECT address FROM old.threats WHERE status != 'new' OR coalesce(note, '') != '')"
+            )
         db.execute(f"INSERT OR IGNORE INTO main.threats ({columns}) SELECT {columns} FROM old.threats")
         db.execute("DROP TABLE old.threats")
         db.execute("COMMIT")
