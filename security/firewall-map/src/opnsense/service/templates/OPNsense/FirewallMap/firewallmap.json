@@ -29,5 +29,11 @@
 {% for name, interface in interfaces.items() if interface['if'] is defined and interface['if'] %}
         {{ interface['if'] | tojson }}: {{ (interface.descr or name | upper) | tojson }}{{ "," if not loop.last else "" }}
 {% endfor %}
+    },
+    "topology": {
+        "primary_wan_device": {{ interfaces.get('wan', {}).get('if', '') | tojson }},
+        "discover_external_ip": {{ general.discover_external_ip | default('0', true) | tojson }},
+        "latitude": {{ general.latitude | default('', true) | tojson }},
+        "longitude": {{ general.longitude | default('', true) | tojson }}
     }
 }

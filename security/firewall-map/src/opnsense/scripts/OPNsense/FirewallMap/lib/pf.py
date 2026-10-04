@@ -285,7 +285,7 @@ def _origin_address(record, local_addresses, networks):
     return min(on_egress or same_family, default=None)
 
 
-def flow_endpoints(record, local_addresses, networks=None):
+def flow_endpoints(record, local_addresses, networks=None, interface_addresses=None, primary_wan_device=None):
     """Return (firewall public address, remote address) or None for non-map traffic.
 
     NAT states carry the firewall's public address explicitly; other states are kept
@@ -300,6 +300,14 @@ def flow_endpoints(record, local_addresses, networks=None):
         local = src
     elif dst in local_addresses:
         local = dst
+    elif nat and record["direction"] == "out" and private_ip(src) and public_ip(dst) \
+            and record.get("origif") == primary_wan_device and src in (interface_addresses or {}).get(primary_wan_device, set()):
+        # Outbound NAT through the configured primary WAN's RFC1918 address (upstream/double NAT).
+        local = src
+    elif nat and record["direction"] == "in" and private_ip(nat) and public_ip(src) \
+            and record.get("origif") == primary_wan_device and nat in (interface_addresses or {}).get(primary_wan_device, set()):
+        # An upstream port forward followed by this firewall's own port forward.
+        local = nat
     elif nat and private_ip(src) and public_ip(dst) and local_addresses:
         # outbound NAT to a tunnel address (e.g. a WireGuard or IPsec egress): draw it from the
         # firewall's own location, the egress interface tells which path it took
@@ -331,7 +339,11 @@ def flow_endpoints(record, local_addresses, networks=None):
 
 def inside_endpoint(record, networks=None, local_addresses=None):
     """The protected endpoint behind NAT or within a directly routed interface prefix."""
-    for side in (record["nat"], record["src"], record["dst"]):
+    # On inbound NAT, both the WAN translation and the protected target can be private behind
+    # upstream NAT. PF's destination is the protected side; prefer it over the wire translation.
+    sides = (record["dst"], record["nat"], record["src"]) if record.get("direction") == "in" \
+        else (record["nat"], record["src"], record["dst"])
+    for side in sides:
         if side and private_ip(side["address"]):
             return side
     # Public prefixes are unambiguous only when pfctl supplied the state's outside interface.
@@ -416,14 +428,35 @@ def interface_networks(output):
     return networks
 
 
+def interface_addresses(output):
+    """{device: {exact local addresses}} from ifconfig -a, including private WAN addresses."""
+    addresses = {}
+    device = None
+    for line in output.splitlines():
+        header = re.match(r"^(\S+?):\s+flags=", line)
+        if header:
+            device = header.group(1)
+            continue
+        match = re.search(r"\binet\s+(\d+(?:\.\d+){3})", line)
+        match6 = re.search(r"\binet6\s+([^\s%]+)", line)
+        value = match.group(1) if match else match6.group(1) if match6 else None
+        if value and device:
+            try:
+                address = str(ipaddress.ip_address(value))
+            except ValueError:
+                continue
+            addresses.setdefault(device, set()).add(address)
+    return addresses
+
+
 def host_info():
-    """Return (public IP addresses on this firewall, CARP role or None, interface networks)."""
+    """Return (public addresses, CARP role, interface networks, exact addresses by device)."""
     try:
         output = subprocess.run(
             [IFCONFIG, "-a"], capture_output=True, check=False, text=True, timeout=2,
         ).stdout
     except (OSError, subprocess.TimeoutExpired):
-        return set(), None, []
+        return set(), None, [], {}
     candidates = re.findall(r"\binet\s+(\d+(?:\.\d+){3})", output)
     candidates += re.findall(r"\binet6\s+([^\s%]+)", output)
     addresses = {str(ipaddress.ip_address(address)) for address in candidates if public_ip(address)}
@@ -434,7 +467,7 @@ def host_info():
         role = "master"
     else:
         role = "backup"
-    return addresses, role, interface_networks(output)
+    return addresses, role, interface_networks(output), interface_addresses(output)
 
 
 def blocked_rule_tables(path=RULES_DEBUG):
@@ -570,7 +603,7 @@ class StateFacts:
                      "remote_started", "service_port", "service", "port_label", "target", "rule_key", "outside",
                      "inside_text", "public", "remote")
 
-        def __init__(self, record, local_addresses, networks):
+        def __init__(self, record, local_addresses, networks, interface_addresses=None, primary_wan_device=None):
             src, dst, nat = record["src"], record["dst"], record["nat"]
             self.src, self.dst, self.nat = src, dst, nat
             self.origif, self.rule = record.get("origif"), record.get("rule")
@@ -581,7 +614,7 @@ class StateFacts:
             self.inside = self.src_is_remote = self.remote_started = self.service_port = self.service = None
             self.port_label = self.target = self.rule_key = self.outside = self.inside_text = None
             self.public = self.remote = None
-            self.pair = pair = flow_endpoints(record, local_addresses, networks)
+            self.pair = pair = flow_endpoints(record, local_addresses, networks, interface_addresses, primary_wan_device)
             if pair is None:
                 return
             self.inside = inside = inside_endpoint(record, networks, local_addresses)
@@ -613,10 +646,10 @@ class StateFacts:
         self.context = None
         self.known = {}
 
-    def view(self, records, local_addresses, networks=None):
+    def view(self, records, local_addresses, networks=None, interface_addresses=None, primary_wan_device=None):
         """([(record, facts)] in sample order, lan_rule_index(records)) for one sample."""
         # what the facts depend on besides the state itself (the collector replaces both, never edits them)
-        context = (local_addresses, networks)
+        context = (local_addresses, networks, interface_addresses, primary_wan_device)
         known = self.known if context == self.context else {}
         self.context = context
         fresh = {}
@@ -629,7 +662,7 @@ class StateFacts:
             # the same state (and the same parsed header line: lines that differ never share Endpoints)
             if facts is None or facts.src is not record.src or facts.dst is not record.dst \
                     or facts.nat is not record.nat or facts.origif != record.origif or facts.rule != record.rule:
-                facts = facts_of(record, local_addresses, networks)
+                facts = facts_of(record, local_addresses, networks, interface_addresses, primary_wan_device)
             if state_id is not None:
                 fresh[state_id] = facts
             if facts.lan_key is not None:

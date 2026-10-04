@@ -14,6 +14,11 @@
                     <dbip>DB-IP Lite (no key)</dbip>
                 </OptionValues>
             </provider>
+            <discover_external_ip type="BooleanField">
+                <Default>0</Default>
+            </discover_external_ip>
+            <latitude type="TextField"/>
+            <longitude type="TextField"/>
             <!-- write-only; empty: reuse the key of a MaxMind GeoIP alias URL, when one is configured -->
             <license_key type="UpdateOnlyTextField">
                 <Mask>/^[A-Za-z0-9_]{0,64}$/</Mask>

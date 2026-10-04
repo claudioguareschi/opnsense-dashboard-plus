@@ -108,9 +108,32 @@ vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
                    "   age 00:00:05, expires in 23:59:37, 1:1 pkts, 1:1 bytes\n   id: 01 creatorid: 02\n"
         self.assertIsNone(PF.flow_endpoints(PF.parse_states(lan_side)[0], {"1.2.3.163"}))
 
+    def test_private_primary_wan_nat_keeps_its_real_wire_address(self):
+        state = self.NAT_OUT.replace("1.2.3.163:19421", "192.168.0.2:19421")
+        record = PF.parse_states(state)[0]
+        topology = {"igb1": {"192.168.0.2"}}
+        self.assertEqual(PF.flow_endpoints(record, set(), interface_addresses=topology,
+                                           primary_wan_device="igb1"),
+                         ("192.168.0.2", "34.209.15.107"))
+        # A public address elsewhere on the firewall is not this state\'s origin.
+        self.assertEqual(PF.flow_endpoints(record, {"152.44.11.230"}, interface_addresses=topology,
+                                           primary_wan_device="igb1"),
+                         ("192.168.0.2", "34.209.15.107"))
+
+    def test_private_wan_requires_the_exact_local_address_and_origif(self):
+        state = self.NAT_OUT.replace("1.2.3.163:19421", "192.168.0.3:19421")
+        record = PF.parse_states(state)[0]
+        topology = {"igb1": {"192.168.0.2"}}
+        self.assertIsNone(PF.flow_endpoints(record, set(), interface_addresses=topology,
+                                            primary_wan_device="igb1"))
+        record.origif = "vlan03"
+        self.assertIsNone(PF.flow_endpoints(record, set(), interface_addresses=topology,
+                                            primary_wan_device="igb1"))
+
     def test_maps_inside_host_to_interface_and_name(self):
         networks = PF.interface_networks(self.IFCONFIG)
         self.assertIn(("192.168.30.250/32", "vlan03"), [(str(network), device) for network, device in networks])
+        self.assertEqual(PF.interface_addresses(self.IFCONFIG)["igb1"], {"1.2.2.230", "2606:4700:4700::1111"})
         described = LEASES.describe_inside("192.168.30.30", {"192.168.30.30": "nas"}, networks, {"vlan03": "VLAN30_IOT"})
         self.assertEqual(described, {"ip": "192.168.30.30", "name": "nas", "interface": "VLAN30_IOT"})
         self.assertEqual(LEASES.describe_inside("fd12:3456:789a:30::20", {}, networks,
@@ -199,6 +222,20 @@ class InitiatorTest(unittest.TestCase):
         self.assertGreater(flow["rate_out"], flow["rate_in"])
         target = LEASES.describe_target("tcp|192.168.1.2|443", {"192.168.1.2": "mail"}, [], {}, {"1.2.3.163"})
         self.assertEqual((target["name"], target["service"]), ("mail", "HTTPS"))
+
+    def test_inbound_private_primary_wan_port_forward_reports_real_wire_address(self):
+        state = self.INBOUND.replace("1.2.3.163", "192.168.0.2").replace("origif: ix0", "origif: igb1")
+        record = PF.parse_states(state)[0]
+        topology = {"igb1": {"192.168.0.2"}}
+        pair = PF.flow_endpoints(record, set(), interface_addresses=topology, primary_wan_device="igb1")
+        self.assertEqual(pair, ("192.168.0.2", "94.154.43.203"))
+        self.assertEqual(PF.state_outside(record, pair),
+                         ("tcp", "192.168.0.2", "443", "94.154.43.203", "51234"))
+        tracker = COLLECTOR.FlowTracker(smoothing=1.0)
+        tracker.update([], set(), now=0.0, interface_addresses=topology, primary_wan_device="igb1")
+        tracker.update([record], set(), now=2.0, interface_addresses=topology, primary_wan_device="igb1")
+        flow = tracker.flows[pair]
+        self.assertEqual((flow["initiated"], flow["targets"]), ("remote", ["tcp|192.168.1.2|443"]))
 
     def test_inbound_udp_to_the_firewall_keeps_its_protocol(self):
         states = ("all udp 1.2.3.163:51820 <- 94.154.43.203:51234       MULTIPLE:MULTIPLE\n"
@@ -361,6 +398,17 @@ class SampleCacheTest(unittest.TestCase):
         moved = PF.parse_states(text.replace("34.209.15.107", "34.209.15.108"))
         (_, moved_facts), _ = facts.view(moved, {"1.2.3.163"}, self.NETWORKS)[0]
         self.assertEqual(moved_facts.pair, ("1.2.3.163", "34.209.15.108"))
+
+    def test_facts_are_reworked_when_primary_wan_topology_changes(self):
+        record = PF.parse_states(NAT_OUT.replace("1.2.3.163:19421", "192.168.0.2:19421"))[0]
+        facts = PF.StateFacts()
+        (_, first), = facts.view([record], set(), interface_addresses={"igb1": {"192.168.0.2"}},
+                                  primary_wan_device="igb1")[0]
+        (_, changed), = facts.view([record], set(), interface_addresses={"igb1": {"192.168.0.3"}},
+                                    primary_wan_device="igb1")[0]
+        self.assertEqual(first.pair, ("192.168.0.2", "34.209.15.107"))
+        self.assertIsNone(changed.pair)
+        self.assertIsNot(first, changed)
 
 
 if __name__ == "__main__":

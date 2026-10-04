@@ -48,6 +48,7 @@ writes every tracked flow, not just the capped summary, plus the PF states behin
 """
 
 import json
+import ipaddress
 import os
 import re
 import signal
@@ -56,6 +57,8 @@ import subprocess
 import sys
 import time
 import traceback
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 
 import firewallmap_geodb as geodb
@@ -68,10 +71,10 @@ from lib.blocks import BlockTracker, FilterLogTail, block_event_time, block_summ
 from lib.cache import CacheStore, GeoCache
 from lib.common import (
     COLLECTOR_TIMINGS, HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, SNAPSHOT_DIR,
-    SNAPSHOT_REQUEST_DIR, host_port, log_error, log_notice, log_warning, requested, secure_umask, write_json,
+    SNAPSHOT_REQUEST_DIR, host_port, log_error, log_notice, log_warning, private_ip, public_ip, requested, secure_umask, write_json,
     write_text,
 )
-from lib.config import interface_names, settings, widget_in_use
+from lib.config import interface_names, settings, topology, widget_in_use
 from lib.ids import (
     ALERT_BACKLOG_BYTES, EVE_LOG, AlertTracker, Correlator, alert_summary, connection_keys, connection_summary, firewall_blocks,
     ips_drops,
@@ -81,6 +84,27 @@ from firewallmap_snapshots import valid_id as snapshot_valid_id
 from lib.pf import (
     StateFacts, TooManyStates, flow_endpoints, host_info, port_forwards, rule_descriptions, sample_states,
 )
+
+
+EXTERNAL_IP_URL = "https://api.ipify.org"
+EXTERNAL_IP_TIMEOUT = 3
+EXTERNAL_IP_MAX_AGE = 24 * 3600
+EXTERNAL_IP_RETRY_SECONDS = 15 * 60
+
+
+def discover_external_ipv4(fetch=None):
+    """The caller's public IPv4, or None. This is optional map-anchor metadata, never flow identity."""
+    if fetch is None:
+        def fetch():
+            request = urllib.request.Request(EXTERNAL_IP_URL, headers={"User-Agent": "OPNsense-FirewallMap"})
+            with urllib.request.urlopen(request, timeout=EXTERNAL_IP_TIMEOUT) as response:
+                return response.read(128)
+    try:
+        value = fetch()
+        address = str(ipaddress.ip_address(value.decode("ascii", "ignore").strip() if isinstance(value, bytes) else value))
+    except (OSError, ValueError, urllib.error.URLError):
+        return None
+    return address if public_ip(address) and ":" not in address else None
 
 
 HOSTNAME_REQUEST_SECONDS = 30
@@ -134,7 +158,8 @@ class FlowTracker:
         self.flows = {}
         self.sampled_at = None
 
-    def _totals(self, records, local_addresses, elapsed, networks=None, sample=None):
+    def _totals(self, records, local_addresses, elapsed, networks=None, sample=None,
+                interface_addresses=None, primary_wan_device=None):
         """{(local, remote): totals} for this sample, and the counters to diff the next one against.
 
         sample: StateFacts.view() of these records, when the caller already has it. This runs for
@@ -143,7 +168,8 @@ class FlowTracker:
         counters = {}
         totals = {}
         previous_counters = self.counters
-        views, lan_rules = sample if sample is not None else StateFacts().view(records, local_addresses, networks)
+        views, lan_rules = sample if sample is not None else StateFacts().view(
+            records, local_addresses, networks, interface_addresses, primary_wan_device)
         for record, facts in views:
             pair = facts.pair
             state_id = record.id
@@ -231,9 +257,11 @@ class FlowTracker:
         if total["toward"] + total["away"] > 0:
             flow["last_active"] = now
 
-    def update(self, records, local_addresses, now, networks=None, sample=None):
+    def update(self, records, local_addresses, now, networks=None, sample=None,
+               interface_addresses=None, primary_wan_device=None):
         elapsed = (now - self.sampled_at) if self.sampled_at is not None else None
-        totals, self.counters = self._totals(records, local_addresses, elapsed, networks, sample)
+        totals, self.counters = self._totals(records, local_addresses, elapsed, networks, sample,
+                                             interface_addresses, primary_wan_device)
         self.sampled_at = now
         # a flow disappears together with its last PF state
         for pair in list(self.flows):
@@ -317,16 +345,24 @@ def _location_entry(address, location, local_addresses):
     return entry
 
 
-def summarize_flows(tracker, geo, local_addresses, role, now, wall_time, hostnames=None, context=None, limit=MAX_FLOWS):
+def summarize_flows(tracker, geo, local_addresses, role, now, wall_time, hostnames=None, context=None, limit=MAX_FLOWS,
+                    anchor=None):
     context = context or {}
     visible = tracker.visible(now, limit)
-    geo.resolve([address for _, local, remote, _, _ in visible for address in (local, remote)])
+    geo.resolve([address for _, local, remote, _, _ in visible for address in (remote, local) if public_ip(address)])
     flows = []
-    location_ids = set()
+    locations = {}
     for _, local, remote, flow, activity in visible:
-        if geo.get(local) is None or geo.get(remote) is None:
+        remote_location = geo.get(remote)
+        if remote_location is None:
             continue
-        location_ids.update((local, remote))
+        locations[remote] = _location_entry(remote, remote_location, local_addresses)
+        local_location = geo.get(local)
+        if anchor is not None:
+            locations[local] = {"id": local, "name": anchor.get("name") or "Firewall",
+                                "lat": anchor["lat"], "lon": anchor["lon"], "local": True}
+        elif local_location is not None:
+            locations[local] = _location_entry(local, local_location, local_addresses)
         flows.append(_flow_entry(local, remote, flow, activity, local_addresses, context, wall_time))
     resolved = {}
     if hostnames is not None:
@@ -340,7 +376,7 @@ def summarize_flows(tracker, geo, local_addresses, role, now, wall_time, hostnam
         "carp": role,
         "tracked_flows": len(tracker.flows),
         "flows": flows,
-        "locations": [_location_entry(address, geo.get(address), local_addresses) for address in sorted(location_ids)],
+        "locations": [locations[address] for address in sorted(locations)],
         "hostnames": resolved,
     }
 
@@ -539,7 +575,10 @@ class Collector:
         self.timings = None
         self.timings_written = None
         self.descriptions, self.interfaces, self.leases = {}, {}, {}
-        self.local_addresses, self.role, self.networks = set(), None, []
+        self.local_addresses, self.role, self.networks, self.interface_addresses = set(), None, [], {}
+        self.primary_wan_device = None
+        self.location_settings = {"discover_external_ip": False, "latitude": None, "longitude": None}
+        self.external_ip, self.external_ip_key, self.external_ip_checked = None, None, None
         self.values = {}
         self.recording = False
         self.provider = "maxmind"
@@ -558,10 +597,10 @@ class Collector:
         token = reload_token()
         if token != self.reload_seen:
             self.reload_seen = token
-            self.checked["settings"] = self.checked["blocklists"] = None
+            self.checked["settings"] = self.checked["blocklists"] = self.checked["metadata"] = None
             log_notice("settings changed: reloading them")
         if self._due("host", now, HOST_REFRESH_SECONDS):
-            self.local_addresses, self.role, self.networks = host_info()
+            self.local_addresses, self.role, self.networks, self.interface_addresses = host_info()
             self.checked["host"] = now
         if self._due("settings", now, SETTINGS_REFRESH_SECONDS):
             self.values = settings()
@@ -588,6 +627,8 @@ class Collector:
         kept alive in the background must not record queue entries with stale names."""
         if self._due("metadata", now, METADATA_REFRESH_SECONDS):
             self.descriptions, self.interfaces, self.leases = rule_descriptions(), interface_names(), lease_names()
+            self.location_settings = topology()
+            self.primary_wan_device = self.location_settings["primary_wan_device"]
             self.correlator.forwards = port_forwards()
             self.checked["metadata"] = now
         if self._due("blocklists", now, BLOCKLIST_REFRESH_SECONDS):
@@ -625,6 +666,35 @@ class Collector:
         self.correlator.resolve(self.local_addresses, wall, self.networks)
         self.alerts.expire(wall)
 
+    def map_anchor(self, now):
+        """Coordinates for rendering a private-WAN origin, never an address substituted into a flow."""
+        latitude, longitude = self.location_settings["latitude"], self.location_settings["longitude"]
+        if latitude is not None and longitude is not None:
+            return {"lat": latitude, "lon": longitude, "name": "Firewall"}
+        device = self.primary_wan_device
+        addresses = self.interface_addresses.get(device, set())
+        # A public WAN remains on its existing local-GeoIP path even when CARP or an alias adds
+        # private addresses. No individual private address is the WAN's semantic identity.
+        private_ipv4 = any(private_ip(address) and ":" not in address for address in addresses)
+        if not self.location_settings["discover_external_ip"] or not device or not private_ipv4 \
+                or any(public_ip(address) for address in addresses):
+            return None
+        key = device
+        if key != self.external_ip_key:
+            self.external_ip, self.external_ip_key, self.external_ip_checked = None, key, None
+        if self.external_ip is None and (self.external_ip_checked is None or now - self.external_ip_checked >= EXTERNAL_IP_RETRY_SECONDS):
+            self.external_ip_checked = now
+            self.external_ip = self.store.get("external-ip-v1", key, max_age=EXTERNAL_IP_MAX_AGE)
+            if self.external_ip is None:
+                self.external_ip = discover_external_ipv4()
+                if self.external_ip:
+                    self.store.put_many("external-ip-v1", [(key, self.external_ip)])
+        if not self.external_ip:
+            return None
+        self.geo.resolve([self.external_ip])
+        location = self.geo.get(self.external_ip)
+        return {"lat": location["lat"], "lon": location["lon"], "name": "Firewall"} if location else None
+
     def build_payload(self, now, limit=MAX_FLOWS):
         """The map document: flows (the strongest `limit`, None for all), blocked sources, alerts."""
         resolver = self.hostnames if requested(HOSTNAME_MARKER, HOSTNAME_REQUEST_SECONDS) else None
@@ -635,7 +705,7 @@ class Collector:
             "descriptions": self.descriptions,
         }
         payload = summarize_flows(self.tracker, geo, self.local_addresses, self.role, now, time.time(), resolver, context,
-                                  limit)
+                                  limit, self.map_anchor(now))
         origin = next((location["id"] for location in payload["locations"] if location["local"]), None)
         if origin is None and self.local_addresses:
             origin = sorted(self.local_addresses)[0]
@@ -686,7 +756,8 @@ class Collector:
         for record in records:
             if total >= SNAPSHOT_STATES_TOTAL:
                 break
-            pair = flow_endpoints(record, self.local_addresses, self.networks)
+            pair = flow_endpoints(record, self.local_addresses, self.networks, self.interface_addresses,
+                                  self.primary_wan_device)
             if pair is None or pair[1] not in remotes:
                 continue
             listed = rows.setdefault(pair[1], [])
@@ -780,10 +851,12 @@ class Collector:
         wall = time.time()
         self.refresh_metadata(now)
         timer.phase("metadata")
-        sample = self.facts.view(records, self.local_addresses, self.networks)
+        sample = self.facts.view(records, self.local_addresses, self.networks, self.interface_addresses,
+                                 self.primary_wan_device)
         timer.phase("facts")
         if not background:
-            self.tracker.update(records, self.local_addresses, now, self.networks, sample)
+            self.tracker.update(records, self.local_addresses, now, self.networks, sample,
+                                self.interface_addresses, self.primary_wan_device)
             timer.phase("tracker")
         self.ingest(records, now, wall, foreground=not background, sample=sample)
         timer.phase("ingest")

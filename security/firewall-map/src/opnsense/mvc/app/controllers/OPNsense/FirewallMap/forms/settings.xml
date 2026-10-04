@@ -29,6 +29,28 @@
     </field>
     <field>
         <type>header</type>
+        <label>Firewall map location</label>
+    </field>
+    <field>
+        <id>firewallmap.general.discover_external_ip</id>
+        <label>Discover external IPv4 address</label>
+        <type>checkbox</type>
+        <help>When the assigned WAN address is private and no manual location is set, periodically asks a public HTTPS service for the WAN's visible IPv4 address. The address is used only to place the firewall on the map. Discovery is ignored while both manual coordinates are set.</help>
+    </field>
+    <field>
+        <id>firewallmap.general.latitude</id>
+        <label>Latitude</label>
+        <type>text</type>
+        <help>Optional manual firewall location. Enter signed decimal degrees, for example 40.7128 and -74.0060. Enter both latitude and longitude to override GeoIP for every local map endpoint, including public WAN addresses.</help>
+    </field>
+    <field>
+        <id>firewallmap.general.longitude</id>
+        <label>Longitude</label>
+        <type>text</type>
+        <help>Optional manual firewall location. Enter signed decimal degrees, for example 40.7128 and -74.0060. Enter both latitude and longitude to override GeoIP for every local map endpoint, including public WAN addresses.</help>
+    </field>
+    <field>
+        <type>header</type>
         <label>Threats</label>
     </field>
     <field>

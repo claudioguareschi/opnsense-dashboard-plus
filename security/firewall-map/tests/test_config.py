@@ -48,12 +48,15 @@ class SettingsFileTest(unittest.TestCase):
                             "threat_lists": "", "record_threats": "1", "blocklist_aliases": "0"},
                 "aliases": [{"name": "Drop", "type": "urltable", "enabled": True, "description": ""}, {"name": ""}],
                 "interfaces": {"igb1": "WAN", "vlan01": "LAN"},
+                "topology": {"primary_wan_device": "igb1"},
             })
             self.assertEqual(CONFIG.settings(path), {"provider": "dbip", "license_key": "", "update_days": 7,
                              "threat_lists": "", "record_threats": "1", "blocklist_aliases": "0"})
             self.assertEqual(CONFIG.abuseipdb_key(path), "key")
             self.assertEqual([alias["name"] for alias in CONFIG.aliases(path)], ["Drop"])
             self.assertEqual(CONFIG.interface_names(path), {"igb1": "WAN", "vlan01": "LAN"})
+            self.assertEqual(CONFIG.topology(path), {"primary_wan_device": "igb1", "discover_external_ip": False,
+                                                      "latitude": None, "longitude": None})
             # read again when the file changes
             self.write(path, {"general": {"provider": "nonsense", "update_days": "x"}})
             os.utime(path, ns=(1, 2))

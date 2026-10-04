@@ -110,6 +110,21 @@ def interface_names(path=SETTINGS_FILE):
     return {str(device): str(name) for device, name in names.items()} if isinstance(names, dict) else {}
 
 
+def topology(path=SETTINGS_FILE):
+    """Primary WAN identity and optional map anchor from the rendered OPNsense configuration."""
+    values = _read(path).get("topology") or {}
+    try:
+        latitude, longitude = float(values.get("latitude")), float(values.get("longitude"))
+        coordinates = (latitude, longitude) if -90 <= latitude <= 90 and -180 <= longitude <= 180 else (None, None)
+    except (TypeError, ValueError):
+        coordinates = (None, None)
+    return {
+        "primary_wan_device": str(values.get("primary_wan_device") or "") or None,
+        "discover_external_ip": str(values.get("discover_external_ip") or "0") == "1",
+        "latitude": coordinates[0], "longitude": coordinates[1],
+    }
+
+
 def widget_in_use(path=DASHBOARDS_FILE):
     """True when any user's dashboard holds the Firewall Map widget."""
     return _read(path).get("widget_in_use") is True

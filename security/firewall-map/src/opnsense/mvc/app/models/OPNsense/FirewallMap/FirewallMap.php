@@ -51,6 +51,17 @@ class FirewallMap extends BaseModel
                 $messages->appendMessage(new Message($error, 'general.blocklist_aliases'));
             }
         }
+        $latitude = trim((string)$general->latitude);
+        $longitude = trim((string)$general->longitude);
+        $decimalDegrees = '/^-?(?:[0-9]+(?:\\.[0-9]+)?)$/D';
+        if (($latitude === '') !== ($longitude === '')) {
+            $messages->appendMessage(new Message('Enter both latitude and longitude, or leave both empty.', 'general.latitude'));
+        } elseif ($latitude !== '' && (!preg_match($decimalDegrees, $latitude) || !preg_match($decimalDegrees, $longitude) ||
+                  (float)$latitude < -90 || (float)$latitude > 90 ||
+                  (float)$longitude < -180 || (float)$longitude > 180)) {
+            $messages->appendMessage(new Message('Enter decimal degrees: latitude from -90 to 90 and longitude from -180 to 180.',
+                                                 'general.latitude'));
+        }
         return $messages;
     }
 }

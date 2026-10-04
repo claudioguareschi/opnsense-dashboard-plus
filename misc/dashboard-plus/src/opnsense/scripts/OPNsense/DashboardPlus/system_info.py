@@ -628,12 +628,7 @@ def collect_qat(pciconf_output, sysctl_output, slot_output):
         # interrupt-mode kernel symmetric instances, which the driver creates
         # for the "sym" or "cy" service in kernel ("ks") mode.
         mode_set = set(filter(None, re.split(r"[;,]", mode.lower())))
-        ocf_active = (
-            ocf_enabled
-            and state.lower() == "up"
-            and "sym" in service_set
-            and (not mode_set or "ks" in mode_set)
-        )
+        ocf_active = ocf_enabled and state.lower() == "up" and "sym" in service_set and (not mode_set or "ks" in mode_set)
         algorithms = list(QAT_OCF_ALGORITHMS) if ocf_active else []
 
         result.append({

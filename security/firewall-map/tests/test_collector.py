@@ -94,6 +94,59 @@ class TrackerTest(unittest.TestCase):
         visible = tracker.visible(0.0, limit=2)
         self.assertEqual([item[2] for item in visible], ["8.8.8.4", "8.8.8.3"])
 
+    def test_private_origin_is_kept_without_a_map_anchor(self):
+        tracker = COLLECTOR.FlowTracker(smoothing=1.0)
+        pair = ("192.168.0.2", "45.56.79.53")
+        tracker.flows[pair] = {
+            "rate": 1.0, "rate_in": 0.0, "rate_out": 1.0, "packet_rate": 1.0, "last_active": 0.0,
+            "first_seen": 0.0, "states": 1, "protocols": ["tcp"], "services": ["HTTPS"],
+            "service_ports": {"HTTPS": "443/tcp"}, "inside": ["192.168.30.60"], "egress": "igb1",
+            "initiated": "local", "targets": [], "age": 1, "transferred": (1, 1), "rule": None,
+        }
+
+        class RemoteOnlyGeo(Geo):
+            def get(self, address):
+                return None if address == pair[0] else super().get(address)
+
+        payload = COLLECTOR.summarize_flows(tracker, RemoteOnlyGeo(), set(), None, 0.0, 0.0, context={})
+        self.assertEqual([flow["origin"] for flow in payload["flows"]], [pair[0]])
+        self.assertEqual([location["id"] for location in payload["locations"]], [pair[1]])
+        anchored = COLLECTOR.summarize_flows(tracker, RemoteOnlyGeo(), set(), None, 0.0, 0.0, context={},
+                                             anchor={"lat": 40.7, "lon": -74.0, "name": "Firewall"})
+        origin = next(location for location in anchored["locations"] if location["id"] == pair[0])
+        self.assertEqual((origin["lat"], origin["lon"], origin["local"]), (40.7, -74.0, True))
+
+    def test_external_ip_discovery_validates_a_public_ipv4(self):
+        self.assertEqual(COLLECTOR.discover_external_ipv4(lambda: b"73.1.2.3\n"), "73.1.2.3")
+        self.assertIsNone(COLLECTOR.discover_external_ipv4(lambda: b"192.168.0.2"))
+        self.assertIsNone(COLLECTOR.discover_external_ipv4(lambda: b"not an address"))
+
+    def test_anchor_ignores_private_aliases_on_a_public_primary_wan(self):
+        collector = object.__new__(COLLECTOR.Collector)
+        collector.location_settings = {"latitude": None, "longitude": None, "discover_external_ip": True}
+        collector.primary_wan_device = "igb1"
+        collector.interface_addresses = {"igb1": {"1.2.3.163", "192.168.0.2"}}
+        collector.external_ip = collector.external_ip_key = collector.external_ip_checked = None
+        collector.store, collector.geo = mock.Mock(), Geo()
+        with mock.patch.object(COLLECTOR, "discover_external_ipv4") as discover:
+            self.assertIsNone(collector.map_anchor(0.0))
+        discover.assert_not_called()
+
+    def test_anchor_uses_the_primary_wan_device_not_one_of_its_carp_addresses(self):
+        collector = object.__new__(COLLECTOR.Collector)
+        collector.location_settings = {"latitude": None, "longitude": None, "discover_external_ip": True}
+        collector.primary_wan_device = "igb1"
+        collector.interface_addresses = {"igb1": {"192.168.0.2", "192.168.0.254"}}
+        collector.external_ip = collector.external_ip_key = collector.external_ip_checked = None
+        collector.store, collector.geo = mock.Mock(), Geo()
+        collector.store.get.return_value = None
+        with mock.patch.object(COLLECTOR, "discover_external_ipv4", return_value="73.1.2.3") as discover:
+            self.assertEqual(collector.map_anchor(0.0), {"lat": 1.0, "lon": 2.0, "name": "Firewall"})
+            self.assertEqual(collector.external_ip_key, "igb1")
+            collector.interface_addresses["igb1"] = {"192.168.0.254", "192.168.0.2"}
+            collector.map_anchor(1.0)
+        discover.assert_called_once_with()
+
 
 class IdleTest(unittest.TestCase):
     def test_stops_only_after_grace_period_without_requests(self):
@@ -147,7 +200,7 @@ class CollectorLoopTest(unittest.TestCase):
             "OUTPUT_FILE": self.output,
             "COLLECTOR_TIMINGS": os.path.join(self.directory, "collector_timings.json"),
             "sample_states": lambda: PF.parse_states(nat_state(self.bytes, self.bytes)),
-            "host_info": lambda: ({"1.2.3.163"}, None, []),
+            "host_info": lambda: ({"1.2.3.163"}, None, [], {"igb1": {"1.2.3.163"}}),
             "recording_wanted": lambda values=None: True,
             "database_state": lambda values: ("city.mmdb", "asn.mmdb", None),
             "rule_descriptions": dict, "interface_names": dict, "lease_names": lease_names, "port_forwards": list,

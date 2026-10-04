@@ -365,6 +365,9 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.55** (all packages): Dashboard Plus adds DNS health, live DNS request-rate and Services+
+  widgets; Firewall Map+ recognizes primary-WAN double NAT while keeping state identities local,
+  with optional manual or discovered map anchoring; VNStat Plus is published for the first time.
 - **0.53** (both packages): less CPU while a dashboard is open.
   - Firewall Map+: each collector sample costs about a third of the CPU it did, and the Status
     page shows how long the last sample took. Map polls are answered by a small shell script
