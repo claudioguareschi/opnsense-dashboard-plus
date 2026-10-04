@@ -472,10 +472,12 @@ export default class VnstatPlus extends BaseWidget {
             return;
         }
         $chart.html(`<canvas id="${this._elementId('chart-canvas')}"></canvas>`);
-        const root = document.getElementById(this._elementId('root'));
-        const theme = getComputedStyle(root);
-        const color = name => theme.getPropertyValue(name).trim();
-        const fillColor = value => value.startsWith('rgb(') ? value.replace('rgb(', 'rgba(').replace(')', ', 0.2)') : value;
+        // Match Traffic Graph+'s direction palette and translucent area treatment exactly.
+        const seriesColors = {
+            rx: {line: '#2ca02c', fill: 'rgba(44, 160, 44, 0.28)'},
+            tx: {line: '#ff7f0e', fill: 'rgba(255, 127, 14, 0.28)'},
+            total: {line: '#a0cbe8', fill: 'rgba(160, 203, 232, 0.28)'}
+        };
         const labels = entries.map(entry => this._formatChartLabel(entry));
         const rx = entries.map(entry => Number(entry.rx) || 0);
         const tx = entries.map(entry => Number(entry.tx) || 0);
@@ -486,16 +488,16 @@ export default class VnstatPlus extends BaseWidget {
             data: {
                 labels,
                 datasets: [
-                    {label: this.translations.download, data: rx, borderColor: color('--vnstat-plus-rx'), backgroundColor: fillColor(color('--vnstat-plus-rx')), fill: true, tension: 0.22, pointRadius: 0, borderWidth: 2},
-                    {label: this.translations.upload, data: tx, borderColor: color('--vnstat-plus-tx'), backgroundColor: fillColor(color('--vnstat-plus-tx')), fill: true, tension: 0.22, pointRadius: 0, borderWidth: 2},
-                    {label: this.translations.total, data: total, borderColor: color('--vnstat-plus-total'), backgroundColor: fillColor(color('--vnstat-plus-total')), fill: true, tension: 0.22, pointRadius: 0, borderWidth: 2}
+                    {label: this.translations.total, data: total, borderColor: seriesColors.total.line, backgroundColor: seriesColors.total.fill, fill: true, pointRadius: 0, borderWidth: 2},
+                    {label: this.translations.download, data: rx, borderColor: seriesColors.rx.line, backgroundColor: seriesColors.rx.fill, fill: true, pointRadius: 0, borderWidth: 2},
+                    {label: this.translations.upload, data: tx, borderColor: seriesColors.tx.line, backgroundColor: seriesColors.tx.fill, fill: true, pointRadius: 0, borderWidth: 2}
                 ]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 interaction: {mode: 'index', intersect: false},
-                elements: {line: {cubicInterpolationMode: 'monotone', clip: 0}},
+                elements: {line: {fill: true, cubicInterpolationMode: 'monotone', clip: 0}},
                 plugins: {
                     colorschemes: false,
                     legend: {display: false},
