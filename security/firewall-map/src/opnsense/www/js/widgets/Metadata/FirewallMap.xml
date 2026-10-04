@@ -28,7 +28,7 @@
             <below_threshold>{count} below threshold</below_threshold>
             <block_min>Show blocked sources after</block_min>
             <every_attempt>every attempt</every_attempt>
-            <attempts>attempts in 10 minutes</attempts>
+            <attempts>{count} attempts in 10 minutes</attempts>
             <hostnames>Look up hostnames</hostnames>
             <asn>Show ASN</asn>
             <follow>Follow traffic: keep the map zoomed to the current arcs</follow>
@@ -45,6 +45,7 @@
             <geo_fills_in>The map fills in as soon as it is done.</geo_fills_in>
             <geo_failed_title>The geolocation database could not be downloaded</geo_failed_title>
             <geo_key_title>A MaxMind license key is needed</geo_key_title>
+            <geo_key_advice>Add it in the Firewall Map settings or in the GeoIP alias settings, or choose DB-IP Lite.</geo_key_advice>
             <geo_retry_in>Trying again in {time}</geo_retry_in>
             <geo_retrying>Trying again…</geo_retrying>
             <geo_retry_now>Retry now</geo_retry_now>
@@ -79,7 +80,6 @@
             <map_flagged_blocked>Flagged · blocked</map_flagged_blocked>
             <map_flagged_allowed>Flagged · allowed</map_flagged_allowed>
             <map_allowed>Allowed</map_allowed>
-            <map_ids_alert>IDS alert</map_ids_alert>
             <map_category_web>Web</map_category_web>
             <map_category_quic>QUIC</map_category_quic>
             <map_category_dns>DNS</map_category_dns>
@@ -98,28 +98,29 @@
             <map_traffic>traffic</map_traffic>
             <map_this_firewall>this firewall</map_this_firewall>
             <map_this_firewall_title>This firewall</map_this_firewall_title>
-            <map_other_targets_one> (and {count} other target)</map_other_targets_one>
-            <map_other_targets_many> (and {count} other targets)</map_other_targets_many>
-            <map_through_forward> through a port forward</map_through_forward>
+            <map_other_targets_one>{target} (and {count} other target)</map_other_targets_one>
+            <map_other_targets_many>{target} (and {count} other targets)</map_other_targets_many>
             <map_open_for>, open for {duration}</map_open_for>
-            <map_reached>{other} reached {where} on {service}{more}{forwarded}{open}.</map_reached>
+            <map_reached>{other} reached {where} on {service}{open}.</map_reached>
+            <map_reached_forward>{other} reached {where} on {service} through a port forward{open}.</map_reached_forward>
             <map_other_hosts_one>{host} and {count} other host</map_other_hosts_one>
             <map_other_hosts_many>{host} and {count} other hosts</map_other_hosts_many>
-            <map_other_services_one> and {count} other service</map_other_services_one>
-            <map_other_services_many> and {count} other services</map_other_services_many>
-            <map_queried>{who} queried {service}{more} at {other}</map_queried>
-            <map_synced>{who} synced time with {other} over {service}{more}</map_synced>
-            <map_mailed>{who} delivered mail to {other} over {service}{more}</map_mailed>
+            <map_other_services_one>{service} and {count} other service</map_other_services_one>
+            <map_other_services_many>{service} and {count} other services</map_other_services_many>
+            <map_queried>{who} queried {service} at {other}</map_queried>
+            <map_synced>{who} synced time with {other} over {service}</map_synced>
+            <map_mailed>{who} delivered mail to {other} over {service}</map_mailed>
             <map_pinged>{who} pinged {other}</map_pinged>
-            <map_opened>{who} opened {service}{more} to {other}</map_opened>
+            <map_opened>{who} opened {service} to {other}</map_opened>
             <map_a_connection>a connection</map_a_connection>
-            <map_other_ports_one> and {count} other port</map_other_ports_one>
-            <map_other_ports_many> and {count} other ports</map_other_ports_many>
-            <map_and> and </map_and>
-            <map_by_rule> by "{rule}"</map_by_rule>
-            <map_on_interface> on {interface}</map_on_interface>
+            <map_other_ports_one>{services} and {count} other port</map_other_ports_one>
+            <map_other_ports_many>{services} and {count} other ports</map_other_ports_many>
+            <map_two_services>{first} and {second}</map_two_services>
             <map_first_seen_ago>, first seen {duration} ago</map_first_seen_ago>
-            <map_block_sentence>{source}{place} tried {tried} on this firewall: blocked {hits}× in the last {minutes} min{rule}{where}{since}.</map_block_sentence>
+            <map_block_sentence>{source}{place} tried {tried} on this firewall: blocked {hits}× in the last {minutes} min{since}.</map_block_sentence>
+            <map_block_sentence_rule>{source}{place} tried {tried} on this firewall: blocked {hits}× in the last {minutes} min by "{rule}"{since}.</map_block_sentence_rule>
+            <map_block_sentence_interface>{source}{place} tried {tried} on this firewall: blocked {hits}× in the last {minutes} min on {interface}{since}.</map_block_sentence_interface>
+            <map_block_sentence_rule_interface>{source}{place} tried {tried} on this firewall: blocked {hits}× in the last {minutes} min by "{rule}" on {interface}{since}.</map_block_sentence_rule_interface>
             <map_ids_line>{signature} (severity {severity}{category})</map_ids_line>
             <map_ids_source>Suricata: {line}</map_ids_source>
             <map_ids_first>, {count}× in the last {window}, latest {latest} ago</map_ids_first>
@@ -141,7 +142,7 @@
             <map_seen_by_suricata_flagged>Seen by Suricata · flagged</map_seen_by_suricata_flagged>
             <map_no_connection>No connection is open right now</map_no_connection>
             <map_last_minute>{count} in the last minute</map_last_minute>
-            <map_hammering> · hammering</map_hammering>
+            <map_last_minute_hammering>{count} in the last minute · hammering</map_last_minute_hammering>
             <map_active_links_one>{count} active link</map_active_links_one>
             <map_active_links_many>{count} active links</map_active_links_many>
         </translations>

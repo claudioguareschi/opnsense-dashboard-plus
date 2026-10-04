@@ -56,7 +56,9 @@ class IndexController extends \OPNsense\Base\IndexController
             }
         }
         /* safe inside the page's <script>: no tag, quote or ampersand survives unescaped */
-        return json_encode((object)$texts, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        /* a damaged catalog entry is replaced, never a page that stops at an empty Object.assign() */
+        $flags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE;
+        return json_encode((object)$texts, $flags) ?: '{}';
     }
 
     /**
@@ -91,7 +93,9 @@ class IndexController extends \OPNsense\Base\IndexController
     {
         $this->view->title = gettext('Firewall Map');
         /* cache_safe() keys on the firmware version; the plugin's files change independently */
-        $this->view->rendererVersion = $this->version('js/firewall-map-renderer.js');
+        /* the content hash the widget uses too (RENDERER_VERSION): one cached copy for both */
+        $renderer = '/usr/local/opnsense/www/js/firewall-map-renderer.js';
+        $this->view->rendererVersion = is_file($renderer) ? substr(hash_file('sha256', $renderer), 0, 12) : 0;
         $this->view->pageVersion = $this->version('js/firewall-map-page.js');
         $this->view->styleVersion = $this->version('css/firewall-map.css');
         /* the ?debug=1 panel: only development packages install it, and only ?debug=1 loads it */

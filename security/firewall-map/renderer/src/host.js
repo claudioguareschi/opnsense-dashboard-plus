@@ -267,9 +267,7 @@ export function geoCardHtml(summary, text, {admin = false} = {}) {
   // the plugin settings page, for those who may change the settings
   const settings = admin ? `<a class="btn btn-default btn-sm" href="/ui/firewallmap/settings">${escapeHtml(t.geo_settings)}</a>` : '';
   if (summary.reason === 'maxmind_key_missing') {
-    // the status-line message starts with what the title already says ("…is needed: add it…")
-    const advice = t.key_missing.includes(': ') ? t.key_missing.slice(t.key_missing.indexOf(': ') + 2) : t.key_missing;
-    return geoCard('key', 'fa-key', t.geo_key_title, `<p>${escapeHtml(advice.charAt(0).toUpperCase() + advice.slice(1))}.</p>`
+    return geoCard('key', 'fa-key', t.geo_key_title, `<p>${escapeHtml(t.geo_key_advice)}</p>`
       + (settings ? `<div class="fwmap-geo-actions"><span class="fwmap-geo-buttons">${settings}</span></div>` : ''));
   }
   if (geo.state === 'failed') {

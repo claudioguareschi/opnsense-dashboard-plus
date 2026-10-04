@@ -47,7 +47,7 @@ import urllib.request
 
 import firewallmap_investigate as investigate
 from lib.common import (
-    ABUSEIPDB_BLACKLIST, PFCTL, STATE_DIR, log_notice, log_warning, read_json, secure_umask, write_json, write_text,
+    ABUSEIPDB_BLACKLIST, FORCED_REPEAT_SECONDS, PFCTL, STATE_DIR, log_notice, log_warning, read_json, secure_umask, write_json, write_text,
 )
 from lib.config import abuseipdb_key, aliases, readable, settings
 
@@ -143,6 +143,9 @@ def update(force=False, key=None, fetch=download, now=None):
     new_key = status.get("key_id") != key_id
     # a timestamp from the future (clock fixed after boot) must not block updates
     if not (force or new_key) and attempted is not None and 0 <= now - attempted < MIN_AGE_SECONDS:
+        return {"result": "skipped", "reason": "recent"}
+    updated = status.get("updated")
+    if force and not new_key and updated is not None and 0 <= now - updated < FORCED_REPEAT_SECONDS:
         return {"result": "skipped", "reason": "recent"}
     status.update({"attempted": now, "key_id": key_id})
     try:

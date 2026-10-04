@@ -111,8 +111,7 @@ vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
     def test_maps_inside_host_to_interface_and_name(self):
         networks = PF.interface_networks(self.IFCONFIG)
         self.assertIn(("192.168.30.250/32", "vlan03"), [(str(network), device) for network, device in networks])
-        described = LEASES.describe_inside("192.168.30.30", {"192.168.30.30": "nas"}, networks,
-                                              {"vlan03": "VLAN30_IOT"})
+        described = LEASES.describe_inside("192.168.30.30", {"192.168.30.30": "nas"}, networks, {"vlan03": "VLAN30_IOT"})
         self.assertEqual(described, {"ip": "192.168.30.30", "name": "nas", "interface": "VLAN30_IOT"})
         self.assertEqual(LEASES.describe_inside("fd12:3456:789a:30::20", {}, networks,
                                                 {"vlan03": "VLAN30_IOT"})["interface"], "VLAN30_IOT")

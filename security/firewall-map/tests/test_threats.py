@@ -268,5 +268,6 @@ class ThreatHistoryFileTest(unittest.TestCase):
                 self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], THREATS.SCHEMA_VERSION)
                 db.close()
 
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,7 @@
-Firewall Map+ bundles deck.gl, luma.gl and their dependencies (MIT License,
-https://github.com/visgl/deck.gl). The bundled world-boundary dataset is
+Firewall Map+ bundles deck.gl, luma.gl and their dependencies
+(https://github.com/visgl/deck.gl) under the MIT, ISC and BSD-2-Clause
+licenses, with the Apache-2.0 notices math.gl and loaders.gl carry; the full
+texts are in www/js/firewall-map-renderer.LICENSE. The bundled world-boundary dataset is
 derived from the Natural Earth public-domain dataset.
 
 When DB-IP Lite is selected as geolocation source, the downloaded databases

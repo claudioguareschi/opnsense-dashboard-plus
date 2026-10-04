@@ -61,6 +61,9 @@ SNAPSHOT_REQUEST_DIR = f"{RUN_DIR}/snapshot_requests"
 GEODB_STATUS = f"{STATE_DIR}/geodb.json"
 # a download whose progress has not moved for this long is no longer running
 GEODB_STALE_SECONDS = 30
+# "Update now" downloads again even when the copy is fresh, but not again this soon after a
+# successful download: repeated clicks must not spend the providers' daily download limits
+FORCED_REPEAT_SECONDS = 300
 
 PFCTL = "/sbin/pfctl"
 RULES_DEBUG = "/tmp/rules.debug"

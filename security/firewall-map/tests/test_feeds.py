@@ -71,6 +71,10 @@ class FeedTest(unittest.TestCase):
             self.assertEqual(FEEDS.update(fetch=fetch, now=1000.0, feeds=[feed]), {"FWMAP_Spamhaus_DROP": "ok"})
             self.assertEqual(FEEDS.update(fetch=fetch, now=2000.0, feeds=[feed]), {"FWMAP_Spamhaus_DROP": "recent"})
             self.assertEqual(len(calls), 1)
+            # "Update now" downloads a fresh list again, but not right after a download
+            self.assertEqual(FEEDS.update(force=True, fetch=fetch, now=1100.0, feeds=[feed]), {"FWMAP_Spamhaus_DROP": "recent"})
+            self.assertEqual(FEEDS.update(force=True, fetch=fetch, now=2000.0, feeds=[feed]), {"FWMAP_Spamhaus_DROP": "ok"})
+            self.assertEqual(len(calls), 2)
 
             def broken(url):
                 raise OSError("offline")

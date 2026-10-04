@@ -43,7 +43,7 @@ import urllib.error
 import urllib.request
 
 from lib.blocklists import FEEDS, FEED_DIR, feed_file
-from lib.common import STATE_DIR, log_notice, log_warning, read_json, secure_umask, write_json, write_text
+from lib.common import FORCED_REPEAT_SECONDS, STATE_DIR, log_notice, log_warning, read_json, secure_umask, write_json, write_text
 from lib.config import aliases, settings
 
 STATUS_FILE = f"{STATE_DIR}/feeds.json"
@@ -102,7 +102,9 @@ def update(force=False, fetch=download, now=None, feeds=None):
         entry = status.get(feed["name"], {})
         attempted = entry.get("attempted")
         fresh = attempted is not None and 0 <= now - attempted < MIN_AGE_SECONDS
-        if fresh and not force and os.path.exists(feed_file(feed["name"])):
+        updated = entry.get("updated")
+        just_updated = updated is not None and 0 <= now - updated < FORCED_REPEAT_SECONDS
+        if (just_updated if force else fresh) and os.path.exists(feed_file(feed["name"])):
             results[feed["name"]] = "recent"
             continue
         entry["attempted"] = now

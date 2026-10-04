@@ -117,6 +117,8 @@ class AbuseBlacklistTest(unittest.TestCase):
                                  ["94.154.43.203", "204.76.203.231", "2001:4860:4860::8888"])
             self.assertEqual(ABUSEIPDB.update(key="k", fetch=fetch, now=2000.0)["reason"], "recent")
             self.assertEqual(ABUSEIPDB.update(force=True, key="k", fetch=fetch, now=2000.0)["result"], "ok")
+            # "Download now" clicked again right after a download does not spend another one
+            self.assertEqual(ABUSEIPDB.update(force=True, key="k", fetch=fetch, now=2100.0)["reason"], "recent")
             # a new key downloads at once, the same key again waits
             self.assertEqual(ABUSEIPDB.update(key="other", fetch=fetch, now=3000.0)["result"], "ok")
             self.assertEqual(ABUSEIPDB.update(key="other", fetch=fetch, now=4000.0)["reason"], "recent")

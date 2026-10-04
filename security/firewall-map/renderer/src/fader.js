@@ -26,14 +26,13 @@
 
 /* Fading: arcs, blocked sources and endpoints fade in and out instead of popping. */
 
-// arches, blocked sources and endpoints fade in and out instead of popping
-export const FADE_IN_MS = 800;
+const FADE_IN_MS = 800;
+const FADE_OUT_MS = 1600;
 
 /** A color with its alpha scaled by a fade opacity. */
 export function faded(color, opacity) {
   return opacity >= 1 ? color : [color[0], color[1], color[2], Math.round((color[3] ?? 255) * opacity)];
 }
-export const FADE_OUT_MS = 1600;
 
 /** Tracks when each keyed item appeared or vanished; vanished items linger while fading out. */
 export class Fader {

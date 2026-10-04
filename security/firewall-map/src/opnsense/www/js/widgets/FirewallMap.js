@@ -1,14 +1,35 @@
 /*
  * Copyright (C) 2026 Claudio Guareschi <cguareschimd@gmail.com>
  * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY,
+ * OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 // A cap far above any widget: the map fits its content (see _fitToContent).
 const AUTO_HEIGHT = 10000;
-// follow traffic is the map's own toggle, remembered per browser (as on the full-size map)
 // the renderer's content hash, written by tools/build-renderer.sh: a new renderer has a new
 // address, so a browser never runs an old cached copy with a newer widget
-const RENDERER_VERSION = '80c3d3a1d213';
+const RENDERER_VERSION = 'b5a1d1b65a08';
+// follow traffic is the map's own toggle, remembered per browser (as on the full-size map)
 const FOLLOW_KEY = 'firewallmap.widget.follow';
 
 function readStorage(key) {
@@ -123,7 +144,7 @@ export default class FirewallMap extends BaseWidget {
                 title: this.translations.block_min,
                 type: 'select',
                 options: choices(['1', '2', '3', '5', '10'].map(
-                    (value) => [value, value === '1' ? this.translations.every_attempt : `${value} ${this.translations.attempts}`])),
+                    (value) => [value, value === '1' ? this.translations.every_attempt : this.translations.attempts.replace('{count}', value)])),
                 default: String(defaults.blockMin ?? 3),
             },
             hostnames: {
@@ -179,9 +200,9 @@ export default class FirewallMap extends BaseWidget {
         host.flash(frame);
         const $button = $(`#${this.id}-firewall-map-camera`).prop('disabled', true);
         try {
-            // not ajaxCall: its 5 s timeout is shorter than the collector may take to answer, and
-            // its retry on timeout would save the snapshot twice. So the save is not in the Metadata
-            // endpoint list either; the widget privilege that shows the widget also covers it.
+            // a plain request with room to spare: the save waits for the collector's full snapshot, and
+            // a busy firewall should not cut it short. The save is not in the Metadata endpoint list;
+            // the widget privilege that shows the widget also covers it.
             const result = await $.ajax({
                 type: 'POST', url: '/api/firewallmap/snapshots/save', dataType: 'json',
                 contentType: 'application/json', data: JSON.stringify({}), timeout: 30000,

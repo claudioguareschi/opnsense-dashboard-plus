@@ -203,8 +203,8 @@ class CorrelationTest(unittest.TestCase):
         correlator.observe_states(PF.parse_states(self.OUTBOUND), self.LOCAL, 1000.0, {"abc123": "IoT to Internet"})
         correlator.add_alert(self.alert("1.2.3.163", 13526, "162.217.103.70", 443), 1000.0)
         correlator.resolve(self.LOCAL, 1000.0)
-        (item,) = IDS.connection_summary("162.217.103.70", correlator, {"192.168.30.52": "laptop"}, {"igb1": "WAN"},
-                                                wall=1240.0)
+        (item,) = IDS.connection_summary(
+            "162.217.103.70", correlator, {"192.168.30.52": "laptop"}, {"igb1": "WAN"}, wall=1240.0)
         self.assertEqual((item["inside"], item["inside_name"], item["public"], item["remote"], item["rule"], item["started"]),
                          ("192.168.30.52:52114", "laptop", "1.2.3.163:13526", "162.217.103.70:443", "IoT to Internet", 1000))
         self.assertEqual(item["ids"][0]["signature"], "ET MALWARE Possible C2 Activity")

@@ -66,7 +66,9 @@
 .label.fwmap-pill { border-radius: 10em; padding: .2em .7em; font-size: 85%; font-weight: 500; vertical-align: middle; }
 .label.fwmap-pill-lg { font-size: 100%; font-weight: 600; padding: .3em .9em; }
 
-/* layout: the map with its toolbar and status line, a splitter, the side panel */
+/* layout: the map with its toolbar and status line, a splitter, the side panel. The 222 px are
+   what OPNsense draws around the page content (top bar, page title, tabs and footer) plus the
+   content's padding, so the map fills the window without a page scrollbar. */
 #fwmap-layout { display: flex; height: calc(100vh - 222px); min-height: 540px; }
 #fwmap-main { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid rgba(128, 128, 128, .18);
     border-radius: 6px; padding: 12px 12px 0; }

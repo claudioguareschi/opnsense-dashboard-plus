@@ -30,7 +30,7 @@ import {idsOutcome} from '../src/summaries.js';
 import {ABUSEIPDB_BLACKLIST_LIST, ABUSEIPDB_LOOKUP_LIST, state, T} from './context.js';
 import {ic} from './icons.js';
 import {investigationPanel} from './investigate.js';
-import {ago, bigPill, card, endBox, pill, place, rows, serviceParts, spanText} from './parts.js';
+import {agoText, bigPill, card, endBox, pill, place, rows, serviceParts, spanText} from './parts.js';
 
 // Investigate scrolls its card into view slowly enough to follow
 const REVEAL_MS = 900;
@@ -134,7 +134,7 @@ function flowModel(flow, context) {
       [T.remote_port, outbound && service.port ? escapeHtml(service.port.split('/')[1]) : ''],
       [T.other_services, (flow.services || []).slice(1).map(escapeHtml).join(', ')],
       [T.state, (flow.activity || 0) > 0 ? pill('success', T.active, 'check') : pill('default', T.idle)],
-      [T.started, flow.age ? escapeHtml(`${ago(Date.now() / 1000 - flow.age)} ${T.ago}`) : ''],
+      [T.started, flow.age ? escapeHtml(agoText(Date.now() / 1000 - flow.age)) : ''],
       [T.transferred, flow.transferred ? rateText(flow.transferred[0], flow.transferred[1], formatBytes) : ''],
       [T.current_rate, rateText(flow.rate_in, flow.rate_out)],
       [T.duration, flow.age ? escapeHtml(spanText(flow.age)) : ''],
@@ -181,7 +181,7 @@ function idsFlowModel(ids, context) {
       [T.via, escapeHtml(ids.public)],
       [T.remote_side, escapeHtml(ids.remote)],
       [T.state, ids.active ? pill('success', T.active, 'check') : pill('default', T.closed)],
-      [T.started, ids.age ? escapeHtml(`${ago(Date.now() / 1000 - ids.age)} ${T.ago}`) : ''],
+      [T.started, ids.age ? escapeHtml(agoText(Date.now() / 1000 - ids.age)) : ''],
       [T.transferred, rateText(ids.bytes_in, ids.bytes_out, formatBytes)],
     ]),
     firewall: rows([
@@ -211,8 +211,8 @@ function blockModel(block, context) {
         return `${escapeHtml(parts.name)} <span class="text-muted">${escapeHtml(parts.port)}</span> ×${escapeHtml(entry.hits)}`;
       }).join('<br>')],
       [T.other_ports, block.port_count > (block.services || []).length ? escapeHtml(block.port_count - block.services.length) : ''],
-      [T.attempts, escapeHtml(`${block.hits} · ${block.hits_per_minute}/min`)],
-      [T.first_seen, block.seconds ? escapeHtml(`${ago(Date.now() / 1000 - block.seconds)} ${T.ago}`) : ''],
+      [T.block_attempts, escapeHtml(`${block.hits} · ${block.hits_per_minute}/min`)],
+      [T.first_seen, block.seconds ? escapeHtml(agoText(Date.now() / 1000 - block.seconds)) : ''],
     ]),
     firewall: rows([
       [T.decision, pill('default', T.blocked, 'ban')],
@@ -342,7 +342,7 @@ export function renderDetails() {
         <div class="fwmap-d-verdict">${model.verdict}<div class="fwmap-d-verdict-sub">${escapeHtml(model.sub)}</div></div>
         <button type="button" class="close" id="fwmap-details-close" title="${escapeHtml(T.close)}" aria-label="${escapeHtml(T.close)}"><span aria-hidden="true">&times;</span></button>
       </div>
-      ${state.mode === 'snapshot' ? `<div class="alert alert-warning fwmap-snap-notice">${ic('camera')} ${escapeHtml(T.as_captured)} ${escapeHtml(capturedTime())} · ${escapeHtml(T.may_have_closed)}</div>` : ''}
+      ${state.mode === 'snapshot' ? `<div class="alert alert-warning fwmap-snap-notice">${ic('camera')} ${escapeHtml(fill(T.as_captured_at, {time: capturedTime()}))} · ${escapeHtml(T.may_have_closed)}</div>` : ''}
       ${picker}
       ${diagramHtml(model.diagram)}
       <div class="fwmap-cards">

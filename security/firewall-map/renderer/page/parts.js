@@ -106,6 +106,11 @@ export function ago(seconds) {
   return unit('map_days', Math.round(age / 86400));
 }
 
+/** "3 min ago" for an epoch time. */
+export function agoText(seconds) {
+  return fill(T.time_ago, {time: ago(seconds)});
+}
+
 /** 8040 seconds read "2 h 14 min". */
 export function spanText(seconds) {
   const minutes = Math.floor(seconds / 60);

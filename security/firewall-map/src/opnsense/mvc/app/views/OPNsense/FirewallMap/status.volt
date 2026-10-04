@@ -48,7 +48,13 @@
             key_unused: "{{ lang._('Not needed') }}",
             entries: "{{ lang._('%s entries') }}",
             started: "{{ lang._('Download started') }}",
+            unavailable: "{{ lang._('The status could not be read. Trying again shortly.') }}",
+            update_failed: "{{ lang._('The download could not be started.') }}",
             standin: "{{ lang._('%s standing in while the download fails') }}",
+            seconds: "{{ lang._('%s s') }}",
+            minutes: "{{ lang._('%s min') }}",
+            hours: "{{ lang._('%s h') }}",
+            days: "{{ lang._('%s days') }}",
         };
         const PROVIDERS = {
             auto: "{{ lang._('Automatic') }}", maxmind: 'MaxMind GeoLite2', maxmind_paid: 'MaxMind GeoIP2 City', dbip: 'DB-IP Lite',
@@ -56,10 +62,10 @@
         const escape = (text) => $('<div/>').text(text === null || text === undefined ? '' : String(text)).html();
         const duration = (seconds) => {
             seconds = Math.abs(seconds);
-            if (seconds < 90) return `${Math.round(seconds)} s`;
-            if (seconds < 5400) return `${Math.round(seconds / 60)} min`;
-            if (seconds < 172800) return `${Math.round(seconds / 3600)} h`;
-            return `${Math.round(seconds / 86400)} days`;
+            if (seconds < 90) return T.seconds.replace('%s', Math.round(seconds));
+            if (seconds < 5400) return T.minutes.replace('%s', Math.round(seconds / 60));
+            if (seconds < 172800) return T.hours.replace('%s', Math.round(seconds / 3600));
+            return T.days.replace('%s', Math.round(seconds / 86400));
         };
         const toEpoch = (value) => (typeof value === 'number' ? value : value ? Date.parse(value) / 1000 : null);
         const when = (value, now) => {
@@ -100,6 +106,7 @@
             const newest = Math.min(...['city', 'asn'].map((kind) => toEpoch(db[kind]?.updated_at) || 0));
             $('#geo-next').html(db.next_retry ? when(db.next_retry, now)
                 : newest ? when(newest + (db.update_days || 3) * 86400, now) : escape(T.never));
+            $('#update-geodb:not(.busy)').prop('disabled', db.state === 'downloading');
             $('#geo-state').html(db.state === 'downloading' ? `<i class="fa fa-spinner fa-pulse fa-fw"></i> ${escape(T.downloading)}`
                 : state((db.errors || []).map((error) => error.message).join('; ') || db.last_error));
 
@@ -113,23 +120,41 @@
             $('#abuse-count').text(abuse.count ? `${Number(abuse.count).toLocaleString()} (IPv4 ${Number(abuse.count_v4 || 0).toLocaleString()}, IPv6 ${Number(abuse.count_v6 || 0).toLocaleString()})` : '—');
             $('#abuse-updated').html(abuse.updated ? when(abuse.updated, now) : escape(T.never));
             $('#abuse-state').html(abuse.configured ? state(abuse.error) : `<span class="text-muted">${escape(T.no_key)}</span>`);
-            $('#update-abuseipdb').prop('disabled', !abuse.configured);
+            $('#update-abuseipdb:not(.busy)').prop('disabled', !abuse.configured);
         };
 
         let timer = null;
         const refresh = function () {
             clearTimeout(timer);
-            ajaxGet('/api/firewallmap/service/overview', {}, function (data) {
-                render(data || {});
+            ajaxGet('/api/firewallmap/service/overview', {}, function (data, status) {
+                // a failed request keeps what is shown (never "Stopped" or "not downloaded" for want of an answer)
+                const ok = status === 'success' && data && data.collector;
+                $('#overview-error').toggleClass('hidden', !!ok).text(ok ? '' : T.unavailable);
+                if (ok) {
+                    render(data);
+                }
                 // while a download runs, follow it closely
-                timer = setTimeout(refresh, (data && data.database && data.database.state === 'downloading') ? 2000 : 15000);
+                timer = setTimeout(refresh, ok && data.database && data.database.state === 'downloading' ? 2000 : 15000);
             });
         };
         $('.update-now').click(function () {
-            const $button = $(this).prop('disabled', true);
-            ajaxCall(`/api/firewallmap/service/update/${$button.data('what')}`, {}, function () {
-                $button.prop('disabled', false);
+            // busy: render() leaves the button alone until its own answer is shown
+            const $button = $(this).prop('disabled', true).addClass('busy');
+            const label = $button.html();
+            ajaxCall(`/api/firewallmap/service/update/${$button.data('what')}`, {}, function (data, status) {
+                if (status !== 'success' || !data || data.result !== 'started') {
+                    $('#overview-error').removeClass('hidden').text(T.update_failed);
+                    $button.removeClass('busy').prop('disabled', false);
+                    return;
+                }
+                // a repeat right after a download is skipped by the firewall (provider limits): the
+                // button only says the download started, then refresh shows its result
+                $button.html(`<i class="fa fa-check fa-fw"></i> ${escape(T.started)}`);
                 setTimeout(refresh, 1500);
+                setTimeout(() => {
+                    $button.html(label).removeClass('busy').prop('disabled', false);
+                    refresh();
+                }, 10000);
             });
         });
 
@@ -137,6 +162,8 @@
         refresh();
     });
 </script>
+
+<div id="overview-error" class="alert alert-warning hidden" role="alert"></div>
 
 <div class="content-box __mb">
     <table class="table table-condensed">

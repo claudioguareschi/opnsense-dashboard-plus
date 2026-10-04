@@ -530,7 +530,8 @@ def state_outside(record, pair):
 # the high end when every state has its own remote address). The map walks at most as many states
 # as fit in a small share of the firewall's RAM (a 4 GB box: about 35,000), so a flood or a very
 # busy firewall pauses the sampling instead of risking memory; never fewer than MIN, never more
-# than MAX. Parsing takes about 20 µs per state on a fast CPU, longer on appliance CPUs.
+# than MAX. Parsing takes about 20 µs per state on a fast CPU and longer on appliance CPUs; a walk
+# that runs past SAMPLE_TIMEOUT is stopped (see sample_states).
 BYTES_PER_STATE = 6000
 STATE_MEMORY_SHARE = 0.05
 MIN_SAMPLED_STATES = 10000

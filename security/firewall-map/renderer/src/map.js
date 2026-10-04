@@ -59,7 +59,7 @@ function fitZoom(width) {
 }
 
 /**
- * options: {theme, settings, text, onSelect(selection), onFollowChange(on), followResumeMs}.
+ * options: {theme, settings, text, onSelect(selection), onFollowChange(on), onContextLost()}.
  * `text` is the caller's translation table (see text.js); `settings` as parseSettings() returns.
  */
 export function createFirewallMap(container, options = {}) {
@@ -238,7 +238,6 @@ export function createFirewallMap(container, options = {}) {
   let blocksDrawn = [];
   let endpointsDrawn = [];
   let homesDrawn = [];
-  // stable color per category across refreshes (first seen keeps its color)
   // what the coloring and label modules read: the map's current state, never a stale copy
   const view = {
     get colors() { return colors; },
@@ -503,7 +502,12 @@ export function createFirewallMap(container, options = {}) {
       const dest = locationIndex.get(flow.dest);
       if (dest) {
         const key = `${dest.lat},${dest.lon}`;
-        flowsByDest.set(key, [...(flowsByDest.get(key) || []), flow]);
+        const flows = flowsByDest.get(key);
+        if (flows) {
+          flows.push(flow);
+        } else {
+          flowsByDest.set(key, [flow]);
+        }
       }
     }
     baseLayers = [

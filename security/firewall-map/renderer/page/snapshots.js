@@ -90,7 +90,7 @@ async function takeSnapshot() {
     const note = window.FirewallMapRenderer.host.toast(frame,
       `${ic('check', 'text-success')}<span><b>${escapeHtml(T.snapshot_saved)}</b> `
       + `<span class="text-muted">· ${escapeHtml(takenText(meta, false))} · ${countsText(meta)}</span></span>`
-      + `<button type="button" class="btn btn-primary btn-xs fwmap-toast-open">${escapeHtml(T.snapshot_open)}</button>`);
+      + `<button type="button" class="btn btn-primary btn-xs fwmap-toast-open">${escapeHtml(T.snapshot_view)}</button>`);
     $(note).find('.fwmap-toast-open').on('click', () => {
       note.remove();
       openSnapshot(meta.id);

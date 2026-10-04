@@ -33,7 +33,7 @@ import {state, T, TEXT} from './context.js';
 import {remoteOf} from './details.js';
 import {ic} from './icons.js';
 import {investigate, investigationPanel} from './investigate.js';
-import {ago, idsLines, pill} from './parts.js';
+import {ago, agoText, idsLines, pill} from './parts.js';
 
 const VIEWS = ['passed', 'firewall_blocked', 'ips_dropped', 'all', 'reviewed', 'dismissed'];
 const QUEUE_PAGE = 100;
@@ -149,7 +149,7 @@ function queueItem(row, names) {
         + `<div class="text-muted">${escapeHtml(T.via)} ${escapeHtml(item.public || '')}${item.open ? '' : ` · ${escapeHtml(T.closed)}`}</div></td>`
         + `<td>${decision(item)}</td><td>${escapeHtml(item.rule || '—')}</td><td>${escapeHtml(item.interface || '—')}</td>`
         + `<td>↓ ${escapeHtml(formatBytes(item.bytes_in || 0))} ↑ ${escapeHtml(formatBytes(item.bytes_out || 0))}</td>`
-        + `<td>${item.started ? escapeHtml(`${ago(item.started)} ${T.ago}`) : '—'}</td><td>${ids || '<span class="text-muted">—</span>'}</td></tr>`;
+        + `<td>${item.started ? escapeHtml(agoText(item.started)) : '—'}</td><td>${ids || '<span class="text-muted">—</span>'}</td></tr>`;
     }).join('') + '</tbody></table>' : '';
   const org = saved.org || live.org;
   // the lists stand out while the entry waits for review
@@ -189,7 +189,7 @@ function queueItem(row, names) {
             ${otherTargets ? `<a href="#" class="fwmap-q-expand text-muted" aria-expanded="${expanded}">${escapeHtml(otherTargets)}</a>` : ''}</div>
         </div>
         <ul class="list-inline text-muted fwmap-q-meta">
-          <li>${ic('calendar')} ${escapeHtml(T.first_seen)} ${escapeHtml(ago(row.first_seen))} ${escapeHtml(T.ago)}</li>
+          <li>${ic('calendar')} ${escapeHtml(fill(T.first_seen_ago, {time: ago(row.first_seen)}))}</li>
           <li>${ic('chart-column')} ${escapeHtml(row.samples)} ${escapeHtml(row.samples === 1 ? T.sample : T.samples)}</li>
           <li>${ic('right-left')} ${escapeHtml(T.peak)} ${escapeHtml(formatBytes(row.peak_bytes || 0))}</li>
           ${rule ? `<li title="${escapeHtml(T.rule)}">${ic('shield-halved')} ${escapeHtml(rule)}</li>` : ''}
@@ -197,7 +197,7 @@ function queueItem(row, names) {
         ${idsLines(row.ids, TEXT)}
       </div>
       <div class="text-muted fwmap-q-when">
-        <span title="${escapeHtml(new Date(row.last_seen * 1000).toLocaleString())}">${ic('clock')} ${escapeHtml(ago(row.last_seen))} ${escapeHtml(T.ago)}</span>
+        <span title="${escapeHtml(new Date(row.last_seen * 1000).toLocaleString())}">${ic('clock')} ${escapeHtml(agoText(row.last_seen))}</span>
         <a href="#" class="fwmap-q-expand" title="${escapeHtml(T.more_details)}" aria-label="${escapeHtml(T.more_details)}" aria-expanded="${expanded}">${ic(expanded ? 'chevron-down' : 'chevron-right')}</a>
       </div>
     </div>

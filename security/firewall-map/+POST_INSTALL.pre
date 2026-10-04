@@ -1,0 +1,3 @@
+# the directory of the plugin's settings file, root-only (it holds the keys): created before the
+# framework's template reload below renders the file into it, so the file is never readable by others
+install -d -m 0700 /usr/local/etc/firewallmap

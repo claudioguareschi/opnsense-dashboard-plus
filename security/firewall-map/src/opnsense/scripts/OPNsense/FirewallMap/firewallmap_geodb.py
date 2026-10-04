@@ -53,7 +53,7 @@ from configparser import ConfigParser
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlencode, urlparse
 
-from lib.common import GEODB_STATUS, STATE_DIR, log_notice, log_warning, read_json, secure_umask, write_json
+from lib.common import FORCED_REPEAT_SECONDS, GEODB_STATUS, STATE_DIR, log_notice, log_warning, read_json, secure_umask, write_json
 from lib import mmdb
 from lib.config import settings
 
@@ -268,10 +268,11 @@ def fetch_dbip(edition, workdir, progress=None):
 
 
 def needs_update(path, update_days, force):
-    if force:
-        return True
     info = os.stat(path) if os.path.exists(path) else None
-    return info is None or time.time() - info.st_mtime > update_days * 86400
+    if info is None:
+        return True
+    age = time.time() - info.st_mtime
+    return not 0 <= age < FORCED_REPEAT_SECONDS if force else age > update_days * 86400
 
 
 def in_backoff(last, now=None):
@@ -280,7 +281,9 @@ def in_backoff(last, now=None):
         return False
     now = time.time() if now is None else now
     if last.get("next_retry"):
-        return now < last["next_retry"]
+        # never longer than the longest wait: after the clock was set back, a next_retry written
+        # with the wrong time would otherwise hold the downloads for that long
+        return now < last["next_retry"] <= now + RETRY_STEPS[-1]
     try:
         # written by an older version: no next_retry, a fixed wait
         attempted = datetime.fromisoformat(last["last_attempt"]).timestamp()

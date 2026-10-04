@@ -190,7 +190,7 @@ export function cards(text) {
       return `<div class="fmt fmt-tone-${tone}">${head(block.city || block.country || block.source, placeOf(block), outcomePill(tone))}
         ${lists(block.lists)}
         ${address('server', block.source, org(block, showAsn), [blockSummary(block, showAsn, text)], bad, block.ids)}
-        <div class="fmt-foot"><span>${escapeHtml(fill(text.map_last_minute, {count: block.hits_per_minute}) + (block.threat ? text.map_hammering : ''))}</span></div></div>`;
+        <div class="fmt-foot"><span>${escapeHtml(fill(block.threat ? text.map_last_minute_hammering : text.map_last_minute, {count: block.hits_per_minute}))}</span></div></div>`;
     },
   };
 }

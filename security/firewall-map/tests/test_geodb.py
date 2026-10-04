@@ -121,6 +121,18 @@ class GeoDatabaseUpdateTest(unittest.TestCase):
             self.assertEqual(GEODB.update()["result"], "backoff")
             self.assertEqual(GEODB.update(force=True)["result"], "ok")
 
+    def test_backoff_is_bounded_and_forced_updates_are_not_repeated_at_once(self):
+        failed = {"last_error": "HTTP 500", "last_attempt": "2026-10-04T00:00:00+00:00"}
+        self.assertTrue(GEODB.in_backoff({**failed, "next_retry": 1000.0 + GEODB.RETRY_STEPS[-1]}, now=1000.0))
+        # written before the clock was set back: not trusted beyond the longest wait
+        self.assertFalse(GEODB.in_backoff({**failed, "next_retry": 1000.0 + 86400}, now=1000.0))
+        with tempfile.NamedTemporaryFile() as handle:
+            self.assertFalse(GEODB.needs_update(handle.name, 3, force=True))
+            old = time.time() - GEODB.FORCED_REPEAT_SECONDS - 1
+            os.utime(handle.name, (old, old))
+            self.assertTrue(GEODB.needs_update(handle.name, 3, force=True))
+            self.assertFalse(GEODB.needs_update(handle.name, 3, force=False))
+
     def test_a_second_updater_is_turned_away(self):
         import fcntl
         with open(GEODB.LOCK_FILE, "w") as lock:
@@ -132,7 +144,6 @@ class GeoDatabaseUpdateTest(unittest.TestCase):
                 mock.patch.object(GEODB, "alias_license_key", lambda path=None: None):
             self.assertEqual(GEODB.update()["error"], "maxmind_key_missing")
         self.assertFalse(GEODB.in_backoff(GEODB.read_status()))
-
 
     def unauthorized(self, edition, key, workdir, progress=None):
         import urllib.error

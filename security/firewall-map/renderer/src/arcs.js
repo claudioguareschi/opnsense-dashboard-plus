@@ -243,7 +243,7 @@ export function buildBlocks(data) {
 }
 
 /** How visible a correlated connection's arc is: full while open, then fading out over a minute. */
-export function idsArcActivity(flow) {
+function idsArcActivity(flow) {
   if (flow.active) {
     return 1;
   }

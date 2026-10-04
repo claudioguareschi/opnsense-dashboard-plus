@@ -42,7 +42,8 @@ class ServiceController extends ApiMutableServiceControllerBase
     protected static $internalServiceClass = 'OPNsense\FirewallMap\FirewallMap';
     protected static $internalServiceName = 'firewallmap';
 
-    /* what each "Update now" downloads again, in the background */
+    /* what each "Update now" downloads again, in the background (not again within minutes of a
+     * successful download: see FORCED_REPEAT_SECONDS in the scripts) */
     private const UPDATES = [
         'geodb' => 'firewallmap geodb force',
         'feeds' => 'firewallmap feeds refresh',

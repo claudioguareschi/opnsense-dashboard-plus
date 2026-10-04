@@ -29,11 +29,11 @@
  * actions around the shared renderer (firewall-map-renderer.js, the global FirewallMapRenderer).
  * Built with vite.page.config.js into src/opnsense/www/js/firewall-map-page.js.
  */
-import {escapeHtml} from '../src/format.js';
+import {escapeHtml, fill} from '../src/format.js';
 import {parseSettings, summaryQuery} from '../src/options.js';
 import {addCountry, addToAlias, killStates, markThreat, showStates} from './actions.js';
 import {getJSON} from './api.js';
-import {POLL_MS, resetFilters, state, T} from './context.js';
+import {POLL_MS, resetFilters, state, T, TEXT} from './context.js';
 import {renderDetails} from './details.js';
 import {filtered} from './filters.js';
 import {checkAbuse, investigate} from './investigate.js';
@@ -76,14 +76,14 @@ function statusLine(summary, shown) {
 
 function updatedLine() {
   if (state.mode === 'snapshot' && state.frozen) {
-    $('#fwmap-updated').html(`${escapeHtml(T.captured)} ${escapeHtml(takenText(state.frozen.meta))} <i class="fwmap-live frozen"></i>`);
+    $('#fwmap-updated').html(`${escapeHtml(fill(T.captured_at, {time: takenText(state.frozen.meta)}))} <i class="fwmap-live frozen"></i>`);
     return;
   }
   if (!state.updatedAt) {
     return;
   }
   const seconds = Math.max(0, Math.round((Date.now() - state.updatedAt) / 1000));
-  $('#fwmap-updated').html(`${escapeHtml(T.last_updated)} ${escapeHtml(seconds)} s ${escapeHtml(T.ago)} `
+  $('#fwmap-updated').html(`${escapeHtml(fill(T.last_updated_ago, {time: fill(TEXT.map_seconds, {count: seconds})}))} `
     + `<i class="fwmap-live${seconds > 10 ? ' stale' : ''}"></i>`);
 }
 

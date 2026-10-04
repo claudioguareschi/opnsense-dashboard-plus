@@ -1,7 +1,5 @@
-# the plugin's settings file, rendered from the configuration (root-only: it holds the keys), and
-# whether a dashboard holds the widget
-install -d -m 0700 /usr/local/etc/firewallmap
-/usr/local/sbin/configctl template reload OPNsense/FirewallMap > /dev/null 2>&1
+# whether a dashboard holds the widget (the settings file is rendered by the framework's template
+# reload, into the directory +POST_INSTALL.pre created)
 /usr/local/sbin/configctl firewallmap dashboards > /dev/null 2>&1
 # restart a running collector so it picks up the new code; an idle one stays stopped
 if /usr/local/etc/rc.d/firewallmap onestatus > /dev/null 2>&1; then

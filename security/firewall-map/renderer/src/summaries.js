@@ -70,10 +70,11 @@ function remoteReached(flow, other, open, text) {
     const port = target.port ? `${target.port}/${target.protocol || 'tcp'}` : null;
     service = serviceLabel(target.service, port, text);
   }
-  return fill(text.map_reached, {
+  if (targets.length > 1) {
+    where = plural(text, 'map_other_targets', targets.length - 1, {target: where});
+  }
+  return fill(target && !isFirewall(target) ? text.map_reached_forward : text.map_reached, {
     other, where, service,
-    more: targets.length > 1 ? plural(text, 'map_other_targets', targets.length - 1) : '',
-    forwarded: target && !isFirewall(target) ? text.map_through_forward : '',
     open: open ? fill(text.map_open_for, {duration: open}) : '',
   });
 }
@@ -86,9 +87,10 @@ function localOpened(flow, other, open, text) {
     ? (inside.length > 1 ? plural(text, 'map_other_hosts', inside.length - 1, {host: hostLabel(inside[0])}) : hostLabel(inside[0]))
     : text.map_this_firewall_title;
   const name = services[0] || '';
+  const service = serviceLabel(name, ports[name], text);
   const values = {
-    who, other, service: serviceLabel(name, ports[name], text),
-    more: services.length > 1 ? plural(text, 'map_other_services', services.length - 1) : '',
+    who, other,
+    service: services.length > 1 ? plural(text, 'map_other_services', services.length - 1, {service}) : service,
   };
   let sentence;
   if (/^DNS/.test(name)) {
@@ -129,18 +131,25 @@ export function blockSummary(block, showAsn = true, text = DEFAULT_TEXT) {
   const place = [showAsn ? block.as_org : null, block.country].filter(Boolean).map(plain).join(', ');
   const services = (block.services || []).slice(0, 2).map((service) => serviceLabel(service.name, service.port, text));
   const others = Math.max(0, (block.port_count || services.length) - services.length);
-  const tried = services.length
-    ? `${services.join(services.length > 1 && !others ? text.map_and : ', ')}${others ? plural(text, 'map_other_ports', others) : ''}`
-    : text.map_a_connection;
+  let tried = text.map_a_connection;
+  if (others) {
+    tried = plural(text, 'map_other_ports', others, {services: services.join(', ')});
+  } else if (services.length > 1) {
+    tried = fill(text.map_two_services, {first: services[0], second: services[1]});
+  } else if (services.length) {
+    tried = services[0];
+  }
   const since = duration(block.seconds, text);
-  return fill(text.map_block_sentence, {
+  const sentence = block.rule && block.interface ? 'map_block_sentence_rule_interface'
+    : block.rule ? 'map_block_sentence_rule' : block.interface ? 'map_block_sentence_interface' : 'map_block_sentence';
+  return fill(text[sentence], {
     source: block.source,
     place: place ? ` (${place})` : '',
     tried,
     hits: block.hits ?? block.hits_per_minute,
     minutes: block.window_minutes ?? 1,
-    rule: block.rule ? fill(text.map_by_rule, {rule: plain(block.rule)}) : '',
-    where: block.interface ? fill(text.map_on_interface, {interface: plain(block.interface)}) : '',
+    rule: plain(block.rule || ''),
+    interface: plain(block.interface || ''),
     since: since ? fill(text.map_first_seen_ago, {duration: since}) : '',
   });
 }

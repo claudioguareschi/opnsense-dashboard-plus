@@ -26,7 +26,7 @@
 
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {idsOutcome, outcome} from '../src/summaries.js';
+import {blockSummary, flowSummary, idsOutcome, outcome} from '../src/summaries.js';
 
 test('one verdict for flagged and stopped traffic everywhere', () => {
   assert.equal(outcome({flagged: true, stopped: false}), 'danger');
@@ -41,4 +41,19 @@ test('an IDS connection is flagged by a severe alert or a threat list, stopped b
   assert.equal(idsOutcome({severity: 3, kind: 'current'}), 'ok');
   assert.equal(idsOutcome({severity: 2, kind: 'blocked'}), 'contained');
   assert.equal(idsOutcome({severity: 3, kind: 'current', ips_dropped: true}), 'blocked');
+});
+
+test('sentences are whole phrases: rule, interface, services and targets', () => {
+  const block = {source: '198.51.100.7', hits: 4, window_minutes: 10, services: [{name: 'SSH', port: '22/tcp'}, {name: 'Telnet', port: '23/tcp'}]};
+  assert.equal(blockSummary(block),
+    '198.51.100.7 tried SSH (22/tcp) and Telnet (23/tcp) on this firewall: blocked 4× in the last 10 min.');
+  assert.equal(blockSummary({...block, rule: 'Default deny', interface: 'WAN', port_count: 5}),
+    '198.51.100.7 tried SSH (22/tcp), Telnet (23/tcp) and 3 other ports on this firewall: blocked 4× in the last 10 min by "Default deny" on WAN.');
+  assert.equal(blockSummary({...block, interface: 'WAN', services: []}),
+    '198.51.100.7 tried a connection on this firewall: blocked 4× in the last 10 min on WAN.');
+  const flow = {initiated: 'remote', targets: [{ip: '192.168.1.10', name: 'nas', service: 'HTTPS', port: 443}, {ip: '192.168.1.11'}]};
+  assert.deepEqual(flowSummary(flow, {ip: '203.0.113.5'}),
+    ['203.0.113.5 reached nas (192.168.1.10) (and 1 other target) on HTTPS (443/tcp) through a port forward.']);
+  const local = {initiated: 'local', inside: [{ip: '192.168.1.20'}], services: ['HTTPS', 'HTTP'], service_ports: {HTTPS: '443/tcp'}};
+  assert.deepEqual(flowSummary(local, {ip: '203.0.113.5'}), ['192.168.1.20 opened HTTPS (443/tcp) and 1 other service to 203.0.113.5.']);
 });

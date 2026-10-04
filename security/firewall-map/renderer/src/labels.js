@@ -42,7 +42,6 @@ const LABEL_CHAR_WIDTH = 6.2;
 const LABEL_PADDING = 3;
 
 export function createLabels(view) {
-  // one label per place, busiest places first
   // one label per place: busiest allowed traffic first, then blocked sources and alerts by hits
   function labels(data) {
     const seen = new Map();

@@ -51,7 +51,16 @@ if (!is_dir($directory)) {
     mkdir($directory, 0750, true);
 }
 $file = "{$directory}/dashboards.json";
-file_put_contents("{$file}.new", json_encode(['widget_in_use' => $inUse]) . "\n");
-chmod("{$file}.new", 0640);
-rename("{$file}.new", $file);
-echo json_encode(['widget_in_use' => $inUse]) . "\n";
+$content = json_encode(['widget_in_use' => $inUse]) . "\n";
+/* a private temporary name, and the old file stays until the new one is complete (a full disk or
+ * two runs at once never leave an empty file behind) */
+$temporary = tempnam($directory, 'dashboards.');
+if ($temporary === false || file_put_contents($temporary, $content) !== strlen($content)
+    || !chmod($temporary, 0640) || !rename($temporary, $file)) {
+    if ($temporary !== false && is_file($temporary)) {
+        unlink($temporary);
+    }
+    fwrite(STDERR, "could not write {$file}\n");
+    exit(1);
+}
+echo $content;

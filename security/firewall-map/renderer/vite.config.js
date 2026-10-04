@@ -75,7 +75,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         // after minification, which would strip it
-        postBanner: `${BANNER}\n/* Includes deck.gl, luma.gl, loaders.gl, math.gl and mjolnir.js (MIT License): see firewall-map-renderer.LICENSE. */`,
+        postBanner: `${BANNER}\n/* Includes deck.gl, luma.gl, loaders.gl, math.gl and mjolnir.js under the MIT, ISC and BSD-2-Clause licenses: see firewall-map-renderer.LICENSE. */`,
       },
     },
   },

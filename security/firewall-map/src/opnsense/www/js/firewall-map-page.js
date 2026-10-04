@@ -12,7 +12,7 @@
 *    notice, this list of conditions and the following disclaimer in the
 *    documentation and/or other materials provided with the distribution.
 *
-* THIS SOFTWARE IS PROVIDED AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
+* THIS SOFTWARE IS PROVIDED AS IS AND ANY EXPRESS OR IMPLIED WARRANTIES,
 * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
 * AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
 * AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY,
@@ -137,6 +137,7 @@
 		geo_fills_in: "The map fills in as soon as it is done.",
 		geo_failed_title: "The geolocation database could not be downloaded",
 		geo_key_title: "A MaxMind license key is needed",
+		geo_key_advice: "Add it in the Firewall Map settings or in the GeoIP alias settings, or choose DB-IP Lite.",
 		geo_retry_in: "Trying again in {time}",
 		geo_retrying: "Trying again…",
 		geo_retry_now: "Retry now",
@@ -163,7 +164,6 @@
 		map_flagged_blocked: "Flagged · blocked",
 		map_flagged_allowed: "Flagged · allowed",
 		map_allowed: "Allowed",
-		map_ids_alert: "IDS alert",
 		map_category_web: "Web",
 		map_category_quic: "QUIC",
 		map_category_dns: "DNS",
@@ -182,28 +182,29 @@
 		map_traffic: "traffic",
 		map_this_firewall: "this firewall",
 		map_this_firewall_title: "This firewall",
-		map_other_targets_one: " (and {count} other target)",
-		map_other_targets_many: " (and {count} other targets)",
-		map_through_forward: " through a port forward",
+		map_other_targets_one: "{target} (and {count} other target)",
+		map_other_targets_many: "{target} (and {count} other targets)",
 		map_open_for: ", open for {duration}",
-		map_reached: "{other} reached {where} on {service}{more}{forwarded}{open}.",
+		map_reached: "{other} reached {where} on {service}{open}.",
+		map_reached_forward: "{other} reached {where} on {service} through a port forward{open}.",
 		map_other_hosts_one: "{host} and {count} other host",
 		map_other_hosts_many: "{host} and {count} other hosts",
-		map_other_services_one: " and {count} other service",
-		map_other_services_many: " and {count} other services",
-		map_queried: "{who} queried {service}{more} at {other}",
-		map_synced: "{who} synced time with {other} over {service}{more}",
-		map_mailed: "{who} delivered mail to {other} over {service}{more}",
+		map_other_services_one: "{service} and {count} other service",
+		map_other_services_many: "{service} and {count} other services",
+		map_queried: "{who} queried {service} at {other}",
+		map_synced: "{who} synced time with {other} over {service}",
+		map_mailed: "{who} delivered mail to {other} over {service}",
 		map_pinged: "{who} pinged {other}",
-		map_opened: "{who} opened {service}{more} to {other}",
+		map_opened: "{who} opened {service} to {other}",
 		map_a_connection: "a connection",
-		map_other_ports_one: " and {count} other port",
-		map_other_ports_many: " and {count} other ports",
-		map_and: " and ",
-		map_by_rule: " by \"{rule}\"",
-		map_on_interface: " on {interface}",
+		map_other_ports_one: "{services} and {count} other port",
+		map_other_ports_many: "{services} and {count} other ports",
+		map_two_services: "{first} and {second}",
 		map_first_seen_ago: ", first seen {duration} ago",
-		map_block_sentence: "{source}{place} tried {tried} on this firewall: blocked {hits}× in the last {minutes} min{rule}{where}{since}.",
+		map_block_sentence: "{source}{place} tried {tried} on this firewall: blocked {hits}× in the last {minutes} min{since}.",
+		map_block_sentence_rule: "{source}{place} tried {tried} on this firewall: blocked {hits}× in the last {minutes} min by \"{rule}\"{since}.",
+		map_block_sentence_interface: "{source}{place} tried {tried} on this firewall: blocked {hits}× in the last {minutes} min on {interface}{since}.",
+		map_block_sentence_rule_interface: "{source}{place} tried {tried} on this firewall: blocked {hits}× in the last {minutes} min by \"{rule}\" on {interface}{since}.",
 		map_ids_line: "{signature} (severity {severity}{category})",
 		map_ids_source: "Suricata: {line}",
 		map_ids_first: ", {count}× in the last {window}, latest {latest} ago",
@@ -225,7 +226,7 @@
 		map_seen_by_suricata_flagged: "Seen by Suricata · flagged",
 		map_no_connection: "No connection is open right now",
 		map_last_minute: "{count} in the last minute",
-		map_hammering: " · hammering",
+		map_last_minute_hammering: "{count} in the last minute · hammering",
 		map_active_links_one: "{count} active link",
 		map_active_links_many: "{count} active links"
 	};
@@ -512,12 +513,11 @@
 			const port = target.port ? `${target.port}/${target.protocol || "tcp"}` : null;
 			service = serviceLabel(target.service, port, text);
 		}
-		return fill(text.map_reached, {
+		if (targets.length > 1) where = plural(text, "map_other_targets", targets.length - 1, { target: where });
+		return fill(target && !isFirewall(target) ? text.map_reached_forward : text.map_reached, {
 			other,
 			where,
 			service,
-			more: targets.length > 1 ? plural(text, "map_other_targets", targets.length - 1) : "",
-			forwarded: target && !isFirewall(target) ? text.map_through_forward : "",
 			open: open ? fill(text.map_open_for, { duration: open }) : ""
 		});
 	}
@@ -527,11 +527,11 @@
 		const inside = flow.inside || [];
 		const who = inside.length ? inside.length > 1 ? plural(text, "map_other_hosts", inside.length - 1, { host: hostLabel(inside[0]) }) : hostLabel(inside[0]) : text.map_this_firewall_title;
 		const name = services[0] || "";
+		const service = serviceLabel(name, ports[name], text);
 		const values = {
 			who,
 			other,
-			service: serviceLabel(name, ports[name], text),
-			more: services.length > 1 ? plural(text, "map_other_services", services.length - 1) : ""
+			service: services.length > 1 ? plural(text, "map_other_services", services.length - 1, { service }) : service
 		};
 		let sentence;
 		if (/^DNS/.test(name)) sentence = fill(text.map_queried, values);
@@ -658,6 +658,10 @@
 		if (age < 5400) return unit("map_minutes", Math.round(age / 60));
 		if (age < 129600) return unit("map_hours", Math.round(age / 3600));
 		return unit("map_days", Math.round(age / 86400));
+	}
+	/** "3 min ago" for an epoch time. */
+	function agoText(seconds) {
+		return fill(T.time_ago, { time: ago(seconds) });
 	}
 	/** 8040 seconds read "2 h 14 min". */
 	function spanText(seconds) {
@@ -856,7 +860,7 @@
 				[T.remote_port, outbound && service.port ? escapeHtml(service.port.split("/")[1]) : ""],
 				[T.other_services, (flow.services || []).slice(1).map(escapeHtml).join(", ")],
 				[T.state, (flow.activity || 0) > 0 ? pill("success", T.active, "check") : pill("default", T.idle)],
-				[T.started, flow.age ? escapeHtml(`${ago(Date.now() / 1e3 - flow.age)} ${T.ago}`) : ""],
+				[T.started, flow.age ? escapeHtml(agoText(Date.now() / 1e3 - flow.age)) : ""],
 				[T.transferred, flow.transferred ? rateText(flow.transferred[0], flow.transferred[1], formatBytes) : ""],
 				[T.current_rate, rateText(flow.rate_in, flow.rate_out)],
 				[T.duration, flow.age ? escapeHtml(spanText(flow.age)) : ""],
@@ -911,7 +915,7 @@
 				[T.via, escapeHtml(ids.public)],
 				[T.remote_side, escapeHtml(ids.remote)],
 				[T.state, ids.active ? pill("success", T.active, "check") : pill("default", T.closed)],
-				[T.started, ids.age ? escapeHtml(`${ago(Date.now() / 1e3 - ids.age)} ${T.ago}`) : ""],
+				[T.started, ids.age ? escapeHtml(agoText(Date.now() / 1e3 - ids.age)) : ""],
 				[T.transferred, rateText(ids.bytes_in, ids.bytes_out, formatBytes)]
 			]),
 			firewall: rows([
@@ -947,8 +951,8 @@
 					return `${escapeHtml(parts.name)} <span class="text-muted">${escapeHtml(parts.port)}</span> ×${escapeHtml(entry.hits)}`;
 				}).join("<br>")],
 				[T.other_ports, block.port_count > (block.services || []).length ? escapeHtml(block.port_count - block.services.length) : ""],
-				[T.attempts, escapeHtml(`${block.hits} · ${block.hits_per_minute}/min`)],
-				[T.first_seen, block.seconds ? escapeHtml(`${ago(Date.now() / 1e3 - block.seconds)} ${T.ago}`) : ""]
+				[T.block_attempts, escapeHtml(`${block.hits} · ${block.hits_per_minute}/min`)],
+				[T.first_seen, block.seconds ? escapeHtml(agoText(Date.now() / 1e3 - block.seconds)) : ""]
 			]),
 			firewall: rows([
 				[T.decision, pill("default", T.blocked, "ban")],
@@ -1072,7 +1076,7 @@
         <div class="fwmap-d-verdict">${model.verdict}<div class="fwmap-d-verdict-sub">${escapeHtml(model.sub)}</div></div>
         <button type="button" class="close" id="fwmap-details-close" title="${escapeHtml(T.close)}" aria-label="${escapeHtml(T.close)}"><span aria-hidden="true">&times;</span></button>
       </div>
-      ${state.mode === "snapshot" ? `<div class="alert alert-warning fwmap-snap-notice">${ic("camera")} ${escapeHtml(T.as_captured)} ${escapeHtml(capturedTime())} · ${escapeHtml(T.may_have_closed)}</div>` : ""}
+      ${state.mode === "snapshot" ? `<div class="alert alert-warning fwmap-snap-notice">${ic("camera")} ${escapeHtml(fill(T.as_captured_at, { time: capturedTime() }))} · ${escapeHtml(T.may_have_closed)}</div>` : ""}
       ${picker}
       ${diagramHtml(model.diagram)}
       <div class="fwmap-cards">
@@ -1459,7 +1463,7 @@
 			const insideText = `${item.inside_name ? `${item.inside_name} ` : ""}${item.inside || T.this_firewall}`;
 			const path = item.remote_started ? `${item.remote} → ${insideText}` : `${insideText} → ${item.remote}`;
 			const ids = (item.ids || []).map((sig) => `<div class="${sig.severity <= 2 ? "text-danger fwmap-ids-high" : "fwmap-ids"}">${ic("flag")} ${escapeHtml(sig.signature)} ×${escapeHtml(sig.count)}</div>` + (sig.query ? `<div class="text-muted">${escapeHtml(T.query)}: ${escapeHtml(sig.query)}</div>` : "")).join("");
-			return `<tr><td><div>${escapeHtml(path)} <span class="text-muted">${escapeHtml(protocolLabel(item.protocol))}</span></div><div class="text-muted">${escapeHtml(T.via)} ${escapeHtml(item.public || "")}${item.open ? "" : ` · ${escapeHtml(T.closed)}`}</div></td><td>${decision(item)}</td><td>${escapeHtml(item.rule || "—")}</td><td>${escapeHtml(item.interface || "—")}</td><td>↓ ${escapeHtml(formatBytes(item.bytes_in || 0))} ↑ ${escapeHtml(formatBytes(item.bytes_out || 0))}</td><td>${item.started ? escapeHtml(`${ago(item.started)} ${T.ago}`) : "—"}</td><td>${ids || "<span class=\"text-muted\">—</span>"}</td></tr>`;
+			return `<tr><td><div>${escapeHtml(path)} <span class="text-muted">${escapeHtml(protocolLabel(item.protocol))}</span></div><div class="text-muted">${escapeHtml(T.via)} ${escapeHtml(item.public || "")}${item.open ? "" : ` · ${escapeHtml(T.closed)}`}</div></td><td>${decision(item)}</td><td>${escapeHtml(item.rule || "—")}</td><td>${escapeHtml(item.interface || "—")}</td><td>↓ ${escapeHtml(formatBytes(item.bytes_in || 0))} ↑ ${escapeHtml(formatBytes(item.bytes_out || 0))}</td><td>${item.started ? escapeHtml(agoText(item.started)) : "—"}</td><td>${ids || "<span class=\"text-muted\">—</span>"}</td></tr>`;
 		}).join("") + "</tbody></table>" : "";
 		const org = saved.org || live.org;
 		const chips = (row.lists || []).map((name) => pill(status === "new" ? "danger" : "default", listLabel(name))).join(" ");
@@ -1498,7 +1502,7 @@
             ${otherTargets ? `<a href="#" class="fwmap-q-expand text-muted" aria-expanded="${expanded}">${escapeHtml(otherTargets)}</a>` : ""}</div>
         </div>
         <ul class="list-inline text-muted fwmap-q-meta">
-          <li>${ic("calendar")} ${escapeHtml(T.first_seen)} ${escapeHtml(ago(row.first_seen))} ${escapeHtml(T.ago)}</li>
+          <li>${ic("calendar")} ${escapeHtml(fill(T.first_seen_ago, { time: ago(row.first_seen) }))}</li>
           <li>${ic("chart-column")} ${escapeHtml(row.samples)} ${escapeHtml(row.samples === 1 ? T.sample : T.samples)}</li>
           <li>${ic("right-left")} ${escapeHtml(T.peak)} ${escapeHtml(formatBytes(row.peak_bytes || 0))}</li>
           ${rule ? `<li title="${escapeHtml(T.rule)}">${ic("shield-halved")} ${escapeHtml(rule)}</li>` : ""}
@@ -1506,7 +1510,7 @@
         ${idsLines(row.ids, TEXT)}
       </div>
       <div class="text-muted fwmap-q-when">
-        <span title="${escapeHtml((/* @__PURE__ */ new Date(row.last_seen * 1e3)).toLocaleString())}">${ic("clock")} ${escapeHtml(ago(row.last_seen))} ${escapeHtml(T.ago)}</span>
+        <span title="${escapeHtml((/* @__PURE__ */ new Date(row.last_seen * 1e3)).toLocaleString())}">${ic("clock")} ${escapeHtml(agoText(row.last_seen))}</span>
         <a href="#" class="fwmap-q-expand" title="${escapeHtml(T.more_details)}" aria-label="${escapeHtml(T.more_details)}" aria-expanded="${expanded}">${ic(expanded ? "chevron-down" : "chevron-right")}</a>
       </div>
     </div>
@@ -1833,7 +1837,7 @@
 			const result = await postJSON("/api/firewallmap/snapshots/save", {});
 			if (result.result !== "saved") throw new Error(result.error || result.result);
 			const meta = result.snapshot;
-			const note = window.FirewallMapRenderer.host.toast(frame, `${ic("check", "text-success")}<span><b>${escapeHtml(T.snapshot_saved)}</b> <span class="text-muted">· ${escapeHtml(takenText(meta, false))} · ${countsText(meta)}</span></span><button type="button" class="btn btn-primary btn-xs fwmap-toast-open">${escapeHtml(T.snapshot_open)}</button>`);
+			const note = window.FirewallMapRenderer.host.toast(frame, `${ic("check", "text-success")}<span><b>${escapeHtml(T.snapshot_saved)}</b> <span class="text-muted">· ${escapeHtml(takenText(meta, false))} · ${countsText(meta)}</span></span><button type="button" class="btn btn-primary btn-xs fwmap-toast-open">${escapeHtml(T.snapshot_view)}</button>`);
 			$(note).find(".fwmap-toast-open").on("click", () => {
 				note.remove();
 				openSnapshot(meta.id);
@@ -2580,12 +2584,12 @@
 	}
 	function updatedLine() {
 		if (state.mode === "snapshot" && state.frozen) {
-			$("#fwmap-updated").html(`${escapeHtml(T.captured)} ${escapeHtml(takenText(state.frozen.meta))} <i class="fwmap-live frozen"></i>`);
+			$("#fwmap-updated").html(`${escapeHtml(fill(T.captured_at, { time: takenText(state.frozen.meta) }))} <i class="fwmap-live frozen"></i>`);
 			return;
 		}
 		if (!state.updatedAt) return;
 		const seconds = Math.max(0, Math.round((Date.now() - state.updatedAt) / 1e3));
-		$("#fwmap-updated").html(`${escapeHtml(T.last_updated)} ${escapeHtml(seconds)} s ${escapeHtml(T.ago)} <i class="fwmap-live${seconds > 10 ? " stale" : ""}"></i>`);
+		$("#fwmap-updated").html(`${escapeHtml(fill(T.last_updated_ago, { time: fill(TEXT.map_seconds, { count: seconds }) }))} <i class="fwmap-live${seconds > 10 ? " stale" : ""}"></i>`);
 	}
 	function refresh() {
 		const summary = state.data;
