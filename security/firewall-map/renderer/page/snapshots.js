@@ -30,7 +30,7 @@
  * firewall; showing one feeds it to the renderer instead of the live document, which keeps
  * being polled underneath so going back to live is instant.
  */
-import {escapeHtml, formatBytes, hostPort, plural} from '../src/format.js';
+import {escapeHtml, fill, formatBytes, hostPort, plural} from '../src/format.js';
 import {confirmAction, getJSON, notifyFailure, postJSON} from './api.js';
 import {state, T} from './context.js';
 import {ic} from './icons.js';
@@ -414,7 +414,7 @@ export function renderSnapshotList() {
     $list.html(`<div class="text-muted fwmap-empty">${escapeHtml(needle ? T.queue_no_match : T.no_snapshots)}</div>`);
     return;
   }
-  const kept = `<div class="fwmap-snap-kept fwmap-muted">${escapeHtml(T.snapshots_kept.replace('%s', state.snapshotsKept.keep).replace('%d', state.snapshotsKept.keep_days))}</div>`;
+  const kept = `<div class="fwmap-snap-kept fwmap-muted">${escapeHtml(fill(T.snapshots_kept, {count: state.snapshotsKept.keep, days: state.snapshotsKept.keep_days}))}</div>`;
   $list.html(kept + rows.map((meta) => {
     const current = meta.id === state.frozen?.meta.id;
     return `<div class="fwmap-talker fwmap-snap-row${current ? ' active' : ''}" role="button" tabindex="0" data-id="${escapeHtml(meta.id)}"

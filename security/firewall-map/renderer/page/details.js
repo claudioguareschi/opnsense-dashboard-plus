@@ -25,7 +25,7 @@
  */
 
 /* The details panel for what was clicked on the map or in the IDS list. */
-import {escapeHtml, flagHtml, formatBytes, formatRate, hostPort, listLabel, plain, protocolLabel, splitHostPort} from '../src/format.js';
+import {escapeHtml, fill, flagHtml, formatBytes, formatRate, hostPort, listLabel, plain, protocolLabel, splitHostPort} from '../src/format.js';
 import {idsOutcome} from '../src/summaries.js';
 import {ABUSEIPDB_BLACKLIST_LIST, ABUSEIPDB_LOOKUP_LIST, state, T} from './context.js';
 import {ic} from './icons.js';
@@ -202,7 +202,7 @@ function blockModel(block, context) {
   return {
     verdict: flagged ? bigPill('contained', T.blocked_flagged, 'fa-ban') : bigPill('blocked', T.blocked, 'fa-ban'),
     sub: T.blocked_attempts,
-    diagram: {from: remoteBox, service, rate: `${escapeHtml(block.hits)}× ${escapeHtml(T.in_minutes.replace('%s', block.window_minutes))}`,
+    diagram: {from: remoteBox, service, rate: `${escapeHtml(block.hits)}× ${escapeHtml(fill(T.in_minutes, {minutes: block.window_minutes}))}`,
       to: endBox('fa-shield', T.this_firewall_title, [block.target, block.interface]), blocked: true},
     connection: rows([
       [T.tried, (block.services || []).map((entry) => {

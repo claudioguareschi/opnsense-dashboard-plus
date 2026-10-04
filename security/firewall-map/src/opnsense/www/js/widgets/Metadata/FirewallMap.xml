@@ -99,6 +99,16 @@
             <map_flagged_allowed>Flagged · allowed</map_flagged_allowed>
             <map_allowed>Allowed</map_allowed>
             <map_ids_alert>IDS alert</map_ids_alert>
+            <map_category_web>Web</map_category_web>
+            <map_category_quic>QUIC</map_category_quic>
+            <map_category_dns>DNS</map_category_dns>
+            <map_category_ntp>NTP</map_category_ntp>
+            <map_category_vpn>VPN</map_category_vpn>
+            <map_category_mail>Mail</map_category_mail>
+            <map_category_remote_access>Remote access</map_category_remote_access>
+            <map_category_push_stun>Push / STUN</map_category_push_stun>
+            <map_category_other>Other</map_category_other>
+            <map_seconds>{count} s</map_seconds>
             <map_minutes>{count} min</map_minutes>
             <map_hours>{count} h</map_hours>
             <map_days>{count} days</map_days>
@@ -129,7 +139,8 @@
             <map_on_interface> on {interface}</map_on_interface>
             <map_first_seen_ago>, first seen {duration} ago</map_first_seen_ago>
             <map_block_sentence>{source}{place} tried {tried} on this firewall: blocked {hits}× in the last {minutes} min{rule}{where}{since}.</map_block_sentence>
-            <map_ids_line>Suricata: {signature} (severity {severity}{category})</map_ids_line>
+            <map_ids_line>{signature} (severity {severity}{category})</map_ids_line>
+            <map_ids_source>Suricata: {line}</map_ids_source>
             <map_ids_first>, {count}× in the last {window}, latest {latest} ago</map_ids_first>
             <map_ids_count>, {count}×</map_ids_count>
             <map_more_alerts_one>and {count} more alert</map_more_alerts_one>

@@ -48,6 +48,13 @@ npm test
 
 if [ "${1:-}" = "--check" ]; then
     STATUS=0
+    # the build regenerates src/text.js from the widget's translations: it must match the commit
+    if git -C "${ROOT}" diff --quiet -- security/firewall-map/renderer/src/text.js; then
+        echo "same      text.js"
+    else
+        echo "DIFFERENT text.js (edit the strings in Metadata/FirewallMap.xml)"
+        STATUS=1
+    fi
     for FILE in ${FILES}; do
         if cmp -s "${FILE}" "${TARGET}/$(basename "${FILE}")"; then
             echo "same      $(basename "${FILE}")"

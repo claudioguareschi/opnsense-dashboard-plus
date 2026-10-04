@@ -25,9 +25,9 @@
  */
 
 /* Building blocks of the details panel and Threats. */
-import {escapeHtml, plain} from '../src/format.js';
+import {escapeHtml, fill, plain} from '../src/format.js';
 import {idsSummary} from '../src/summaries.js';
-import {T} from './context.js';
+import {T, TEXT} from './context.js';
 import {ic} from './icons.js';
 
 /** A status pill; `big` is the verdict pill at the top of the details panel. */
@@ -83,31 +83,33 @@ export function idsLines(ids, text) {
   return idsSummary(ids, text).map((line) => `<div class="${cls}">${ic('flag')} ${escapeHtml(line)}</div>`).join('');
 }
 
-/** "3 min", "2 h", "5 d" since an epoch time. */
+const unit = (key, count) => fill(TEXT[key], {count});
+
+/** "3 min", "2 h", "5 days" since an epoch time. */
 export function ago(seconds) {
   const age = Math.max(0, Date.now() / 1000 - seconds);
   if (age < 90) {
-    return `${Math.round(age)} s`;
+    return unit('map_seconds', Math.round(age));
   }
   if (age < 5400) {
-    return `${Math.round(age / 60)} min`;
+    return unit('map_minutes', Math.round(age / 60));
   }
   if (age < 129600) {
-    return `${Math.round(age / 3600)} h`;
+    return unit('map_hours', Math.round(age / 3600));
   }
-  return `${Math.round(age / 86400)} d`;
+  return unit('map_days', Math.round(age / 86400));
 }
 
 /** 8040 seconds read "2 h 14 min". */
 export function spanText(seconds) {
   const minutes = Math.floor(seconds / 60);
   if (minutes < 1) {
-    return `${Math.round(seconds)} s`;
+    return unit('map_seconds', Math.round(seconds));
   }
   if (minutes < 60) {
-    return `${minutes} min`;
+    return unit('map_minutes', minutes);
   }
   const days = Math.floor(minutes / 1440);
   const hours = Math.floor((minutes % 1440) / 60);
-  return days ? `${days} d ${hours} h` : `${hours} h ${minutes % 60} min`;
+  return days ? `${unit('map_days', days)} ${unit('map_hours', hours)}` : `${unit('map_hours', hours)} ${unit('map_minutes', minutes % 60)}`;
 }

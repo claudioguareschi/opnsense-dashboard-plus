@@ -26,7 +26,8 @@
 
 /* The toolbar's filter chips and the map legend. */
 import {escapeHtml, plain} from '../src/format.js';
-import {state, T} from './context.js';
+import {categoryLabel} from '../src/palette.js';
+import {state, T, TEXT} from './context.js';
 import {flowService, locationsById} from './filters.js';
 
 /** Rebuild a filter's options (bootstrap-select), never while its list is open. */
@@ -63,7 +64,7 @@ export function updateToolbar(summary) {
   const countries = new Map();
   for (const flow of summary.flows || []) {
     const service = flowService(flow);
-    services.set(service, {value: service, label: service});
+    services.set(service, {value: service, label: categoryLabel(service, TEXT)});
     for (const inside of flow.inside || []) {
       if (inside.interface) {
         ifaces.set(inside.interface, {value: inside.interface, label: inside.interface});

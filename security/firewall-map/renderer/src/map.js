@@ -31,7 +31,7 @@ import {IDS_ARC_FADE_SECONDS, buildArcs, continuePhases, buildBlocks, clearOfHom
 import {createFollow} from './follow.js';
 import {plain} from './format.js';
 import {DEFAULT_OPTIONS} from './options.js';
-import {CATEGORY_COLORS, mix, palette, rgb} from './palette.js';
+import {CATEGORY_COLORS, categoryLabel, mix, palette, rgb} from './palette.js';
 import {alertOutcome, idsOutcome, outcome} from './summaries.js';
 import {textTable} from './text.js';
 import {cards, createTooltip} from './tooltips.js';
@@ -444,7 +444,7 @@ export function createFirewallMap(container, options = {}) {
     const present = [...new Set(arcs.filter((arc) => !arc.fading).map(categoryOf))];
     present.sort((a, b) => (a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b)));
     return [
-      ...present.map((label) => ({label, color: categoryColor(label)})),
+      ...present.map((name) => ({label: settings.colorMode === 'service' ? categoryLabel(name, text) : name, color: categoryColor(name)})),
       ...outcomeLegend(),
     ];
   }

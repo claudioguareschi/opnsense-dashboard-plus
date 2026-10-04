@@ -195,6 +195,11 @@ export const CATEGORY_COLORS = [
   [86, 180, 233], [140, 109, 49], [27, 158, 158], [120, 94, 240], [150, 150, 150],
 ];
 
+/** A category's name as shown (legend, filter): translated, while the English name stays the key. */
+export function categoryLabel(name, text) {
+  return text?.[`map_category_${String(name).toLowerCase().replace(/[^a-z]+/g, '_')}`] || name;
+}
+
 export function serviceCategory(service) {
   if (!service) {
     return 'Other';

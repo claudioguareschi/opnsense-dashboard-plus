@@ -117,8 +117,8 @@ export function cards(text) {
   const outcomePill = (kind, label) => pill(kind, label || OUTCOME_PILLS[kind][0], OUTCOME_PILLS[kind][1]);
   const idsLines = (ids) => {
     const bad = ids && ids.severity <= 2;
-    return idsSummary(ids, text).map((line) => `<div class="fmt-ids${bad ? ' fmt-bad' : ''}">${icon('flag')}`
-      + `<span>${escapeHtml(line.replace(/^Suricata: /, ''))}</span></div>`).join('');
+    return idsSummary(ids, text, {source: false}).map((line) => `<div class="fmt-ids${bad ? ' fmt-bad' : ''}">${icon('flag')}`
+      + `<span>${escapeHtml(line)}</span></div>`).join('');
   };
   const address = (iconName, name, meta, sentences, bad, ids) =>
     `<div class="fmt-addr"><div class="fmt-host">${icon(iconName)}<span>${escapeHtml(name)}</span></div>`

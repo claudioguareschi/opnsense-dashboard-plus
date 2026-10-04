@@ -131,6 +131,31 @@
 	//#endregion
 	//#region src/text.js
 	var DEFAULT_TEXT = {
+		geo_provider: "Geolocation service",
+		geo_key: "MaxMind license key",
+		geo_update: "Update frequency",
+		geo_downloading_title: "Downloading the geolocation database",
+		geo_preparing: "Starting the download…",
+		geo_progress: "{done} of {total}",
+		geo_fills_in: "The map fills in as soon as it is done.",
+		geo_failed_title: "The geolocation database could not be downloaded",
+		geo_key_title: "A MaxMind license key is needed",
+		geo_retry_in: "Trying again in {time}",
+		geo_retrying: "Trying again…",
+		geo_retry_now: "Retry now",
+		geo_partial: "Network names are unavailable",
+		geo_fallback: "Using {provider} Lite while the MaxMind download fails",
+		geo_stale: "The geolocation database could not be updated",
+		geo_err_unauthorized: "MaxMind did not accept the license key. A new key can take a few minutes to start working; if this persists, check the key in the settings and that GeoLite2 downloads are enabled for your MaxMind account.",
+		geo_err_forbidden: "{provider} refused the download (HTTP 403): the account may not have access to this database.",
+		geo_err_not_found: "{provider} did not have the database at the expected address (HTTP 404). DB-IP publishes a new file each month; early in the month it may not be out yet.",
+		geo_err_rate_limited: "{provider} limits how often a database can be downloaded (HTTP 429).",
+		geo_err_unreachable: "The firewall could not reach {provider}. Check that it has internet access and working DNS.",
+		geo_err_timeout: "The download from {provider} took too long and was stopped. A slow or busy connection is the usual cause.",
+		geo_err_invalid: "The downloaded file was not a valid database.",
+		geo_err_disk_full: "The database could not be saved: the firewall's disk is full.",
+		geo_err_http: "{provider} answered with an error.",
+		geo_err_other: "The download failed.",
 		map_started_inside: "Outbound",
 		map_started_outside: "Inbound",
 		map_started_both: "Both directions",
@@ -141,6 +166,16 @@
 		map_flagged_allowed: "Flagged · allowed",
 		map_allowed: "Allowed",
 		map_ids_alert: "IDS alert",
+		map_category_web: "Web",
+		map_category_quic: "QUIC",
+		map_category_dns: "DNS",
+		map_category_ntp: "NTP",
+		map_category_vpn: "VPN",
+		map_category_mail: "Mail",
+		map_category_remote_access: "Remote access",
+		map_category_push_stun: "Push / STUN",
+		map_category_other: "Other",
+		map_seconds: "{count} s",
 		map_minutes: "{count} min",
 		map_hours: "{count} h",
 		map_days: "{count} days",
@@ -171,7 +206,8 @@
 		map_on_interface: " on {interface}",
 		map_first_seen_ago: ", first seen {duration} ago",
 		map_block_sentence: "{source}{place} tried {tried} on this firewall: blocked {hits}× in the last {minutes} min{rule}{where}{since}.",
-		map_ids_line: "Suricata: {signature} (severity {severity}{category})",
+		map_ids_line: "{signature} (severity {severity}{category})",
+		map_ids_source: "Suricata: {line}",
 		map_ids_first: ", {count}× in the last {window}, latest {latest} ago",
 		map_ids_count: ", {count}×",
 		map_more_alerts_one: "and {count} more alert",
@@ -193,29 +229,7 @@
 		map_last_minute: "{count} in the last minute",
 		map_hammering: " · hammering",
 		map_active_links_one: "{count} active link",
-		map_active_links_many: "{count} active links",
-		geo_downloading_title: "Downloading the geolocation database",
-		geo_preparing: "Starting the download…",
-		geo_progress: "{done} of {total}",
-		geo_fills_in: "The map fills in as soon as it is done.",
-		geo_failed_title: "The geolocation database could not be downloaded",
-		geo_key_title: "A MaxMind license key is needed",
-		geo_retry_in: "Trying again in {time}",
-		geo_retrying: "Trying again…",
-		geo_retry_now: "Retry now",
-		geo_partial: "Network names are unavailable",
-		geo_fallback: "Using {provider} Lite while the MaxMind download fails",
-		geo_stale: "The geolocation database could not be updated",
-		geo_err_unauthorized: "MaxMind did not accept the license key. A new key can take a few minutes to start working; if this persists, check the key in the settings and that GeoLite2 downloads are enabled for your MaxMind account.",
-		geo_err_forbidden: "{provider} refused the download (HTTP 403): the account may not have access to this database.",
-		geo_err_not_found: "{provider} did not have the database at the expected address (HTTP 404). DB-IP publishes a new file each month; early in the month it may not be out yet.",
-		geo_err_rate_limited: "{provider} limits how often a database can be downloaded (HTTP 429).",
-		geo_err_unreachable: "The firewall could not reach {provider}. Check that it has internet access and working DNS.",
-		geo_err_timeout: "The download from {provider} took too long and was stopped. A slow or busy connection is the usual cause.",
-		geo_err_invalid: "The downloaded file was not a valid database.",
-		geo_err_disk_full: "The database could not be saved: the firewall's disk is full.",
-		geo_err_http: "{provider} answered with an error.",
-		geo_err_other: "The download failed."
+		map_active_links_many: "{count} active links"
 	};
 	/** The text table in use: the caller's translations over the English defaults. */
 	function textTable(text) {
@@ -540,20 +554,24 @@
 	/**
 	* Suricata's view of an address in one line per signature, worst first:
 	* 'Suricata: ET SCAN Potential SSH Scan (severity 2), 3× in the last hour, latest 2 min ago'.
+	* `source: false` leaves out the "Suricata:" (where an IDS icon already says it).
 	*/
-	function idsSummary(ids, text = DEFAULT_TEXT) {
+	function idsSummary(ids, text = DEFAULT_TEXT, { source = true } = {}) {
 		if (!ids || !ids.count) return [];
 		const latest = duration(ids.last_seconds, text) || text.map_moments;
 		const window = ids.minutes >= 60 ? fill(text.map_hours, { count: Math.round(ids.minutes / 60) }) : fill(text.map_minutes, { count: ids.minutes });
-		const lines = (ids.signatures || []).map((item, index) => fill(text.map_ids_line, {
-			signature: plain(item.signature),
-			severity: item.severity,
-			category: item.category ? `, ${plain(item.category)}` : ""
-		}) + (index === 0 ? fill(text.map_ids_first, {
-			count: item.count,
-			window,
-			latest
-		}) : fill(text.map_ids_count, { count: item.count })));
+		const lines = (ids.signatures || []).map((item, index) => {
+			const line = fill(text.map_ids_line, {
+				signature: plain(item.signature),
+				severity: item.severity,
+				category: item.category ? `, ${plain(item.category)}` : ""
+			}) + (index === 0 ? fill(text.map_ids_first, {
+				count: item.count,
+				window,
+				latest
+			}) : fill(text.map_ids_count, { count: item.count }));
+			return source ? fill(text.map_ids_source, { line }) : line;
+		});
 		const shown = (ids.signatures || []).reduce((sum, item) => sum + item.count, 0);
 		if (ids.count > shown) lines.push(plural(text, "map_more_alerts", ids.count - shown));
 		return lines;
@@ -683,22 +701,23 @@
 		const cls = ids.severity <= 2 ? "fwmap-ids fwmap-ids-high" : "fwmap-ids";
 		return idsSummary(ids, text).map((line) => `<div class="${cls}">${ic("flag")} ${escapeHtml(line)}</div>`).join("");
 	}
-	/** "3 min", "2 h", "5 d" since an epoch time. */
+	var unit = (key, count) => fill(TEXT[key], { count });
+	/** "3 min", "2 h", "5 days" since an epoch time. */
 	function ago(seconds) {
 		const age = Math.max(0, Date.now() / 1e3 - seconds);
-		if (age < 90) return `${Math.round(age)} s`;
-		if (age < 5400) return `${Math.round(age / 60)} min`;
-		if (age < 129600) return `${Math.round(age / 3600)} h`;
-		return `${Math.round(age / 86400)} d`;
+		if (age < 90) return unit("map_seconds", Math.round(age));
+		if (age < 5400) return unit("map_minutes", Math.round(age / 60));
+		if (age < 129600) return unit("map_hours", Math.round(age / 3600));
+		return unit("map_days", Math.round(age / 86400));
 	}
 	/** 8040 seconds read "2 h 14 min". */
 	function spanText(seconds) {
 		const minutes = Math.floor(seconds / 60);
-		if (minutes < 1) return `${Math.round(seconds)} s`;
-		if (minutes < 60) return `${minutes} min`;
+		if (minutes < 1) return unit("map_seconds", Math.round(seconds));
+		if (minutes < 60) return unit("map_minutes", minutes);
 		const days = Math.floor(minutes / 1440);
 		const hours = Math.floor(minutes % 1440 / 60);
-		return days ? `${days} d ${hours} h` : `${hours} h ${minutes % 60} min`;
+		return days ? `${unit("map_days", days)} ${unit("map_hours", hours)}` : `${unit("map_hours", hours)} ${unit("map_minutes", minutes % 60)}`;
 	}
 	//#endregion
 	//#region page/details.js
@@ -871,7 +890,7 @@
 			diagram: {
 				from: remoteBox,
 				service,
-				rate: `${escapeHtml(block.hits)}× ${escapeHtml(T.in_minutes.replace("%s", block.window_minutes))}`,
+				rate: `${escapeHtml(block.hits)}× ${escapeHtml(fill(T.in_minutes, { minutes: block.window_minutes }))}`,
 				to: endBox("fa-shield", T.this_firewall_title, [block.target, block.interface]),
 				blocked: true
 			},
@@ -1053,6 +1072,10 @@
 		["Remote access", /^(SSH|RDP)$/],
 		["Push / STUN", /(Push|STUN)/]
 	];
+	/** A category's name as shown (legend, filter): translated, while the English name stays the key. */
+	function categoryLabel(name, text) {
+		return text?.[`map_category_${String(name).toLowerCase().replace(/[^a-z]+/g, "_")}`] || name;
+	}
 	function serviceCategory(service) {
 		if (!service) return "Other";
 		const match = SERVICE_CATEGORIES.find(([, pattern]) => pattern.test(service));
@@ -1624,7 +1647,10 @@
 		const render = () => {
 			$tabs.html(VIEWS.map((status) => `<li class="${status === view.status ? "active" : ""}" role="presentation"><a href="#" role="tab" aria-selected="${status === view.status}" data-status="${status}">${escapeHtml(T[`status_${status}`])}${view.counts[status] ? ` <span class="badge">${escapeHtml(view.counts[status])}</span>` : ""}</a></li>`).join(""));
 			const names = insideNames(view.names);
-			$list.html(view.rows.length ? view.rows.map((row) => queueItem(row, names)).join("") + (view.total > view.rows.length ? `<div class="fwmap-q-moreitems"><button type="button" class="btn btn-default fwmap-q-showmore">${escapeHtml(T.show_more.replace("%s", Math.min(QUEUE_PAGE, view.total - view.rows.length)))}</button> <span class="fwmap-q-muted">${escapeHtml(T.showing.replace("%s", view.rows.length).replace("%t", view.total))}</span></div>` : "") : `<div class="text-muted fwmap-empty fwmap-q-empty">${ic("check")} ${escapeHtml(emptyText())}</div>`);
+			$list.html(view.rows.length ? view.rows.map((row) => queueItem(row, names)).join("") + (view.total > view.rows.length ? `<div class="fwmap-q-moreitems"><button type="button" class="btn btn-default fwmap-q-showmore">${escapeHtml(fill(T.show_more, { count: Math.min(QUEUE_PAGE, view.total - view.rows.length) }))}</button> <span class="fwmap-q-muted">${escapeHtml(fill(T.showing, {
+				shown: view.rows.length,
+				total: view.total
+			}))}</span></div>` : "") : `<div class="text-muted fwmap-empty fwmap-q-empty">${ic("check")} ${escapeHtml(emptyText())}</div>`);
 			const count = view.query ? view.total : view.counts[view.status] || 0;
 			const bulk = [];
 			if ([
@@ -1633,11 +1659,11 @@
 				"ips_dropped"
 			].includes(view.status) && count) {
 				const label = view.query ? T.dismiss_shown : T.dismiss_all;
-				bulk.push(`<button type="button" class="btn btn-default fwmap-q-bulk" data-to="dismissed">${ic("eye-off")}<span>${escapeHtml(label.replace("%s", count))}</span></button>`);
+				bulk.push(`<button type="button" class="btn btn-default fwmap-q-bulk" data-to="dismissed">${ic("eye-off")}<span>${escapeHtml(fill(label, { count }))}</span></button>`);
 			}
 			if ((view.status === "dismissed" || view.status === "reviewed") && count) {
 				const label = view.query ? T.delete_shown : T.delete_all;
-				bulk.push(`<button type="button" class="btn btn-default fwmap-q-purge">${ic("trash")}<span>${escapeHtml(label.replace("%s", count))}</span></button>`);
+				bulk.push(`<button type="button" class="btn btn-default fwmap-q-purge">${ic("trash")}<span>${escapeHtml(fill(label, { count }))}</span></button>`);
 			}
 			$bulk.html(bulk.join(""));
 		};
@@ -1681,7 +1707,7 @@
 		$bulk.on("click", ".fwmap-q-bulk", function() {
 			const to = String($(this).data("to"));
 			const count = view.query ? view.total : view.counts[view.status] || 0;
-			confirmAction((view.query ? T.dismiss_shown_confirm : T.dismiss_all_confirm).replace("%s", count), () => act(async () => {
+			confirmAction(fill(view.query ? T.dismiss_shown_confirm : T.dismiss_all_confirm, { count }), () => act(async () => {
 				const result = await postJSON("/api/firewallmap/threats/bulk", {
 					from: view.status,
 					to,
@@ -1691,7 +1717,10 @@
 			}));
 		}).on("click", ".fwmap-q-purge", function() {
 			const count = view.query ? view.total : view.counts[view.status] || 0;
-			confirmAction(T.delete_all_confirm.replace("%s", count).replace("%status", T[`status_${view.status}`]), () => act(async () => {
+			confirmAction(fill(T.delete_all_confirm, {
+				count,
+				status: T[`status_${view.status}`]
+			}), () => act(async () => {
 				const result = await postJSON("/api/firewallmap/threats/purge", {
 					status: view.status,
 					query: view.query
@@ -2117,7 +2146,10 @@
 			$list.html(`<div class="text-muted fwmap-empty">${escapeHtml(needle ? T.queue_no_match : T.no_snapshots)}</div>`);
 			return;
 		}
-		const kept = `<div class="fwmap-snap-kept fwmap-muted">${escapeHtml(T.snapshots_kept.replace("%s", state.snapshotsKept.keep).replace("%d", state.snapshotsKept.keep_days))}</div>`;
+		const kept = `<div class="fwmap-snap-kept fwmap-muted">${escapeHtml(fill(T.snapshots_kept, {
+			count: state.snapshotsKept.keep,
+			days: state.snapshotsKept.keep_days
+		}))}</div>`;
 		$list.html(kept + rows.map((meta) => {
 			const current = meta.id === state.frozen?.meta.id;
 			return `<div class="fwmap-talker fwmap-snap-row${current ? " active" : ""}" role="button" tabindex="0" data-id="${escapeHtml(meta.id)}"
@@ -2441,7 +2473,7 @@
 			const service = flowService(flow);
 			services.set(service, {
 				value: service,
-				label: service
+				label: categoryLabel(service, TEXT)
 			});
 			for (const inside of flow.inside || []) {
 				if (inside.interface) ifaces.set(inside.interface, {

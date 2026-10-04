@@ -39,6 +39,24 @@ class IndexController extends \OPNsense\Base\IndexController
         return is_file($file) ? filemtime($file) : 0;
     }
 
+    /**
+     * The strings the page shares with the dashboard widget and the renderer, from the widget's
+     * metadata and translated the way the dashboard translates them: one source for both.
+     */
+    private function sharedText()
+    {
+        $texts = [];
+        $metadata = '/usr/local/opnsense/www/js/widgets/Metadata/FirewallMap.xml';
+        $xml = is_file($metadata) ? simplexml_load_file($metadata) : false;
+        if ($xml !== false && isset($xml->firewallmap->translations)) {
+            foreach ($xml->firewallmap->translations->children() as $key => $value) {
+                $texts[$key] = gettext((string)$value);
+            }
+        }
+        /* safe inside the page's <script>: no tag, quote or ampersand survives unescaped */
+        return json_encode((object)$texts, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    }
+
     public function indexAction()
     {
         $this->view->title = gettext('Firewall Map');
@@ -47,6 +65,7 @@ class IndexController extends \OPNsense\Base\IndexController
         $this->view->pageVersion = $this->version('firewall-map-page.js');
         /* the ?debug=1 panel: installed by development packages only */
         $this->view->diagnosticsVersion = $this->version('firewall-map-diagnostics.js');
+        $this->view->sharedText = $this->sharedText();
         $this->view->pick('OPNsense/FirewallMap/index');
     }
 }

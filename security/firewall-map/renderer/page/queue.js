@@ -25,7 +25,7 @@
  */
 
 /* Threat history: flagged traffic organized by what the firewall or IPS actually did. */
-import {escapeHtml, flagHtml, formatBytes, hostPort, listLabel, plain, privateAddress, protocolLabel, splitHostPort} from '../src/format.js';
+import {escapeHtml, fill, flagHtml, formatBytes, hostPort, listLabel, plain, privateAddress, protocolLabel, splitHostPort} from '../src/format.js';
 import {flowSummary} from '../src/summaries.js';
 import {addAddressToAlias, chooseAlias, killStates, showStates} from './actions.js';
 import {confirmAction, getJSON, notifyFailure, postJSON} from './api.js';
@@ -310,8 +310,8 @@ export async function showQueue() {
     const names = insideNames(view.names);
     $list.html(view.rows.length ? view.rows.map((row) => queueItem(row, names)).join('')
       + (view.total > view.rows.length ? `<div class="fwmap-q-moreitems"><button type="button" class="btn btn-default fwmap-q-showmore">`
-        + `${escapeHtml(T.show_more.replace('%s', Math.min(QUEUE_PAGE, view.total - view.rows.length)))}</button>`
-        + ` <span class="fwmap-q-muted">${escapeHtml(T.showing.replace('%s', view.rows.length).replace('%t', view.total))}</span></div>` : '')
+        + `${escapeHtml(fill(T.show_more, {count: Math.min(QUEUE_PAGE, view.total - view.rows.length)}))}</button>`
+        + ` <span class="fwmap-q-muted">${escapeHtml(fill(T.showing, {shown: view.rows.length, total: view.total}))}</span></div>` : '')
       : `<div class="text-muted fwmap-empty fwmap-q-empty">${ic('check')} ${escapeHtml(emptyText())}</div>`);
     // bulk actions for the tab: dismissing is reversible, deleting asks first. With a search, they
     // act on what the search shows and say so.
@@ -319,11 +319,11 @@ export async function showQueue() {
     const bulk = [];
     if (['passed', 'firewall_blocked', 'ips_dropped'].includes(view.status) && count) {
       const label = view.query ? T.dismiss_shown : T.dismiss_all;
-      bulk.push(`<button type="button" class="btn btn-default fwmap-q-bulk" data-to="dismissed">${ic('eye-off')}<span>${escapeHtml(label.replace('%s', count))}</span></button>`);
+      bulk.push(`<button type="button" class="btn btn-default fwmap-q-bulk" data-to="dismissed">${ic('eye-off')}<span>${escapeHtml(fill(label, {count}))}</span></button>`);
     }
     if ((view.status === 'dismissed' || view.status === 'reviewed') && count) {
       const label = view.query ? T.delete_shown : T.delete_all;
-      bulk.push(`<button type="button" class="btn btn-default fwmap-q-purge">${ic('trash')}<span>${escapeHtml(label.replace('%s', count))}</span></button>`);
+      bulk.push(`<button type="button" class="btn btn-default fwmap-q-purge">${ic('trash')}<span>${escapeHtml(fill(label, {count}))}</span></button>`);
     }
     $bulk.html(bulk.join(''));
   };
@@ -377,7 +377,7 @@ export async function showQueue() {
     const to = String($(this).data('to'));
     const count = view.query ? view.total : view.counts[view.status] || 0;
     const message = view.query ? T.dismiss_shown_confirm : T.dismiss_all_confirm;
-    confirmAction(message.replace('%s', count), () => act(async () => {
+    confirmAction(fill(message, {count}), () => act(async () => {
       const result = await postJSON('/api/firewallmap/threats/bulk', {from: view.status, to, query: view.query});
       if (result.result !== 'saved') {
         throw new Error(result.error || T.action_failed);
@@ -385,7 +385,7 @@ export async function showQueue() {
     }));
   }).on('click', '.fwmap-q-purge', function () {
     const count = view.query ? view.total : view.counts[view.status] || 0;
-    confirmAction(T.delete_all_confirm.replace('%s', count).replace('%status', T[`status_${view.status}`]), () => act(async () => {
+    confirmAction(fill(T.delete_all_confirm, {count, status: T[`status_${view.status}`]}), () => act(async () => {
       const result = await postJSON('/api/firewallmap/threats/purge', {status: view.status, query: view.query});
       if (result.result !== 'deleted') {
         throw new Error(result.error || T.action_failed);

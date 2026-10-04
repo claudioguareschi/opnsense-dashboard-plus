@@ -148,18 +148,21 @@ export function blockSummary(block, showAsn = true, text = DEFAULT_TEXT) {
 /**
  * Suricata's view of an address in one line per signature, worst first:
  * 'Suricata: ET SCAN Potential SSH Scan (severity 2), 3× in the last hour, latest 2 min ago'.
+ * `source: false` leaves out the "Suricata:" (where an IDS icon already says it).
  */
-export function idsSummary(ids, text = DEFAULT_TEXT) {
+export function idsSummary(ids, text = DEFAULT_TEXT, {source = true} = {}) {
   if (!ids || !ids.count) {
     return [];
   }
   const latest = duration(ids.last_seconds, text) || text.map_moments;
   const window = ids.minutes >= 60 ? fill(text.map_hours, {count: Math.round(ids.minutes / 60)})
     : fill(text.map_minutes, {count: ids.minutes});
-  const lines = (ids.signatures || []).map((item, index) =>
-    fill(text.map_ids_line, {signature: plain(item.signature), severity: item.severity,
+  const lines = (ids.signatures || []).map((item, index) => {
+    const line = fill(text.map_ids_line, {signature: plain(item.signature), severity: item.severity,
       category: item.category ? `, ${plain(item.category)}` : ''})
-    + (index === 0 ? fill(text.map_ids_first, {count: item.count, window, latest}) : fill(text.map_ids_count, {count: item.count})));
+      + (index === 0 ? fill(text.map_ids_first, {count: item.count, window, latest}) : fill(text.map_ids_count, {count: item.count}));
+    return source ? fill(text.map_ids_source, {line}) : line;
+  });
   const shown = (ids.signatures || []).reduce((sum, item) => sum + item.count, 0);
   if (ids.count > shown) {
     lines.push(plural(text, 'map_more_alerts', ids.count - shown));
