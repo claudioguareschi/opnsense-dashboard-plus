@@ -25,7 +25,7 @@
  */
 
 const {
-    escapeHtml, renderTitle, fill, DashboardPlusWidget, mergeOrder, makeSortable, isDragging,
+    escapeHtml, renderTitle, fill, ensureStyle, DashboardPlusWidget, mergeOrder, makeSortable, isDragging,
     isEditMode, watchEditMode
 } = await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
@@ -55,6 +55,7 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
     }
 
     getMarkup() {
+        ensureStyle();
         // Label and value side by side at every width. The stock table stacks them below
         // 450 px, so the widget changed layout whenever the side menu was toggled.
         const markup = this.createTable(this._tableId(), {headerPosition: 'left', headerBreakpoint: 0});
@@ -238,7 +239,7 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
         $(`#${this._tableId()} > .flextable-row[data-sort-id]`)
             .attr('draggable', editing ? 'true' : null)
             .attr('title', editing ? this.translations.drag_to_reorder : null)
-            .css('cursor', editing ? 'grab' : '');
+            .toggleClass('dashboard-plus-grab', editing);
     }
 
     async onMarkupRendered() {
