@@ -25,16 +25,19 @@
  */
 
 /* The deck.gl map: layers for arcs, blocked sources, IDS markers and labels, fades and pulses. */
-import {Deck, MapView, WebMercatorViewport} from '@deck.gl/core';
+import {Deck, MapView} from '@deck.gl/core';
 import {GeoJsonLayer, IconLayer, PathLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
-import {IDS_ARC_FADE_SECONDS, buildArcs, continuePhases, buildBlocks, clearOfHomes, HOME_CLEARANCE, idsArcData, marchingPulses, mercatorY, pulsePosition, pulses, unitsPerPixel} from './arcs.js';
+import {buildArcs, continuePhases, buildBlocks, clearOfHomes, HOME_CLEARANCE, idsArcData, marchingPulses, mercatorY, pulses, unitsPerPixel} from './arcs.js';
 import {createFollow} from './follow.js';
-import {plain} from './format.js';
 import {DEFAULT_OPTIONS} from './options.js';
-import {CATEGORY_COLORS, categoryLabel, mix, palette, rgb} from './palette.js';
+import {palette, rgb} from './palette.js';
 import {alertOutcome, idsOutcome, outcome} from './summaries.js';
 import {textTable} from './text.js';
 import {cards, createTooltip} from './tooltips.js';
+import {Fader, faded} from './fader.js';
+import {HOME_ICON_MAPPING, HOME_LAYER, homeIconAtlas} from './home.js';
+import {LABEL_ZOOM_STEP, createLabels} from './labels.js';
+import {createStyle} from './style.js';
 import worldData from './world.json';
 
 // Antarctica only adds empty space below the flows.
@@ -42,111 +45,7 @@ const world = {...worldData, features: worldData.features.filter((feature) => fe
 
 const LINK_WIDTH = 1.5;
 const HEAVY_WIDTH = 3;
-// threats throb at their source
-const THREAT_THROB_PERIOD = 0.9;
-// city labels appear once the map is zoomed this far past the fitted world view
-const LABEL_ZOOM_STEP = 1.2;
-const MAX_LABELS = 40;
-// places considered for a label, busiest first (most are off screen when zoomed in)
-const MAX_LABEL_CANDIDATES = 600;
-const LABEL_FONT_SIZE = 11;
-// approximate glyph width for placing labels before they are drawn
-const LABEL_CHAR_WIDTH = 6.2;
-const LABEL_PADDING = 3;
 const FRAME_INTERVAL = 1000 / 30;
-
-// arches, blocked sources and endpoints fade in and out instead of popping
-const FADE_IN_MS = 800;
-
-/** A color with its alpha scaled by a fade opacity. */
-function faded(color, opacity) {
-  return opacity >= 1 ? color : [color[0], color[1], color[2], Math.round((color[3] ?? 255) * opacity)];
-}
-const FADE_OUT_MS = 1600;
-
-/** Tracks when each keyed item appeared or vanished; vanished items linger while fading out. */
-class Fader {
-  constructor(keyOf) {
-    this.keyOf = keyOf;
-    this.entries = new Map();
-  }
-
-  opacityOf(entry, now) {
-    const fadeIn = Math.min(1, (now - entry.born) / FADE_IN_MS);
-    const fadeOut = entry.gone === null ? 1 : Math.max(0, 1 - (now - entry.gone) / FADE_OUT_MS);
-    return Math.max(0, fadeIn * fadeOut);
-  }
-
-  update(items, now) {
-    const next = new Map();
-    const result = [];
-    for (const item of items) {
-      const key = this.keyOf(item);
-      if (next.has(key)) {
-        continue;
-      }
-      const previous = this.entries.get(key);
-      let born = now;
-      if (previous) {
-        // coming back while fading out resumes from the current opacity
-        born = previous.gone === null ? previous.born : now - this.opacityOf(previous, now) * FADE_IN_MS;
-      }
-      const entry = {item, born, gone: null};
-      item.fade = entry;
-      next.set(key, entry);
-      result.push(item);
-    }
-    for (const [key, entry] of this.entries) {
-      if (next.has(key)) {
-        continue;
-      }
-      if (entry.gone === null) {
-        entry.gone = now;
-      }
-      if (this.opacityOf(entry, now) > 0) {
-        entry.item.fading = true;
-        next.set(key, entry);
-        result.push(entry.item);
-      }
-    }
-    this.entries = next;
-    return result;
-  }
-
-  opacity(item, now) {
-    return item.fade ? this.opacityOf(item.fade, now) : 1;
-  }
-
-  animating(now) {
-    for (const entry of this.entries.values()) {
-      if (entry.gone !== null || now - entry.born < FADE_IN_MS) {
-        return true;
-      }
-    }
-    return false;
-  }
-}
-
-// the firewall's own location: an outline house, tinted by the layer (mask), so it is not
-// mistaken for the hollow rings that mark flagged addresses. Drawn on a canvas because the
-// OPNsense content policy does not let deck.gl fetch a data: URL.
-let homeAtlas = null;
-function homeIconAtlas() {
-  if (!homeAtlas) {
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = 48;
-    const context = canvas.getContext('2d');
-    context.scale(2, 2);
-    context.strokeStyle = '#000';
-    context.lineWidth = 2.2;
-    context.lineCap = context.lineJoin = 'round';
-    context.stroke(new Path2D('M3 10.5 12 3l9 7.5M5.5 8.5V21h13V8.5M10 21v-6h4v6'));
-    homeAtlas = canvas;
-  }
-  return homeAtlas;
-}
-const HOME_LAYER = 'firewall-map-home';
-const HOME_ICON_MAPPING = {home: {x: 0, y: 0, width: 48, height: 48, anchorY: 24, mask: true}};
 
 // Mercator world is 512px wide at zoom 0. The whole-world view is centered on longitude 0, so the
 // world fills the map edge to edge instead of leaving a strip on one side; this latitude keeps
@@ -340,171 +239,25 @@ export function createFirewallMap(container, options = {}) {
   let endpointsDrawn = [];
   let homesDrawn = [];
   // stable color per category across refreshes (first seen keeps its color)
-  const categoryColors = new Map();
-  let categoryKey = '';
-
-  function categoryOf(arc) {
-    return settings.colorMode === 'egress' ? arc.egress : arc.service;
-  }
-
-  function categorical() {
-    return settings.colorMode === 'egress' || settings.colorMode === 'service';
-  }
-
-  function categoryColor(name) {
-    if (!categoryColors.has(name)) {
-      categoryColors.set(name, CATEGORY_COLORS[categoryColors.size % CATEGORY_COLORS.length]);
-      categoryKey = [...categoryColors.keys()].join('|');
-    }
-    return categoryColors.get(name);
-  }
-
-  function arcColor(arc) {
-    return faded(arcBaseColor(arc), arcOpacity(arc));
-  }
-
-  /** How far a closed IDS connection's arc has faded, counting on from the last refresh. */
-  function idsLinger(arc) {
-    if (!arc.ids || arc.ids.active) {
-      return 1;
-    }
-    const closed = (arc.ids.closed_seconds ?? arc.ids.last_seconds ?? 0) + (frozen ? 0 : (frameNow - dataTime) / 1000);
-    return Math.max(0, 1 - closed / IDS_ARC_FADE_SECONDS);
-  }
-
-  function arcOpacity(arc) {
-    return arcFader.opacity(arc, frameNow) * idsLinger(arc);
-  }
-
-  function arcBaseColor(arc) {
-    // an idle connection is still a state on the firewall (and may be the one a snapshot was taken
-    // for): it stays plainly visible wherever it can be hovered, busier ones only get stronger
-    const alpha = Math.round((arc.heavy ? 170 : 140) + (arc.heavy ? 85 : 115) * arc.activity);
-    if (arc.threat) {
-      // flagged traffic the firewall let through
-      return rgb(colors.danger, Math.max(alpha, 170));
-    }
-    if (arc.contained) {
-      return rgb(colors.contained, Math.max(alpha, 170));
-    }
-    if (categorical()) {
-      const base = baseColor(arc);
-      return rgb(arc.heavy ? mix(base, colors.dark ? [255, 255, 255] : [0, 0, 0], 0.2) : mix(colors.background.slice(0, 3), base, 0.8), alpha);
-    }
-    const scheme = settings.colorMode === 'initiator' ? initiatorScheme(arc.initiated) : arc.toward ? colors.toward : colors.away;
-    return rgb(arc.heavy ? scheme.heavy : scheme.link, alpha);
-  }
-
-  function pulseColor(item) {
-    return faded(pulseBaseColor(item), arcOpacity(item.arc));
-  }
-
-  function pulseBaseColor(item) {
-    const alpha = Math.round(110 + 145 * item.arc.activity);
-    if (item.arc.threat) {
-      return rgb(colors.danger, alpha);
-    }
-    if (item.arc.contained) {
-      return rgb(colors.contained, alpha);
-    }
-    if (categorical()) {
-      return rgb(baseColor(item.arc), alpha);
-    }
-    // by who connected, pulses keep the arc's color; their movement shows which way the data goes
-    const scheme = settings.colorMode === 'initiator' ? initiatorScheme(item.arc.initiated) : item.toward ? colors.toward : colors.away;
-    return rgb(scheme.pulse, alpha);
-  }
-
-  // green: started inside the network; orange (theme accent): started from outside
-  function initiatorScheme(side) {
-    return side === 'remote' ? colors.inbound : side === 'local' ? colors.away : colors.neutral;
-  }
-
-  function baseColor(arc) {
-    return categoryColor(categoryOf(arc));
-  }
-
-  function legend() {
-    if (settings.colorMode === 'initiator') {
-      // always show inside and outside, so the meaning of green and orange is never a guess
-      const present = new Set(['local', 'remote', ...arcs.filter((arc) => !arc.fading).map((arc) => arc.initiated)]);
-      return [
-        ...['local', 'remote', 'both'].filter((side) => present.has(side))
-          .map((side) => ({label: text[`map_started_${side === 'local' ? 'inside' : side === 'remote' ? 'outside' : 'both'}`], color: initiatorScheme(side).heavy})),
-        ...outcomeLegend(),
-      ];
-    }
-    if (!categorical()) {
-      return [
-        {label: text.map_toward, color: colors.toward.heavy},
-        {label: text.map_away, color: colors.away.heavy},
-        ...outcomeLegend(),
-      ];
-    }
-    const present = [...new Set(arcs.filter((arc) => !arc.fading).map(categoryOf))];
-    present.sort((a, b) => (a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b)));
-    return [
-      ...present.map((name) => ({label: settings.colorMode === 'service' ? categoryLabel(name, text) : name, color: categoryColor(name)})),
-      ...outcomeLegend(),
-    ];
-  }
-
-  function outcomeLegend() {
-    return [
-      {label: text.map_blocked, color: colors.blocked},
-      {label: text.map_flagged_blocked, color: colors.contained},
-      {label: text.map_flagged_allowed, color: colors.danger},
-    ];
-  }
-
-  function blockColor(block) {
-    return (block.lists || []).length ? colors.contained : colors.blocked;
-  }
-
-  function outcomeColor(kind) {
-    return {danger: colors.danger, contained: colors.contained, blocked: colors.blocked, ok: colors.blocked}[kind];
-  }
-
-  function pulseLayer(seconds) {
-    return new ScatterplotLayer({
-      id: 'firewall-map-pulses',
-      data: pulseItems.filter((item) => drawn(item.arc)),
-      getPosition: (item) => pulsePosition(item.arc, seconds, item.reverse, item.period, item.phase),
-      getRadius: (item) => item.march ? (item.arc.heavy ? 2.6 : 1.9) : item.arc.heavy ? 3.4 : 2.4,
-      radiusUnits: 'pixels',
-      getFillColor: (item) => pulseColor(item),
-      updateTriggers: {getPosition: seconds, getFillColor: [colors.toward.pulse, colors.away.pulse, colors.inbound.pulse, settings.colorMode, categoryKey]},
-    });
-  }
-
-  function blockPulseLayers(seconds) {
-    const active = blockArcs.filter((block) => block.activity > 0 && drawn(block));
-    return [
-      new ScatterplotLayer({
-        id: 'firewall-map-block-pulses',
-        data: active,
-        getPosition: (block) => pulsePosition(block, seconds, false),
-        getRadius: (block) => block.threat ? 3.6 : 2.6,
-        radiusUnits: 'pixels',
-        getFillColor: (block) => rgb(blockColor(block), Math.round((80 + 175 * block.activity) * blockFader.opacity(block, frameNow))),
-        updateTriggers: {getPosition: seconds, getFillColor: [colors.blocked, colors.contained]},
-      }),
-      new ScatterplotLayer({
-        id: 'firewall-map-threats',
-        data: blockArcs.filter((block) => block.threat),
-        getPosition: (block) => [block.lon, block.lat],
-        // a throbbing halo around sources hammering the firewall
-        getRadius: () => 6 + 6 * ((seconds / THREAT_THROB_PERIOD) % 1),
-        radiusUnits: 'pixels',
-        stroked: true,
-        filled: false,
-        lineWidthUnits: 'pixels',
-        getLineWidth: 1.5,
-        getLineColor: (block) => rgb(blockColor(block), Math.round(220 * (1 - (seconds / THREAT_THROB_PERIOD) % 1))),
-        updateTriggers: {getRadius: seconds, getLineColor: [seconds, colors.blocked, colors.contained]},
-      }),
-    ];
-  }
+  // what the coloring and label modules read: the map's current state, never a stale copy
+  const view = {
+    get colors() { return colors; },
+    get settings() { return settings; },
+    get frozen() { return frozen; },
+    get frameNow() { return frameNow; },
+    get dataTime() { return dataTime; },
+    get arcs() { return arcs; },
+    get pulseItems() { return pulseItems; },
+    get blockArcs() { return blockArcs; },
+    get viewState() { return viewState; },
+    get homesDrawn() { return homesDrawn; },
+    get labelCandidates() { return labelCandidates; },
+    get locationIndex() { return locationIndex; },
+    text, container, arcFader, blockFader, drawn,
+  };
+  const style = createStyle(view);
+  const {arcColor, arcOpacity, legend, blockColor, outcomeColor, pulseLayer, blockPulseLayers} = style;
+  const {labels, buildLabelLayer} = createLabels(view);
 
   let framesComposed = 0;
   let composeMs = 0;
@@ -535,96 +288,6 @@ export function createFirewallMap(container, options = {}) {
   }) : null;
   visibility?.observe(container);
 
-  // one label per place, busiest places first
-  // one label per place: busiest allowed traffic first, then blocked sources and alerts by hits
-  function labels(data) {
-    const seen = new Map();
-    const add = (place, rank, weight) => {
-      const text = place?.city || place?.region || place?.country;
-      if (!text || !Number.isFinite(place.lat) || !Number.isFinite(place.lon)) {
-        return;
-      }
-      const key = `${place.lat},${place.lon}`;
-      const current = seen.get(key);
-      if (!current || rank < current.rank) {
-        seen.set(key, {text, lat: place.lat, lon: place.lon, rank, weight});
-      } else if (rank === current.rank) {
-        current.weight += weight;
-      }
-    };
-    for (const flow of data.flows || []) {
-      add(locationIndex.get(flow.dest), 0, flow.rate || 0);
-    }
-    if (settings.blocks) {
-      (data.blocks || []).forEach((block) => add(block, 1, block.hits || 0));
-    }
-    (data.alerts || []).forEach((alert) => add(alert, 1, alert.count || 1));
-    return [...seen.values()].sort((a, b) => a.rank - b.rank || b.weight - a.weight).slice(0, MAX_LABEL_CANDIDATES);
-  }
-
-  /**
-   * Greedy screen-space placement: busiest places first, each label tries above, below,
-   * right and left of its point and is dropped when every spot overlaps a placed label or a
-   * house. Only places on screen count towards MAX_LABELS, and places hidden inside a house's
-   * circle get none.
-   */
-  function placeLabels(candidates) {
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-    if (!width || !height) {
-      return [];
-    }
-    const viewport = new WebMercatorViewport({...viewState, width, height});
-    const placed = [];
-    // labels keep out of the clear circle around each house
-    const homePixels = homesDrawn.map((home) => viewport.project([home.lon, home.lat]));
-    const boxes = homePixels.map(([x, y]) => [x - HOME_CLEARANCE, y - HOME_CLEARANCE, x + HOME_CLEARANCE, y + HOME_CLEARANCE]);
-    for (const label of candidates) {
-      if (placed.length >= MAX_LABELS) {
-        break;
-      }
-      const [px, py] = viewport.project([label.lon, label.lat]);
-      if (px < 0 || py < 0 || px > width || py > height ||
-          homePixels.some(([x, y]) => Math.hypot(px - x, py - y) < HOME_CLEARANCE)) {
-        continue;
-      }
-      const w = label.text.length * LABEL_CHAR_WIDTH + 2 * LABEL_PADDING;
-      const h = LABEL_FONT_SIZE + 2 * LABEL_PADDING;
-      const spots = [[0, -(h / 2 + 5)], [0, h / 2 + 5], [w / 2 + 6, 0], [-(w / 2 + 6), 0]];
-      for (const [dx, dy] of spots) {
-        const box = [px + dx - w / 2, py + dy - h / 2, px + dx + w / 2, py + dy + h / 2];
-        const inside = box[0] >= 0 && box[1] >= 0 && box[2] <= width && box[3] <= height;
-        const clear = boxes.every((other) => box[2] <= other[0] || box[0] >= other[2] || box[3] <= other[1] || box[1] >= other[3]);
-        if (inside && clear) {
-          boxes.push(box);
-          placed.push({...label, offset: [dx, dy]});
-          break;
-        }
-      }
-    }
-    return placed;
-  }
-
-  function buildLabelLayer() {
-    const visible = settings.labels && viewState.zoom >= viewState.minZoom + LABEL_ZOOM_STEP;
-    return new TextLayer({
-      id: 'firewall-map-labels',
-      data: visible ? placeLabels(labelCandidates) : [],
-      visible,
-      getPosition: (label) => [label.lon, label.lat],
-      getText: (label) => plain(label.text),
-      getSize: LABEL_FONT_SIZE,
-      getColor: colors.label,
-      getPixelOffset: (label) => label.offset,
-      fontFamily: getComputedStyle(container).fontFamily || 'sans-serif',
-      outlineWidth: 3,
-      outlineColor: colors.background,
-      fontSettings: {sdf: true},
-      characterSet: 'auto',
-      updateTriggers: {getColor: colors.label},
-    });
-  }
-
   function fadingLayers() {
     return [
       new PathLayer({
@@ -638,7 +301,7 @@ export function createFirewallMap(container, options = {}) {
         pickable: true,
         widthMinPixels: 1,
         getColor: (arc) => arcColor(arc),
-        updateTriggers: {getColor: [colors.toward.link, colors.away.link, colors.inbound.link, settings.colorMode, categoryKey, fadeKey], getPath: clearKey},
+        updateTriggers: {getColor: [colors.toward.link, colors.away.link, colors.inbound.link, settings.colorMode, style.categoryKey(), fadeKey], getPath: clearKey},
       }),
       new PathLayer({
         id: 'firewall-map-blocks',

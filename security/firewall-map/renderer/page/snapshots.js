@@ -54,10 +54,6 @@ export function takenText(meta, withDate = true) {
   return `${day}, ${time}`;
 }
 
-function shortTime(meta) {
-  return new Date((meta?.taken || 0) * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-}
-
 function countsText(meta) {
   const parts = [plural(T, 'snapshot_flows', meta.flows || 0)];
   if (meta.flagged) {
