@@ -557,7 +557,7 @@ export default class VnstatPlus extends BaseWidget {
             return '0 B';
         }
         const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
-        const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+        const index = Math.max(0, Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1));
         const value = bytes / Math.pow(1024, index);
         return `${value >= 100 || index === 0 ? value.toFixed(0) : value.toFixed(2)} ${units[index]}`;
     }
