@@ -56,10 +56,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             }
             .dashboard-plus-dns-health-dot {
                 flex: none;
-                width: 0.7em;
-                height: 0.7em;
                 margin: 0 0.25em;
-                border-radius: 50%;
                 background: currentColor;
                 opacity: 0.8;
             }
@@ -287,7 +284,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             <div id="${this._elementId('root')}" class="dashboard-plus-dns-health">
                 <div class="dashboard-plus-dns-health-header">
                     <div class="dashboard-plus-dns-health-identity">
-                        <span id="${this._elementId('dot')}" class="dashboard-plus-dns-health-dot text-muted" aria-hidden="true"></span>
+                        <span id="${this._elementId('dot')}" class="dashboard-plus-dot dashboard-plus-dns-health-dot text-muted" aria-hidden="true"></span>
                         <div class="dashboard-plus-dns-health-label">
                             <div class="dashboard-plus-dns-health-eyebrow">${escapeHtml(this.translations.resolver)}</div>
                             <div id="${this._elementId('state')}" class="dashboard-plus-dns-health-state">${escapeHtml(this.translations.loading)}</div>
