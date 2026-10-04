@@ -72,11 +72,16 @@ class DnsController extends ApiControllerBase
             }
             $timestamp = filter_var($record['time'] ?? null, FILTER_VALIDATE_INT);
             $lookup = filter_var($record['resolve_time_ms'] ?? null, FILTER_VALIDATE_INT);
+            $rcode = strtoupper((string)($record['rcode'] ?? ''));
+            if (!preg_match('/^[A-Z_]{1,16}$/', $rcode)) {
+                $rcode = '';
+            }
             $queries[] = [
                 'domain' => $domain,
                 'type' => $type,
                 'age' => $timestamp === false ? null : max(0, $now - $timestamp),
                 'lookup_ms' => $lookup === false ? null : $lookup,
+                'rcode' => $rcode,
             ];
         }
 

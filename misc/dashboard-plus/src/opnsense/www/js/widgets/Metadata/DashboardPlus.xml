@@ -262,7 +262,7 @@
             <avg_recursive_lookup>Avg recursive lookup</avg_recursive_lookup>
             <dnsbl>DNSBL total</dnsbl>
             <of_queries>of queries</of_queries>
-            <upstreams>AdGuard upstreams</upstreams>
+            <upstreams>Forward zones</upstreams>
             <query_types>Query types</query_types>
             <recent_query_types>Recent query types</recent_query_types>
             <recent_external_queries>Recent external queries</recent_external_queries>
@@ -271,7 +271,10 @@
             <lookup>Lookup</lookup>
             <no_recent_queries>No recent external queries</no_recent_queries>
             <configured>Configured</configured>
-            <no_upstreams>No AdGuard upstreams configured</no_upstreams>
+            <no_upstreams>No forward zones configured</no_upstreams>
+            <recently_resolved>Latest matching query resolved</recently_resolved>
+            <recent_error>Latest matching query returned an error</recent_error>
+            <no_recent_zone_activity>No recent query for this zone</no_recent_zone_activity>
             <updated>Updated</updated>
             <fetch_failed>Unable to read DNS health data</fetch_failed>
             <open_unbound>Open Unbound</open_unbound>

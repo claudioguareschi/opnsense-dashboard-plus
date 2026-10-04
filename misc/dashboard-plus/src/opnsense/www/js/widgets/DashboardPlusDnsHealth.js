@@ -21,7 +21,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         this.refreshSeconds = 30;
         this.tickTimeout = 30;
         this.queryChart = null;
-        this.recentRows = 6;
+        this.recentRows = 5;
     }
 
     getGridOptions() {
@@ -137,40 +137,29 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 gap: 0.25em;
             }
             .dashboard-plus-dns-health-upstream {
-                display: flex;
+                display: grid;
+                grid-template-columns: 1.2em minmax(0, 1fr) auto;
                 align-items: center;
                 gap: 0.55em;
                 min-width: 0;
                 padding: 0.32em 0;
             }
             .dashboard-plus-dns-health-upstream-dot {
-                flex: none;
-                width: 0.55em;
-                height: 0.55em;
-                border-radius: 50%;
-                background: currentColor;
+                text-align: center;
+                align-self: center;
+                line-height: 1;
             }
-            .dashboard-plus-dns-health-upstream-main {
-                min-width: 0;
-                flex: 1 1 auto;
-            }
-            .dashboard-plus-dns-health-upstream-name,
-            .dashboard-plus-dns-health-upstream-server {
+            .dashboard-plus-dns-health-upstream-name {
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
-            }
-            .dashboard-plus-dns-health-upstream-name {
                 font-size: 0.88em;
             }
             .dashboard-plus-dns-health-upstream-server {
+                text-align: right;
                 opacity: 0.62;
                 font-size: 0.76em;
-            }
-            .dashboard-plus-dns-health-badge {
-                flex: none;
-                font-size: 0.72em;
-                white-space: nowrap;
+                font-variant-numeric: tabular-nums;
             }
             .dashboard-plus-dns-health-empty {
                 padding: 0.35em 0 0.6em;
@@ -248,7 +237,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             }
             .dashboard-plus-dns-health-recent-row {
                 display: grid;
-                grid-template-columns: minmax(0, 1fr) auto auto;
+                grid-template-columns: 1.35em minmax(0, 1fr) auto auto;
                 align-items: center;
                 gap: 0.7em;
                 padding: 0.32em 0;
@@ -259,11 +248,16 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+                text-align: left;
             }
             .dashboard-plus-dns-health-recent-meta {
                 white-space: nowrap;
                 opacity: 0.7;
                 font-variant-numeric: tabular-nums;
+            }
+            .dashboard-plus-dns-health-recent-icon {
+                text-align: center;
+                opacity: 0.75;
             }
             @media (max-width: 28em) {
                 .dashboard-plus-dns-health-panels { grid-template-columns: 1fr; }
@@ -303,7 +297,6 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                     <section class="dashboard-plus-dns-health-panel">
                         <div class="dashboard-plus-dns-health-section-head">
                             <span class="dashboard-plus-dns-health-panel-head">${escapeHtml(this.translations.upstreams)}</span>
-                            <span id="${this._elementId('upstream-count')}" class="dashboard-plus-dns-health-section-label"></span>
                         </div>
                         <div id="${this._elementId('upstreams')}" class="dashboard-plus-dns-health-upstreams"></div>
                     </section>
@@ -469,20 +462,40 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 responsive: true,
                 maintainAspectRatio: false,
                 cutout: '62%',
-                plugins: {legend: {display: false}}
+                plugins: {legend: {display: false}, colorschemes: false}
             }
         });
     }
 
+    _zoneHealth(zone) {
+        const name = String(zone.domain || '').replace(/\.$/, '').toLowerCase();
+        if (!name) {
+            return {icon: 'minus-circle', color: 'text-muted', title: this.translations.no_recent_zone_activity};
+        }
+        const query = (this.data.recent?.queries || []).find(item => {
+            const domain = String(item.domain || '').toLowerCase();
+            return domain === name || domain.endsWith(`.${name}`);
+        });
+        if (!query) {
+            return {icon: 'minus-circle', color: 'text-muted', title: this.translations.no_recent_zone_activity};
+        }
+        if (['SERVFAIL', 'REFUSED'].includes(query.rcode)) {
+            return {icon: 'times-circle-o', color: 'text-danger', title: this.translations.recent_error};
+        }
+        return {icon: 'circle', color: 'text-success', title: this.translations.recently_resolved};
+    }
+
     _renderRecent() {
         const $recent = $(`#${this._elementId('recent')}`);
-        const queries = (this.data.recent?.queries || []).slice(0, this.recentRows);
+        const queries = (this.data.recent?.queries || []).slice(0, 5);
         $recent.css('--dashboard-plus-dns-health-recent-height', `${this.recentRows * 2.1}em`);
         $recent.html(queries.length ? queries.map(query => {
             const lookup = this._asNumber(query.lookup_ms);
             const details = [lookup === null ? '' : this._formatLookup(lookup), this._formatAge(query.age)].filter(Boolean).join(' · ') || '—';
+            const isError = ['SERVFAIL', 'REFUSED'].includes(query.rcode);
             return `
             <div class="dashboard-plus-dns-health-recent-row">
+                <i class="fa fa-fw fa-${isError ? 'times-circle-o text-danger' : 'globe text-primary'} dashboard-plus-dns-health-recent-icon" title="${escapeHtml(query.rcode || query.type)}" aria-hidden="true"></i>
                 <span class="dashboard-plus-dns-health-recent-domain" title="${escapeHtml(query.domain)}">${escapeHtml(query.domain)}</span>
                 <span class="dashboard-plus-dns-health-recent-meta">${escapeHtml(query.type)}</span>
                 <span class="dashboard-plus-dns-health-recent-meta">${escapeHtml(details)}</span>
@@ -516,16 +529,15 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         ].join(''));
 
         const upstreams = this.data.upstreams || [];
-        $(`#${this._elementId('upstream-count')}`).text(upstreams.length ? `${upstreams.length} ${this.translations.configured}` : '');
         $(`#${this._elementId('upstreams')}`).html(upstreams.length ? upstreams.map(upstream => `
-            <div class="dashboard-plus-dns-health-upstream">
-                <span class="dashboard-plus-dns-health-upstream-dot text-success" aria-hidden="true"></span>
-                <div class="dashboard-plus-dns-health-upstream-main">
-                    <div class="dashboard-plus-dns-health-upstream-name">${escapeHtml(upstream.description || upstream.server)}</div>
+            ${(() => {
+                const health = this._zoneHealth(upstream);
+                return `<div class="dashboard-plus-dns-health-upstream">
+                    <i class="fa fa-fw fa-${health.icon} ${health.color} dashboard-plus-dns-health-upstream-dot" title="${escapeHtml(health.title)}" aria-hidden="true"></i>
+                    <div class="dashboard-plus-dns-health-upstream-name" title="${escapeHtml(upstream.domain || upstream.description || upstream.server)}">${escapeHtml(upstream.domain || upstream.description || upstream.server)}</div>
                     <div class="dashboard-plus-dns-health-upstream-server">${escapeHtml(upstream.server)}</div>
-                </div>
-                <span class="label label-success dashboard-plus-dns-health-badge">${escapeHtml(this.translations.configured)}</span>
-            </div>`).join('') : `<div class="dashboard-plus-dns-health-empty">${escapeHtml(this.translations.no_upstreams)}</div>`);
+                </div>`;
+            })()}`).join('') : `<div class="dashboard-plus-dns-health-empty">${escapeHtml(this.translations.no_upstreams)}</div>`);
         this._renderTypes();
         this._renderRecent();
 
@@ -639,12 +651,6 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
 
     onWidgetResize(elem, width, height) {
         const layoutChanged = super.onWidgetResize(elem, width, height);
-        const rows = Math.max(4, Math.min(16, Math.floor((height - 320) / 28)));
-        if (rows !== this.recentRows) {
-            this.recentRows = rows;
-            this._renderRecent();
-            return true;
-        }
         this.queryChart?.resize();
         return layoutChanged;
     }
