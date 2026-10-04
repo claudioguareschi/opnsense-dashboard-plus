@@ -464,7 +464,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 this.queryRateSamples.push({at: now, ratePerSecond: delta / elapsed});
             }
         }
-        this.queryRateSamples = this.queryRateSamples.filter(sample => sample.at >= now - 10 * 60 * 1000);
+        this.queryRateSamples = this.queryRateSamples.filter(sample => sample.at >= now - 5 * 60 * 1000);
         if (totalQueries !== null) {
             this.previousSample = {queries: totalQueries, at: now};
         }
