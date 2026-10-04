@@ -20,6 +20,7 @@ export default class VnstatPlus extends BaseWidget {
         this.barRange = '12';
         this.chartOffset = 0;
         this.trafficChart = null;
+        this.chartPaging = false;
         this.fetchPromise = null;
     }
 
@@ -103,8 +104,6 @@ export default class VnstatPlus extends BaseWidget {
         const interfaceId = this._elementId('interface');
         const periodId = this._elementId('period');
         const rangeId = this._elementId('range');
-        const previousId = this._elementId('previous');
-        const nextId = this._elementId('next');
         const refreshId = this._elementId('refresh');
 
         return $(`
@@ -118,7 +117,6 @@ export default class VnstatPlus extends BaseWidget {
                     #${rootId} .vnstat-plus-controls .bootstrap-select > .dropdown-toggle:focus { border-color: #d94f00; box-shadow: 0 0 0 0.15rem rgba(217,79,0,0.2); }
                     #${rootId} .vnstat-plus-controls .bootstrap-select .dropdown-menu > li.selected > a { background: #d94f00; color: #fff; }
                     #${rootId} .vnstat-plus-controls button { flex: 0 0 auto; }
-                    #${rootId} .vnstat-plus-chart-navigation { display: flex; gap: 0.25em; }
                     #${rootId} .vnstat-plus-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.45em; margin-bottom: 0.7em; }
                     #${rootId} .vnstat-plus-card { border: 1px solid rgba(127,127,127,0.24); border-radius: 3px; background: rgba(127,127,127,0.06); padding: 0.6em 0.65em; min-width: 0; }
                     #${rootId} .vnstat-plus-card-label { color: currentColor; opacity: 0.68; font-size: 0.78em; letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -147,7 +145,6 @@ export default class VnstatPlus extends BaseWidget {
                     @media (max-width: 420px) {
                         #${rootId} .vnstat-plus-summary { grid-template-columns: 1fr; }
                         #${rootId} .vnstat-plus-bar-row { grid-template-columns: 5.4em minmax(0, 1fr) 4.5em; }
-                        #${rootId} .vnstat-plus-legend { margin-left: 5.85em; }
                     }
                 </style>
                 <div class="vnstat-plus-controls">
@@ -160,14 +157,10 @@ export default class VnstatPlus extends BaseWidget {
                     </select>
                     <select id="${rangeId}" class="selectpicker" aria-label="${this._escape(this.translations.bar_range)}">
                     </select>
-                    <span class="vnstat-plus-chart-navigation">
-                        <button id="${previousId}" type="button" class="btn btn-default" title="${this._escape(this.translations.previous)}" aria-label="${this._escape(this.translations.previous)}"><i class="fa fa-chevron-left"></i></button>
-                        <button id="${nextId}" type="button" class="btn btn-default" title="${this._escape(this.translations.next)}" aria-label="${this._escape(this.translations.next)}"><i class="fa fa-chevron-right"></i></button>
-                    </span>
                     <button id="${refreshId}" type="button" class="btn btn-default" title="${this._escape(this.translations.refresh)}" aria-label="${this._escape(this.translations.refresh)}"><i class="fa fa-refresh"></i></button>
                 </div>
                 <div id="${this._elementId('chart-title')}" class="vnstat-plus-section-title">${this._escape(this.translations.traffic_chart)}</div>
-                <div id="${this._elementId('chart')}" class="vnstat-plus-chart"></div>
+                <div id="${this._elementId('chart')}" class="vnstat-plus-chart" title="${this._escape(this.translations.chart_scroll_hint)}"></div>
                 <div id="${this._elementId('legend')}" class="vnstat-plus-legend">
                     <span><i class="vnstat-plus-dot" style="background:var(--vnstat-plus-rx);"></i>${this._escape(this.translations.download)}</span>
                     <span><i class="vnstat-plus-dot" style="background:var(--vnstat-plus-tx);"></i>${this._escape(this.translations.upload)}</span>
@@ -228,16 +221,23 @@ export default class VnstatPlus extends BaseWidget {
             event.preventDefault();
             await this._fetchAndRender();
         });
-        $root.on('click.vnstat-plus-widget', `#${this._elementId('previous')}`, async event => {
+        $root.on('wheel.vnstat-plus-widget', `#${this._elementId('chart')}`, async event => {
+            const source = event.originalEvent;
+            const delta = Math.abs(source.deltaX) > Math.abs(source.deltaY) ? source.deltaX : source.deltaY;
+            if (!delta || this.chartPaging) {
+                return;
+            }
             event.preventDefault();
-            this.chartOffset += 1;
-            await this._fetchAndRender();
-        });
-        $root.on('click.vnstat-plus-widget', `#${this._elementId('next')}`, async event => {
-            event.preventDefault();
-            if (this.chartOffset > 0) {
-                this.chartOffset -= 1;
+            this.chartPaging = true;
+            try {
+                if (delta > 0) {
+                    this.chartOffset += 1;
+                } else if (this.chartOffset > 0) {
+                    this.chartOffset -= 1;
+                }
                 await this._fetchAndRender();
+            } finally {
+                this.chartPaging = false;
             }
         });
 
@@ -315,7 +315,7 @@ export default class VnstatPlus extends BaseWidget {
         $(`#${this._elementId('summary')}`).toggle(this.showKpi);
         $(`#${this._elementId('chart-title')}, #${this._elementId('chart')}, #${this._elementId('legend')}`).toggle(this.showChart);
         $(`#${this._elementId('history-title')}, #${this._elementId('table')}`).toggle(this.showHistory);
-        $(`#${this._elementId('range')}, #${this._elementId('previous')}, #${this._elementId('next')}`).toggle(this.showChart);
+        $(`#${this._elementId('range')}`).toggle(this.showChart);
     }
 
     _rangeOptions() {
@@ -432,7 +432,6 @@ export default class VnstatPlus extends BaseWidget {
         const chart = this._chartEntries(entries);
         this._renderSummary(entries[entries.length - 1]);
         this._renderChart(chart.entries);
-        this._updateChartNavigation(chart);
         this._renderTable(tableEntries.slice().reverse());
     }
 
@@ -566,11 +565,6 @@ export default class VnstatPlus extends BaseWidget {
             canGoPrevious: end > size,
             canGoNext: this.chartOffset > 0
         };
-    }
-
-    _updateChartNavigation(chart) {
-        $(`#${this._elementId('previous')}`).prop('disabled', !chart.canGoPrevious);
-        $(`#${this._elementId('next')}`).prop('disabled', !chart.canGoNext);
     }
 
     _formatBytes(bytes) {

@@ -35,6 +35,7 @@
             <years>years</years>
             <previous>Previous time window</previous>
             <next>Next time window</next>
+            <chart_scroll_hint>Scroll to browse previous or later time windows</chart_scroll_hint>
             <current_period>Current period</current_period>
             <latest_one>Latest 1 period</latest_one>
             <latest_three>Latest 3 periods</latest_three>
