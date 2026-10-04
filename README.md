@@ -182,7 +182,12 @@ The plugin settings are in **Reporting ▸ Firewall Map ▸ Settings** (administ
 **Apply** after saving: geolocation service (automatic, MaxMind GeoLite2, MaxMind GeoIP2 City,
 DB-IP Lite), MaxMind license key (taken from a MaxMind GeoIP alias when present), database update
 frequency, threat lists, background recording, AbuseIPDB API key and *Maintain blocklist aliases*.
-Keys are write-only and never displayed or logged: leave a key field empty to keep the stored key.
+Keys are write-only and never displayed or logged: leave a key field empty to keep the stored key,
+or tick *Remove the stored key* to delete it.
+
+**Reporting ▸ Firewall Map ▸ Status** shows whether the collector is running (with the usual start,
+stop and restart controls), how fresh the geolocation database, the threat feeds and the AbuseIPDB
+blacklist are, and any download errors. Each has an *Update now* button.
 
 Each widget's display options are in its own settings dialog (gear icon on the widget): busiest-arc
 highlighting, maximum arcs, city labels, blocked traffic and its minimum hits, hostname lookups and

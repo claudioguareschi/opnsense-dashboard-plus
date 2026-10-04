@@ -35,6 +35,9 @@
                 keyField('license_key').attr('placeholder', status.license_key_set ? stored
                     : (status.database && status.database.key_source === 'alias' ? alias : ''));
                 keyField('abuseipdb_key').attr('placeholder', status.abuseipdb_configured ? stored : '');
+                // removing is offered only for a key that is stored
+                keyField('remove_license_key').prop('checked', false).closest('tr').toggle(Boolean(status.license_key_set));
+                keyField('remove_abuseipdb_key').prop('checked', false).closest('tr').toggle(Boolean(status.abuseipdb_configured));
             });
         };
         mapDataToFormUI({'frm_settings': '/api/firewallmap/settings/get'}).done(function () {
@@ -46,6 +49,8 @@
         $('#firewallmap\\.general\\.provider').change(function () {
             keyField('license_key').closest('tr').toggle($(this).val() !== 'dbip');
         });
+
+        updateServiceControlUI('firewallmap');
 
         $('#reconfigureAct').SimpleActionButton({
             onPreAction: function () {

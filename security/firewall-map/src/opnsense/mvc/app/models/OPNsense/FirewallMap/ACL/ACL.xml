@@ -10,12 +10,15 @@
     </page-dashboard-widget-firewall-map>
     <page-firewall-map-settings>
         <!--
-            Also covers the lookups an investigation makes to outside services, the review queue
-            (including deleting reviewed or dismissed entries) and deleting saved map snapshots.
+            Also covers the status page (collector start, stop and restart, "Update now"), the lookups
+            an investigation makes to outside services, the review queue (including deleting reviewed
+            or dismissed entries) and deleting saved map snapshots.
         -->
         <name>Firewall Map+: settings, investigations and threats</name>
         <patterns>
             <pattern>ui/firewallmap/settings</pattern>
+            <pattern>ui/firewallmap/status</pattern>
+            <pattern>api/firewallmap/service/*</pattern>
             <pattern>api/firewallmap/settings/*</pattern>
             <pattern>api/firewallmap/investigate/*</pattern>
             <pattern>api/firewallmap/threats/*</pattern>

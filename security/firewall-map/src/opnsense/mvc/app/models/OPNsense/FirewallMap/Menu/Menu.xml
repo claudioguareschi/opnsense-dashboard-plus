@@ -2,7 +2,8 @@
     <Reporting>
         <FirewallMap VisibleName="Firewall Map" cssClass="fa fa-globe fa-fw">
             <Map order="10" url="/ui/firewallmap"/>
-            <Settings order="20" url="/ui/firewallmap/settings"/>
+            <Status order="20" url="/ui/firewallmap/status"/>
+            <Settings order="30" url="/ui/firewallmap/settings"/>
         </FirewallMap>
     </Reporting>
 </menu>

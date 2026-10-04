@@ -19,11 +19,14 @@
                 <Mask>/^[A-Za-z0-9_]{0,64}$/</Mask>
                 <ValidationMessage>A MaxMind license key contains only letters, digits and underscores.</ValidationMessage>
             </license_key>
+            <!-- "Remove the stored key" on the settings page; never saved -->
+            <remove_license_key type="BooleanField" volatile="true"/>
             <!-- write-only -->
             <abuseipdb_key type="UpdateOnlyTextField">
                 <Mask>/^[A-Za-z0-9]{0,128}$/</Mask>
                 <ValidationMessage>An AbuseIPDB API key contains only letters and digits.</ValidationMessage>
             </abuseipdb_key>
+            <remove_abuseipdb_key type="BooleanField" volatile="true"/>
             <!-- pf tables that count as threat lists; empty: automatic -->
             <threat_lists type=".\ThreatListField">
                 <Multiple>Y</Multiple>

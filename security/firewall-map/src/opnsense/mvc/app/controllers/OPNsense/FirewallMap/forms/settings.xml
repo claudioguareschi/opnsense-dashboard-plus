@@ -16,6 +16,12 @@
         <help>Leave empty to keep the stored key. Without a key here, the key of a MaxMind GeoIP alias is used when one exists.</help>
     </field>
     <field>
+        <id>firewallmap.general.remove_license_key</id>
+        <label>Remove the stored key</label>
+        <type>checkbox</type>
+        <help>Deletes the MaxMind key saved here when you save. A key in a MaxMind GeoIP alias is not affected.</help>
+    </field>
+    <field>
         <id>firewallmap.general.update_days</id>
         <label>Update every (days)</label>
         <type>text</type>
@@ -43,6 +49,12 @@
         <label>AbuseIPDB API key</label>
         <type>password</type>
         <help>Optional: enables abuse reports when investigating an address, and the AbuseIPDB blacklist. Leave empty to keep the stored key.</help>
+    </field>
+    <field>
+        <id>firewallmap.general.remove_abuseipdb_key</id>
+        <label>Remove the stored key</label>
+        <type>checkbox</type>
+        <help>Deletes the AbuseIPDB key when you save. Abuse reports and the blacklist stop until a new key is entered.</help>
     </field>
     <field>
         <id>firewallmap.general.blocklist_aliases</id>

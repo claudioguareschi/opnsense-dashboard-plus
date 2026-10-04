@@ -33,13 +33,24 @@ use OPNsense\FirewallMap\BlocklistAliases;
 
 /**
  * Firewall Map+ settings (Reporting: Firewall Map: Settings): OPNsense's standard get and set, and
- * reconfigure for the Apply button. The keys are write-only fields: never sent back, and an empty
- * key keeps the stored one.
+ * reconfigure for the Apply button. The keys are write-only fields: never sent back, an empty key
+ * keeps the stored one, and "Remove the stored key" clears it.
  */
 class SettingsController extends ApiMutableModelControllerBase
 {
     protected static $internalModelName = 'firewallmap';
     protected static $internalModelClass = 'OPNsense\FirewallMap\FirewallMap';
+
+    /** "Remove the stored key": a write-only field cannot be emptied by posting an empty value */
+    protected function setActionHook()
+    {
+        $general = $this->getModel()->general;
+        foreach (['license_key', 'abuseipdb_key'] as $key) {
+            if ((string)$general->{'remove_' . $key} === '1') {
+                $general->$key->applyDefault();
+            }
+        }
+    }
 
     /** The AbuseIPDB list download status, read directly: the map page asks for it on every load. */
     private function blacklistStatus()
