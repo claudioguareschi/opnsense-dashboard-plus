@@ -30,19 +30,22 @@ import {idsSummary} from '../src/summaries.js';
 import {T, TEXT} from './context.js';
 import {ic} from './icons.js';
 
-/** A status pill; `big` is the verdict pill at the top of the details panel. */
-export function pill(kind, text, icon, big = false) {
-  const base = big ? 'fwmap-vpill' : 'fwmap-pill';
-  return `<span class="${base} ${base}-${kind}">${icon ? `${ic(icon)} ` : ''}${escapeHtml(text)}</span>`;
+/**
+ * A status pill: the theme's colored label (`color` is success, danger, warning or default),
+ * rounded, since Bootstrap 3 badges come in gray only. `big` is the details panel's verdict.
+ */
+export function pill(color, text, icon, big = false) {
+  return `<span class="label label-${color} fwmap-pill${big ? ' fwmap-pill-lg' : ''}">`
+    + `${icon ? `${ic(icon)} ` : ''}${escapeHtml(text)}</span>`;
 }
 
-export function bigPill(kind, text, icon) {
-  return pill(kind, text, icon, true);
+export function bigPill(color, text, icon) {
+  return pill(color, text, icon, true);
 }
 
 /** A label/value table; rows with no value are left out. Values are HTML. */
 export function rows(items, className = 'fwmap-kv') {
-  return `<table class="${className}">${items.filter(([, value]) => value !== null && value !== undefined && value !== '')
+  return `<table class="table table-condensed ${className}">${items.filter(([, value]) => value !== null && value !== undefined && value !== '')
     .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${value}</td></tr>`).join('')}</table>`;
 }
 
@@ -52,16 +55,19 @@ export function place(item) {
 
 /** One box of the connection diagram: a host on either end. */
 export function endBox(icon, name, lines) {
-  return `<div class="fwmap-end">${ic(icon)}<div class="fwmap-end-name">${escapeHtml(name)}</div>`
+  return `<div class="well well-sm fwmap-end">${ic(icon, 'text-primary fwmap-end-ic')}<div class="fwmap-end-name">${escapeHtml(name)}</div>`
     + lines.filter(Boolean).map((line) => `<div class="fwmap-end-sub">${escapeHtml(line)}</div>`).join('') + '</div>';
 }
 
-/** A card of the details panel: icon, title and a chevron that opens the related view. */
+/**
+ * A panel of the details panel: icon, title and a chevron that opens the related view. A table
+ * body sits flush in the panel, anything else in its body.
+ */
 export function card(icon, title, body, action) {
-  const chevron = action ? `<a href="${action.href || '#'}" class="fwmap-card-go ${action.cls || ''}"${action.href ? ' target="_blank" rel="noopener"' : ''}`
-    + `${action.address ? ` data-address="${escapeHtml(action.address)}"` : ''} title="${escapeHtml(action.title)}" aria-label="${escapeHtml(action.title)}">${ic('chevron')}</a>` : '';
-  return `<section class="fwmap-card"><div class="fwmap-card-head">${ic(icon, 'fwmap-card-ic')}<span>${escapeHtml(title)}</span>${chevron}</div>`
-    + `<div class="fwmap-card-body">${body}</div></section>`;
+  const chevron = action ? `<a href="${action.href || '#'}" class="pull-right fwmap-card-go ${action.cls || ''}"${action.href ? ' target="_blank" rel="noopener"' : ''}`
+    + `${action.address ? ` data-address="${escapeHtml(action.address)}"` : ''} title="${escapeHtml(action.title)}" aria-label="${escapeHtml(action.title)}">${ic('chevron-right')}</a>` : '';
+  return `<section class="panel panel-default fwmap-card"><div class="panel-heading">${chevron}${ic(icon)} <b>${escapeHtml(title)}</b></div>`
+    + (body.startsWith('<table') ? body : `<div class="panel-body">${body}</div>`) + '</section>';
 }
 
 export function serviceParts(name, port) {
@@ -79,7 +85,7 @@ export function idsLines(ids, text) {
   if (!ids) {
     return '';
   }
-  const cls = ids.severity <= 2 ? 'fwmap-ids fwmap-ids-high' : 'fwmap-ids';
+  const cls = ids.severity <= 2 ? 'fwmap-ids text-danger fwmap-ids-high' : 'fwmap-ids';
   return idsSummary(ids, text).map((line) => `<div class="${cls}">${ic('flag')} ${escapeHtml(line)}</div>`).join('');
 }
 

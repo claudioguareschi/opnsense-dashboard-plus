@@ -165,7 +165,8 @@ function poll(query) {
 /** The side panel's current tab: top talkers from `groups`, or the saved snapshots. */
 function renderTabs(groups) {
   const snapshots = state.talkerTab === 'snapshots';
-  $('#fwmap-talker-sort').toggle(!snapshots && state.talkerTab !== 'ids');
+  // snapshots and IDS alerts have a fixed order (newest first; connections, then severity)
+  $('#fwmap-talker-sort').closest('.bootstrap-select').toggle(!snapshots && state.talkerTab !== 'ids');
   if (snapshots) {
     renderSnapshotList();
   } else if (groups) {

@@ -57,11 +57,11 @@ function groupTalkers(summary) {
     }
     if (dest.country) {
       add('countries', dest.country, {label: plain(dest.country), flag: flagHtml(dest.country_code),
-        icon: 'fa-flag-o', filter: {country: dest.country}}, rate);
+        icon: 'globe', filter: {country: dest.country}}, rate);
     }
     if (dest.asn) {
       add('networks', String(dest.asn), {label: plain(dest.as_org || `AS${dest.asn}`), sub: `AS${dest.asn}`,
-        icon: 'network', filter: {asn: String(dest.asn)}}, rate);
+        icon: 'sitemap', filter: {asn: String(dest.asn)}}, rate);
     }
   }
   // IDS: correlated connections first, then addresses with alert history
@@ -72,7 +72,7 @@ function groupTalkers(summary) {
     }
     const top = ids?.signatures?.[0] || ids?.groups?.[0]?.signatures?.[0];
     groups.ids.set(address, {key: address, label: address, sub: top ? plain(top.signature) : '', severity,
-      count, connection, icon: connection ? 'fa-exclamation-circle' : 'fa-flag', rate: 0, select});
+      count, connection, icon: connection ? 'circle-exclamation' : 'flag', rate: 0, select});
   };
   for (const flow of summary.ids_flows || []) {
     if (flow.kind !== 'blocked') {
@@ -180,8 +180,6 @@ export function talkerActive(row) {
 
 export function renderTalkers(groups) {
   const ids = state.talkerTab === 'ids';
-  // the IDS tab lists alerts, not traffic: its order is fixed (connections, then severity)
-  $('#fwmap-talker-sort').toggle(!ids);
   const needle = String($('#fwmap-talker-search').val() || '').trim().toLowerCase();
   const sort = $('#fwmap-talker-sort').val() || 'rate';
   let rows = (groups[state.talkerTab] || []).slice();
@@ -201,26 +199,26 @@ export function renderTalkers(groups) {
     state.talkerRows = [];
     return;
   }
-  $list.html(rows.map((row, index) => {
+  $list.html(`<table class="table table-condensed table-hover fwmap-talkers-table"><tbody>${rows.map((row, index) => {
     const sub = row.ip ? `${escapeHtml(row.ip)}${row.iface ? ` · <span title="${escapeHtml(row.iface)}">${escapeHtml(shortInterface(row.iface))}</span>` : ''}`
       : escapeHtml(row.sub || '');
-    const chart = ids ? '<span></span>' : '<canvas></canvas>';
     const value = ids
-      ? `<span class="fwmap-talker-count ${row.severity <= 2 ? 'fwmap-ids-high' : 'fwmap-ids'}">${escapeHtml(row.count)} ${escapeHtml(T.alerts_short)}</span>`
-      : `<span class="fwmap-talker-rate">${escapeHtml(formatRate(row.rate))}</span>`;
-    const extra = ids
-      ? `<span class="fwmap-talker-flows">${escapeHtml(T.severity)} ${escapeHtml(row.severity)}</span>`
-      : `<span class="fwmap-talker-flows">${escapeHtml(row.flows)} ${escapeHtml(row.flows === 1 ? T.flow_one : T.flow_many)}</span>`;
+      ? `<span class="${row.severity <= 2 ? 'text-danger fwmap-ids-high' : 'fwmap-ids'}">${escapeHtml(row.count)} ${escapeHtml(T.alerts_short)}</span>`
+      : escapeHtml(formatRate(row.rate));
+    const extra = ids ? `${escapeHtml(T.severity)} ${escapeHtml(row.severity)}`
+      : `${escapeHtml(row.flows)} ${escapeHtml(row.flows === 1 ? T.flow_one : T.flow_many)}`;
     const active = talkerActive(row);
     // a button for keyboards too: Enter or Space acts like a click (see bindControls)
-    return `<div class="fwmap-talker${active ? ' active' : ''}" data-index="${index}" role="button" tabindex="0"
+    return `<tr class="fwmap-talker${active ? ' active' : ''}" data-index="${index}" role="button" tabindex="0"
         ${ids ? '' : `aria-pressed="${active}"`} title="${escapeHtml(ids ? T.select_hint : T.filter_hint)}">
-      <span class="fwmap-talker-icon">${row.flag || `${ic(row.icon)}`}</span>
-      <span class="fwmap-talker-text"><span class="fwmap-talker-label">${escapeHtml(row.label)}</span>
-        <span class="fwmap-talker-sub">${sub}</span></span>
-      ${chart}${value}${extra}
-    </div>`;
-  }).join(''));
+      <td class="text-muted text-center fwmap-talker-icon">${row.flag || ic(row.icon)}</td>
+      <td><div class="fwmap-talker-label">${escapeHtml(row.label)}</div>
+        <div class="small text-muted fwmap-talker-sub">${sub}</div></td>
+      <td class="fwmap-talker-chart">${ids ? '' : '<canvas></canvas>'}</td>
+      <td class="text-right fwmap-talker-rate">${value}</td>
+      <td class="small text-muted text-right fwmap-talker-flows">${extra}</td>
+    </tr>`;
+  }).join('')}</tbody></table>`);
   state.talkerRows = rows;
   $list.find('.fwmap-talker canvas').each(function () {
     sparkline(this, rows[$(this).closest('.fwmap-talker').data('index')].series);

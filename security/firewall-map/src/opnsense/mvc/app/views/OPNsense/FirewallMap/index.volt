@@ -24,425 +24,7 @@
  # POSSIBILITY OF SUCH DAMAGE.
  #}
 
-<style>
-    /*
-     * Colors come from the theme through CSS variables set by the renderer's host.applyTheme():
-     * --fwmap-accent, --fwmap-text, --fwmap-panel and the status colors --fwmap-ok, -danger,
-     * -contained, -blocked (each with an --fwmap-on-* text color). Sizes are in em of the
-     * surrounding text, so the page scales with the theme's font size.
-     */
-    /* one row of Bootstrap controls: the mode switch, the filters (in the order a connection runs:
-       interface, inside host, service, country; bootstrap-select dropdowns) and the threats list at the
-       end. Filters that do not fit fold into a "Filters" menu instead of wrapping onto a second row. */
-    #fwmap-toolbar { display: flex; flex-wrap: nowrap; gap: 8px; align-items: center; margin-bottom: 12px; min-width: 0; }
-    #fwmap-toolbar > .btn-group, #fwmap-toolbar > .btn { flex: none; }
-    .fwmap-tool-sep { flex: none; width: 1px; height: 22px; background: rgba(128, 128, 128, .3); }
-    #fwmap-chips { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; }
-    #fwmap-chips > .btn-group { flex: none; float: none; }
-    .fwmap-filter .bootstrap-select > .dropdown-toggle { max-width: 16em; }
-    /* the filter's icon labels the button; the list itself stays plain */
-    .fwmap-filter .dropdown-menu li .fa { display: none; }
-    /* a chosen filter turns primary (bootstrap-select's style) and gains a joined clear button */
-    /* flex, not Bootstrap's floats, so the clear button joins on the right of its dropdown */
-    #fwmap-chips > .fwmap-filter { display: inline-flex; }
-    .fwmap-filter-clear { display: none; }
-    .fwmap-filter.active .fwmap-filter-clear { display: inline-flex; align-items: center; margin-left: -1px;
-        border-top-left-radius: 0; border-bottom-left-radius: 0; }
-    #fwmap-more-menu > .fwmap-filter { display: flex; }
-    .fwmap-filter.active .bootstrap-select > .dropdown-toggle { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-    #fwmap-filter-asn { display: none; }
-    #fwmap-filter-asn.shown { display: inline-flex; }
-    #fwmap-filter-asn .fwmap-filter-clear { display: inline-flex; align-items: center; margin-left: -1px; }
-    #fwmap-filter-asn .fwmap-asn-label { cursor: default; }
-    #fwmap-more-menu { padding: 8px; min-width: 16em; }
-    #fwmap-more-wrap.open #fwmap-more-menu { display: flex; flex-direction: column; gap: 6px; }
-    #fwmap-more-menu > .btn-group { float: none; }
-    #fwmap-more-menu .bootstrap-select { flex: 1; }
-    #fwmap-more-menu .bootstrap-select > .dropdown-toggle { max-width: none; }
-    #fwmap-more .badge:empty, #fwmap-mode .badge:empty { display: none; }
-    #fwmap-toolbar #fwmap-review { margin-left: auto; }
-    #fwmap-review > .fa { margin-right: 3px; }
-    /* the color scheme explains the legend, so it is chosen there */
-    .fwmap-legend-mode { pointer-events: auto; display: inline-flex; align-items: center; gap: 6px; margin-right: 4px; }
-    .fwmap-legend-mode .fwmap-legend-label { opacity: .7; }
-    #fwmap-legend-items { display: contents; }
-    #fwmap-layout { display: flex; height: calc(100vh - 222px); min-height: 540px; }
-    #fwmap-main { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid rgba(128, 128, 128, .18);
-        border-radius: 6px; padding: 12px 12px 0; }
-    /* the legend takes the top left, the zoom buttons the top right: they never overlap */
-    #fwmap-zoom { position: absolute; right: 12px; top: 10px; z-index: 3; display: flex; flex-direction: column;
-        border: 1px solid rgba(128, 128, 128, .3); border-radius: 4px; overflow: hidden; background: var(--fwmap-panel, #fff);
-        color: var(--fwmap-text, inherit); box-shadow: 0 1px 3px rgba(0, 0, 0, .08); }
-    #fwmap-zoom button { width: 30px; height: 30px; border: 0; background: transparent; color: inherit; }
-    #fwmap-zoom button + button { border-top: 1px solid rgba(128, 128, 128, .25); }
-    #fwmap-zoom button:hover { background: rgba(128, 128, 128, .12); }
-    #fwmap-zoom button.active { background: rgba(128, 128, 128, .22); color: var(--fwmap-accent); }
-    #fwmap-zoom .fwmap-ic { width: 16px; height: 16px; vertical-align: middle; }
-    #fwmap-statusbar { display: flex; align-items: center; gap: 12px; padding: 12px 6px; font-size: .92em;
-        border-top: 1px solid rgba(128, 128, 128, .15); margin-top: 8px; }
-    #fwmap-statusbar #fwmap-status { flex: 1; min-width: 0; }
-    #fwmap-map {
-        position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; border-radius: 6px;
-        /* the map's own layers (canvas, legend, zoom buttons) stack inside it, never above OPNsense's menus */
-        isolation: isolate;
-    }
-    #fwmap-grid { pointer-events: none; position: absolute; inset: 0; z-index: 0; background-size: 48px 48px; }
-    #fwmap-canvas { position: absolute; inset: 0; z-index: 1; text-align: left; }
-    #fwmap-credit { position: absolute; right: 12px; bottom: 10px; z-index: 2; font-size: .8em; opacity: .7; }
-    #fwmap-legend {
-        position: absolute; left: 12px; top: 10px; right: 60px; z-index: 2; font-size: .85em; pointer-events: none;
-        display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px;
-    }
-    .fwmap-legend-item { white-space: nowrap; }
-    .fwmap-legend-item i { display: inline-block; width: 22px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
-    .fwmap-legend-item i.fwmap-legend-ring { width: 11px; height: 11px; border-radius: 50%; border: 2px solid currentColor; opacity: .7; background: transparent; }
-    .fwmap-status-ids { color: var(--fwmap-danger); }
-    .fwmap-status-ids.active { font-weight: 600; text-decoration: underline; }
-    #fwmap-updated { white-space: nowrap; opacity: .8; }
-    .fwmap-live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--fwmap-ok); margin-left: 4px; }
-    .fwmap-live.stale { background: var(--fwmap-contained); }
-    /* the map gets the larger share by default; the splitter gives the side panel more when wanted */
-    #fwmap-side { width: clamp(360px, 30vw, 600px); flex: 0 0 clamp(360px, 30vw, 600px); display: flex; flex-direction: column;
-        height: 100%; min-height: 0; }
-    #fwmap-talkers, #fwmap-details-box { border: 1px solid rgba(128, 128, 128, .22); border-radius: 6px;
-        background: var(--fwmap-panel, transparent); box-shadow: 0 1px 3px rgba(0, 0, 0, .06); }
-    #fwmap-talkers { flex: 1 1 60%; min-height: 0; display: flex; flex-direction: column; padding: 10px 12px 6px; }
-    #fwmap-talkers-list { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
-    #fwmap-details-box { flex: 1 1 40%; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-    #fwmap-details { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-    #fwmap-details > .fwmap-empty { padding: 14px 16px; }
-    /* drag handles: between map and side panel, and between the two side boxes; double-click resets */
-    .fwmap-splitter { flex: 0 0 12px; position: relative; touch-action: none; user-select: none; }
-    .fwmap-splitter::after { content: ""; position: absolute; border-radius: 2px; background: rgba(128, 128, 128, .35);
-        transition: background .15s; }
-    .fwmap-splitter:hover::after, .fwmap-splitter:focus-visible::after, .fwmap-splitter.fwmap-dragging::after { background: rgba(128, 128, 128, .75); }
-    .fwmap-splitter:focus-visible { outline: 2px solid var(--fwmap-accent); outline-offset: -2px; }
-    .fwmap-splitter-v { cursor: col-resize; }
-    .fwmap-splitter-v::after { left: 5px; top: 50%; width: 3px; height: 40px; margin-top: -20px; }
-    .fwmap-splitter-h { cursor: row-resize; }
-    .fwmap-splitter-h::after { top: 5px; left: 50%; height: 3px; width: 40px; margin-left: -20px; }
-    body.fwmap-resizing, body.fwmap-resizing * { user-select: none !important; }
-    /* top talkers: tabs that shrink instead of running off the panel, search and sort, rows */
-    #fwmap-talkers .nav-tabs { border-bottom: 1px solid rgba(128, 128, 128, .25); margin-bottom: 8px; display: flex; gap: 4px; }
-    #fwmap-talkers .nav-tabs > li { float: none; margin-bottom: -1px; flex: 0 1 auto; min-width: 0; }
-    #fwmap-talkers .nav-tabs > li > a { padding: 7px 14px; margin: 0; border: 1px solid rgba(128, 128, 128, .22); border-bottom-color: transparent;
-        border-radius: 5px 5px 0 0; background: rgba(128, 128, 128, .05); font-weight: 500;
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    #fwmap-talkers .nav-tabs > li.active > a { background: var(--fwmap-panel, #fff); color: inherit; border-color: rgba(128, 128, 128, .3);
-        border-bottom-color: var(--fwmap-panel, #fff); box-shadow: inset 0 3px 0 var(--fwmap-accent); font-weight: 600; }
-    .fwmap-talker-tools { display: flex; gap: 8px; margin-bottom: 6px; }
-    .fwmap-talker-search { position: relative; flex: 1; }
-    .fwmap-talker-search .fwmap-ic { position: absolute; left: 10px; top: 9px; width: 15px; height: 15px; opacity: .5; }
-    .fwmap-talker-search input { width: 100%; height: 2.3em; padding: 4px 8px 4px 30px; }
-    .fwmap-talker-tools select { width: auto; min-width: 9.5em; height: 2.3em; padding: 2px 1.8em 2px 8px; }
-    .fwmap-talker { display: grid; grid-template-columns: 30px minmax(0, 1fr) 64px 80px 62px; column-gap: 10px;
-        align-items: center; padding: 7px 6px; cursor: pointer; border-radius: 5px; }
-    .fwmap-talker + .fwmap-talker { border-top: 1px solid rgba(128, 128, 128, .08); }
-    .fwmap-talker:hover, .fwmap-talker:focus-visible { background: rgba(128, 128, 128, .08); outline: none; }
-    .fwmap-talker:focus-visible { box-shadow: inset 0 0 0 2px var(--fwmap-accent); }
-    .fwmap-talker.active { background: rgba(128, 128, 128, .12); box-shadow: inset 3px 0 0 var(--fwmap-accent); }
-    .fwmap-talker-icon { text-align: center; opacity: .8; }
-    .fwmap-talker-icon .fwmap-ic { width: 22px; height: 22px; stroke-width: 1.6; }
-    .fwmap-talker-icon .fwmap-flag.flag-icon { width: 24px; height: 17px; margin: 0; }
-    .fwmap-talker-text { display: block; min-width: 0; line-height: 1.3; }
-    .fwmap-talker-label, .fwmap-talker-sub { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .fwmap-talker-label { font-size: 1.02em; font-weight: 500; }
-    .fwmap-talker-sub { font-size: .82em; opacity: .65; }
-    .fwmap-talker canvas { width: 64px; height: 22px; }
-    .fwmap-talker-rate, .fwmap-talker-count { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 500; }
-    .fwmap-talker-flows { font-size: .85em; opacity: .6; white-space: nowrap; text-align: right; }
-    #fwmap-side.fwmap-narrow .fwmap-talker { grid-template-columns: 26px minmax(0, 1fr) 56px 72px; }
-    #fwmap-side.fwmap-narrow .fwmap-talker-flows { display: none; }
-    .fwmap-ids { margin-top: 2px; opacity: .85; }
-    .fwmap-ids-high { font-weight: 600; opacity: 1; color: var(--fwmap-danger); }
-    .fwmap-empty { padding: 6px 2px; }
-    .fwmap-investigation { margin: 4px 0 8px; padding: 6px 8px; border-left: 3px solid rgba(128, 128, 128, .35); }
-    .fwmap-inv-section { margin-bottom: 6px; }
-    .fwmap-inv-title { font-weight: 600; font-size: .9em; text-transform: uppercase; letter-spacing: .03em; opacity: .75; }
-    /* one label column for every section (registry, routing, AbuseIPDB), so the values share one edge */
-    .fwmap-inv-table { width: 100%; font-size: .9em; table-layout: fixed; }
-    .fwmap-inv-table th { font-weight: normal; opacity: .7; padding-right: 8px; vertical-align: top; width: 10em; }
-    .fwmap-inv-retry { margin-top: 6px; }
-    /* while the lookup runs: a spinner where the data will appear (seen mostly on slow links) */
-    .fwmap-inv-loading { display: flex; align-items: center; gap: 8px; padding: 12px 0; opacity: .7; }
-    .fwmap-inv-table td { word-break: break-word; }
-    #fwmap-review-count:empty { display: none; }
-    #fwmap-review-count { background: var(--fwmap-danger); color: var(--fwmap-on-danger); }
-
-    /* threat history */
-    .bootstrap-dialog.fwmap-q-dialog .modal-dialog { width: min(1320px, 94vw); max-width: none; }
-    .bootstrap-dialog.fwmap-q-dialog .modal-header { background: var(--fwmap-panel, #fff) !important; color: var(--fwmap-text, #222);
-        border-bottom: 2px solid var(--fwmap-accent); padding: 14px 20px; border-radius: 6px 6px 0 0; }
-    .bootstrap-dialog.fwmap-q-dialog .bootstrap-dialog-title, .fwmap-q-dialog .modal-title { color: inherit; width: 100%; }
-    .fwmap-q-dialog .modal-header .close, .fwmap-q-dialog .modal-header .bootstrap-dialog-close-button button { color: inherit; opacity: .8; font-size: 1.85em; }
-    .fwmap-q-titlebar { display: flex; align-items: center; gap: 14px; }
-    .fwmap-q-titlebar > div { flex: 1; }
-    .fwmap-q-titlebar .fwmap-q-title-ic { width: 32px; height: 32px; color: var(--fwmap-accent); }
-    .fwmap-q-title { font-size: 1.55em; font-weight: 600; line-height: 1.2; }
-    .fwmap-q-subtitle { font-size: 1em; opacity: .65; font-weight: normal; }
-    .fwmap-q-newcount { font-size: 1.07em; color: var(--fwmap-accent); font-weight: 600; margin-right: 18px; white-space: nowrap; }
-    .fwmap-q-newcount b { display: inline-block; background: var(--fwmap-danger); color: var(--fwmap-on-danger); border-radius: 12px; padding: 1px 10px; }
-    .fwmap-q-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px; }
-    .fwmap-q-tabs { flex: 1 1 auto; margin: 0; }
-    .fwmap-q-tabs > li > a { padding: 7px 18px; font-size: 1.07em; }
-    .fwmap-q-tabs .badge { margin-left: 6px; }
-    .fwmap-q-bulkbar { display: flex; gap: 8px; }
-    .fwmap-q-bulkbar .btn { height: 2.7em; display: inline-flex; align-items: center; gap: 7px; font-size: 1em; }
-    .fwmap-q-bulkbar .btn .fwmap-ic { width: 1.15em; height: 1.15em; }
-    .fwmap-q-conns { width: 100%; margin-top: 8px; font-size: .93em; border-collapse: collapse; }
-    .fwmap-q-conns th { font-weight: 600; opacity: .7; padding: 4px 8px 4px 0; border-bottom: 1px solid rgba(128, 128, 128, .25); white-space: nowrap; }
-    .fwmap-q-conns td { padding: 5px 8px 5px 0; vertical-align: top; border-bottom: 1px solid rgba(128, 128, 128, .1); }
-    .fwmap-q-moreitems { text-align: center; padding: 10px 0 4px; }
-    .fwmap-q-searchbox { position: relative; width: 38%; min-width: 240px; }
-    .fwmap-q-searchbox .fwmap-ic { position: absolute; left: 12px; top: 10px; width: 17px; height: 17px; opacity: .6; }
-    .fwmap-q-searchbox input { width: 100%; height: 2.7em; padding-left: 38px; font-size: 1em; }
-    /* the list keeps its height when a tab is empty, so the dialog does not jump */
-    .fwmap-q-list { min-height: 40vh; max-height: 64vh; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
-    .fwmap-q-empty { padding: 3em 0; text-align: center; font-size: 1.07em; }
-    .fwmap-q-item { padding: 12px 14px 10px; margin: 10px 0; border: 1px solid rgba(128, 128, 128, .22); border-radius: 6px;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, .04); font-size: 1em; }
-    .fwmap-q-item.fwmap-q-dismissed { opacity: .8; }
-    .fwmap-q-top { display: grid; grid-template-columns: minmax(200px, 30%) minmax(0, 1fr) auto; gap: 14px; }
-    .fwmap-q-who { border-right: 1px solid rgba(128, 128, 128, .15); padding-right: 12px; min-width: 0; }
-    .fwmap-q-ipline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .fwmap-q-ip { font-size: 1.5em; font-weight: 600; letter-spacing: -.01em; }
-    .fwmap-q-badge { font-size: .8em; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 1px 9px; border-radius: 10px;
-        background: rgba(128, 128, 128, .2); }
-    .fwmap-q-disposition-passed { background: var(--fwmap-danger); color: var(--fwmap-on-danger); }
-    .fwmap-q-disposition-firewall_blocked { background: var(--fwmap-blocked); color: var(--fwmap-on-blocked); }
-    .fwmap-q-disposition-ips_dropped { background: var(--fwmap-contained); color: var(--fwmap-on-contained); }
-    .fwmap-q-workflow { font-size: .8em; opacity: .65; text-transform: uppercase; }
-    .fwmap-q-hostname { font-size: .93em; opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
-    .fwmap-q-org { margin-top: 3px; font-size: 1.07em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .fwmap-q-country { font-size: 1.07em; margin-top: 2px; }
-    .fwmap-q-country .fwmap-flag.flag-icon { width: 20px; height: 15px; margin-right: 8px; vertical-align: -2px; }
-    .fwmap-q-chips { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
-    .fwmap-q-chip { font-size: .9em; font-weight: 600; padding: 2px 10px; border-radius: 4px; color: var(--fwmap-danger);
-        border: 1px solid var(--fwmap-danger); }
-    .fwmap-q-blocked .fwmap-q-chip, .fwmap-q-dropped .fwmap-q-chip { color: inherit; border-color: var(--fwmap-contained); }
-    .fwmap-q-reviewed .fwmap-q-chip, .fwmap-q-dismissed .fwmap-q-chip { color: inherit; border-color: rgba(128, 128, 128, .4); }
-    .fwmap-q-flow { min-width: 0; }
-    .fwmap-q-diagram { display: flex; align-items: flex-start; gap: 12px; }
-    .fwmap-q-diagram .fwmap-q-end { width: 34px; height: 34px; flex: none; margin-top: 6px; opacity: .8; stroke-width: 1.5; }
-    .fwmap-q-link { flex: 1; min-width: 90px; text-align: center; }
-    .fwmap-q-svc { font-size: .96em; opacity: .8; }
-    .fwmap-q-arrow { position: relative; height: 12px; margin: 2px 0 4px; }
-    .fwmap-q-arrow::before { content: ""; position: absolute; left: 0; right: 0; top: 6px; border-top: 1.5px solid currentColor; opacity: .55; }
-    .fwmap-q-arrow::after { content: ""; position: absolute; top: 2px; border: 5px solid transparent; opacity: .55; }
-    .fwmap-q-arrow-in::after { right: -2px; border-left: 8px solid currentColor; }
-    .fwmap-q-arrow-out::after { left: -2px; border-right: 8px solid currentColor; }
-    .fwmap-q-dirpill { display: inline-block; font-size: .93em; padding: 1px 12px; border-radius: 12px; background: rgba(128, 128, 128, .13); }
-    .fwmap-q-local { min-width: 120px; font-size: 1em; line-height: 1.45; }
-    .fwmap-q-local-name { font-weight: 600; font-size: 1.14em; }
-    .fwmap-q-muted { opacity: .65; }
-    .fwmap-q-meta { display: flex; flex-wrap: wrap; gap: 4px 22px; margin-top: 10px; font-size: .96em; opacity: .75; }
-    .fwmap-q-meta .fwmap-ic { width: 16px; height: 16px; margin-right: 4px; vertical-align: -3px; }
-    .fwmap-q-flow .fwmap-ids { margin-top: 6px; font-size: .93em; }
-    .fwmap-q-when { display: flex; align-items: flex-start; gap: 10px; white-space: nowrap; font-size: 1em; opacity: .8; }
-    .fwmap-q-when .fwmap-ic { width: 16px; height: 16px; vertical-align: -3px; }
-    .fwmap-q-expand { color: inherit; }
-    .fwmap-q-when .fwmap-q-expand .fwmap-ic { width: 20px; height: 20px; }
-    .fwmap-q-warning { margin-top: 8px; color: var(--fwmap-danger); font-weight: 600; }
-    .fwmap-q-more { margin-top: 8px; padding: 8px 10px; border-radius: 4px; background: rgba(128, 128, 128, .06); font-size: .96em; }
-    .fwmap-q-note { white-space: pre-wrap; margin-top: 8px; padding: 6px 10px; border-left: 3px solid rgba(128, 128, 128, .35);
-        background: rgba(128, 128, 128, .06); font-size: .96em; }
-    .fwmap-q-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-top: 12px; }
-    .fwmap-q-left, .fwmap-q-right { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-    .fwmap-q-bar .btn { height: 2.7em; display: inline-flex; align-items: center; gap: 7px; padding: 6px 14px; font-size: 1em; margin: 0; }
-    .fwmap-q-bar .btn .fwmap-ic { width: 17px; height: 17px; }
-    .fwmap-q-bar .btn-primary, .fwmap-actions .btn-primary { background: var(--fwmap-accent); border-color: var(--fwmap-accent); color: #fff; }
-    .fwmap-q-bar .btn-primary:hover, .fwmap-actions .btn-primary:hover { filter: brightness(.92); }
-    .fwmap-q-bar .btn-danger { background: var(--fwmap-danger); border-color: var(--fwmap-danger); color: var(--fwmap-on-danger); }
-    .fwmap-q-bar .fwmap-q-menu { padding: 6px 10px; }
-    .fwmap-q-footer { float: left; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 28px; text-align: left;
-        font-size: 1em; padding-top: 8px; }
-    .fwmap-q-record { display: inline-flex; align-items: center; font-weight: normal; margin: 0; }
-    .fwmap-q-record input { width: 18px; height: 18px; margin: 0 8px 0 0; flex: none; }
-    .fwmap-q-source { opacity: .75; }
-
-    /* details panel: header, verdict pill, diagram, cards, action bar. Base size 13/14 of the page text */
-    .fwmap-d-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 12px 14px 4px; font-size: .93em; }
-    .fwmap-d-head { display: flex; align-items: flex-start; gap: 12px; }
-    .fwmap-d-icon { width: 30px; height: 30px; opacity: .7; margin-top: 2px; }
-    .fwmap-d-title { flex: 1; min-width: 0; }
-    .fwmap-d-name { font-size: 1.38em; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
-    .fwmap-d-line { font-size: .96em; margin-top: 2px; display: flex; flex-wrap: wrap; gap: 2px 10px; opacity: .8; }
-    .fwmap-d-line b { font-weight: 500; }
-    .fwmap-d-verdict { text-align: center; margin-top: 8px; }
-    .fwmap-d-verdict-sub { font-size: .88em; opacity: .65; margin-top: 5px; }
-    #fwmap-details-close { line-height: 1; margin-left: 2px; color: var(--fwmap-accent); }
-    #fwmap-details-close .fwmap-ic { width: 20px; height: 20px; stroke-width: 2.2; }
-    .fwmap-vpill, .fwmap-pill { display: inline-block; font-weight: 600; white-space: nowrap; }
-    .fwmap-vpill { font-size: .96em; padding: 2px 12px; border-radius: 14px; }
-    .fwmap-pill { font-size: .92em; font-weight: 500; padding: 0 8px; border-radius: 9px; }
-    .fwmap-vpill .fwmap-ic, .fwmap-pill .fwmap-ic { stroke-width: 2.6; width: .95em; height: .95em; }
-    .fwmap-vpill-ok, .fwmap-pill-ok { background: var(--fwmap-ok); color: var(--fwmap-on-ok); }
-    .fwmap-vpill-danger, .fwmap-pill-danger { background: var(--fwmap-danger); color: var(--fwmap-on-danger); }
-    .fwmap-vpill-blocked, .fwmap-pill-blocked { background: var(--fwmap-blocked); color: var(--fwmap-on-blocked); }
-    .fwmap-vpill-contained, .fwmap-pill-contained { background: var(--fwmap-contained); color: var(--fwmap-on-contained); }
-    .fwmap-vpill-muted, .fwmap-pill-muted { background: rgba(128, 128, 128, .2); }
-    .fwmap-pill-warning { background: var(--fwmap-contained); color: var(--fwmap-on-contained); }
-    .fwmap-vpill-ok { box-shadow: 0 0 0 4px rgba(128, 128, 128, .12); }
-    .fwmap-picker { margin: 6px 0 0; font-size: .88em; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
-    .fwmap-pick { padding: 0 6px; border-radius: 8px; }
-    .fwmap-pick.active { background: rgba(128, 128, 128, .2); font-weight: 600; }
-    .fwmap-diagram { display: flex; align-items: stretch; gap: 8px; margin: 10px 0 8px; }
-    .fwmap-end { flex: 1 1 0; min-width: 0; text-align: center; padding: 7px 6px; border-radius: 5px; background: rgba(128, 128, 128, .06);
-        border: 1px solid rgba(128, 128, 128, .12); font-size: .96em; }
-    .fwmap-end .fwmap-ic { display: block; width: 24px; height: 24px; margin: 0 auto 3px; color: var(--fwmap-accent); }
-    .fwmap-end-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .fwmap-end-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .fwmap-end-sub + .fwmap-end-sub { font-size: .9em; opacity: .7; }
-    .fwmap-link { flex: 0 0 30%; display: flex; flex-direction: column; justify-content: center; text-align: center; font-size: .92em; }
-    .fwmap-link-service { font-weight: 600; }
-    .fwmap-link-port { opacity: .75; }
-    .fwmap-link-arrow { position: relative; height: 14px; margin: 4px 2px 6px; }
-    .fwmap-link-arrow::before { content: ""; position: absolute; left: 0; right: 7px; top: 6px; border-top: 1.5px solid currentColor; opacity: .6; }
-    .fwmap-link-arrow::after { content: ""; position: absolute; right: 0; top: 2px; border: 5px solid transparent; border-left: 8px solid currentColor; opacity: .6; }
-    .fwmap-link-blocked .fwmap-link-arrow .fwmap-ic { position: relative; z-index: 1; color: var(--fwmap-danger); }
-    .fwmap-link-rate { opacity: .7; }
-    .fwmap-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 7px; }
-    .fwmap-card { border: 1px solid rgba(128, 128, 128, .22); border-radius: 5px; min-width: 0; }
-    .fwmap-card-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 1em; padding: 5px 9px;
-        border-bottom: 1px solid rgba(128, 128, 128, .15); }
-    .fwmap-card-head span { flex: 1; }
-    .fwmap-card-ic { width: 18px; height: 18px; color: var(--fwmap-accent); }
-    .fwmap-card-go { color: inherit; opacity: .5; }
-    .fwmap-card-go:hover, .fwmap-card-go:focus-visible { opacity: 1; }
-    .fwmap-card-go .fwmap-ic { width: 14px; height: 14px; }
-    .fwmap-card-body { padding: 4px 9px 6px; }
-    .fwmap-kv { width: 100%; font-size: .92em; border-collapse: collapse; }
-    .fwmap-kv th { font-weight: normal; opacity: .7; padding: 0 8px 0 0; vertical-align: top; white-space: nowrap; width: 40%; }
-    .fwmap-kv td { padding: 0; overflow-wrap: anywhere; }
-    .fwmap-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 2px 14px; }
-    .fwmap-two .fwmap-kv { table-layout: auto; }
-    .fwmap-two .fwmap-kv th { width: 1%; }
-    .fwmap-card-note { font-size: .84em; opacity: .7; margin-bottom: 3px; }
-    .fwmap-empty-note { display: flex; gap: 10px; align-items: center; font-size: .88em; padding: 6px 9px; border-radius: 4px;
-        background: rgba(128, 128, 128, .07); }
-    .fwmap-ok-ic { width: 22px; height: 22px; color: var(--fwmap-ok); stroke-width: 2.4; }
-    .fwmap-muted { opacity: .65; }
-    .fwmap-sig { margin-bottom: 5px; font-size: .95em; }
-    .fwmap-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 9px 14px; border-top: 1px solid rgba(128, 128, 128, .18); }
-    .fwmap-actions .btn { padding: 6px 14px; font-size: .96em; }
-    .fwmap-actions .btn .fwmap-ic { width: 17px; height: 17px; margin-right: 5px; vertical-align: -3px; }
-    .fwmap-actions .btn-group { margin-left: auto; }
-    /* outline icons and flag images */
-    .fwmap-ic { width: 1.05em; height: 1.05em; vertical-align: -.17em; flex: none; }
-    .fwmap-flag.flag-icon { width: 19px; height: 14px; line-height: 14px; background-size: cover; border-radius: 2px;
-        box-shadow: 0 0 0 1px rgba(0, 0, 0, .1); vertical-align: -3px; margin-right: 6px; }
-    .fwmap-not-listed { color: var(--fwmap-ok); }
-    .fwmap-not-listed .fwmap-ic { stroke-width: 2.4; width: .95em; height: .95em; }
-    .fwmap-abuse-check { white-space: nowrap; font-weight: 500; }
-
-    /* snapshots: the Live | Snapshots switch, the camera, and snapshot mode (frame, banner, timeline).
-       --fwmap-frozen is the theme's warning color, made to stand out on the map background. */
-    /* Bootstrap's own active button for live; a snapshot on screen takes the warning color */
-    #fwmap-mode .fwmap-live { margin: 0 2px 1px 0; }
-    #fwmap-mode #fwmap-mode-snapshots.active { background: var(--fwmap-frozen-soft); border-color: var(--fwmap-frozen); }
-    #fwmap-snapshot-count:empty { display: none; }
-    #fwmap-snapshot-count { background: rgba(128, 128, 128, .35); color: inherit; }
-    #fwmap-camera { position: absolute; right: 12px; top: 146px; z-index: 3; width: 32px; height: 32px; padding: 0;
-        display: flex; align-items: center; justify-content: center; border: 1px solid var(--fwmap-accent); border-radius: 8px;
-        background: var(--fwmap-panel, #fff); color: var(--fwmap-accent); box-shadow: 0 1px 3px rgba(0, 0, 0, .08); }
-    #fwmap-camera:hover { background: var(--fwmap-accent); color: #fff; }
-    #fwmap-camera:disabled { opacity: .6; }
-    #fwmap-camera .fwmap-ic { width: 18px; height: 18px; }
-    #fwmap-map.fwmap-frozen::after { content: ""; position: absolute; inset: 0; z-index: 4; pointer-events: none;
-        border: 2px solid var(--fwmap-frozen); border-radius: 6px; }
-    #fwmap-map.fwmap-frozen #fwmap-legend, #fwmap-map.fwmap-frozen #fwmap-zoom { top: 58px; }
-    #fwmap-map.fwmap-frozen #fwmap-credit { display: none; }
-    #fwmap-banner { position: absolute; left: 0; right: 0; top: 0; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
-        padding: 8px 12px; font-size: .92em; color: var(--fwmap-text, inherit);
-        background: linear-gradient(var(--fwmap-frozen-soft), var(--fwmap-frozen-soft)), var(--fwmap-panel, #fff);
-        border-bottom: 1px solid var(--fwmap-frozen); }
-    .fwmap-banner-ic { width: 18px; height: 18px; color: var(--fwmap-frozen); }
-    .fwmap-banner-text { flex: 1 1 260px; min-width: 0; }
-    .fwmap-banner-counts { opacity: .8; }
-    /* who took a snapshot sits with its time, in the small muted style of the line below */
-    .fwmap-snap-by { font-size: .8em; font-weight: normal; opacity: .65; }
-    .fwmap-banner-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-    .fwmap-banner-actions .btn { display: inline-flex; align-items: center; gap: 5px; }
-    .fwmap-banner-actions .btn .fwmap-ic { width: 15px; height: 15px; }
-    .fwmap-snap-note { font-style: italic; }
-    .fwmap-snap-flagged { color: var(--fwmap-danger); font-weight: 600; }
-    .fwmap-live.frozen { background: var(--fwmap-frozen); }
-    /* the timeline: a pill bottom left that grows sideways only (same height), a scrubber when open */
-    #fwmap-timeline { position: absolute; left: 12px; bottom: 12px; z-index: 4; height: 40px; box-sizing: border-box;
-        display: flex; align-items: center; gap: 2px; max-width: calc(100% - 24px); padding: 0 4px; border-radius: 20px; font-size: .9em;
-        background: var(--fwmap-panel, #fff); color: var(--fwmap-text, inherit); border: 1px solid var(--fwmap-frozen);
-        box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
-    #fwmap-timeline.open { right: 12px; }
-    #fwmap-timeline button { border: 0; background: transparent; color: inherit; }
-    .fwmap-tl-toggle, .fwmap-tl-step, .fwmap-tl-day-step { height: 30px; border-radius: 15px; flex: none; }
-    #fwmap-timeline .fwmap-tl-toggle:hover, #fwmap-timeline .fwmap-tl-step:hover:not(:disabled),
-    #fwmap-timeline .fwmap-tl-day-step:hover:not(:disabled) { background: var(--fwmap-frozen-soft); }
-    #fwmap-timeline button:disabled { opacity: .3; }
-    .fwmap-tl-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font-weight: 600; }
-    #fwmap-timeline.open .fwmap-tl-toggle { width: 30px; padding: 0; justify-content: center; color: var(--fwmap-frozen); }
-    .fwmap-tl-step, .fwmap-tl-day-step { width: 28px; padding: 0; }
-    .fwmap-tl-where { padding: 0 6px; white-space: nowrap; font-variant-numeric: tabular-nums; flex: none; }
-    .fwmap-tl-day { display: inline-flex; align-items: center; flex: none; padding: 0 4px 0 2px; margin-right: 6px;
-        border-right: 1px solid rgba(128, 128, 128, .25); }
-    .fwmap-tl-day-label { font-weight: 600; white-space: nowrap; min-width: 4.5em; text-align: center; }
-    .fwmap-tl-track { position: relative; flex: 1; min-width: 120px; height: 100%; margin: 0 14px; }
-    .fwmap-tl-line { position: absolute; left: -6px; right: -6px; top: 15px; height: 2px; border-radius: 1px; background: rgba(128, 128, 128, .35); }
-    .fwmap-tl-tick { position: absolute; bottom: 2px; transform: translateX(-50%); font-size: .7em; opacity: .55; white-space: nowrap;
-        font-variant-numeric: tabular-nums; pointer-events: none; }
-    .fwmap-tl-tick::before { content: ""; position: absolute; left: 50%; top: -9px; width: 1px; height: 5px; background: currentColor; }
-    .fwmap-tl-dot, .fwmap-tl-group, .fwmap-tl-mini { position: absolute; transform: translate(-50%, -50%); }
-    #fwmap-timeline .fwmap-tl-dot { top: 16px; width: 12px; height: 12px; padding: 0; border-radius: 50%;
-        background: var(--fwmap-text, #888); opacity: .75; box-shadow: 0 0 0 2px var(--fwmap-panel, #fff); }
-    #fwmap-timeline .fwmap-tl-dot:hover, #fwmap-timeline .fwmap-tl-dot:focus-visible { opacity: 1; width: 15px; height: 15px; }
-    #fwmap-timeline .fwmap-tl-dot.flagged { background: var(--fwmap-danger); opacity: .9; }
-    #fwmap-timeline .fwmap-tl-dot.active { background: var(--fwmap-frozen); opacity: 1;
-        box-shadow: 0 0 0 2px var(--fwmap-panel, #fff), 0 0 0 4px var(--fwmap-frozen); }
-    .fwmap-tl-group { top: 16px; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-        cursor: pointer; background: var(--fwmap-frozen-soft); border: 1.5px solid var(--fwmap-frozen); outline: none;
-        box-shadow: 0 0 0 2px var(--fwmap-panel, #fff); }
-    .fwmap-tl-group.active { background: var(--fwmap-frozen); color: var(--fwmap-on-frozen); }
-    .fwmap-tl-group:focus-visible { box-shadow: 0 0 0 2px var(--fwmap-panel, #fff), 0 0 0 4px var(--fwmap-accent); }
-    .fwmap-tl-count { font-size: .72em; font-weight: 700; line-height: 1; }
-    /* a numbered dot opens a zoomed strip above the pill (the pill keeps its height) */
-    .fwmap-tl-pop { display: none; position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); padding-bottom: 12px; cursor: default; }
-    .fwmap-tl-group:hover .fwmap-tl-pop, .fwmap-tl-group:focus-within .fwmap-tl-pop { display: block; }
-    .fwmap-tl-strip { position: relative; display: block; height: 52px; border-radius: 12px; background: var(--fwmap-panel, #fff);
-        border: 1px solid var(--fwmap-frozen); box-shadow: 0 6px 18px rgba(0, 0, 0, .22); }
-    .fwmap-tl-strip::before { content: ""; position: absolute; left: 14px; right: 14px; top: 18px; height: 2px; background: rgba(128, 128, 128, .3); }
-    #fwmap-timeline .fwmap-tl-mini { top: 19px; width: 12px; height: 12px; padding: 0; border-radius: 50%; background: var(--fwmap-text, #888); opacity: .8; }
-    #fwmap-timeline .fwmap-tl-mini.flagged { background: var(--fwmap-danger); }
-    #fwmap-timeline .fwmap-tl-mini.active { background: var(--fwmap-frozen); opacity: 1; box-shadow: 0 0 0 2px var(--fwmap-panel, #fff), 0 0 0 4px var(--fwmap-frozen); }
-    #fwmap-timeline .fwmap-tl-mini:hover, #fwmap-timeline .fwmap-tl-mini:focus-visible { opacity: 1; width: 15px; height: 15px; }
-    .fwmap-tl-mini-time { position: absolute; top: 15px; left: 50%; transform: translateX(-50%) scale(.8); font-size: .78em; white-space: nowrap;
-        opacity: .75; pointer-events: none; color: var(--fwmap-text, inherit); }
-    /* the badge over a dot: date, time, counts, note, who took it */
-    .fwmap-tl-tip { display: none; position: absolute; left: 50%; bottom: calc(100% + 12px); transform: translateX(-50%); z-index: 2;
-        flex-direction: column; gap: 2px; min-width: 150px; max-width: 280px; padding: 7px 10px; border-radius: 8px; text-align: left;
-        white-space: normal; font-size: .88rem; line-height: 1.35; pointer-events: none;
-        background: var(--fwmap-panel, #fff); color: var(--fwmap-text, inherit); border: 1px solid rgba(128, 128, 128, .35);
-        box-shadow: 0 6px 18px rgba(0, 0, 0, .25); }
-    .fwmap-tl-dot:hover > .fwmap-tl-tip, .fwmap-tl-dot:focus-visible > .fwmap-tl-tip,
-    .fwmap-tl-mini:hover > .fwmap-tl-tip, .fwmap-tl-mini:focus-visible > .fwmap-tl-tip { display: flex; }
-    .fwmap-tl-tip b { white-space: nowrap; }
-    .fwmap-snap-row { grid-template-columns: 30px minmax(0, 1fr) auto; }
-    #fwmap-side.fwmap-narrow .fwmap-snap-row { grid-template-columns: 26px minmax(0, 1fr) auto; }
-    .fwmap-snap-row.active { background: var(--fwmap-frozen-soft); box-shadow: inset 3px 0 0 var(--fwmap-frozen); }
-    .fwmap-snap-row .fwmap-talker-icon { color: var(--fwmap-frozen); opacity: 1; }
-    .fwmap-snap-size { font-size: .85em; opacity: .6; white-space: nowrap; }
-    .fwmap-snap-kept { font-size: .85em; padding: 0 6px 6px; }
-    .fwmap-snap-notice { display: flex; align-items: center; gap: 8px; margin: 8px 0 2px; padding: 6px 10px; border-radius: 4px; font-size: .92em;
-        background: var(--fwmap-frozen-soft); border-left: 3px solid var(--fwmap-frozen); }
-    .fwmap-snap-notice .fwmap-ic { color: var(--fwmap-frozen); }
-    .fwmap-toast-ok { color: var(--fwmap-ok); stroke-width: 2.6; }
-    @media (max-width: 1100px) {
-        #fwmap-layout { flex-direction: column; height: auto; }
-        #fwmap-split-side { display: none; }
-        #fwmap-side { width: auto; flex: none; height: auto; }
-        #fwmap-map { flex: none; height: 60vh; }
-        #fwmap-toolbar .fwmap-tool-text { display: none; }
-    }
-</style>
-
+<link rel="stylesheet" href="/ui/css/firewall-map.css?v={{ styleVersion }}">
 <link rel="stylesheet" href="/ui/css/flags/flag-icon.css">
 <script>
     // json_encode: a translation containing a quote cannot break out of the string. The strings the
@@ -755,8 +337,8 @@
                 </div>
                 <button id="fwmap-reset" class="btn btn-default btn-sm" type="button" title="{{ lang._('Reset filters') }}" aria-label="{{ lang._('Reset filters') }}" style="display:none"><i class="fa fa-fw fa-rotate-left" aria-hidden="true"></i></button>
             </div>
-            <button id="fwmap-review" class="btn btn-default btn-sm fwmap-tool-btn" type="button" style="display:none" title="{{ lang._('Threats') }}">
-                <i class="fa fa-fw fa-list" aria-hidden="true"></i><span class="fwmap-tool-text">{{ lang._('Threats') }}</span> <span class="badge" id="fwmap-review-count"></span>
+            <button id="fwmap-review" class="btn btn-default btn-sm" type="button" style="display:none" title="{{ lang._('Threats') }}">
+                <i class="fa fa-fw fa-list" aria-hidden="true"></i><span class="fwmap-tool-text">{{ lang._('Threats') }}</span> <span class="label label-danger fwmap-pill" id="fwmap-review-count"></span>
             </button>
         </div>
         <div id="fwmap-map">
@@ -772,13 +354,15 @@
                     </select></span>
                 <span id="fwmap-legend-items"></span>
             </div>
-            <div id="fwmap-zoom">
-                <button type="button" data-zoom="1" title="{{ lang._('Zoom in') }}" aria-label="{{ lang._('Zoom in') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button>
-                <button type="button" data-zoom="-1" title="{{ lang._('Zoom out') }}" aria-label="{{ lang._('Zoom out') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg></button>
-                <button type="button" data-zoom="fit" title="{{ lang._('Whole world') }}" aria-label="{{ lang._('Whole world') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
-                <button type="button" id="fwmap-follow" data-zoom="follow" aria-pressed="false" title="{{ lang._('Follow traffic: keep the map zoomed to the current arcs') }}" aria-label="{{ lang._('Follow traffic') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+            <div id="fwmap-controls">
+                <div id="fwmap-zoom" class="btn-group-vertical btn-group-sm" role="group" aria-label="{{ lang._('Zoom') }}">
+                    <button type="button" class="btn btn-default" data-zoom="1" title="{{ lang._('Zoom in') }}" aria-label="{{ lang._('Zoom in') }}"><i class="fa fa-fw fa-plus" aria-hidden="true"></i></button>
+                    <button type="button" class="btn btn-default" data-zoom="-1" title="{{ lang._('Zoom out') }}" aria-label="{{ lang._('Zoom out') }}"><i class="fa fa-fw fa-minus" aria-hidden="true"></i></button>
+                    <button type="button" class="btn btn-default" data-zoom="fit" title="{{ lang._('Whole world') }}" aria-label="{{ lang._('Whole world') }}"><i class="fa fa-fw fa-expand" aria-hidden="true"></i></button>
+                    <button type="button" class="btn btn-default" id="fwmap-follow" data-zoom="follow" aria-pressed="false" title="{{ lang._('Follow traffic: keep the map zoomed to the current arcs') }}" aria-label="{{ lang._('Follow traffic') }}"><i class="fa fa-fw fa-crosshairs" aria-hidden="true"></i></button>
+                </div>
+                <button type="button" class="btn btn-default btn-sm" id="fwmap-camera" title="{{ lang._('Take a snapshot: save the map as it is now, to review later') }}" aria-label="{{ lang._('Take a snapshot') }}"><i class="fa fa-fw fa-camera" aria-hidden="true"></i></button>
             </div>
-            <button type="button" id="fwmap-camera" title="{{ lang._('Take a snapshot: save the map as it is now, to review later') }}" aria-label="{{ lang._('Take a snapshot') }}"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.6l1.6-2.4h6.6L16.9 7h2.6A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.8" r="3.4"/></svg></button>
             <div id="fwmap-banner" style="display:none" aria-live="polite"></div>
             <div id="fwmap-geo"></div>
             <div id="fwmap-timeline" style="display:none"></div>
@@ -789,17 +373,20 @@
         <div class="fwmap-splitter fwmap-splitter-v" id="fwmap-split-side" title="{{ lang._('Drag or use the arrow keys to resize; double-click or Home to reset') }}"></div>
         <div id="fwmap-side">
             <div id="fwmap-talkers">
+                <!-- each tab shows its icon; only the open one also shows its name (the others on hover) -->
                 <ul class="nav nav-tabs" role="tablist" aria-label="{{ lang._('Top talkers') }}">
-                    <li class="active" role="presentation"><a href="#" role="tab" aria-selected="true" data-tab="hosts" title="{{ lang._('Hosts') }}">{{ lang._('Hosts') }}</a></li>
-                    <li role="presentation"><a href="#" role="tab" aria-selected="false" data-tab="countries" title="{{ lang._('Countries') }}">{{ lang._('Countries') }}</a></li>
-                    <li role="presentation"><a href="#" role="tab" aria-selected="false" data-tab="networks" title="{{ lang._('Networks') }}">{{ lang._('Networks') }}</a></li>
-                    <li role="presentation"><a href="#" role="tab" aria-selected="false" data-tab="ids" title="{{ lang._('IDS') }}">{{ lang._('IDS') }}</a></li>
-                    <li role="presentation"><a href="#" role="tab" aria-selected="false" data-tab="snapshots" title="{{ lang._('Snapshots') }}">{{ lang._('Snapshots') }}</a></li>
+                    <li class="active" role="presentation"><a href="#" role="tab" aria-selected="true" data-tab="hosts" title="{{ lang._('Hosts') }}"><i class="fa fa-fw fa-desktop" aria-hidden="true"></i><span class="fwmap-tab-text">{{ lang._('Hosts') }}</span></a></li>
+                    <li role="presentation"><a href="#" role="tab" aria-selected="false" data-tab="countries" title="{{ lang._('Countries') }}"><i class="fa fa-fw fa-globe" aria-hidden="true"></i><span class="fwmap-tab-text">{{ lang._('Countries') }}</span></a></li>
+                    <li role="presentation"><a href="#" role="tab" aria-selected="false" data-tab="networks" title="{{ lang._('Networks') }}"><i class="fa fa-fw fa-sitemap" aria-hidden="true"></i><span class="fwmap-tab-text">{{ lang._('Networks') }}</span></a></li>
+                    <li role="presentation"><a href="#" role="tab" aria-selected="false" data-tab="ids" title="{{ lang._('IDS') }}"><i class="fa fa-fw fa-shield-halved" aria-hidden="true"></i><span class="fwmap-tab-text">{{ lang._('IDS') }}</span></a></li>
+                    <li role="presentation"><a href="#" role="tab" aria-selected="false" data-tab="snapshots" title="{{ lang._('Snapshots') }}"><i class="fa fa-fw fa-camera" aria-hidden="true"></i><span class="fwmap-tab-text">{{ lang._('Snapshots') }}</span></a></li>
                 </ul>
                 <div class="fwmap-talker-tools">
-                    <div class="fwmap-talker-search"><svg class="fwmap-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-5-5"/></svg>
-                        <input type="search" class="form-control" id="fwmap-talker-search" placeholder="{{ lang._('Search…') }}" aria-label="{{ lang._('Search…') }}"></div>
-                    <select class="form-control" id="fwmap-talker-sort" aria-label="{{ lang._('Sort') }}">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-addon"><i class="fa fa-fw fa-magnifying-glass" aria-hidden="true"></i></span>
+                        <input type="search" class="form-control" id="fwmap-talker-search" placeholder="{{ lang._('Search…') }}" aria-label="{{ lang._('Search…') }}">
+                    </div>
+                    <select class="selectpicker" id="fwmap-talker-sort" data-width="fit" data-style="btn-default btn-sm" aria-label="{{ lang._('Sort') }}">
                         <option value="rate">{{ lang._('Top talkers') }}</option>
                         <option value="flows">{{ lang._('Most flows') }}</option>
                         <option value="name">{{ lang._('Name') }}</option>

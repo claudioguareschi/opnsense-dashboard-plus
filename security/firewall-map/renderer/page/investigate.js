@@ -28,18 +28,24 @@
 import {escapeHtml} from '../src/format.js';
 import {errorText, notify, postJSON} from './api.js';
 import {MAX_ABUSE_SCORES, MAX_INVESTIGATIONS, state, T} from './context.js';
-import {rows} from './parts.js';
+import {ic} from './icons.js';
+import {pill, rows} from './parts.js';
 
 function scoreBadge(score) {
-  const kind = score >= 75 ? 'danger' : score >= 25 ? 'warning' : score > 0 ? 'contained' : 'ok';
-  return `<span class="fwmap-pill fwmap-pill-${kind}">${escapeHtml(score)}%</span>`;
+  return pill(score >= 25 ? (score >= 75 ? 'danger' : 'warning') : score > 0 ? 'default' : 'success', `${score}%`);
+}
+
+/** The investigation as the details panel and Threats show it: a panel under the entry. */
+export function investigationPanel(html) {
+  return `<div class="panel panel-default fwmap-investigation"><div class="panel-heading">${ic('magnifying-glass')} <b>${escapeHtml(T.investigate)}</b></div>`
+    + `<div class="panel-body">${html}</div></div>`;
 }
 
 function investigationCard(result) {
   if (result.status !== 'ok') {
     return `<div class="text-danger">${escapeHtml(result.error || T.action_failed)}</div>`;
   }
-  const section = (title, data, body) => `<div class="fwmap-inv-section"><div class="fwmap-inv-title">${escapeHtml(title)}</div>`
+  const section = (title, data, body) => `<div class="fwmap-inv-section"><h5 class="fwmap-inv-title">${escapeHtml(title)}</h5>`
     + (data?.error ? `<div class="text-muted">${escapeHtml(T.lookup_failed)}: ${escapeHtml(data.error)}</div>` : body) + '</div>';
   const table = (items) => rows(items, 'fwmap-inv-table');
   const rdap = result.rdap || {};

@@ -34,6 +34,7 @@ import {escapeHtml, fill, formatBytes, hostPort, plural} from '../src/format.js'
 import {confirmAction, getJSON, notifyFailure, postJSON} from './api.js';
 import {state, T} from './context.js';
 import {ic} from './icons.js';
+import {pill} from './parts.js';
 import {readStorage, writeStorage} from './storage.js';
 
 const TIMELINE_KEY = 'firewallmap.timeline';
@@ -55,11 +56,8 @@ export function takenText(meta, withDate = true) {
 }
 
 function countsText(meta) {
-  const parts = [plural(T, 'snapshot_flows', meta.flows || 0)];
-  if (meta.flagged) {
-    parts.push(`<span class="fwmap-snap-flagged">${escapeHtml(plural(T, 'snapshot_flagged', meta.flagged))}</span>`);
-  }
-  return parts.map((part, index) => (index ? part : escapeHtml(part))).join(' · ');
+  const flows = escapeHtml(plural(T, 'snapshot_flows', meta.flows || 0));
+  return meta.flagged ? `${flows} ${pill('danger', plural(T, 'snapshot_flagged', meta.flagged))}` : flows;
 }
 
 async function loadSnapshots() {
@@ -90,8 +88,8 @@ async function takeSnapshot() {
     }
     const meta = result.snapshot;
     const note = window.FirewallMapRenderer.host.toast(frame,
-      `${ic('check', 'fwmap-toast-ok')}<span><b>${escapeHtml(T.snapshot_saved)}</b> `
-      + `<span class="fwmap-muted">· ${escapeHtml(takenText(meta, false))} · ${countsText(meta)}</span></span>`
+      `${ic('check', 'text-success')}<span><b>${escapeHtml(T.snapshot_saved)}</b> `
+      + `<span class="text-muted">· ${escapeHtml(takenText(meta, false))} · ${countsText(meta)}</span></span>`
       + `<button type="button" class="btn btn-primary btn-xs fwmap-toast-open">${escapeHtml(T.snapshot_open)}</button>`);
     $(note).find('.fwmap-toast-open').on('click', () => {
       note.remove();
@@ -257,15 +255,15 @@ function renderBanner() {
   }
   const meta = frozen.meta;
   const note = meta.note ? ` · <span class="fwmap-snap-note">“${escapeHtml(meta.note)}”</span>` : '';
-  const partial = meta.partial ? ` · <span class="fwmap-muted" title="${escapeHtml(T.snapshot_partial_hint)}">${escapeHtml(T.snapshot_partial)}</span>` : '';
+  const partial = meta.partial ? ` · <span class="text-muted" title="${escapeHtml(T.snapshot_partial_hint)}">${escapeHtml(T.snapshot_partial)}</span>` : '';
   $banner.html(`
     ${ic('camera', 'fwmap-banner-ic')}
     <span class="fwmap-banner-text"><b>${escapeHtml(T.snapshot)} · ${escapeHtml(takenText(meta))}</b>${meta.user ? ` <span class="fwmap-banner-counts">· ${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}</span>` : ''}${note}
       <span class="fwmap-banner-counts">· ${countsText(meta)}${partial}</span></span>
     <span class="fwmap-banner-actions">
-      <button type="button" class="btn btn-default btn-sm fwmap-snap-note-btn">${ic('edit')} ${escapeHtml(meta.note ? T.snapshot_edit_note : T.snapshot_add_note)}</button>
+      <button type="button" class="btn btn-default btn-sm fwmap-snap-note-btn">${ic('pen')} ${escapeHtml(meta.note ? T.snapshot_edit_note : T.snapshot_add_note)}</button>
       <button type="button" class="btn btn-default btn-sm fwmap-snap-download" title="${escapeHtml(T.snapshot_download)}" aria-label="${escapeHtml(T.snapshot_download)}">${ic('download')}</button>
-      ${state.isAdmin ? `<button type="button" class="btn btn-default btn-sm fwmap-snap-delete" title="${escapeHtml(T.snapshot_delete)}" aria-label="${escapeHtml(T.snapshot_delete)}">${ic('trash')}</button>` : ''}
+      ${state.isAdmin ? `<button type="button" class="btn btn-default btn-sm fwmap-snap-delete" title="${escapeHtml(T.snapshot_delete)}" aria-label="${escapeHtml(T.snapshot_delete)}">${ic('trash-can')}</button>` : ''}
     </span>`).show();
 }
 
@@ -287,7 +285,7 @@ function dayLabel(key) {
 /** The badge over a dot: when and by whom, what it holds, the note. */
 function tipHtml(meta) {
   return `<span class="fwmap-tl-tip" role="tooltip"><b>${escapeHtml(takenText(meta))}</b>
-    ${meta.user ? `<span class="fwmap-muted">${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}</span>` : ''}
+    ${meta.user ? `<span class="text-muted">${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}</span>` : ''}
     <span>${countsText(meta)}</span>
     ${meta.note ? `<span class="fwmap-snap-note">“${escapeHtml(meta.note)}”</span>` : ''}</span>`;
 }
@@ -371,8 +369,8 @@ function renderTimeline() {
   const list = state.snapshots;
   const index = list.findIndex((meta) => meta.id === state.frozen.meta.id);
   const older = `<button type="button" class="fwmap-tl-step" data-step="1" title="${escapeHtml(T.snapshot_older)}" aria-label="${escapeHtml(T.snapshot_older)}"${index >= list.length - 1 ? ' disabled' : ''}>${ic('chevron-left')}</button>`;
-  const newer = `<button type="button" class="fwmap-tl-step" data-step="-1" title="${escapeHtml(T.snapshot_newer)}" aria-label="${escapeHtml(T.snapshot_newer)}"${index <= 0 ? ' disabled' : ''}>${ic('chevron')}</button>`;
-  const where = `<span class="fwmap-tl-where">${escapeHtml(takenText(state.frozen.meta, false))} <span class="fwmap-muted">· ${escapeHtml(list.length - index)}/${escapeHtml(list.length)}</span></span>`;
+  const newer = `<button type="button" class="fwmap-tl-step" data-step="-1" title="${escapeHtml(T.snapshot_newer)}" aria-label="${escapeHtml(T.snapshot_newer)}"${index <= 0 ? ' disabled' : ''}>${ic('chevron-right')}</button>`;
+  const where = `<span class="fwmap-tl-where">${escapeHtml(takenText(state.frozen.meta, false))} <span class="text-muted">· ${escapeHtml(list.length - index)}/${escapeHtml(list.length)}</span></span>`;
   if (!timelineOpen) {
     $timeline.removeClass('open').html(`
       <button type="button" class="fwmap-tl-toggle" aria-expanded="false" title="${escapeHtml(T.timeline_expand)}">${ic('clock')} ${escapeHtml(T.timeline)}</button>
@@ -391,7 +389,7 @@ function renderTimeline() {
     <button type="button" class="fwmap-tl-toggle" aria-expanded="true" title="${escapeHtml(T.timeline_collapse)}" aria-label="${escapeHtml(T.timeline_collapse)}">${ic('clock')}</button>
     <span class="fwmap-tl-day">${dayButton(-1, 'chevron-left', T.timeline_previous_day, dayIndex <= 0)}
       <span class="fwmap-tl-day-label">${escapeHtml(dayLabel(timelineDay))}</span>
-      ${dayButton(1, 'chevron', T.timeline_next_day, dayIndex >= days.length - 1)}</span>
+      ${dayButton(1, 'chevron-right', T.timeline_next_day, dayIndex >= days.length - 1)}</span>
     <span class="fwmap-tl-track"></span>
     ${older}${where}${newer}`).show();
   layoutTrack($timeline.find('.fwmap-tl-track'), list.filter((meta) => dayKey(meta) === timelineDay));
@@ -410,18 +408,17 @@ export function renderSnapshotList() {
     $list.html(`<div class="text-muted fwmap-empty">${escapeHtml(needle ? T.queue_no_match : T.no_snapshots)}</div>`);
     return;
   }
-  const kept = `<div class="fwmap-snap-kept fwmap-muted">${escapeHtml(fill(T.snapshots_kept, {count: state.snapshotsKept.keep, days: state.snapshotsKept.keep_days}))}</div>`;
-  $list.html(kept + rows.map((meta) => {
+  const kept = `<p class="help-block">${escapeHtml(fill(T.snapshots_kept, {count: state.snapshotsKept.keep, days: state.snapshotsKept.keep_days}))}</p>`;
+  $list.html(`${kept}<div class="list-group">${rows.map((meta) => {
     const current = meta.id === state.frozen?.meta.id;
-    return `<div class="fwmap-talker fwmap-snap-row${current ? ' active' : ''}" role="button" tabindex="0" data-id="${escapeHtml(meta.id)}"
+    return `<a href="#" role="button" class="list-group-item fwmap-snap-row${current ? ' active' : ''}" data-id="${escapeHtml(meta.id)}"
         aria-pressed="${current}" title="${escapeHtml(T.snapshot_show)}">
-      <span class="fwmap-talker-icon">${ic('camera')}</span>
-      <span class="fwmap-talker-text"><span class="fwmap-talker-label">${escapeHtml(takenText(meta))}${meta.user ? ` <span class="fwmap-snap-by">· ${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}</span>` : ''}</span>
-        <span class="fwmap-talker-sub">${countsText(meta)}</span>
-        ${meta.note ? `<span class="fwmap-talker-sub fwmap-snap-note">“${escapeHtml(meta.note)}”</span>` : ''}</span>
-      <span class="fwmap-snap-size">${escapeHtml(formatBytes(meta.size || 0))}</span>
-    </div>`;
-  }).join(''));
+      <span class="badge">${escapeHtml(formatBytes(meta.size || 0))}</span>
+      <h5 class="list-group-item-heading">${ic('camera')} ${escapeHtml(takenText(meta))}${meta.user ? ` <small>${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}</small>` : ''}</h5>
+      <div class="list-group-item-text">${countsText(meta)}${meta.partial ? ` <span title="${escapeHtml(T.snapshot_partial_hint)}">${pill('warning', T.snapshot_partial)}</span>` : ''}
+        ${meta.note ? `<div><em>“${escapeHtml(meta.note)}”</em></div>` : ''}</div>
+    </a>`;
+  }).join('')}</div>`);
 }
 
 /** The header switch, the camera, the frame, banner and timeline, and the tab if it is open. */
@@ -490,6 +487,8 @@ export function bindSnapshots(pageHooks) {
       event.preventDefault();
       openSnapshot(String($(this).data('id')));
     })
+    // the row is a link for Bootstrap's list styling; it opens on mousedown and goes nowhere
+    .on('click', '.fwmap-snap-row', (event) => event.preventDefault())
     .on('keydown', '.fwmap-snap-row', function (event) {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();

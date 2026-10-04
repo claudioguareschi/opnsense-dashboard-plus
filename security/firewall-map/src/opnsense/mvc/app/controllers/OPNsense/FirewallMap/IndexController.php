@@ -32,10 +32,10 @@ namespace OPNsense\FirewallMap;
  */
 class IndexController extends \OPNsense\Base\IndexController
 {
-    /** A script's modification time as its cache-busting version, 0 when it is not installed. */
-    private function version($script)
+    /** A file's modification time as its cache-busting version, 0 when it is not installed. */
+    private function version($path)
     {
-        $file = '/usr/local/opnsense/www/js/' . $script;
+        $file = '/usr/local/opnsense/www/' . $path;
         return is_file($file) ? filemtime($file) : 0;
     }
 
@@ -60,11 +60,12 @@ class IndexController extends \OPNsense\Base\IndexController
     public function indexAction()
     {
         $this->view->title = gettext('Firewall Map');
-        /* cache_safe() keys on the firmware version; the plugin's renderer changes independently */
-        $this->view->rendererVersion = $this->version('firewall-map-renderer.js');
-        $this->view->pageVersion = $this->version('firewall-map-page.js');
+        /* cache_safe() keys on the firmware version; the plugin's files change independently */
+        $this->view->rendererVersion = $this->version('js/firewall-map-renderer.js');
+        $this->view->pageVersion = $this->version('js/firewall-map-page.js');
+        $this->view->styleVersion = $this->version('css/firewall-map.css');
         /* the ?debug=1 panel: installed by development packages only */
-        $this->view->diagnosticsVersion = $this->version('firewall-map-diagnostics.js');
+        $this->view->diagnosticsVersion = $this->version('js/firewall-map-diagnostics.js');
         $this->view->sharedText = $this->sharedText();
         $this->view->pick('OPNsense/FirewallMap/index');
     }

@@ -593,93 +593,38 @@
 	}
 	//#endregion
 	//#region page/icons.js
-	var ICON_PATHS = {
-		"globe": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M2 12h20\"/><path d=\"M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z\"/>",
-		"laptop": "<rect x=\"4\" y=\"4\" width=\"16\" height=\"11\" rx=\"1.5\"/><path d=\"M2 19h20\"/>",
-		"server": "<rect x=\"3\" y=\"3\" width=\"18\" height=\"7\" rx=\"1.5\"/><rect x=\"3\" y=\"14\" width=\"18\" height=\"7\" rx=\"1.5\"/><path d=\"M7 6.5h.01M7 17.5h.01M11 6.5h6M11 17.5h6\"/>",
-		"shield": "<path d=\"M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z\"/>",
-		"shield-check": "<path d=\"M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z\"/><path d=\"m9 12 2 2 4-4\"/>",
-		"chart": "<path d=\"M3 3v18h18\"/><path d=\"M8 17v-4M12 17V7M16 17v-7M20 17v-2\"/>",
-		"search": "<circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"m21 21-5-5\"/>",
-		"layers": "<path d=\"m12 2 10 5-10 5L2 7l10-5z\"/><path d=\"m2 17 10 5 10-5\"/><path d=\"m2 12 10 5 10-5\"/>",
-		"external": "<path d=\"M15 3h6v6\"/><path d=\"M10 14 21 3\"/><path d=\"M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6\"/>",
-		"list": "<path d=\"M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01\"/>",
-		"trash": "<path d=\"M3 6h18\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/><path d=\"M10 11v6M14 11v6\"/>",
-		"chevron": "<path d=\"m9 18 6-6-6-6\"/>",
-		"check": "<path d=\"M20 6 9 17l-5-5\"/>",
-		"x": "<path d=\"M18 6 6 18M6 6l12 12\"/>",
-		"ban": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m4.9 4.9 14.2 14.2\"/>",
-		"flag": "<path d=\"M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z\"/><path d=\"M4 22v-7\"/>",
-		"alert": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 8v4M12 16h.01\"/>",
-		"network": "<rect x=\"9\" y=\"2\" width=\"6\" height=\"6\" rx=\"1\"/><rect x=\"16\" y=\"16\" width=\"6\" height=\"6\" rx=\"1\"/><rect x=\"2\" y=\"16\" width=\"6\" height=\"6\" rx=\"1\"/><path d=\"M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3M12 12V8\"/>",
-		"plus": "<path d=\"M12 5v14M5 12h14\"/>",
-		"minus": "<path d=\"M5 12h14\"/>",
-		"calendar": "<rect x=\"3\" y=\"4\" width=\"18\" height=\"18\" rx=\"2\"/><path d=\"M16 2v4M8 2v4M3 10h18\"/>",
-		"clock": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 6v6l4 2\"/>",
-		"swap": "<path d=\"m16 3 4 4-4 4\"/><path d=\"M20 7H4\"/><path d=\"m8 21-4-4 4-4\"/><path d=\"M4 17h16\"/>",
-		"eye-off": "<path d=\"M9.9 4.2A10 10 0 0 1 12 4c7 0 10 8 10 8a13 13 0 0 1-1.7 2.7\"/><path d=\"M6.6 6.6A13.5 13.5 0 0 0 2 12s3 8 10 8a9.7 9.7 0 0 0 5.4-1.6\"/><path d=\"M14.1 14.1a3 3 0 1 1-4.2-4.2\"/><path d=\"m2 2 20 20\"/>",
-		"undo": "<path d=\"M3 7v6h6\"/><path d=\"M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13\"/>",
-		"chevron-down": "<path d=\"m6 9 6 6 6-6\"/>",
-		"list-box": "<rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"/><path d=\"M7 8h10M7 12h10M7 16h6\"/>",
-		"expand": "<path d=\"M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3\"/>",
-		"camera": "<path d=\"M3 8.5A1.5 1.5 0 0 1 4.5 7h2.6l1.6-2.4h6.6L16.9 7h2.6A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z\"/><circle cx=\"12\" cy=\"12.8\" r=\"3.4\"/>",
-		"download": "<path d=\"M12 4v11\"/><path d=\"m7 10 5 5 5-5\"/><path d=\"M5 20h14\"/>",
-		"edit": "<path d=\"M4 20h4L19 9l-4-4L4 16z\"/><path d=\"m14 6 4 4\"/>",
-		"chevron-left": "<path d=\"m15 18-6-6 6-6\"/>",
-		"live": "<circle cx=\"12\" cy=\"12\" r=\"4\"/>"
-	};
-	var ICON_ALIASES = {
-		"fa-globe": "globe",
-		"fa-desktop": "laptop",
-		"fa-laptop": "laptop",
-		"fa-server": "server",
-		"fa-shield": "shield",
-		"fa-bar-chart": "chart",
-		"fa-search": "search",
-		"fa-database": "layers",
-		"fa-external-link": "external",
-		"fa-list": "list",
-		"fa-trash-o": "trash",
-		"fa-chevron-right": "chevron",
-		"fa-check": "check",
-		"fa-times": "x",
-		"fa-ban": "ban",
-		"fa-flag": "flag",
-		"fa-flag-o": "flag",
-		"fa-exclamation-triangle": "alert",
-		"fa-exclamation-circle": "alert",
-		"fa-sitemap": "network"
-	};
 	function ic(name, cls = "") {
-		const paths = ICON_PATHS[ICON_ALIASES[name] || name];
-		if (!paths) return `<i class="fa ${name} ${cls}"></i>`;
-		return `<svg class="fwmap-ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+		return `<i class="fa fa-fw fa-${name}${cls ? ` ${cls}` : ""}" aria-hidden="true"></i>`;
 	}
 	//#endregion
 	//#region page/parts.js
-	/** A status pill; `big` is the verdict pill at the top of the details panel. */
-	function pill(kind, text, icon, big = false) {
-		const base = big ? "fwmap-vpill" : "fwmap-pill";
-		return `<span class="${base} ${base}-${kind}">${icon ? `${ic(icon)} ` : ""}${escapeHtml(text)}</span>`;
+	/**
+	* A status pill: the theme's colored label (`color` is success, danger, warning or default),
+	* rounded, since Bootstrap 3 badges come in gray only. `big` is the details panel's verdict.
+	*/
+	function pill(color, text, icon, big = false) {
+		return `<span class="label label-${color} fwmap-pill${big ? " fwmap-pill-lg" : ""}">${icon ? `${ic(icon)} ` : ""}${escapeHtml(text)}</span>`;
 	}
-	function bigPill(kind, text, icon) {
-		return pill(kind, text, icon, true);
+	function bigPill(color, text, icon) {
+		return pill(color, text, icon, true);
 	}
 	/** A label/value table; rows with no value are left out. Values are HTML. */
 	function rows(items, className = "fwmap-kv") {
-		return `<table class="${className}">${items.filter(([, value]) => value !== null && value !== void 0 && value !== "").map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${value}</td></tr>`).join("")}</table>`;
+		return `<table class="table table-condensed ${className}">${items.filter(([, value]) => value !== null && value !== void 0 && value !== "").map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${value}</td></tr>`).join("")}</table>`;
 	}
 	function place(item) {
 		return [item.city, item.country].filter(Boolean).map(plain).join(", ");
 	}
 	/** One box of the connection diagram: a host on either end. */
 	function endBox(icon, name, lines) {
-		return `<div class="fwmap-end">${ic(icon)}<div class="fwmap-end-name">${escapeHtml(name)}</div>` + lines.filter(Boolean).map((line) => `<div class="fwmap-end-sub">${escapeHtml(line)}</div>`).join("") + "</div>";
+		return `<div class="well well-sm fwmap-end">${ic(icon, "text-primary fwmap-end-ic")}<div class="fwmap-end-name">${escapeHtml(name)}</div>` + lines.filter(Boolean).map((line) => `<div class="fwmap-end-sub">${escapeHtml(line)}</div>`).join("") + "</div>";
 	}
-	/** A card of the details panel: icon, title and a chevron that opens the related view. */
+	/**
+	* A panel of the details panel: icon, title and a chevron that opens the related view. A table
+	* body sits flush in the panel, anything else in its body.
+	*/
 	function card(icon, title, body, action) {
-		const chevron = action ? `<a href="${action.href || "#"}" class="fwmap-card-go ${action.cls || ""}"${action.href ? " target=\"_blank\" rel=\"noopener\"" : ""}${action.address ? ` data-address="${escapeHtml(action.address)}"` : ""} title="${escapeHtml(action.title)}" aria-label="${escapeHtml(action.title)}">${ic("chevron")}</a>` : "";
-		return `<section class="fwmap-card"><div class="fwmap-card-head">${ic(icon, "fwmap-card-ic")}<span>${escapeHtml(title)}</span>${chevron}</div><div class="fwmap-card-body">${body}</div></section>`;
+		return `<section class="panel panel-default fwmap-card"><div class="panel-heading">${action ? `<a href="${action.href || "#"}" class="pull-right fwmap-card-go ${action.cls || ""}"${action.href ? " target=\"_blank\" rel=\"noopener\"" : ""}${action.address ? ` data-address="${escapeHtml(action.address)}"` : ""} title="${escapeHtml(action.title)}" aria-label="${escapeHtml(action.title)}">${ic("chevron-right")}</a>` : ""}${ic(icon)} <b>${escapeHtml(title)}</b></div>` + (body.startsWith("<table") ? body : `<div class="panel-body">${body}</div>`) + "</section>";
 	}
 	function serviceParts(name, port) {
 		const raw = /^(TCP|UDP)\/(\d+)$/.exec(name || "");
@@ -696,7 +641,7 @@
 	/** Suricata's alerts for an address, worst signature first. */
 	function idsLines(ids, text) {
 		if (!ids) return "";
-		const cls = ids.severity <= 2 ? "fwmap-ids fwmap-ids-high" : "fwmap-ids";
+		const cls = ids.severity <= 2 ? "fwmap-ids text-danger fwmap-ids-high" : "fwmap-ids";
 		return idsSummary(ids, text).map((line) => `<div class="${cls}">${ic("flag")} ${escapeHtml(line)}</div>`).join("");
 	}
 	var unit = (key, count) => fill(TEXT[key], { count });
@@ -716,6 +661,103 @@
 		const days = Math.floor(minutes / 1440);
 		const hours = Math.floor(minutes % 1440 / 60);
 		return days ? `${unit("map_days", days)} ${unit("map_hours", hours)}` : `${unit("map_hours", hours)} ${unit("map_minutes", minutes % 60)}`;
+	}
+	//#endregion
+	//#region page/investigate.js
+	function scoreBadge(score) {
+		return pill(score >= 25 ? score >= 75 ? "danger" : "warning" : score > 0 ? "default" : "success", `${score}%`);
+	}
+	/** The investigation as the details panel and Threats show it: a panel under the entry. */
+	function investigationPanel(html) {
+		return `<div class="panel panel-default fwmap-investigation"><div class="panel-heading">${ic("magnifying-glass")} <b>${escapeHtml(T.investigate)}</b></div><div class="panel-body">${html}</div></div>`;
+	}
+	function investigationCard(result) {
+		if (result.status !== "ok") return `<div class="text-danger">${escapeHtml(result.error || T.action_failed)}</div>`;
+		const section = (title, data, body) => `<div class="fwmap-inv-section"><h5 class="fwmap-inv-title">${escapeHtml(title)}</h5>` + (data?.error ? `<div class="text-muted">${escapeHtml(T.lookup_failed)}: ${escapeHtml(data.error)}</div>` : body) + "</div>";
+		const table = (items) => rows(items, "fwmap-inv-table");
+		const rdap = result.rdap || {};
+		const ripe = result.ripestat || {};
+		const abuse = result.abuseipdb;
+		let html = section(T.registry, rdap, table([
+			[T.owner, escapeHtml(rdap.owner || rdap.name)],
+			[T.network, escapeHtml([rdap.name, rdap.handle].filter(Boolean).join(" · "))],
+			[T.range, escapeHtml(rdap.range)],
+			[T.country, escapeHtml(rdap.country)],
+			[T.abuse_contact, rdap.abuse_email ? `<a href="mailto:${escapeHtml(rdap.abuse_email)}">${escapeHtml(rdap.abuse_email)}</a>` : ""],
+			[T.registered, escapeHtml([rdap.registered, rdap.updated && `${T.updated} ${rdap.updated}`].filter(Boolean).join(" · "))]
+		]));
+		html += section(T.routing, ripe, table([
+			[T.prefix, escapeHtml(ripe.prefix)],
+			[T.origin_as, (ripe.asns || []).map((item) => escapeHtml(`AS${item.asn} ${item.holder || ""}`)).join("<br>")],
+			[T.announced, ripe.announced === void 0 ? "" : escapeHtml(ripe.announced ? T.yes : T.no)]
+		]));
+		if (abuse) html += section("AbuseIPDB", abuse, table([
+			[T.confidence, abuse.score === void 0 ? "" : scoreBadge(abuse.score)],
+			[T.reports, abuse.reports === void 0 ? "" : escapeHtml(`${abuse.reports} (${abuse.reporters ?? 0} ${T.reporters})`)],
+			[T.last_reported, escapeHtml(abuse.last_reported)],
+			[T.usage, escapeHtml([abuse.usage, abuse.tor ? "Tor" : null].filter(Boolean).join(" · "))],
+			["ISP", escapeHtml([abuse.isp, abuse.domain].filter(Boolean).join(" · "))]
+		]));
+		else if (!result.abuseipdb_configured) html += `<div class="text-muted fwmap-inv-section">${escapeHtml(T.abuseipdb_hint)}</div>`;
+		return html;
+	}
+	/** Keep a card for the most recent addresses only. */
+	function remember(address, html) {
+		state.investigations.delete(address);
+		state.investigations.set(address, html);
+		while (state.investigations.size > 50) state.investigations.delete(state.investigations.keys().next().value);
+	}
+	function noteScore(result, address) {
+		if (result.abuseipdb && typeof result.abuseipdb.score === "number") {
+			state.abuseScores.delete(address);
+			state.abuseScores.set(address, result.abuseipdb.score);
+			while (state.abuseScores.size > 500) state.abuseScores.delete(state.abuseScores.keys().next().value);
+		}
+	}
+	var RETRY_MS = 1500;
+	function failureCard(address, text) {
+		return `<div class="text-danger">${escapeHtml(T.action_failed)}: ${escapeHtml(text)}</div><button type="button" class="btn btn-default btn-xs fwmap-investigate fwmap-inv-retry" data-address="${escapeHtml(address)}"><i class="fa fa-rotate-right"></i> ${escapeHtml(T.retry)}</button>`;
+	}
+	async function lookup(address) {
+		let failure = null;
+		for (let attempt = 0; attempt < 2; attempt++) {
+			if (attempt) await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+			try {
+				const result = await postJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`, {});
+				if (result.status === "ok") return { result };
+				failure = result.error || T.lookup_failed;
+			} catch (error) {
+				failure = errorText(error);
+			}
+		}
+		return { failure };
+	}
+	/** The full lookup for an address; `rerender` redraws whatever shows the card, scrolled to it. */
+	async function investigate(address, rerender) {
+		state.revealInvestigation = address;
+		remember(address, `<div class="fwmap-inv-loading"><i class="fa fa-spinner fa-spin"></i> ${escapeHtml(T.looking_up)}</div>`);
+		rerender();
+		state.revealInvestigation = null;
+		const { result, failure } = await lookup(address);
+		if (result) {
+			remember(address, investigationCard(result));
+			noteScore(result, address);
+		} else remember(address, failureCard(address, failure));
+		rerender();
+	}
+	/** AbuseIPDB alone, from the Reputation card: the verdict fills in without opening the full investigation. */
+	async function checkAbuse(address, rerender) {
+		state.abuseChecking.add(address);
+		rerender();
+		try {
+			const result = await postJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`, { sources: "abuseipdb" });
+			noteScore(result, address);
+			if (!state.abuseScores.has(address)) notify(`AbuseIPDB: ${result.abuseipdb?.error || result.error || T.lookup_failed}`, BootstrapDialog.TYPE_WARNING);
+		} catch (error) {
+			notify(`${T.action_failed}: ${errorText(error)}`, BootstrapDialog.TYPE_DANGER);
+		}
+		state.abuseChecking.delete(address);
+		rerender();
 	}
 	//#endregion
 	//#region page/details.js
@@ -739,17 +781,17 @@
 		const blacklisted = listed.has(ABUSEIPDB_BLACKLIST_LIST);
 		const known = score !== null && score !== void 0;
 		let abuse;
-		if (state.abuseChecking.has(address)) abuse = `<span class="fwmap-muted">${escapeHtml(T.checking)}</span>`;
-		else if (!known) abuse = state.isAdmin && state.abuseConfigured ? `<a href="#" class="fwmap-abuse-check" data-address="${escapeHtml(address)}">${ic("search")} ${escapeHtml(T.check_now)}</a>` : `<span class="fwmap-muted" title="${escapeHtml(T.abuseipdb_hint)}">${escapeHtml(T.no_key)}</span>`;
-		else abuse = score >= 75 ? pill("danger", `${score}%`) : score >= 25 ? pill("warning", `${score}%`) : pill("ok", T.clean, "fa-check");
-		const notListed = `<span class="fwmap-not-listed">${ic("check")} ${escapeHtml(T.not_listed_short)}</span>`;
-		const left = rows([["AbuseIPDB", blacklisted && !known ? "" : abuse], ...lists.filter((name) => name !== ABUSEIPDB_LOOKUP_LIST).map((name) => [listLabel(name), listed.has(name) ? pill("danger", T.listed, "fa-ban") : notListed])]);
+		if (state.abuseChecking.has(address)) abuse = `<span class="text-muted">${escapeHtml(T.checking)}</span>`;
+		else if (!known) abuse = state.isAdmin && state.abuseConfigured ? `<a href="#" class="fwmap-abuse-check" data-address="${escapeHtml(address)}">${ic("magnifying-glass")} ${escapeHtml(T.check_now)}</a>` : `<span class="text-muted" title="${escapeHtml(T.abuseipdb_hint)}">${escapeHtml(T.no_key)}</span>`;
+		else abuse = score >= 75 ? pill("danger", `${score}%`) : score >= 25 ? pill("warning", `${score}%`) : pill("success", T.clean, "check");
+		const notListed = `<span class="text-success">${ic("check")} ${escapeHtml(T.not_listed_short)}</span>`;
+		const left = rows([["AbuseIPDB", blacklisted && !known ? "" : abuse], ...lists.filter((name) => name !== ABUSEIPDB_LOOKUP_LIST).map((name) => [listLabel(name), listed.has(name) ? pill("danger", T.listed, "ban") : notListed])]);
 		const right = rows([
 			["ASN", item.asn ? escapeHtml(`AS${item.asn}`) : ""],
 			[T.organization, escapeHtml(plain(item.as_org || ""))],
 			[T.country, item.country ? `${flagHtml(item.country_code)} ${escapeHtml(plain(item.country))}` : ""]
 		]);
-		return card("fa-database", T.sec_reputation, `<div class="fwmap-two">${left}${right}</div>`, state.isAdmin ? {
+		return card("layer-group", T.sec_reputation, `<div class="fwmap-two">${left}${right}</div>`, state.isAdmin ? {
 			cls: "fwmap-investigate",
 			address,
 			title: T.investigate
@@ -760,14 +802,14 @@
 			...item,
 			last: null
 		}));
-		if (!signatures.length) return card("fa-search", T.sec_ids_long, `<div class="fwmap-empty-note">${ic("check", "fwmap-ok-ic")}
-      <div><div>${escapeHtml(T.no_ids)}</div><div class="fwmap-muted">${escapeHtml(T.no_ids_sub)}</div></div></div>`, {
+		if (!signatures.length) return card("magnifying-glass", T.sec_ids_long, `<div class="text-success">${ic("check")} ${escapeHtml(T.no_ids)}</div>
+      <div class="text-muted">${escapeHtml(T.no_ids_sub)}</div>`, {
 			href: "/ui/ids#alerts",
 			title: T.open_ids
 		});
 		const scope = groups ? T.ids_on_connection : T.ids_on_address;
-		return card("fa-search", T.sec_ids_long, `<div class="fwmap-card-note">${escapeHtml(scope)}</div>` + signatures.map((item) => `<div class="fwmap-sig">
-        <div class="${item.severity <= 2 ? "fwmap-ids-high" : "fwmap-ids"}">${ic("flag")} ${escapeHtml(item.signature)}</div>
+		return card("magnifying-glass", T.sec_ids_long, `<div class="help-block">${escapeHtml(scope)}</div>` + signatures.map((item) => `<div class="fwmap-sig">
+        <div class="${item.severity <= 2 ? "text-danger fwmap-ids-high" : "fwmap-ids"}">${ic("flag")} ${escapeHtml(item.signature)}</div>
         <div class="text-muted">${escapeHtml(T.severity)} ${escapeHtml(item.severity)}${item.category ? ` · ${escapeHtml(item.category)}` : ""}${item.sid ? ` · SID ${escapeHtml(item.sid)}` : ""}
           · ${escapeHtml(item.count)}×${item.last ? ` · ${escapeHtml((/* @__PURE__ */ new Date(item.last * 1e3)).toLocaleTimeString())}` : ""}${item.action === "blocked" ? ` · <b>${escapeHtml(T.ips_dropped)}</b>` : ""}</div>
       </div>`).join(""), {
@@ -776,7 +818,7 @@
 		});
 	}
 	function firewallBox(sub) {
-		return endBox("fa-shield", T.this_firewall_title, [sub]);
+		return endBox("shield-halved", T.this_firewall_title, [sub]);
 	}
 	function localOrigin() {
 		return (state.data?.locations || []).find((entry) => entry.local)?.id || "";
@@ -793,7 +835,7 @@
 		const service = serviceParts(target && !outbound ? target.service : name, target && !outbound && target.port ? `${target.port}/${target.protocol || "tcp"}` : (flow.service_ports || {})[name]);
 		const localBox = outbound ? inside ? endBox("laptop", inside.name || inside.ip, [inside.name ? inside.ip : "", inside.interface]) : firewallBox(localOrigin()) : target && !target.firewall ? endBox("laptop", target.name || target.ip, [target.name ? target.ip : "", target.interface]) : firewallBox(localOrigin());
 		return {
-			verdict: (flow.lists || []).length > 0 ? bigPill("danger", T.allowed_flagged, "fa-exclamation-triangle") : bigPill("ok", T.allowed, "fa-check"),
+			verdict: (flow.lists || []).length > 0 ? bigPill("danger", T.allowed_flagged, "triangle-exclamation") : bigPill("success", T.allowed, "check"),
 			sub: outbound ? T.started_inside_long : T.started_outside_long,
 			diagram: {
 				from: outbound ? localBox : remoteBox,
@@ -806,7 +848,7 @@
 				[T.protocol, escapeHtml(`${service.name}${service.port ? ` (${service.port.split("/")[0]})` : ""}`)],
 				[T.remote_port, outbound && service.port ? escapeHtml(service.port.split("/")[1]) : ""],
 				[T.other_services, (flow.services || []).slice(1).map(escapeHtml).join(", ")],
-				[T.state, (flow.activity || 0) > 0 ? pill("ok", T.active, "fa-check") : pill("muted", T.idle)],
+				[T.state, (flow.activity || 0) > 0 ? pill("success", T.active, "check") : pill("default", T.idle)],
 				[T.started, flow.age ? escapeHtml(`${ago(Date.now() / 1e3 - flow.age)} ${T.ago}`) : ""],
 				[T.transferred, flow.transferred ? rateText(flow.transferred[0], flow.transferred[1], formatBytes) : ""],
 				[T.current_rate, rateText(flow.rate_in, flow.rate_out)],
@@ -814,7 +856,7 @@
 				[T.connections, escapeHtml(flow.states)]
 			]),
 			firewall: rows([
-				[T.decision, pill("ok", T.allowed, "fa-check")],
+				[T.decision, pill("success", T.allowed, "check")],
 				[T.interface, escapeHtml(inside?.interface || target?.interface || flow.egress || "")],
 				[T.rule, escapeHtml(flow.rule || "")],
 				[T.egress, escapeHtml(flow.egress || "")],
@@ -843,10 +885,10 @@
 		const serious = ids.severity <= 2 || (ids.lists || []).length > 0;
 		return {
 			verdict: {
-				ok: bigPill("ok", T.allowed, "fa-check"),
-				danger: bigPill("danger", T.allowed_flagged, "fa-exclamation-triangle"),
-				blocked: bigPill("blocked", ids.ips_dropped ? T.ips_dropped_title : T.blocked, "fa-ban"),
-				contained: bigPill("contained", ids.ips_dropped ? T.ips_dropped_flagged : T.blocked_flagged, "fa-ban")
+				ok: bigPill("success", T.allowed, "check"),
+				danger: bigPill("danger", T.allowed_flagged, "triangle-exclamation"),
+				blocked: bigPill("default", ids.ips_dropped ? T.ips_dropped_title : T.blocked, "ban"),
+				contained: bigPill("warning", ids.ips_dropped ? T.ips_dropped_flagged : T.blocked_flagged, "ban")
 			}[idsOutcome(ids)],
 			sub: ids.remote_started ? T.started_outside_long : T.started_inside_long,
 			diagram: {
@@ -861,16 +903,16 @@
 				[T.inside_side, escapeHtml(ids.inside || T.this_firewall)],
 				[T.via, escapeHtml(ids.public)],
 				[T.remote_side, escapeHtml(ids.remote)],
-				[T.state, ids.active ? pill("ok", T.active, "fa-check") : pill("muted", T.closed)],
+				[T.state, ids.active ? pill("success", T.active, "check") : pill("default", T.closed)],
 				[T.started, ids.age ? escapeHtml(`${ago(Date.now() / 1e3 - ids.age)} ${T.ago}`) : ""],
 				[T.transferred, rateText(ids.bytes_in, ids.bytes_out, formatBytes)]
 			]),
 			firewall: rows([
-				[T.decision, pill("ok", T.allowed, "fa-check")],
+				[T.decision, pill("success", T.allowed, "check")],
 				[T.interface, escapeHtml(ids.interface || "")],
 				[T.rule, escapeHtml(ids.rule || "")],
 				["NAT", ids.inside && insideAddress !== publicAddress ? escapeHtml(`${T.yes} (${ids.inside} → ${ids.public})`) : escapeHtml(T.no)],
-				["IPS", ids.ips_dropped ? pill(serious ? "contained" : "blocked", T.ips_dropped) : ""]
+				["IPS", ids.ips_dropped ? pill(serious ? "warning" : "default", T.ips_dropped) : ""]
 			]),
 			ids: idsCard(null, ids.groups),
 			reputation: reputationCard({
@@ -883,26 +925,26 @@
 		const { remoteBox, item, address } = context;
 		const service = serviceParts(block.services?.[0]?.name, block.services?.[0]?.port);
 		return {
-			verdict: (block.lists || []).length > 0 ? bigPill("contained", T.blocked_flagged, "fa-ban") : bigPill("blocked", T.blocked, "fa-ban"),
+			verdict: (block.lists || []).length > 0 ? bigPill("warning", T.blocked_flagged, "ban") : bigPill("default", T.blocked, "ban"),
 			sub: T.blocked_attempts,
 			diagram: {
 				from: remoteBox,
 				service,
 				rate: `${escapeHtml(block.hits)}× ${escapeHtml(fill(T.in_minutes, { minutes: block.window_minutes }))}`,
-				to: endBox("fa-shield", T.this_firewall_title, [block.target, block.interface]),
+				to: endBox("shield-halved", T.this_firewall_title, [block.target, block.interface]),
 				blocked: true
 			},
 			connection: rows([
 				[T.tried, (block.services || []).map((entry) => {
 					const parts = serviceParts(entry.name, entry.port);
-					return `${escapeHtml(parts.name)} <span class="fwmap-muted">${escapeHtml(parts.port)}</span> ×${escapeHtml(entry.hits)}`;
+					return `${escapeHtml(parts.name)} <span class="text-muted">${escapeHtml(parts.port)}</span> ×${escapeHtml(entry.hits)}`;
 				}).join("<br>")],
 				[T.other_ports, block.port_count > (block.services || []).length ? escapeHtml(block.port_count - block.services.length) : ""],
 				[T.attempts, escapeHtml(`${block.hits} · ${block.hits_per_minute}/min`)],
 				[T.first_seen, block.seconds ? escapeHtml(`${ago(Date.now() / 1e3 - block.seconds)} ${T.ago}`) : ""]
 			]),
 			firewall: rows([
-				[T.decision, pill("blocked", T.blocked, "fa-ban")],
+				[T.decision, pill("default", T.blocked, "ban")],
 				[T.interface, escapeHtml(block.interface || "")],
 				[T.rule, escapeHtml(block.rule || "")],
 				[T.target, escapeHtml(block.target || "")]
@@ -917,7 +959,7 @@
 	function alertModel(alert, context) {
 		const { item, address } = context;
 		return {
-			verdict: alert?.ids?.severity <= 2 || (alert?.lists || []).length ? bigPill("contained", `${T.ids_only} · ${T.flagged}`, "fa-flag") : bigPill("muted", T.ids_only, "fa-flag"),
+			verdict: alert?.ids?.severity <= 2 || (alert?.lists || []).length ? bigPill("warning", `${T.ids_only} · ${T.flagged}`, "flag") : bigPill("default", T.ids_only, "flag"),
 			sub: T.ids_only_sub,
 			diagram: null,
 			connection: `<div class="text-muted">${escapeHtml(T.no_connection)}</div>`,
@@ -953,7 +995,7 @@
 		const context = {
 			item,
 			address,
-			remoteBox: endBox("fa-server", remote.title, [hostname ? address : "", remote.place])
+			remoteBox: endBox("server", remote.title, [hostname ? address : "", remote.place])
 		};
 		return {
 			...flow ? flowModel(flow, context) : ids ? idsFlowModel(ids, context) : block ? blockModel(block, context) : alertModel(alert, context),
@@ -961,21 +1003,21 @@
 		};
 	}
 	function actionBar(address, countryCode) {
+		const item = (cls, icon, label, extra = "") => `<li><a href="#" class="${cls}" ${extra}>${ic(icon)} ${escapeHtml(label)}</a></li>`;
 		const more = [
-			`<li><a href="https://bgp.he.net/ip/${encodeURIComponent(address)}" target="_blank" rel="noopener noreferrer"><i class="fa fa-globe"></i> ${escapeHtml(T.whois)}</a></li>`,
-			`<li><a href="https://www.abuseipdb.com/check/${encodeURIComponent(address)}" target="_blank" rel="noopener noreferrer"><i class="fa fa-external-link"></i> AbuseIPDB</a></li>`,
-			`<li><a href="#" class="fwmap-copy" data-address="${escapeHtml(address)}"><i class="fa fa-clipboard"></i> ${escapeHtml(T.copy)}</a></li>`
+			`<li><a href="https://bgp.he.net/ip/${encodeURIComponent(address)}" target="_blank" rel="noopener noreferrer">${ic("globe")} ${escapeHtml(T.whois)}</a></li>`,
+			`<li><a href="https://www.abuseipdb.com/check/${encodeURIComponent(address)}" target="_blank" rel="noopener noreferrer">${ic("arrow-up-right-from-square")} AbuseIPDB</a></li>`,
+			item("fwmap-copy", "clipboard", T.copy, `data-address="${escapeHtml(address)}"`)
 		];
 		if (state.isAdmin) {
-			more.push("<li role=\"separator\" class=\"divider\"></li>", `<li><a href="#" class="fwmap-alias" data-address="${escapeHtml(address)}"><i class="fa fa-list-ul"></i> ${escapeHtml(T.add_to_alias)}</a></li>`, `<li><a href="#" class="fwmap-mark" data-address="${escapeHtml(address)}"><i class="fa fa-flag"></i> ${escapeHtml(T.mark_threat)}</a></li>`);
-			if (countryCode) more.push(`<li><a href="#" class="fwmap-country" data-code="${escapeHtml(countryCode)}"><i class="fa fa-map-marker"></i> ${escapeHtml(T.add_country)} (${escapeHtml(countryCode)})</a></li>`);
+			more.push("<li role=\"separator\" class=\"divider\"></li>", item("fwmap-alias", "list", T.add_to_alias, `data-address="${escapeHtml(address)}"`), item("fwmap-mark", "flag", T.mark_threat, `data-address="${escapeHtml(address)}"`));
+			if (countryCode) more.push(item("fwmap-country", "location-dot", `${T.add_country} (${countryCode})`, `data-code="${escapeHtml(countryCode)}"`));
 		}
-		return `<div class="fwmap-actions">${(state.isAdmin ? `<button type="button" class="btn btn-primary fwmap-investigate" data-address="${escapeHtml(address)}">${ic("external")} ${escapeHtml(T.investigate)}</button>` : "") + (state.mode === "snapshot" ? `
-    <button type="button" class="btn btn-default fwmap-states" data-address="${escapeHtml(address)}">${ic("list")} ${escapeHtml(T.states_at)} ${escapeHtml(capturedTime())}</button>
-    ${state.isAdmin ? `<button type="button" class="btn btn-default fwmap-states-now" data-address="${escapeHtml(address)}">${ic("clock")} ${escapeHtml(T.current_states)}</button>` : ""}` : state.isAdmin ? `
-    <button type="button" class="btn btn-default fwmap-states" data-address="${escapeHtml(address)}">${ic("list")} ${escapeHtml(T.show_states)}</button>
-    <button type="button" class="btn btn-default fwmap-kill" data-address="${escapeHtml(address)}">${ic("trash")} ${escapeHtml(T.kill_states)}</button>` : "")}
-    <div class="btn-group dropup"><button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true">${escapeHtml(T.more)} <span class="caret"></span></button>
+		const button = (cls, icon, label, color = "default") => `<button type="button" class="btn btn-${color} ${cls}" data-address="${escapeHtml(address)}">${ic(icon)} ${escapeHtml(label)}</button>`;
+		const investigate = state.isAdmin ? `<div class="btn-group btn-group-sm">${button("fwmap-investigate", "magnifying-glass", T.investigate, "primary")}</div>` : "";
+		const states = state.mode === "snapshot" ? [button("fwmap-states", "list", `${T.states_at} ${capturedTime()}`), state.isAdmin ? button("fwmap-states-now", "clock", T.current_states) : ""] : state.isAdmin ? [button("fwmap-states", "list", T.show_states), button("fwmap-kill", "trash-can", T.kill_states)] : [];
+		return `<div class="btn-toolbar fwmap-actions">${investigate}${states.filter(Boolean).length ? `<div class="btn-group btn-group-sm">${states.join("")}</div>` : ""}
+    <div class="btn-group btn-group-sm dropup pull-right"><button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true">${escapeHtml(T.more)} <span class="caret"></span></button>
     <ul class="dropdown-menu dropdown-menu-right">${more.join("")}</ul></div></div>`;
 	}
 	/** "16:42" of the snapshot on screen. */
@@ -988,9 +1030,9 @@
 	function diagramHtml(diagram) {
 		if (!diagram) return "";
 		return `<div class="fwmap-diagram">${diagram.from}
-    <div class="fwmap-link${diagram.blocked ? " fwmap-link-blocked" : ""}"><div class="fwmap-link-service">${escapeHtml(diagram.service.name)}</div>
+    <div class="fwmap-link"><div class="fwmap-link-service">${escapeHtml(diagram.service.name)}</div>
       <div class="fwmap-link-port">${escapeHtml(diagram.service.port)}</div>
-      <div class="fwmap-link-arrow">${diagram.blocked ? ic("ban") : ""}</div>
+      <div class="fwmap-link-arrow">${diagram.blocked ? ic("ban", "text-danger") : ""}</div>
       <div class="fwmap-link-rate">${diagram.rate}</div></div>
     ${diagram.to}</div>`;
 	}
@@ -1013,7 +1055,7 @@
 		$details.html(`
     <div class="fwmap-d-scroll">
       <div class="fwmap-d-head">
-        ${ic("globe", "fwmap-d-icon")}
+        ${ic("globe", "text-muted fwmap-d-icon")}
         <div class="fwmap-d-title">
           <div class="fwmap-d-name">${escapeHtml(model.remote.title)}</div>
           <div class="fwmap-d-line">${model.remote.hostname ? `<b>${escapeHtml(address)}</b>` : ""}
@@ -1021,25 +1063,25 @@
           ${model.remote.org ? `<div class="fwmap-d-line">${escapeHtml(model.remote.org)}</div>` : ""}
         </div>
         <div class="fwmap-d-verdict">${model.verdict}<div class="fwmap-d-verdict-sub">${escapeHtml(model.sub)}</div></div>
-        <a href="#" id="fwmap-details-close" title="${escapeHtml(T.close)}" aria-label="${escapeHtml(T.close)}">${ic("x")}</a>
+        <button type="button" class="close" id="fwmap-details-close" title="${escapeHtml(T.close)}" aria-label="${escapeHtml(T.close)}"><span aria-hidden="true">&times;</span></button>
       </div>
-      ${state.mode === "snapshot" ? `<div class="fwmap-snap-notice">${ic("camera")} ${escapeHtml(T.as_captured)} ${escapeHtml(capturedTime())} · ${escapeHtml(T.may_have_closed)}</div>` : ""}
+      ${state.mode === "snapshot" ? `<div class="alert alert-warning fwmap-snap-notice">${ic("camera")} ${escapeHtml(T.as_captured)} ${escapeHtml(capturedTime())} · ${escapeHtml(T.may_have_closed)}</div>` : ""}
       ${picker}
       ${diagramHtml(model.diagram)}
       <div class="fwmap-cards">
-        ${card("fa-bar-chart", T.sec_connection, model.connection, state.isAdmin || state.mode === "snapshot" ? {
+        ${card("chart-column", T.sec_connection, model.connection, state.isAdmin || state.mode === "snapshot" ? {
 			cls: "fwmap-states",
 			address,
 			title: T.show_states
 		} : null)}
-        ${card("fa-shield", T.sec_firewall, model.firewall, {
+        ${card("shield-halved", T.sec_firewall, model.firewall, {
 			href: "/ui/diagnostics/firewall/log",
 			title: T.open_log
 		})}
         ${model.ids}
         ${model.reputation}
       </div>
-      ${investigation ? `<div class="fwmap-investigation">${investigation}</div>` : ""}
+      ${investigation ? investigationPanel(investigation) : ""}
     </div>
     ${actionBar(address, selection.countryCode)}
   `);
@@ -1145,99 +1187,6 @@
 			ids_flows: (summary.ids_flows || []).filter(idsFlowMatches),
 			locations: (summary.locations || []).filter((location) => location.local || used.has(location.id))
 		};
-	}
-	//#endregion
-	//#region page/investigate.js
-	function scoreBadge(score) {
-		return `<span class="fwmap-pill fwmap-pill-${score >= 75 ? "danger" : score >= 25 ? "warning" : score > 0 ? "contained" : "ok"}">${escapeHtml(score)}%</span>`;
-	}
-	function investigationCard(result) {
-		if (result.status !== "ok") return `<div class="text-danger">${escapeHtml(result.error || T.action_failed)}</div>`;
-		const section = (title, data, body) => `<div class="fwmap-inv-section"><div class="fwmap-inv-title">${escapeHtml(title)}</div>` + (data?.error ? `<div class="text-muted">${escapeHtml(T.lookup_failed)}: ${escapeHtml(data.error)}</div>` : body) + "</div>";
-		const table = (items) => rows(items, "fwmap-inv-table");
-		const rdap = result.rdap || {};
-		const ripe = result.ripestat || {};
-		const abuse = result.abuseipdb;
-		let html = section(T.registry, rdap, table([
-			[T.owner, escapeHtml(rdap.owner || rdap.name)],
-			[T.network, escapeHtml([rdap.name, rdap.handle].filter(Boolean).join(" · "))],
-			[T.range, escapeHtml(rdap.range)],
-			[T.country, escapeHtml(rdap.country)],
-			[T.abuse_contact, rdap.abuse_email ? `<a href="mailto:${escapeHtml(rdap.abuse_email)}">${escapeHtml(rdap.abuse_email)}</a>` : ""],
-			[T.registered, escapeHtml([rdap.registered, rdap.updated && `${T.updated} ${rdap.updated}`].filter(Boolean).join(" · "))]
-		]));
-		html += section(T.routing, ripe, table([
-			[T.prefix, escapeHtml(ripe.prefix)],
-			[T.origin_as, (ripe.asns || []).map((item) => escapeHtml(`AS${item.asn} ${item.holder || ""}`)).join("<br>")],
-			[T.announced, ripe.announced === void 0 ? "" : escapeHtml(ripe.announced ? T.yes : T.no)]
-		]));
-		if (abuse) html += section("AbuseIPDB", abuse, table([
-			[T.confidence, abuse.score === void 0 ? "" : scoreBadge(abuse.score)],
-			[T.reports, abuse.reports === void 0 ? "" : escapeHtml(`${abuse.reports} (${abuse.reporters ?? 0} ${T.reporters})`)],
-			[T.last_reported, escapeHtml(abuse.last_reported)],
-			[T.usage, escapeHtml([abuse.usage, abuse.tor ? "Tor" : null].filter(Boolean).join(" · "))],
-			["ISP", escapeHtml([abuse.isp, abuse.domain].filter(Boolean).join(" · "))]
-		]));
-		else if (!result.abuseipdb_configured) html += `<div class="text-muted fwmap-inv-section">${escapeHtml(T.abuseipdb_hint)}</div>`;
-		return html;
-	}
-	/** Keep a card for the most recent addresses only. */
-	function remember(address, html) {
-		state.investigations.delete(address);
-		state.investigations.set(address, html);
-		while (state.investigations.size > 50) state.investigations.delete(state.investigations.keys().next().value);
-	}
-	function noteScore(result, address) {
-		if (result.abuseipdb && typeof result.abuseipdb.score === "number") {
-			state.abuseScores.delete(address);
-			state.abuseScores.set(address, result.abuseipdb.score);
-			while (state.abuseScores.size > 500) state.abuseScores.delete(state.abuseScores.keys().next().value);
-		}
-	}
-	var RETRY_MS = 1500;
-	function failureCard(address, text) {
-		return `<div class="text-danger">${escapeHtml(T.action_failed)}: ${escapeHtml(text)}</div><button type="button" class="btn btn-default btn-xs fwmap-investigate fwmap-inv-retry" data-address="${escapeHtml(address)}"><i class="fa fa-rotate-right"></i> ${escapeHtml(T.retry)}</button>`;
-	}
-	async function lookup(address) {
-		let failure = null;
-		for (let attempt = 0; attempt < 2; attempt++) {
-			if (attempt) await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
-			try {
-				const result = await postJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`, {});
-				if (result.status === "ok") return { result };
-				failure = result.error || T.lookup_failed;
-			} catch (error) {
-				failure = errorText(error);
-			}
-		}
-		return { failure };
-	}
-	/** The full lookup for an address; `rerender` redraws whatever shows the card, scrolled to it. */
-	async function investigate(address, rerender) {
-		state.revealInvestigation = address;
-		remember(address, `<div class="fwmap-inv-loading"><i class="fa fa-spinner fa-spin"></i> ${escapeHtml(T.looking_up)}</div>`);
-		rerender();
-		state.revealInvestigation = null;
-		const { result, failure } = await lookup(address);
-		if (result) {
-			remember(address, investigationCard(result));
-			noteScore(result, address);
-		} else remember(address, failureCard(address, failure));
-		rerender();
-	}
-	/** AbuseIPDB alone, from the Reputation card: the verdict fills in without opening the full investigation. */
-	async function checkAbuse(address, rerender) {
-		state.abuseChecking.add(address);
-		rerender();
-		try {
-			const result = await postJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`, { sources: "abuseipdb" });
-			noteScore(result, address);
-			if (!state.abuseScores.has(address)) notify(`AbuseIPDB: ${result.abuseipdb?.error || result.error || T.lookup_failed}`, BootstrapDialog.TYPE_WARNING);
-		} catch (error) {
-			notify(`${T.action_failed}: ${errorText(error)}`, BootstrapDialog.TYPE_DANGER);
-		}
-		state.abuseChecking.delete(address);
-		rerender();
 	}
 	//#endregion
 	//#region page/storage.js
@@ -1468,7 +1417,7 @@
 		const inbound = pseudo.initiated !== "local";
 		const target = targets[0];
 		const inside = pseudo.inside[0];
-		let localIcon = "shield";
+		let localIcon = "shield-halved";
 		let localName = T.this_firewall_title;
 		let localLines = [];
 		let otherTargets = "";
@@ -1498,80 +1447,90 @@
 			localLines = [lead.inside, conns.length > 1 ? `+ ${conns.length - 1} ${conns.length > 2 ? T.more_connections : T.more_connection}` : ""];
 		}
 		const rule = lead ? lead.rule || conns.find((item) => item.decision === lead.decision && item.rule)?.rule : null;
-		const decision = (item) => [item.decision === "pass" ? pill("ok", T.fw_passed) : item.decision === "block" ? pill("blocked", T.fw_blocked) : `<span class="fwmap-q-muted">${escapeHtml(T.fw_not_seen)}</span>`, item.ips_dropped ? pill("contained", T.ips_dropped_short) : ""].filter(Boolean).join(" ");
-		const connTable = conns.length ? `<table class="fwmap-q-conns"><thead><tr><th>${escapeHtml(T.connection_col)}</th><th>${escapeHtml(T.decision)}</th><th>${escapeHtml(T.rule)}</th><th>${escapeHtml(T.interface)}</th><th>${escapeHtml(T.transferred)}</th><th>${escapeHtml(T.started)}</th><th>IDS</th></tr></thead><tbody>` + conns.map((item) => {
+		const decision = (item) => [item.decision === "pass" ? pill("success", T.fw_passed) : item.decision === "block" ? pill("default", T.fw_blocked) : `<span class="text-muted">${escapeHtml(T.fw_not_seen)}</span>`, item.ips_dropped ? pill("warning", T.ips_dropped_short) : ""].filter(Boolean).join(" ");
+		const connTable = conns.length ? `<table class="table table-condensed fwmap-q-conns"><thead><tr><th>${escapeHtml(T.connection_col)}</th><th>${escapeHtml(T.decision)}</th><th>${escapeHtml(T.rule)}</th><th>${escapeHtml(T.interface)}</th><th>${escapeHtml(T.transferred)}</th><th>${escapeHtml(T.started)}</th><th>IDS</th></tr></thead><tbody>` + conns.map((item) => {
 			const insideText = `${item.inside_name ? `${item.inside_name} ` : ""}${item.inside || T.this_firewall}`;
 			const path = item.remote_started ? `${item.remote} → ${insideText}` : `${insideText} → ${item.remote}`;
-			const ids = (item.ids || []).map((sig) => `<div class="${sig.severity <= 2 ? "fwmap-ids-high" : "fwmap-ids"}">${ic("flag")} ${escapeHtml(sig.signature)} ×${escapeHtml(sig.count)}</div>` + (sig.query ? `<div class="fwmap-q-muted">${escapeHtml(T.query)}: ${escapeHtml(sig.query)}</div>` : "")).join("");
-			return `<tr><td><div>${escapeHtml(path)} <span class="fwmap-q-muted">${escapeHtml(protocolLabel(item.protocol))}</span></div><div class="fwmap-q-muted">${escapeHtml(T.via)} ${escapeHtml(item.public || "")}${item.open ? "" : ` · ${escapeHtml(T.closed)}`}</div></td><td>${decision(item)}</td><td>${escapeHtml(item.rule || "—")}</td><td>${escapeHtml(item.interface || "—")}</td><td>↓ ${escapeHtml(formatBytes(item.bytes_in || 0))} ↑ ${escapeHtml(formatBytes(item.bytes_out || 0))}</td><td>${item.started ? escapeHtml(`${ago(item.started)} ${T.ago}`) : "—"}</td><td>${ids || "<span class=\"fwmap-q-muted\">—</span>"}</td></tr>`;
+			const ids = (item.ids || []).map((sig) => `<div class="${sig.severity <= 2 ? "text-danger fwmap-ids-high" : "fwmap-ids"}">${ic("flag")} ${escapeHtml(sig.signature)} ×${escapeHtml(sig.count)}</div>` + (sig.query ? `<div class="text-muted">${escapeHtml(T.query)}: ${escapeHtml(sig.query)}</div>` : "")).join("");
+			return `<tr><td><div>${escapeHtml(path)} <span class="text-muted">${escapeHtml(protocolLabel(item.protocol))}</span></div><div class="text-muted">${escapeHtml(T.via)} ${escapeHtml(item.public || "")}${item.open ? "" : ` · ${escapeHtml(T.closed)}`}</div></td><td>${decision(item)}</td><td>${escapeHtml(item.rule || "—")}</td><td>${escapeHtml(item.interface || "—")}</td><td>↓ ${escapeHtml(formatBytes(item.bytes_in || 0))} ↑ ${escapeHtml(formatBytes(item.bytes_out || 0))}</td><td>${item.started ? escapeHtml(`${ago(item.started)} ${T.ago}`) : "—"}</td><td>${ids || "<span class=\"text-muted\">—</span>"}</td></tr>`;
 		}).join("") + "</tbody></table>" : "";
 		const org = saved.org || live.org;
-		const chips = (row.lists || []).map((name) => `<span class="fwmap-q-chip">${escapeHtml(listLabel(name))}</span>`).join("");
+		const chips = (row.lists || []).map((name) => pill(status === "new" ? "danger" : "default", listLabel(name))).join(" ");
 		const expanded = state.queueExpanded.has(row.address);
 		const card = state.investigations.get(row.address);
-		const btn = (cls, icon, label, extra = "") => `<button type="button" class="btn btn-default ${cls}" ${extra}>${ic(icon)}<span>${escapeHtml(label)}</span></button>`;
-		const link = (href, icon, label) => `<a class="btn btn-default" href="${href}" target="_blank" rel="noopener noreferrer">${ic(icon)}<span>${escapeHtml(label)}</span></a>`;
-		const review = status === "new" ? btn("fwmap-q-status", "check", T.mark_reviewed, "data-status=\"reviewed\"") : btn("fwmap-q-status", "undo", T.reopen, "data-status=\"new\"");
-		return `<div class="fwmap-q-item fwmap-q-${status}${expanded ? " fwmap-q-open" : ""}" data-address="${address}" data-status="${status}">
+		const btn = (cls, icon, label, extra = "") => `<button type="button" class="btn btn-default ${cls}" ${extra}>${ic(icon)} ${escapeHtml(label)}</button>`;
+		const link = (href, icon, label) => `<a class="btn btn-default" href="${href}" target="_blank" rel="noopener noreferrer">${ic(icon)} ${escapeHtml(label)}</a>`;
+		const review = status === "new" ? btn("fwmap-q-status", "check", T.mark_reviewed, "data-status=\"reviewed\"") : btn("fwmap-q-status", "rotate-left", T.reopen, "data-status=\"new\"");
+		const dispositionColor = {
+			passed: "danger",
+			firewall_blocked: "default",
+			ips_dropped: "warning"
+		}[disposition];
+		return `<div class="panel panel-default fwmap-q-item fwmap-q-${status}" data-address="${address}" data-status="${status}">
+    <div class="panel-body">
     <div class="fwmap-q-top">
       <div class="fwmap-q-who">
         <div class="fwmap-q-ipline"><span class="fwmap-q-ip">${address}</span>
-          <span class="fwmap-q-badge fwmap-q-disposition-${disposition}">${escapeHtml(T[`disposition_${disposition}`])}</span>
-          ${status !== "new" ? `<span class="fwmap-q-workflow">${escapeHtml(T[`status_${status}`])}</span>` : ""}</div>
-        ${remote.hostname ? `<div class="fwmap-q-hostname" title="${escapeHtml(remote.hostname)}">${escapeHtml(remote.hostname)}</div>` : ""}
-        ${org ? `<div class="fwmap-q-org">${escapeHtml(org)}</div>` : ""}
-        ${remote.country ? `<div class="fwmap-q-country">${flagHtml(cc)}${escapeHtml(remote.country)}</div>` : ""}
+          ${pill(dispositionColor, T[`disposition_${disposition}`])}
+          ${status !== "new" ? `<span class="text-muted text-uppercase small">${escapeHtml(T[`status_${status}`])}</span>` : ""}</div>
+        ${remote.hostname ? `<div class="text-muted fwmap-q-hostname" title="${escapeHtml(remote.hostname)}">${escapeHtml(remote.hostname)}</div>` : ""}
+        ${org || remote.country ? `<div class="fwmap-q-org">${escapeHtml(org || "")}${org && remote.country ? " · " : ""}${remote.country ? `${flagHtml(cc)}${escapeHtml(remote.country)}` : ""}</div>` : ""}
         ${chips ? `<div class="fwmap-q-chips">${chips}</div>` : ""}
       </div>
       <div class="fwmap-q-flow">
         <div class="fwmap-q-diagram">
-          ${ic("globe", "fwmap-q-end")}
+          ${ic("globe", "fa-2x text-muted")}
           <div class="fwmap-q-link">
-            <div class="fwmap-q-svc">${escapeHtml(service)}</div>
+            <div>${escapeHtml(service)}</div>
             <div class="fwmap-q-arrow ${inbound ? "fwmap-q-arrow-in" : "fwmap-q-arrow-out"}"></div>
-            <span class="fwmap-q-dirpill">${escapeHtml(inbound ? `↘ ${T.inbound}` : `↖ ${T.outbound}`)}</span>
+            ${pill("default", inbound ? `↘ ${T.inbound}` : `↖ ${T.outbound}`)}
           </div>
-          ${ic(localIcon, "fwmap-q-end")}
+          ${ic(localIcon, "fa-2x text-muted")}
           <div class="fwmap-q-local"><div class="fwmap-q-local-name">${escapeHtml(localName)}</div>
-            ${localLines.filter(Boolean).map((line, index) => `<div class="${index ? "fwmap-q-muted" : ""}">${escapeHtml(line)}</div>`).join("")}
-            ${otherTargets ? `<a href="#" class="fwmap-q-expand fwmap-q-muted" aria-expanded="${expanded}">${escapeHtml(otherTargets)}</a>` : ""}</div>
+            ${localLines.filter(Boolean).map((line, index) => `<div class="${index ? "text-muted" : ""}">${escapeHtml(line)}</div>`).join("")}
+            ${otherTargets ? `<a href="#" class="fwmap-q-expand text-muted" aria-expanded="${expanded}">${escapeHtml(otherTargets)}</a>` : ""}</div>
         </div>
-        <div class="fwmap-q-meta">
-          <span>${ic("calendar")} ${escapeHtml(T.first_seen)} ${escapeHtml(ago(row.first_seen))} ${escapeHtml(T.ago)}</span>
-          <span>${ic("chart")} ${escapeHtml(row.samples)} ${escapeHtml(row.samples === 1 ? T.sample : T.samples)}</span>
-          <span>${ic("swap")} ${escapeHtml(T.peak)} ${escapeHtml(formatBytes(row.peak_bytes || 0))}</span>
-          ${rule ? `<span title="${escapeHtml(T.rule)}">${ic("shield")} ${escapeHtml(rule)}</span>` : ""}
-        </div>
+        <ul class="list-inline text-muted fwmap-q-meta">
+          <li>${ic("calendar")} ${escapeHtml(T.first_seen)} ${escapeHtml(ago(row.first_seen))} ${escapeHtml(T.ago)}</li>
+          <li>${ic("chart-column")} ${escapeHtml(row.samples)} ${escapeHtml(row.samples === 1 ? T.sample : T.samples)}</li>
+          <li>${ic("right-left")} ${escapeHtml(T.peak)} ${escapeHtml(formatBytes(row.peak_bytes || 0))}</li>
+          ${rule ? `<li title="${escapeHtml(T.rule)}">${ic("shield-halved")} ${escapeHtml(rule)}</li>` : ""}
+        </ul>
         ${idsLines(row.ids, TEXT)}
       </div>
-      <div class="fwmap-q-when">
+      <div class="text-muted fwmap-q-when">
         <span title="${escapeHtml((/* @__PURE__ */ new Date(row.last_seen * 1e3)).toLocaleString())}">${ic("clock")} ${escapeHtml(ago(row.last_seen))} ${escapeHtml(T.ago)}</span>
-        <a href="#" class="fwmap-q-expand" title="${escapeHtml(T.more_details)}" aria-label="${escapeHtml(T.more_details)}" aria-expanded="${expanded}">${ic(expanded ? "chevron-down" : "chevron")}</a>
+        <a href="#" class="fwmap-q-expand" title="${escapeHtml(T.more_details)}" aria-label="${escapeHtml(T.more_details)}" aria-expanded="${expanded}">${ic(expanded ? "chevron-down" : "chevron-right")}</a>
       </div>
     </div>
-    ${row.seen_after_block ? `<div class="fwmap-q-warning">${ic("alert")} ${escapeHtml(T.seen_after_block)}</div>` : ""}
-    ${expanded ? `<div class="fwmap-q-more">${lines.map((line) => `<div>${line}</div>`).join("")}
-      ${targets.length > 1 ? `<div class="fwmap-q-muted">${escapeHtml(T.targets_seen)}: ${targets.map((item) => escapeHtml(`${item.firewall ? T.this_firewall : item.name || item.ip} (${hostPort(item.ip, item.port)}${item.service ? `, ${item.service}` : ""})`)).join(" · ")}</div>` : ""}
-      ${(row.services || []).length ? `<div class="fwmap-q-muted">${escapeHtml(T.services_seen)}: ${(row.services || []).map(escapeHtml).join(", ")}</div>` : ""}
-      ${connTable || `<div class="fwmap-q-muted">${escapeHtml(T.no_snapshot)}</div>`}</div>` : ""}
-    ${row.note ? `<div class="fwmap-q-note">${escapeHtml(row.note)}</div>` : ""}
-    ${card ? `<div class="fwmap-investigation">${card}</div>` : ""}
-    <div class="fwmap-q-bar">
-      <div class="fwmap-q-left">
-        <button type="button" class="btn btn-primary fwmap-q-investigate">${ic("search")}<span>${escapeHtml(T.investigate)}</span></button>
-        ${btn("fwmap-q-states", "list", T.show_states)}
-        ${link(`https://bgp.he.net/ip/${encodeURIComponent(row.address)}`, "globe", T.whois)}
-        ${link(`https://www.abuseipdb.com/check/${encodeURIComponent(row.address)}`, "external", "AbuseIPDB")}
+    ${row.seen_after_block ? `<div class="text-danger fwmap-q-warning">${ic("circle-exclamation")} ${escapeHtml(T.seen_after_block)}</div>` : ""}
+    ${expanded ? `<div class="well well-sm fwmap-q-more">${lines.map((line) => `<div>${line}</div>`).join("")}
+      ${targets.length > 1 ? `<div class="text-muted">${escapeHtml(T.targets_seen)}: ${targets.map((item) => escapeHtml(`${item.firewall ? T.this_firewall : item.name || item.ip} (${hostPort(item.ip, item.port)}${item.service ? `, ${item.service}` : ""})`)).join(" · ")}</div>` : ""}
+      ${(row.services || []).length ? `<div class="text-muted">${escapeHtml(T.services_seen)}: ${(row.services || []).map(escapeHtml).join(", ")}</div>` : ""}
+      ${connTable || `<div class="text-muted">${escapeHtml(T.no_snapshot)}</div>`}</div>` : ""}
+    ${row.note ? `<div class="well well-sm fwmap-q-note">${escapeHtml(row.note)}</div>` : ""}
+    ${card ? investigationPanel(card) : ""}
+    </div>
+    <div class="panel-footer clearfix">
+      <div class="btn-toolbar pull-left">
+        <div class="btn-group btn-group-sm"><button type="button" class="btn btn-primary fwmap-q-investigate">${ic("magnifying-glass")} ${escapeHtml(T.investigate)}</button></div>
+        <div class="btn-group btn-group-sm">
+          ${btn("fwmap-q-states", "list", T.show_states)}
+          ${link(`https://bgp.he.net/ip/${encodeURIComponent(row.address)}`, "globe", T.whois)}
+          ${link(`https://www.abuseipdb.com/check/${encodeURIComponent(row.address)}`, "arrow-up-right-from-square", "AbuseIPDB")}
+        </div>
       </div>
-      <div class="fwmap-q-right">
-        ${review}
-        ${status !== "dismissed" ? btn("fwmap-q-status", "eye-off", T.dismiss, "data-status=\"dismissed\"") : ""}
-        <button type="button" class="btn btn-danger fwmap-q-block">${ic("ban")}<span>${escapeHtml(T.block)}</span></button>
-        <div class="btn-group">
-          <button type="button" class="btn btn-default dropdown-toggle fwmap-q-menu" data-toggle="dropdown" aria-haspopup="true" aria-label="${escapeHtml(T.more)}">${ic("chevron-down")}</button>
+      <div class="btn-toolbar pull-right">
+        <div class="btn-group btn-group-sm">
+          ${review}
+          ${status !== "dismissed" ? btn("fwmap-q-status", "eye-slash", T.dismiss, "data-status=\"dismissed\"") : ""}
+        </div>
+        <div class="btn-group btn-group-sm">
+          <button type="button" class="btn btn-danger fwmap-q-block">${ic("ban")} ${escapeHtml(T.block)}</button>
+          <button type="button" class="btn btn-danger dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-label="${escapeHtml(T.more)}"><span class="caret"></span></button>
           <ul class="dropdown-menu dropdown-menu-right">
-            <li><a href="#" class="fwmap-q-edit-note">${escapeHtml(T.edit_note)}</a></li>
-            <li><a href="#" class="fwmap-q-kill">${escapeHtml(T.kill_states)}</a></li>
+            <li><a href="#" class="fwmap-q-edit-note">${ic("pen")} ${escapeHtml(T.edit_note)}</a></li>
+            <li><a href="#" class="fwmap-q-kill">${ic("trash-can")} ${escapeHtml(T.kill_states)}</a></li>
           </ul>
         </div>
       </div>
@@ -1611,7 +1570,7 @@
 			})}` : T.blacklist_pending;
 			if (status.error) text += ` (${T.blacklist_error}: ${plain(status.error)})`;
 		}
-		return $("<div class=\"fwmap-q-source\"></div>").attr("title", T.blacklist).append(`${ic("layers")} `).append($("<span></span>").text(`${T.blacklist_short}: ${text}`));
+		return $("<div class=\"text-muted\"></div>").attr("title", T.blacklist).append(`${ic("layer-group")} `).append($("<span></span>").text(`${T.blacklist_short}: ${text}`));
 	}
 	/** The Threats dialog. The server pages and searches it: history can hold thousands of entries. */
 	async function showQueue() {
@@ -1626,7 +1585,7 @@
 		};
 		const $body = $("<div></div>");
 		const status = state.pluginStatus || {};
-		const $record = $(`<label class="fwmap-q-record" title="${escapeHtml(T.record_threats_hint)}"><input type="checkbox"> ${escapeHtml(T.record_threats)}</label>`);
+		const $record = $(`<div class="checkbox fwmap-q-record"><label title="${escapeHtml(T.record_threats_hint)}"><input type="checkbox"> ${escapeHtml(T.record_threats)}</label></div>`);
 		$record.find("input").prop("checked", status.record_threats !== "0").on("change", async function() {
 			const value = this.checked ? "1" : "0";
 			try {
@@ -1640,19 +1599,19 @@
 			}
 		});
 		const $tabs = $(`<ul class="nav nav-pills fwmap-q-tabs" role="tablist" aria-label="${escapeHtml(T.review_queue)}"></ul>`);
-		const $bulk = $("<div class=\"fwmap-q-bulkbar\"></div>");
-		const $search = $(`<input type="search" class="form-control input-sm fwmap-q-search" placeholder="${escapeHtml(T.queue_search)}" aria-label="${escapeHtml(T.queue_search)}">`);
+		const $bulk = $("<div class=\"btn-group btn-group-sm fwmap-q-bulkbar\"></div>");
+		const $search = $(`<input type="search" class="form-control" placeholder="${escapeHtml(T.queue_search)}" aria-label="${escapeHtml(T.queue_search)}">`);
 		const $list = $("<div class=\"fwmap-q-list\" aria-live=\"polite\"></div>");
-		const $searchBox = $(`<div class="fwmap-q-searchbox">${ic("search")}</div>`).append($search);
-		$body.append($("<div class=\"fwmap-q-toolbar\"></div>").append($tabs, $bulk, $searchBox), $list);
+		const $searchBox = $(`<div class="input-group input-group-sm fwmap-q-searchbox"><span class="input-group-addon">${ic("magnifying-glass")}</span></div>`).append($search);
+		$body.append($("<div class=\"fwmap-q-toolbar\"></div>").append($tabs, $bulk), $searchBox, $list);
 		const emptyText = () => view.query ? T.queue_no_match : T[`queue_empty_${view.status}`] || T.queue_empty;
 		const render = () => {
 			$tabs.html(VIEWS.map((status) => `<li class="${status === view.status ? "active" : ""}" role="presentation"><a href="#" role="tab" aria-selected="${status === view.status}" data-status="${status}">${escapeHtml(T[`status_${status}`])}${view.counts[status] ? ` <span class="badge">${escapeHtml(view.counts[status])}</span>` : ""}</a></li>`).join(""));
 			const names = insideNames(view.names);
-			$list.html(view.rows.length ? view.rows.map((row) => queueItem(row, names)).join("") + (view.total > view.rows.length ? `<div class="fwmap-q-moreitems"><button type="button" class="btn btn-default fwmap-q-showmore">${escapeHtml(fill(T.show_more, { count: Math.min(QUEUE_PAGE, view.total - view.rows.length) }))}</button> <span class="fwmap-q-muted">${escapeHtml(fill(T.showing, {
+			$list.html(view.rows.length ? view.rows.map((row) => queueItem(row, names)).join("") + (view.total > view.rows.length ? `<div class="text-center fwmap-q-moreitems"><button type="button" class="btn btn-default btn-sm fwmap-q-showmore">${escapeHtml(fill(T.show_more, { count: Math.min(QUEUE_PAGE, view.total - view.rows.length) }))}</button> <span class="text-muted">${escapeHtml(fill(T.showing, {
 				shown: view.rows.length,
 				total: view.total
-			}))}</span></div>` : "") : `<div class="text-muted fwmap-empty fwmap-q-empty">${ic("check")} ${escapeHtml(emptyText())}</div>`);
+			}))}</span></div>` : "") : `<div class="text-muted text-center fwmap-q-empty">${ic("check")} ${escapeHtml(emptyText())}</div>`);
 			const count = view.query ? view.total : view.counts[view.status] || 0;
 			const bulk = [];
 			if ([
@@ -1661,11 +1620,11 @@
 				"ips_dropped"
 			].includes(view.status) && count) {
 				const label = view.query ? T.dismiss_shown : T.dismiss_all;
-				bulk.push(`<button type="button" class="btn btn-default fwmap-q-bulk" data-to="dismissed">${ic("eye-off")}<span>${escapeHtml(fill(label, { count }))}</span></button>`);
+				bulk.push(`<button type="button" class="btn btn-default fwmap-q-bulk" data-to="dismissed">${ic("eye-slash")} ${escapeHtml(fill(label, { count }))}</button>`);
 			}
 			if ((view.status === "dismissed" || view.status === "reviewed") && count) {
 				const label = view.query ? T.delete_shown : T.delete_all;
-				bulk.push(`<button type="button" class="btn btn-default fwmap-q-purge">${ic("trash")}<span>${escapeHtml(fill(label, { count }))}</span></button>`);
+				bulk.push(`<button type="button" class="btn btn-default fwmap-q-purge">${ic("trash-can")} ${escapeHtml(fill(label, { count }))}</button>`);
 			}
 			$bulk.html(bulk.join(""));
 		};
@@ -1788,9 +1747,10 @@
 			event.preventDefault();
 			killStates(addressOf(this));
 		});
-		const $footer = $("<div class=\"fwmap-q-footer\"></div>").append($record).append(blacklistStatus(status));
+		const $footer = $("<div class=\"pull-left text-left fwmap-q-footer\"></div>").append($record).append(blacklistStatus(status));
 		BootstrapDialog.show({
-			title: `<div class="fwmap-q-titlebar">${ic("list-box", "fwmap-q-title-ic")}<div><div class="fwmap-q-title">${escapeHtml(T.review_queue)}</div><div class="fwmap-q-subtitle">${escapeHtml(T.review_intro)}</div></div><span class="fwmap-q-newcount"><b></b> ${escapeHtml(T.passed_attention)}</span></div>`,
+			title: `${ic("list-check")} ${escapeHtml(T.review_queue)} <span class="label label-danger fwmap-pill fwmap-q-newcount"><b></b> ${escapeHtml(T.passed_attention)}</span><div class="small text-muted">${escapeHtml(T.review_intro)}</div>`,
+			type: BootstrapDialog.TYPE_DEFAULT,
 			size: BootstrapDialog.SIZE_WIDE,
 			message: $body,
 			cssClass: "fwmap-q-dialog",
@@ -1833,9 +1793,8 @@
 		})}, ${time}`;
 	}
 	function countsText(meta) {
-		const parts = [plural(T, "snapshot_flows", meta.flows || 0)];
-		if (meta.flagged) parts.push(`<span class="fwmap-snap-flagged">${escapeHtml(plural(T, "snapshot_flagged", meta.flagged))}</span>`);
-		return parts.map((part, index) => index ? part : escapeHtml(part)).join(" · ");
+		const flows = escapeHtml(plural(T, "snapshot_flows", meta.flows || 0));
+		return meta.flagged ? `${flows} ${pill("danger", plural(T, "snapshot_flagged", meta.flagged))}` : flows;
 	}
 	async function loadSnapshots() {
 		try {
@@ -1861,7 +1820,7 @@
 			const result = await postJSON("/api/firewallmap/snapshots/save", {});
 			if (result.result !== "saved") throw new Error(result.error || result.result);
 			const meta = result.snapshot;
-			const note = window.FirewallMapRenderer.host.toast(frame, `${ic("check", "fwmap-toast-ok")}<span><b>${escapeHtml(T.snapshot_saved)}</b> <span class="fwmap-muted">· ${escapeHtml(takenText(meta, false))} · ${countsText(meta)}</span></span><button type="button" class="btn btn-primary btn-xs fwmap-toast-open">${escapeHtml(T.snapshot_open)}</button>`);
+			const note = window.FirewallMapRenderer.host.toast(frame, `${ic("check", "text-success")}<span><b>${escapeHtml(T.snapshot_saved)}</b> <span class="text-muted">· ${escapeHtml(takenText(meta, false))} · ${countsText(meta)}</span></span><button type="button" class="btn btn-primary btn-xs fwmap-toast-open">${escapeHtml(T.snapshot_open)}</button>`);
 			$(note).find(".fwmap-toast-open").on("click", () => {
 				note.remove();
 				openSnapshot(meta.id);
@@ -1995,15 +1954,15 @@
 		}
 		const meta = frozen.meta;
 		const note = meta.note ? ` · <span class="fwmap-snap-note">“${escapeHtml(meta.note)}”</span>` : "";
-		const partial = meta.partial ? ` · <span class="fwmap-muted" title="${escapeHtml(T.snapshot_partial_hint)}">${escapeHtml(T.snapshot_partial)}</span>` : "";
+		const partial = meta.partial ? ` · <span class="text-muted" title="${escapeHtml(T.snapshot_partial_hint)}">${escapeHtml(T.snapshot_partial)}</span>` : "";
 		$banner.html(`
     ${ic("camera", "fwmap-banner-ic")}
     <span class="fwmap-banner-text"><b>${escapeHtml(T.snapshot)} · ${escapeHtml(takenText(meta))}</b>${meta.user ? ` <span class="fwmap-banner-counts">· ${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}</span>` : ""}${note}
       <span class="fwmap-banner-counts">· ${countsText(meta)}${partial}</span></span>
     <span class="fwmap-banner-actions">
-      <button type="button" class="btn btn-default btn-sm fwmap-snap-note-btn">${ic("edit")} ${escapeHtml(meta.note ? T.snapshot_edit_note : T.snapshot_add_note)}</button>
+      <button type="button" class="btn btn-default btn-sm fwmap-snap-note-btn">${ic("pen")} ${escapeHtml(meta.note ? T.snapshot_edit_note : T.snapshot_add_note)}</button>
       <button type="button" class="btn btn-default btn-sm fwmap-snap-download" title="${escapeHtml(T.snapshot_download)}" aria-label="${escapeHtml(T.snapshot_download)}">${ic("download")}</button>
-      ${state.isAdmin ? `<button type="button" class="btn btn-default btn-sm fwmap-snap-delete" title="${escapeHtml(T.snapshot_delete)}" aria-label="${escapeHtml(T.snapshot_delete)}">${ic("trash")}</button>` : ""}
+      ${state.isAdmin ? `<button type="button" class="btn btn-default btn-sm fwmap-snap-delete" title="${escapeHtml(T.snapshot_delete)}" aria-label="${escapeHtml(T.snapshot_delete)}">${ic("trash-can")}</button>` : ""}
     </span>`).show();
 	}
 	var CLUSTER_PX = 18;
@@ -2023,7 +1982,7 @@
 	/** The badge over a dot: when and by whom, what it holds, the note. */
 	function tipHtml(meta) {
 		return `<span class="fwmap-tl-tip" role="tooltip"><b>${escapeHtml(takenText(meta))}</b>
-    ${meta.user ? `<span class="fwmap-muted">${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}</span>` : ""}
+    ${meta.user ? `<span class="text-muted">${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}</span>` : ""}
     <span>${countsText(meta)}</span>
     ${meta.note ? `<span class="fwmap-snap-note">“${escapeHtml(meta.note)}”</span>` : ""}</span>`;
 	}
@@ -2112,8 +2071,8 @@
 		const list = state.snapshots;
 		const index = list.findIndex((meta) => meta.id === state.frozen.meta.id);
 		const older = `<button type="button" class="fwmap-tl-step" data-step="1" title="${escapeHtml(T.snapshot_older)}" aria-label="${escapeHtml(T.snapshot_older)}"${index >= list.length - 1 ? " disabled" : ""}>${ic("chevron-left")}</button>`;
-		const newer = `<button type="button" class="fwmap-tl-step" data-step="-1" title="${escapeHtml(T.snapshot_newer)}" aria-label="${escapeHtml(T.snapshot_newer)}"${index <= 0 ? " disabled" : ""}>${ic("chevron")}</button>`;
-		const where = `<span class="fwmap-tl-where">${escapeHtml(takenText(state.frozen.meta, false))} <span class="fwmap-muted">· ${escapeHtml(list.length - index)}/${escapeHtml(list.length)}</span></span>`;
+		const newer = `<button type="button" class="fwmap-tl-step" data-step="-1" title="${escapeHtml(T.snapshot_newer)}" aria-label="${escapeHtml(T.snapshot_newer)}"${index <= 0 ? " disabled" : ""}>${ic("chevron-right")}</button>`;
+		const where = `<span class="fwmap-tl-where">${escapeHtml(takenText(state.frozen.meta, false))} <span class="text-muted">· ${escapeHtml(list.length - index)}/${escapeHtml(list.length)}</span></span>`;
 		if (!timelineOpen) {
 			$timeline.removeClass("open").html(`
       <button type="button" class="fwmap-tl-toggle" aria-expanded="false" title="${escapeHtml(T.timeline_expand)}">${ic("clock")} ${escapeHtml(T.timeline)}</button>
@@ -2129,7 +2088,7 @@
     <button type="button" class="fwmap-tl-toggle" aria-expanded="true" title="${escapeHtml(T.timeline_collapse)}" aria-label="${escapeHtml(T.timeline_collapse)}">${ic("clock")}</button>
     <span class="fwmap-tl-day">${dayButton(-1, "chevron-left", T.timeline_previous_day, dayIndex <= 0)}
       <span class="fwmap-tl-day-label">${escapeHtml(dayLabel(timelineDay))}</span>
-      ${dayButton(1, "chevron", T.timeline_next_day, dayIndex >= days.length - 1)}</span>
+      ${dayButton(1, "chevron-right", T.timeline_next_day, dayIndex >= days.length - 1)}</span>
     <span class="fwmap-tl-track"></span>
     ${older}${where}${newer}`).show();
 		layoutTrack($timeline.find(".fwmap-tl-track"), list.filter((meta) => dayKey(meta) === timelineDay));
@@ -2148,21 +2107,20 @@
 			$list.html(`<div class="text-muted fwmap-empty">${escapeHtml(needle ? T.queue_no_match : T.no_snapshots)}</div>`);
 			return;
 		}
-		const kept = `<div class="fwmap-snap-kept fwmap-muted">${escapeHtml(fill(T.snapshots_kept, {
+		const kept = `<p class="help-block">${escapeHtml(fill(T.snapshots_kept, {
 			count: state.snapshotsKept.keep,
 			days: state.snapshotsKept.keep_days
-		}))}</div>`;
-		$list.html(kept + rows.map((meta) => {
+		}))}</p>`;
+		$list.html(`${kept}<div class="list-group">${rows.map((meta) => {
 			const current = meta.id === state.frozen?.meta.id;
-			return `<div class="fwmap-talker fwmap-snap-row${current ? " active" : ""}" role="button" tabindex="0" data-id="${escapeHtml(meta.id)}"
+			return `<a href="#" role="button" class="list-group-item fwmap-snap-row${current ? " active" : ""}" data-id="${escapeHtml(meta.id)}"
         aria-pressed="${current}" title="${escapeHtml(T.snapshot_show)}">
-      <span class="fwmap-talker-icon">${ic("camera")}</span>
-      <span class="fwmap-talker-text"><span class="fwmap-talker-label">${escapeHtml(takenText(meta))}${meta.user ? ` <span class="fwmap-snap-by">· ${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}</span>` : ""}</span>
-        <span class="fwmap-talker-sub">${countsText(meta)}</span>
-        ${meta.note ? `<span class="fwmap-talker-sub fwmap-snap-note">“${escapeHtml(meta.note)}”</span>` : ""}</span>
-      <span class="fwmap-snap-size">${escapeHtml(formatBytes(meta.size || 0))}</span>
-    </div>`;
-		}).join(""));
+      <span class="badge">${escapeHtml(formatBytes(meta.size || 0))}</span>
+      <h5 class="list-group-item-heading">${ic("camera")} ${escapeHtml(takenText(meta))}${meta.user ? ` <small>${escapeHtml(T.snapshot_by)} ${escapeHtml(meta.user)}</small>` : ""}</h5>
+      <div class="list-group-item-text">${countsText(meta)}${meta.partial ? ` <span title="${escapeHtml(T.snapshot_partial_hint)}">${pill("warning", T.snapshot_partial)}</span>` : ""}
+        ${meta.note ? `<div><em>“${escapeHtml(meta.note)}”</em></div>` : ""}</div>
+    </a>`;
+		}).join("")}</div>`);
 	}
 	/** The header switch, the camera, the frame, banner and timeline, and the tab if it is open. */
 	function renderChrome() {
@@ -2215,7 +2173,7 @@
 		$("#fwmap-talkers-list").on("mousedown", ".fwmap-snap-row", function(event) {
 			event.preventDefault();
 			openSnapshot(String($(this).data("id")));
-		}).on("keydown", ".fwmap-snap-row", function(event) {
+		}).on("click", ".fwmap-snap-row", (event) => event.preventDefault()).on("keydown", ".fwmap-snap-row", function(event) {
 			if (event.key === "Enter" || event.key === " ") {
 				event.preventDefault();
 				openSnapshot(String($(this).data("id")));
@@ -2280,13 +2238,13 @@
 			if (dest.country) add("countries", dest.country, {
 				label: plain(dest.country),
 				flag: flagHtml(dest.country_code),
-				icon: "fa-flag-o",
+				icon: "globe",
 				filter: { country: dest.country }
 			}, rate);
 			if (dest.asn) add("networks", String(dest.asn), {
 				label: plain(dest.as_org || `AS${dest.asn}`),
 				sub: `AS${dest.asn}`,
-				icon: "network",
+				icon: "sitemap",
 				filter: { asn: String(dest.asn) }
 			}, rate);
 		}
@@ -2301,7 +2259,7 @@
 				severity,
 				count,
 				connection,
-				icon: connection ? "fa-exclamation-circle" : "fa-flag",
+				icon: connection ? "circle-exclamation" : "flag",
 				rate: 0,
 				select
 			});
@@ -2402,7 +2360,6 @@
 	}
 	function renderTalkers(groups) {
 		const ids = state.talkerTab === "ids";
-		$("#fwmap-talker-sort").toggle(!ids);
 		const needle = String($("#fwmap-talker-search").val() || "").trim().toLowerCase();
 		const sort = $("#fwmap-talker-sort").val() || "rate";
 		let rows = (groups[state.talkerTab] || []).slice();
@@ -2422,20 +2379,21 @@
 			state.talkerRows = [];
 			return;
 		}
-		$list.html(rows.map((row, index) => {
+		$list.html(`<table class="table table-condensed table-hover fwmap-talkers-table"><tbody>${rows.map((row, index) => {
 			const sub = row.ip ? `${escapeHtml(row.ip)}${row.iface ? ` · <span title="${escapeHtml(row.iface)}">${escapeHtml(shortInterface(row.iface))}</span>` : ""}` : escapeHtml(row.sub || "");
-			const chart = ids ? "<span></span>" : "<canvas></canvas>";
-			const value = ids ? `<span class="fwmap-talker-count ${row.severity <= 2 ? "fwmap-ids-high" : "fwmap-ids"}">${escapeHtml(row.count)} ${escapeHtml(T.alerts_short)}</span>` : `<span class="fwmap-talker-rate">${escapeHtml(formatRate(row.rate))}</span>`;
-			const extra = ids ? `<span class="fwmap-talker-flows">${escapeHtml(T.severity)} ${escapeHtml(row.severity)}</span>` : `<span class="fwmap-talker-flows">${escapeHtml(row.flows)} ${escapeHtml(row.flows === 1 ? T.flow_one : T.flow_many)}</span>`;
+			const value = ids ? `<span class="${row.severity <= 2 ? "text-danger fwmap-ids-high" : "fwmap-ids"}">${escapeHtml(row.count)} ${escapeHtml(T.alerts_short)}</span>` : escapeHtml(formatRate(row.rate));
+			const extra = ids ? `${escapeHtml(T.severity)} ${escapeHtml(row.severity)}` : `${escapeHtml(row.flows)} ${escapeHtml(row.flows === 1 ? T.flow_one : T.flow_many)}`;
 			const active = talkerActive(row);
-			return `<div class="fwmap-talker${active ? " active" : ""}" data-index="${index}" role="button" tabindex="0"
+			return `<tr class="fwmap-talker${active ? " active" : ""}" data-index="${index}" role="button" tabindex="0"
         ${ids ? "" : `aria-pressed="${active}"`} title="${escapeHtml(ids ? T.select_hint : T.filter_hint)}">
-      <span class="fwmap-talker-icon">${row.flag || `${ic(row.icon)}`}</span>
-      <span class="fwmap-talker-text"><span class="fwmap-talker-label">${escapeHtml(row.label)}</span>
-        <span class="fwmap-talker-sub">${sub}</span></span>
-      ${chart}${value}${extra}
-    </div>`;
-		}).join(""));
+      <td class="text-muted text-center fwmap-talker-icon">${row.flag || ic(row.icon)}</td>
+      <td><div class="fwmap-talker-label">${escapeHtml(row.label)}</div>
+        <div class="small text-muted fwmap-talker-sub">${sub}</div></td>
+      <td class="fwmap-talker-chart">${ids ? "" : "<canvas></canvas>"}</td>
+      <td class="text-right fwmap-talker-rate">${value}</td>
+      <td class="small text-muted text-right fwmap-talker-flows">${extra}</td>
+    </tr>`;
+		}).join("")}</tbody></table>`);
 		state.talkerRows = rows;
 		$list.find(".fwmap-talker canvas").each(function() {
 			sparkline(this, rows[$(this).closest(".fwmap-talker").data("index")].series);
@@ -2680,7 +2638,7 @@
 	/** The side panel's current tab: top talkers from `groups`, or the saved snapshots. */
 	function renderTabs(groups) {
 		const snapshots = state.talkerTab === "snapshots";
-		$("#fwmap-talker-sort").toggle(!snapshots && state.talkerTab !== "ids");
+		$("#fwmap-talker-sort").closest(".bootstrap-select").toggle(!snapshots && state.talkerTab !== "ids");
 		if (snapshots) renderSnapshotList();
 		else if (groups) renderTalkers(groups);
 	}
