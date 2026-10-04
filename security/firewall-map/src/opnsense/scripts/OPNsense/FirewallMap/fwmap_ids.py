@@ -489,16 +489,29 @@ class AlertTracker:
 MAX_SNAPSHOT_CONNECTIONS = 6
 
 
-def connection_snapshot(address, correlator, names, interfaces, wall=None):
+def connection_keys(correlator):
+    """{remote address: [connection keys]} over current states, IDS flows and blocked attempts, in
+    that order of preference. Built once per recording: walking every state for each flagged
+    address cost about 0.5 s at 100,000 states."""
+    index = {}
+    seen = set()
+    for store in (correlator.current, correlator.flows, correlator.blocked):
+        for key in store:
+            if key not in seen:
+                seen.add(key)
+                index.setdefault(key[3], []).append(key)
+    return index
+
+
+def connection_snapshot(address, correlator, names, interfaces, wall=None, index=None):
     """The connections to one flagged address as PF sees them right now (plus any Suricata linked).
 
     Each carries both sides (inside host, public side, remote), the rule and interface that let it
     through, bytes and age, and the Suricata signatures correlated to that exact connection.
+    `index` is connection_keys(correlator), when several addresses are looked up in a row.
     """
     wall = time.time() if wall is None else wall
-    keys = [key for key in correlator.current if key[3] == address]
-    keys += [key for key in correlator.flows if key[3] == address and key not in correlator.current]
-    keys += [key for key in correlator.blocked if key[3] == address and key not in correlator.flows]
+    keys = (index if index is not None else connection_keys(correlator)).get(address, [])
     result = []
     for key in keys:
         connection = correlator.current.get(key) or (correlator.flows.get(key) or {}).get("connection") \

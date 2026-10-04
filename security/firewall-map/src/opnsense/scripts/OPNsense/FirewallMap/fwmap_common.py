@@ -92,6 +92,22 @@ SERVICES = {
 FILE_MODE = 0o640
 
 
+_config = {}
+
+
+def config_root(path=CONFIG_XML):
+    """config.xml parsed, shared by every reader in this process and parsed again only when the
+    file changes (several readers ran per settings refresh, each parsing it in full). Raises
+    OSError or ElementTree.ParseError like ElementTree.parse(). The tree is read only."""
+    from xml.etree import ElementTree
+    stat = os.stat(path)
+    key = (stat.st_mtime_ns, stat.st_size)
+    cached = _config.get(path)
+    if cached is None or cached[0] != key:
+        cached = _config[path] = (key, ElementTree.parse(path).getroot())
+    return cached[1]
+
+
 def secure_umask():
     """Directories and files these scripts create: owner and group only (see FILE_MODE)."""
     os.umask(0o027)

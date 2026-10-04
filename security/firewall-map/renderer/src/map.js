@@ -517,10 +517,23 @@ export function createFirewallMap(container, options = {}) {
       framesComposed += 1;
       composeMs += performance.now() - start;
     }
-    if (arcs.length || blockArcs.length || animating(now)) {
+    scheduleFrame(now);
+  }
+
+  /** Keep animating while there is motion and the map can be seen (not scrolled away). */
+  function scheduleFrame(now = performance.now()) {
+    if (frame === null && onScreen && (arcs.length || blockArcs.length || animating(now))) {
       frame = requestAnimationFrame(draw);
     }
   }
+
+  // a widget far down a long dashboard stops drawing until it is scrolled back into view
+  let onScreen = true;
+  const visibility = window.IntersectionObserver ? new IntersectionObserver((entries) => {
+    onScreen = entries.some((entry) => entry.isIntersecting);
+    scheduleFrame();
+  }) : null;
+  visibility?.observe(container);
 
   // one label per place, busiest places first
   // one label per place: busiest allowed traffic first, then blocked sources and alerts by hits
@@ -847,9 +860,7 @@ export function createFirewallMap(container, options = {}) {
     clearHome();  // labels are placed around the houses of this data
     labelLayer = buildLabelLayer();
     const layerList = compose();
-    if ((arcs.length || blockArcs.length || animating(performance.now())) && frame === null) {
-      frame = requestAnimationFrame(draw);
-    }
+    scheduleFrame();
     return layerList;
   }
 
@@ -930,6 +941,9 @@ export function createFirewallMap(container, options = {}) {
     },
     destroy() {
       container.removeEventListener('webglcontextlost', onContextLost, true);
+      visibility?.disconnect();
+      delete container.firewallMapDeck;
+      delete container.firewallMapFollow;
       if (frame !== null) {
         cancelAnimationFrame(frame);
         frame = null;

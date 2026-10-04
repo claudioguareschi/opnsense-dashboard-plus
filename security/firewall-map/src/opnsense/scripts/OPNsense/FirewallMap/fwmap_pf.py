@@ -32,7 +32,7 @@ import re
 import subprocess
 import xml.etree.ElementTree as ElementTree
 
-from fwmap_common import CONFIG_XML, PFCTL, RULES_DEBUG, host_port, normalize_ip, private_ip, public_ip
+from fwmap_common import CONFIG_XML, PFCTL, RULES_DEBUG, config_root, host_port, normalize_ip, private_ip, public_ip
 
 
 IFCONFIG = "/sbin/ifconfig"
@@ -360,7 +360,7 @@ def pf_tables():
 def config_aliases(config=CONFIG_XML):
     """Firewall aliases from config.xml: [{"name", "type", "enabled", "description"}]."""
     try:
-        root = ElementTree.parse(config).getroot()
+        root = config_root(config)
     except (OSError, ElementTree.ParseError):
         return []
     return [{
@@ -390,7 +390,7 @@ def interface_names(path=CONFIG_XML):
     """Map devices (igb1, vlan01, ...) to their configured names (WAN, LAN, ...)."""
     names = {}
     try:
-        interfaces = ElementTree.parse(path).getroot().find("interfaces")
+        interfaces = config_root(path).find("interfaces")
     except (OSError, ElementTree.ParseError):
         return names
     for node in list(interfaces) if interfaces is not None else []:

@@ -71,10 +71,11 @@ from fwmap_blocks import BlockTracker, FilterLogTail, block_event_time, block_sn
 from fwmap_cache import CacheStore, GeoCache  # noqa: E402
 from fwmap_common import (  # noqa: E402
     CONFIG_XML, HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, SNAPSHOT_DIR, SNAPSHOT_REQUEST_DIR,
-    host_port, remote_target, requested, secure_umask, service_name, service_port_label, write_json, write_text,
+    config_root, host_port, remote_target, requested, secure_umask, service_name, service_port_label, write_json,
+    write_text,
 )
 from fwmap_ids import (  # noqa: E402
-    ALERT_BACKLOG_BYTES, EVE_LOG, AlertTracker, Correlator, alert_snapshot, connection_snapshot, firewall_blocks,
+    ALERT_BACKLOG_BYTES, EVE_LOG, AlertTracker, Correlator, alert_snapshot, connection_keys, connection_snapshot, firewall_blocks,
     ips_drops,
 )
 from fwmap_leases import HostnameResolver, describe_inside, describe_target, lease_names  # noqa: E402
@@ -345,7 +346,7 @@ def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None
 def widget_in_use(path=CONFIG_XML):
     """True when any user's dashboard contains the Firewall Map widget."""
     try:
-        root = ElementTree.parse(path).getroot()
+        root = config_root(path)
     except (OSError, ElementTree.ParseError):
         return False
     for node in root.iterfind("./system/user/dashboard"):
@@ -407,10 +408,12 @@ class ThreatRecorder:
             seen.update(firewall_blocks(correlator, seen, self.last_wall, blocklists, reputation))
             if collector.geo is not None and seen:
                 collector.geo.resolve(list(seen))
+            index = connection_keys(correlator) if seen else None
             for address, entry in seen.items():
                 entry["remote"] = self._identity(address, collector)
                 entry["ids"] = collector.alerts.summary(address)
-                entry["connections"] = connection_snapshot(address, correlator, collector.leases, collector.interfaces)
+                entry["connections"] = connection_snapshot(address, correlator, collector.leases, collector.interfaces,
+                                                           index=index)
             self.last_wall = time.time()
             threats.record(self.db, seen)
             # hourly by age; at once when a burst of flagged addresses overfills history

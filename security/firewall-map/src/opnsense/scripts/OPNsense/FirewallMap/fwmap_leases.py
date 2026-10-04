@@ -32,7 +32,7 @@ import time
 import xml.etree.ElementTree as ElementTree
 from concurrent.futures import ThreadPoolExecutor
 
-from fwmap_common import CONFIG_XML, service_name
+from fwmap_common import CONFIG_XML, config_root, service_name
 
 
 HOSTNAME_TTL = 6 * 3600
@@ -80,7 +80,7 @@ def lease_names(kea=KEA_LEASES, dnsmasq=DNSMASQ_LEASES, config=CONFIG_XML, now=N
     except OSError:
         pass
     try:
-        root = ElementTree.parse(config).getroot()
+        root = config_root(config)
         for family in ("dhcp4", "dhcp6"):
             for reservation in root.iterfind(f".//Kea/{family}/reservations/reservation"):
                 address, name = reservation.findtext("ip_address"), reservation.findtext("hostname")

@@ -26,6 +26,7 @@
 
 """Threat lists for Firewall Map+: blocklist pf tables, curated feeds and AbuseIPDB verdicts."""
 
+import hashlib
 import ipaddress
 import os
 import subprocess
@@ -162,6 +163,8 @@ class BlocklistIndex:
     def __init__(self):
         self.index = ([], {4: {}, 6: {}})
         self.refreshing = False
+        # what the index was built from, so an unchanged set of lists is not parsed again
+        self.fingerprint = None
 
     # one bit per table in a 64-bit mask
     MAX_TABLES = 62
@@ -229,12 +232,22 @@ class BlocklistIndex:
                 entries = output.split()
                 if len(entries) <= BLOCKLIST_MAX_ENTRIES:
                     contents[table] = entries
+                else:
+                    print(f"firewallmap: threat list {table} has {len(entries)} entries, over "
+                          f"{BLOCKLIST_MAX_ENTRIES}: not used", file=sys.stderr)
             try:
                 with open(ABUSEIPDB_BLACKLIST) as handle:
                     contents[ABUSEIPDB_LIST] = handle.read().split()[:BLOCKLIST_MAX_ENTRIES]
             except OSError:
                 pass
-            self.index = self.build(contents)
+            # parsing every entry is the expensive part: skip it when no list changed since
+            digest = hashlib.sha256()
+            for name in sorted(contents):
+                digest.update(name.encode() + b"\0" + "\n".join(contents[name]).encode() + b"\0")
+            fingerprint = digest.digest()
+            if fingerprint != self.fingerprint:
+                self.index = self.build(contents)
+                self.fingerprint = fingerprint
         finally:
             self.refreshing = False
 

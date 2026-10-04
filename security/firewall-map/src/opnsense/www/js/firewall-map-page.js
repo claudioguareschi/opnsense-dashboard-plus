@@ -2489,12 +2489,18 @@
 				$(this).toggleClass("active", on).data("styled", true);
 				$select.selectpicker("setStyle", on ? "btn-primary btn-sm" : "btn-default btn-sm");
 			}
-			$select.selectpicker("render");
+			const shown = `${$select.val()}|${$select.data("html") || ""}`;
+			if ($select.data("rendered") !== shown) $select.data("rendered", shown).selectpicker("render");
 			active += on ? 1 : 0;
 		});
 		$("#fwmap-reset").toggle(active >= 2);
-		foldChips();
+		const layout = `${document.getElementById("fwmap-chips")?.clientWidth}|${$(".fwmap-filter select.selectpicker").map((_, select) => $(select).data("rendered")).get().join("|")}|${active}`;
+		if (layout !== lastLayout) {
+			lastLayout = layout;
+			foldChips();
+		}
 	}
+	var lastLayout = null;
 	/** Filters that do not fit on the row move, from the right, into the "Filters" menu. */
 	function foldChips() {
 		const row = document.getElementById("fwmap-chips");

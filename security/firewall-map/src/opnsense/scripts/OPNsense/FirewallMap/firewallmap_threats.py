@@ -57,6 +57,7 @@ KEEP_SECONDS = 90 * 86400
 KEEP_ROWS = 5000
 MAX_ITEMS = 8  # per list kept for one address (targets, inside hosts, services, lists)
 MAX_NOTE = 1000
+SCHEMA_VERSION = 1
 
 
 def connect(path=DATABASE):
@@ -71,14 +72,18 @@ def connect(path=DATABASE):
         "samples INTEGER, data TEXT, status TEXT DEFAULT 'new', note TEXT DEFAULT '', status_changed REAL, "
         "disposition TEXT DEFAULT 'passed')"
     )
-    columns = {row[1] for row in db.execute("PRAGMA table_info(threats)")}
-    if "disposition" not in columns:
-        db.execute("ALTER TABLE threats ADD COLUMN disposition TEXT DEFAULT 'passed'")
-    # Releases before disposition tabs used status=dropped for IPS evidence.
-    db.execute("UPDATE threats SET disposition = 'ips_dropped', status = 'new' WHERE status = 'dropped'")
-    db.execute("CREATE INDEX IF NOT EXISTS threats_view ON threats(status, disposition, last_seen DESC)")
-    if path == DATABASE:
-        move_from_cache(db)
+    # one-time steps, recorded in user_version (not repeated on every connection, which is every
+    # list request)
+    if db.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(threats)")}
+        if "disposition" not in columns:
+            db.execute("ALTER TABLE threats ADD COLUMN disposition TEXT DEFAULT 'passed'")
+        db.execute("CREATE INDEX IF NOT EXISTS threats_view ON threats(status, disposition, last_seen DESC)")
+        if path == DATABASE:
+            move_from_cache(db)
+        # releases before disposition tabs used status=dropped for IPS evidence
+        db.execute("UPDATE threats SET disposition = 'ips_dropped', status = 'new' WHERE status = 'dropped'")
+        db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return db
 
 
@@ -120,12 +125,16 @@ def merge(old, new):
 def observe(records, lists_for, local_addresses, networks=None):
     """Group the current states that touch a flagged address: {remote: summary}."""
     seen = {}
+    # an address appears in many states: ask the lists once per address and sample
+    verdicts = {}
     for record in records:
         pair = flow_endpoints(record, local_addresses, networks)
         if pair is None:
             continue
         remote = pair[1]
-        lists = lists_for(remote)
+        if remote not in verdicts:
+            verdicts[remote] = lists_for(remote)
+        lists = verdicts[remote]
         if not lists:
             continue
         entry = seen.setdefault(remote, {
@@ -293,11 +302,15 @@ def _view_clause(view):
     return "status != 'dismissed'", ()
 
 
-def _stored_rows(db, view=None):
-    """Every entry of a disposition/workflow view, most recent activity first."""
+def _stored_rows(db, view=None, offset=0, limit=None):
+    """The entries of a disposition/workflow view, most recent activity first (a page of them
+    when `limit` is given)."""
     clause, parameters = _view_clause(view)
     sql = ("SELECT address, first_seen, last_seen, samples, data, status, note, status_changed, disposition "
            f"FROM threats WHERE {clause} ORDER BY last_seen DESC")
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        parameters = (*parameters, limit, offset)
     for address, first, last, samples, data, current, note, changed, disposition in db.execute(sql, parameters):
         try:
             data = json.loads(data)
@@ -366,11 +379,19 @@ def listing(db, view=None, offset=0, limit=PAGE_SIZE, query=None):
     if view == "counts":
         return {"status": "ok", "rows": [], "counts": counts}
     names = inside_names()
-    rows = list(matching(db, view, query, names))
     offset = max(0, int(offset or 0))
     limit = max(1, min(int(limit or PAGE_SIZE), MAX_PAGE_SIZE))
-    page = [_decorate(db, row) for row in rows[offset:offset + limit]]
-    return {"status": "ok", "rows": page, "total": len(rows), "offset": offset, "counts": counts, "names": names}
+    if str(query or "").strip():
+        # a search matches what the queue displays (decoded rows), so it reads the whole view
+        rows = list(matching(db, view, query, names))
+        total, rows = len(rows), rows[offset:offset + limit]
+    else:
+        # no search: SQL pages it, only one page is decoded
+        clause, parameters = _view_clause(view)
+        total = db.execute(f"SELECT count(*) FROM threats WHERE {clause}", parameters).fetchone()[0]
+        rows = list(_stored_rows(db, view, offset, limit))
+    page = [_decorate(db, row) for row in rows]
+    return {"status": "ok", "rows": page, "total": total, "offset": offset, "counts": counts, "names": names}
 
 
 def set_status(db, address, status, note=None, now=None):

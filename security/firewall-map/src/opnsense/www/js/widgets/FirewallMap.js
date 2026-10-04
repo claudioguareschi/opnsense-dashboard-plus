@@ -450,7 +450,9 @@ export default class FirewallMap extends BaseWidget {
             return window.FirewallMapRenderer;
         }
         if (!this.loadingRenderer) {
-            this.loadingRenderer = $.getScript('/ui/js/firewall-map-renderer.js');
+            // cache allowed ($.getScript forbids it): the browser revalidates the 1.2 MB file
+            // instead of fetching it on every dashboard load, and an upgrade still replaces it
+            this.loadingRenderer = $.ajax({url: '/ui/js/firewall-map-renderer.js', dataType: 'script', cache: true});
         }
         try {
             await this.loadingRenderer;

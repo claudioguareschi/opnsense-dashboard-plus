@@ -56,10 +56,9 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlencode, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fwmap_common import GEODB_STATUS, STATE_DIR, read_json, secure_umask, write_json  # noqa: E402
+from fwmap_common import CONFIG_XML, GEODB_STATUS, STATE_DIR, config_root, read_json, secure_umask, write_json  # noqa: E402
 
 
-CONFIG_XML = "/conf/config.xml"
 GEOIP_ALIAS_CONF = "/usr/local/etc/filter_geoip.conf"
 GEOIP_DIR = "/usr/local/share/GeoIP"
 STATUS_FILE = GEODB_STATUS
@@ -104,7 +103,7 @@ def settings(path=CONFIG_XML):
     values = {"provider": "auto", "license_key": "", "update_days": 3, "threat_lists": "",
               "record_threats": "1", "blocklist_aliases": "0"}
     try:
-        general = ElementTree.parse(path).getroot().find("./OPNsense/FirewallMap/general")
+        general = config_root(path).find("./OPNsense/FirewallMap/general")
     except (OSError, ElementTree.ParseError):
         general = None
     if general is not None:

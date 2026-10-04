@@ -48,7 +48,7 @@ import xml.etree.ElementTree as ElementTree
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import firewallmap_investigate as investigate  # noqa: E402
 from fwmap_common import (  # noqa: E402
-    ABUSEIPDB_BLACKLIST, CONFIG_XML, PFCTL, STATE_DIR, read_json, secure_umask, write_json, write_text,
+    ABUSEIPDB_BLACKLIST, CONFIG_XML, PFCTL, STATE_DIR, config_root, read_json, secure_umask, write_json, write_text,
 )
 
 LIST_FILE = ABUSEIPDB_BLACKLIST
@@ -96,7 +96,7 @@ def download(key):
 def alias_settings(path=CONFIG_XML):
     """(option on, alias defined) from config.xml; the alias may exist without the option."""
     try:
-        root = ElementTree.parse(path).getroot()
+        root = config_root(path)
     except (OSError, ElementTree.ParseError):
         return False, False
     enabled = (root.findtext("./OPNsense/FirewallMap/general/blocklist_aliases") or "").strip() == "1"

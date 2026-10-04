@@ -50,9 +50,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fwmap_cache import CacheStore  # noqa: E402
-from fwmap_common import REPUTATION_KIND, REPUTATION_MAX_AGE, secure_umask  # noqa: E402
+from fwmap_common import CONFIG_XML, REPUTATION_KIND, REPUTATION_MAX_AGE, config_root, secure_umask  # noqa: E402
 
-CONFIG_XML = "/conf/config.xml"
 TIMEOUT = 10
 # an RDAP, RIPEstat or AbuseIPDB answer is a few kB; anything far larger is not one
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -63,7 +62,7 @@ MAX_ENTRIES = {"rdap": 5000, "ripestat": 5000, "abuseipdb": 5000}
 
 def abuseipdb_key(path=CONFIG_XML):
     try:
-        node = ElementTree.parse(path).getroot().find("./OPNsense/FirewallMap/general/abuseipdb_key")
+        node = config_root(path).find("./OPNsense/FirewallMap/general/abuseipdb_key")
     except (OSError, ElementTree.ParseError):
         return None
     return node.text.strip() if node is not None and node.text and node.text.strip() else None
