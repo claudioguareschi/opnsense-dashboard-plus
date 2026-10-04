@@ -53,7 +53,7 @@ from configparser import ConfigParser
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlencode, urlparse
 
-from lib.common import GEODB_STATUS, STATE_DIR, read_json, secure_umask, write_json
+from lib.common import GEODB_STATUS, STATE_DIR, log_notice, log_warning, read_json, secure_umask, write_json
 from lib import mmdb
 from lib.config import settings
 
@@ -171,6 +171,18 @@ def status():
         "errors": last.get("errors"),
         "next_retry": last.get("next_retry"),
     }
+
+
+def built(path):
+    """When the provider built the database (epoch seconds, from its own metadata), or None."""
+    try:
+        reader = mmdb.Reader(path)
+    except (OSError, mmdb.InvalidDatabaseError):
+        return None
+    try:
+        return reader.metadata.get("build_epoch")
+    finally:
+        reader.close()
 
 
 def validate(path, probe):
@@ -328,9 +340,13 @@ def fetch_databases(provider, paths, key, update_days, force, report=None):
                 shutil.move(fetched, f"{paths[kind]}.new")
                 os.replace(f"{paths[kind]}.new", paths[kind])
                 updated.append(kind)
+                epoch = built(paths[kind])
+                build = f", built {datetime.fromtimestamp(epoch, timezone.utc):%Y-%m-%d}" if epoch else ""
+                log_notice(f"{edition} downloaded: {os.path.getsize(paths[kind]) / 1048576:.1f} MB{build}")
             except Exception as exc:
-                errors.append({"kind": kind, "edition": edition, "code": error_code(exc),
-                               "message": scrub(f"{edition}: {exc}", key)})
+                error = {"kind": kind, "edition": edition, "code": error_code(exc), "message": scrub(f"{edition}: {exc}", key)}
+                errors.append(error)
+                log_warning(f"{error['message']} ({error['code']})")
     return updated, errors
 
 
@@ -374,6 +390,7 @@ def update(force=False, retry=False):
         if provider.startswith("maxmind"):
             key, _ = license_key(values)
             if not key:
+                log_warning("no MaxMind license key: add one in the settings or a GeoIP alias, or choose DB-IP Lite")
                 write_status({"last_attempt": datetime.now(timezone.utc).isoformat(),
                               "last_error": "maxmind_key_missing", "provider": provider})
                 return {"result": "failed", "error": "maxmind_key_missing"}
@@ -395,6 +412,12 @@ def update(force=False, retry=False):
         failures = 0 if not errors else (0 if retry else last.get("failures") or 0) + 1
         fallback = fall_back(provider, paths, failures, values["update_days"], last.get("fallback"), report)
         now = time.time()
+        if errors:
+            log_warning(f"geolocation download failed ({failures} in a row): next try in {int(retry_delay(failures) // 60)} min")
+        if (fallback or {}).get("active") and not (last.get("fallback") or {}).get("active"):
+            log_notice("the MaxMind download keeps failing: using DB-IP Lite until it works")
+        elif last.get("fallback") and not fallback:
+            log_notice("MaxMind database in place: the DB-IP Lite stand-in is removed")
         write_status({
             "last_attempt": datetime.now(timezone.utc).isoformat(),
             "last_error": "; ".join(error["message"] for error in errors) or None,

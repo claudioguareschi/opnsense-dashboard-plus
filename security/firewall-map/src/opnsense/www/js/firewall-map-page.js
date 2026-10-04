@@ -1794,7 +1794,7 @@
 	}
 	function countsText(meta) {
 		const flows = escapeHtml(plural(T, "snapshot_flows", meta.flows || 0));
-		return meta.flagged ? `${flows} ${pill("danger", plural(T, "snapshot_flagged", meta.flagged))}` : flows;
+		return meta.flagged ? `${flows} · ${pill("danger", plural(T, "snapshot_flagged", meta.flagged))}` : flows;
 	}
 	async function loadSnapshots() {
 		try {

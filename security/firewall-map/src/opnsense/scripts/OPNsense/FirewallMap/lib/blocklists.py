@@ -30,12 +30,11 @@ import hashlib
 import ipaddress
 import os
 import subprocess
-import sys
 import threading
 from array import array
 from bisect import bisect_left
 
-from .common import ABUSEIPDB_BLACKLIST, CONFIG_XML, PFCTL, REPUTATION_KIND, REPUTATION_MAX_AGE, STATE_DIR
+from .common import ABUSEIPDB_BLACKLIST, CONFIG_XML, PFCTL, REPUTATION_KIND, REPUTATION_MAX_AGE, STATE_DIR, log_warning
 from .pf import blocked_rule_tables, config_aliases, pf_tables
 
 
@@ -165,6 +164,8 @@ class BlocklistIndex:
         self.refreshing = False
         # what the index was built from, so an unchanged set of lists is not parsed again
         self.fingerprint = None
+        # lists too large to use, each logged once (the check repeats every few minutes)
+        self.oversized = set()
 
     # one bit per table in a 64-bit mask
     MAX_TABLES = 62
@@ -173,16 +174,14 @@ class BlocklistIndex:
     def build(contents, max_total=BLOCKLIST_MAX_TOTAL):
         names = sorted(contents)
         if len(names) > BlocklistIndex.MAX_TABLES:
-            print(f"firewallmap: {len(names) - BlocklistIndex.MAX_TABLES} threat lists ignored "
-                  f"(more than {BlocklistIndex.MAX_TABLES}): {', '.join(names[BlocklistIndex.MAX_TABLES:])}",
-                  file=sys.stderr)
+            log_warning(f"{len(names) - BlocklistIndex.MAX_TABLES} threat lists ignored "
+                        f"(more than {BlocklistIndex.MAX_TABLES}): {', '.join(names[BlocklistIndex.MAX_TABLES:])}")
             names = names[:BlocklistIndex.MAX_TABLES]
         by_family = {4: {}, 6: {}}
         total = 0
         for bit, table in enumerate(names):
             if total >= max_total:
-                print(f"firewallmap: threat lists truncated at {max_total} entries, from {table} on",
-                      file=sys.stderr)
+                log_warning(f"threat lists truncated at {max_total} entries, from {table} on")
                 break
             for entry in contents[table]:
                 entry = entry.strip()
@@ -232,9 +231,10 @@ class BlocklistIndex:
                 entries = output.split()
                 if len(entries) <= BLOCKLIST_MAX_ENTRIES:
                     contents[table] = entries
-                else:
-                    print(f"firewallmap: threat list {table} has {len(entries)} entries, over "
-                          f"{BLOCKLIST_MAX_ENTRIES}: not used", file=sys.stderr)
+                    self.oversized.discard(table)
+                elif table not in self.oversized:
+                    self.oversized.add(table)
+                    log_warning(f"threat list {table} has {len(entries)} entries, over {BLOCKLIST_MAX_ENTRIES}: not used")
             try:
                 with open(ABUSEIPDB_BLACKLIST) as handle:
                     contents[ABUSEIPDB_LIST] = handle.read().split()[:BLOCKLIST_MAX_ENTRIES]

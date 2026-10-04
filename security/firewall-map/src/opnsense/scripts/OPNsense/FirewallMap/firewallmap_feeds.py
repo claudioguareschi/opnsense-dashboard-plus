@@ -43,7 +43,7 @@ import urllib.error
 import urllib.request
 
 from lib.blocklists import FEEDS, FEED_DIR, feed_file
-from lib.common import CONFIG_XML, STATE_DIR, read_json, secure_umask, write_json, write_text
+from lib.common import CONFIG_XML, STATE_DIR, log_notice, log_warning, read_json, secure_umask, write_json, write_text
 from lib.pf import config_aliases
 from firewallmap_geodb import settings
 
@@ -109,12 +109,15 @@ def update(force=False, fetch=download, now=None, feeds=None):
             write_text(feed_file(feed["name"]), "\n".join(entries) + "\n")
             entry.update({"updated": now, "count": len(entries), "error": None})
             results[feed["name"]] = "ok"
+            log_notice(f"threat feed {feed['label']} downloaded: {len(entries)} entries")
         except urllib.error.HTTPError as error:
             entry["error"] = f"HTTP {error.code}"
             results[feed["name"]] = entry["error"]
         except Exception as error:  # network or parse errors; the previous copy stays in use
             entry["error"] = str(error)[:200]
             results[feed["name"]] = entry["error"]
+        if entry.get("error"):
+            log_warning(f"threat feed {feed['label']} download failed: {entry['error']} (the previous copy stays in use)")
         status[feed["name"]] = entry
     write_json(STATUS_FILE, status)
     return results

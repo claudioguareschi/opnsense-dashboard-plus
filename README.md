@@ -189,6 +189,15 @@ or tick *Remove the stored key* to delete it.
 stop and restart controls), how fresh the geolocation database, the threat feeds and the AbuseIPDB
 blacklist are, and any download errors. Each has an *Update now* button.
 
+**Reporting ▸ Firewall Map ▸ Log File** is the plugin's log (System ▸ Settings ▸ Logging sets how long
+it is kept and can forward it). It records what helps diagnose a problem, without one line per
+sample: the collector starting and stopping (and why), a map being opened or closed, each download
+of the geolocation database, the threat feeds and the AbuseIPDB blacklist with its result, settings
+being applied (with the blocklist aliases created or removed), and errors, each logged once with
+its recovery. Keys are never logged. Please include this log when asking for help. With *Log
+administrator actions* on (off by default), it also records who investigated an address, changed
+or deleted threat entries, and saved, annotated or deleted snapshots.
+
 Each widget's display options are in its own settings dialog (gear icon on the widget): busiest-arc
 highlighting, maximum arcs, city labels, blocked traffic and its minimum hits, hostname lookups and
 network (ASN) names.

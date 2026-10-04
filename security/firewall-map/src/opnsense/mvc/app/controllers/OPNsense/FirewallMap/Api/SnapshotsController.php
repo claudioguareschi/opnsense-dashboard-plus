@@ -28,6 +28,7 @@ namespace OPNsense\FirewallMap\Api;
 
 use OPNsense\Base\ApiControllerBase;
 use OPNsense\Core\Backend;
+use OPNsense\FirewallMap\AuditLog;
 use OPNsense\FirewallMap\ConfigdArgument;
 
 /**
@@ -48,7 +49,11 @@ class SnapshotsController extends ApiControllerBase
             return ['result' => 'failed'];
         }
         $user = $this->session->has('Username') ? $this->session->get('Username') : '';
-        return $this->run('save', [ConfigdArgument::text($user, 256)]);
+        $result = $this->run('save', [ConfigdArgument::text($user, 256)]);
+        if ($result['result'] === 'saved') {
+            AuditLog::record($user, "saved snapshot {$result['snapshot']['id']}");
+        }
+        return $result;
     }
 
     public function listAction()
@@ -70,6 +75,10 @@ class SnapshotsController extends ApiControllerBase
         if (!$this->request->isPost() || !ConfigdArgument::isSnapshotId($id)) {
             return ['result' => 'failed'];
         }
-        return $this->run('note', [(string)$id, ConfigdArgument::text($this->request->getPost('note') ?? '', 1500)]);
+        $result = $this->run('note', [(string)$id, ConfigdArgument::text($this->request->getPost('note') ?? '', 1500)]);
+        if ($result['result'] === 'saved') {
+            AuditLog::record((string)$this->session->get('Username'), "changed the note of snapshot {$id}");
+        }
+        return $result;
     }
 }

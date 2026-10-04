@@ -29,6 +29,7 @@ namespace OPNsense\FirewallMap\Api;
 use OPNsense\Base\ApiMutableModelControllerBase;
 use OPNsense\Core\Backend;
 use OPNsense\Core\Config;
+use OPNsense\Core\Syslog;
 use OPNsense\FirewallMap\BlocklistAliases;
 
 /**
@@ -97,22 +98,26 @@ class SettingsController extends ApiMutableModelControllerBase
         $backend = new Backend();
         Config::getInstance()->lock();
         $general = $this->getModel()->general;
-        [$aliases, $changed, $error] = BlocklistAliases::reconcile(
+        [$aliases, $changes, $error] = BlocklistAliases::reconcile(
             (string)$general->blocklist_aliases === '1',
             (string)$general->threat_lists,
             $general->abuseipdb_key->getValue() !== ''
         );
-        if ($error === null && $changed) {
+        if ($error === null && $changes) {
             $aliases->serializeToConfig();
             Config::getInstance()->save();
         }
         Config::getInstance()->unlock();
+        $log = new Syslog('firewallmap', null, LOG_DAEMON);
         if ($error !== null) {
+            $log->warning("settings not applied: {$error}");
             return ['status' => 'failed', 'status_msg' => $error];
         }
-        if ($changed) {
+        if ($changes) {
             BlocklistAliases::apply();
+            $log->notice('blocklist aliases: ' . implode(', ', $changes));
         }
+        $log->notice('settings applied');
         /* reload in place: keep live flow and alert history while the chosen list index is rebuilt */
         $backend->configdRun('firewallmap reload');
         $backend->configdRun('firewallmap feeds update', true);

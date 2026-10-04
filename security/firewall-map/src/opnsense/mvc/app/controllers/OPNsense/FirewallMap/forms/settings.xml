@@ -62,4 +62,14 @@
         <type>checkbox</type>
         <help>Keeps an FWMAP_* alias for each selected feed and for the AbuseIPDB blacklist, for use in your own rules. No rules are added.</help>
     </field>
+    <field>
+        <type>header</type>
+        <label>Logging</label>
+    </field>
+    <field>
+        <id>firewallmap.general.audit_log</id>
+        <label>Log administrator actions</label>
+        <type>checkbox</type>
+        <help>Adds to the Firewall Map log who investigated an address (which sends it to RDAP, RIPEstat and AbuseIPDB), changed or deleted threat entries, and saved, annotated or deleted snapshots. Downloads, errors and the collector are always logged.</help>
+    </field>
 </form>

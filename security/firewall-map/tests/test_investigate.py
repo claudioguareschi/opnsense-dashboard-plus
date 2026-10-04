@@ -134,6 +134,7 @@ class AbuseBlacklistTest(unittest.TestCase):
             with open(ABUSEIPDB.STATUS_FILE) as handle:
                 self.assertNotIn("secret", handle.read())
 
+
 class AbuseAliasTest(unittest.TestCase):
     def test_alias_settings(self):
         with tempfile.TemporaryDirectory() as directory:

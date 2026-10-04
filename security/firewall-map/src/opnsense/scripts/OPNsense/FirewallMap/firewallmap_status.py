@@ -39,7 +39,6 @@ import firewallmap_feeds as feeds
 import firewallmap_geodb as geodb
 from firewallmap_collector import IDLE_SECONDS, recording_wanted, widget_in_use
 from firewallmap_investigate import abuseipdb_key
-from lib import mmdb
 from lib.blocklists import FEEDS
 from lib.common import OUTPUT_FILE, REQUEST_MARKER, read_json, secure_umask
 
@@ -76,24 +75,12 @@ def collector(now=None):
     }
 
 
-def built(path):
-    """When the provider built the database, from its own metadata."""
-    try:
-        reader = mmdb.Reader(path)
-    except (OSError, ValueError):
-        return None
-    try:
-        return reader.metadata.get("build_epoch")
-    finally:
-        reader.close()
-
-
 def database():
     status = geodb.status()
     paths = geodb.DATABASES[status["active_provider"]]
     for kind in ("city", "asn"):
         if status.get(kind):
-            status[kind].update({"edition": paths["editions"][kind], "built": built(paths[kind])})
+            status[kind].update({"edition": paths["editions"][kind], "built": geodb.built(paths[kind])})
     status["state"] = geodb.read_status().get("state")
     return status
 

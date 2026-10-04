@@ -29,6 +29,7 @@ namespace OPNsense\FirewallMap\Api;
 
 use OPNsense\Base\ApiControllerBase;
 use OPNsense\Core\Backend;
+use OPNsense\FirewallMap\AuditLog;
 
 /**
  * On-demand registry, routing and reputation lookups for one public IPv4 or IPv6 address.
@@ -52,6 +53,8 @@ class InvestigateController extends ApiControllerBase
         $sources = $this->request->getPost('sources') === 'abuseipdb' ? 'abuseipdb' : 'all';
         $output = (new Backend())->configdpRun('firewallmap investigate', [$address, $sources]);
         $result = json_decode($output ?? '', true);
+        AuditLog::record((string)$this->session->get('Username'), $sources === 'abuseipdb'
+            ? "checked {$address} on AbuseIPDB" : "investigated {$address} (RDAP, RIPEstat, AbuseIPDB)");
         return is_array($result) ? $result : ['status' => 'failed', 'error' => 'no response'];
     }
 }

@@ -28,6 +28,7 @@ namespace OPNsense\FirewallMap\Api;
 
 use OPNsense\Base\ApiControllerBase;
 use OPNsense\Core\Backend;
+use OPNsense\FirewallMap\AuditLog;
 use OPNsense\FirewallMap\ConfigdArgument;
 
 /** Deleting a saved map snapshot (administrators only, see ACL). */
@@ -39,6 +40,9 @@ class SnapshotAdminController extends ApiControllerBase
             return ['result' => 'failed'];
         }
         $result = json_decode((new Backend())->configdpRun('firewallmap snapshot delete', [(string)$id]) ?? '', true);
+        if (($result['result'] ?? '') === 'deleted') {
+            AuditLog::record((string)$this->session->get('Username'), "deleted snapshot {$id}");
+        }
         return is_array($result) ? $result : ['result' => 'failed', 'error' => 'no response'];
     }
 }

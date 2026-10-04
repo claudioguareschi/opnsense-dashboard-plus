@@ -64,7 +64,8 @@ class BlocklistAliases
 
     /**
      * Bring the aliases in line with the settings. $threatLists empty means automatic: existing
-     * feed aliases are kept, none are added. Returns [alias model, changed, error].
+     * feed aliases are kept, none are added. Returns [alias model, changes ("added FWMAP_x",
+     * "removed FWMAP_y"), error].
      */
     public static function reconcile(bool $enabled, string $threatLists, bool $abuseKey): array
     {
@@ -92,13 +93,13 @@ class BlocklistAliases
                 ];
             }
         }
-        $changed = false;
+        $changes = [];
         foreach ($wanted as $name => $nodes) {
             if (!isset($existing[$name])) {
                 $model->aliases->alias->add()->setNodes($nodes);
-                $changed = true;
+                $changes[] = "added {$name}";
             } elseif ($name === self::ABUSE && !self::ours($existing[$name][1])) {
-                return [$model, false, sprintf(
+                return [$model, [], sprintf(
                     gettext('An alias named %s already exists and was not created by Firewall Map+.'),
                     $name
                 )];
@@ -114,10 +115,10 @@ class BlocklistAliases
                 continue;
             }
             $model->aliases->alias->del($uuid);
-            $changed = true;
+            $changes[] = "removed {$name}";
         }
         if (!empty($inUse)) {
-            return [$model, false, sprintf(
+            return [$model, [], sprintf(
                 gettext('Used in firewall rules or other aliases, remove them there first: %s.'),
                 implode(', ', $inUse)
             )];
@@ -126,7 +127,7 @@ class BlocklistAliases
         foreach ($model->performValidation() as $message) {
             $messages[] = $message->getMessage();
         }
-        return [$model, $changed, empty($messages) ? null : implode(' ', $messages)];
+        return [$model, $changes, empty($messages) ? null : implode(' ', $messages)];
     }
 
     /** Load changed alias definitions into PF without touching rules, then fill the tables. */

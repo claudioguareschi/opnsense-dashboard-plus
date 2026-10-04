@@ -29,12 +29,11 @@
 import json
 import os
 import sqlite3
-import sys
 import threading
 import time
 
 from . import mmdb
-from .common import CACHE_DB
+from .common import CACHE_DB, log_notice, log_warning
 
 
 # database paths follow the provider chosen in the firewall-wide settings (see firewallmap_geodb)
@@ -133,6 +132,8 @@ class CacheStore:
     def __init__(self, path=CACHE_DB):
         self.path = path
         self.lock = threading.Lock()
+        # a database error is logged once, then again when the cache works
+        self.failing = False
         try:
             self.db = self._open(path)
         except sqlite3.Error as error:
@@ -144,7 +145,7 @@ class CacheStore:
                 except (OSError, sqlite3.Error):
                     self.db = None
             if self.db is None:
-                print(f"firewallmap: cache unavailable ({error}); caching in memory for now", file=sys.stderr)
+                log_warning(f"cache unavailable ({error}): caching in memory until the collector restarts")
                 self.db = self._open(":memory:")
 
     @staticmethod
@@ -162,10 +163,22 @@ class CacheStore:
     def _query(self, sql, parameters=()):
         try:
             with self.lock:
-                return self.db.execute(sql, parameters).fetchall()
+                rows = self.db.execute(sql, parameters).fetchall()
         except sqlite3.Error as error:
-            print(f"firewallmap: cache query failed: {error}", file=sys.stderr)
+            self._failed(f"cache query failed: {error}")
             return []
+        self._works()
+        return rows
+
+    def _failed(self, message):
+        if not self.failing:
+            log_warning(message)
+            self.failing = True
+
+    def _works(self):
+        if self.failing:
+            log_notice("the cache works again")
+            self.failing = False
 
     def get_all(self, kind, max_age=None, now=None):
         now = time.time() if now is None else now
@@ -197,8 +210,9 @@ class CacheStore:
                 self.db.execute("BEGIN")
                 self.db.executemany("INSERT OR REPLACE INTO cache (kind, key, value, stored) VALUES (?, ?, ?, ?)", rows)
                 self.db.execute("COMMIT")
+                self._works()
             except sqlite3.Error as error:
-                print(f"firewallmap: cache write failed: {error}", file=sys.stderr)
+                self._failed(f"cache write failed: {error}")
                 try:
                     self.db.execute("ROLLBACK")
                 except sqlite3.Error:

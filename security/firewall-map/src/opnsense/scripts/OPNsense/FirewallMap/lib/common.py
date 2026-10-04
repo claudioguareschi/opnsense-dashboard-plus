@@ -24,7 +24,8 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Shared by the Firewall Map+ scripts: paths, service names, address helpers and file writing.
+"""Shared by the Firewall Map+ scripts: paths, service names, address helpers, file writing and
+the log.
 
 Kept free of heavy imports, since the dashboard's snapshot reader and threat history load it
 on every request.
@@ -34,6 +35,7 @@ import functools
 import ipaddress
 import json
 import os
+import syslog
 import tempfile
 import time
 
@@ -106,6 +108,24 @@ def config_root(path=CONFIG_XML):
     if cached is None or cached[0] != key:
         cached = _config[path] = (key, ElementTree.parse(path).getroot())
     return cached[1]
+
+
+# Reporting: Firewall Map: Log File shows what the scripts send to syslog under this name. Log what
+# helps someone diagnose the plugin (what started, stopped, downloaded or failed, and why), never
+# once per sample, and never a key.
+syslog.openlog("firewallmap", syslog.LOG_PID, syslog.LOG_DAEMON)
+
+
+def log_error(message):
+    syslog.syslog(syslog.LOG_ERR, message)
+
+
+def log_warning(message):
+    syslog.syslog(syslog.LOG_WARNING, message)
+
+
+def log_notice(message):
+    syslog.syslog(syslog.LOG_NOTICE, message)
 
 
 def secure_umask():

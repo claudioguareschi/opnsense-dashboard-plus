@@ -242,9 +242,15 @@ class CollectorLoopTest(unittest.TestCase):
                 mock.patch.object(COLLECTOR, "CacheStore", lambda: store), \
                 mock.patch.object(COLLECTOR.Collector, "step", step), \
                 mock.patch.object(COLLECTOR.time, "sleep") as sleep, \
-                mock.patch("sys.stderr") as stderr:
+                mock.patch.object(COLLECTOR.signal, "signal"), \
+                mock.patch.object(COLLECTOR, "log_error") as log_error, \
+                mock.patch.object(COLLECTOR, "log_notice") as log_notice:
             COLLECTOR.run()
-        self.assertIn("boom", "".join(str(call) for call in stderr.write.call_args_list))
+        # the failure once, with its traceback on one line, then the recovery
+        self.assertEqual(log_error.call_count, 1)
+        self.assertIn("boom", log_error.call_args.args[0])
+        self.assertNotIn("\n", log_error.call_args.args[0])
+        self.assertIn("works again", " ".join(call.args[0] for call in log_notice.call_args_list))
         # backed off after the failure, then kept going until the collector chose to stop
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [2.0, 0.01])
 

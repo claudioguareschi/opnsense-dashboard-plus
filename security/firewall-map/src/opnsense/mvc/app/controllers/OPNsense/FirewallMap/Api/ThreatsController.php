@@ -28,6 +28,7 @@ namespace OPNsense\FirewallMap\Api;
 
 use OPNsense\Base\ApiControllerBase;
 use OPNsense\Core\Backend;
+use OPNsense\FirewallMap\AuditLog;
 use OPNsense\FirewallMap\ConfigdArgument;
 
 /**
@@ -42,6 +43,19 @@ class ThreatsController extends ApiControllerBase
     /* a note's limit in bytes, not characters: configd reads one 4 kB message, and base64 grows the
        text by a third (2400 bytes: 800 characters of CJK, 600 emoji, 2400 of Latin text) */
     private const NOTE_BYTES = 2400;
+
+    private function audit($action)
+    {
+        AuditLog::record((string)$this->session->get('Username'), $action);
+    }
+
+    /** The search a bulk action applied to, as the administrator typed it. */
+    private function searched()
+    {
+        /* one log line: control characters (a newline) cannot start a fake entry */
+        $query = trim(preg_replace('/[\x00-\x1f\x7f]+/u', ' ', (string)($this->request->getPost('query') ?? '')));
+        return $query !== '' ? ' (search: ' . mb_substr($query, 0, 200) . ')' : '';
+    }
 
     /** One page of a tab; `q` searches what the queue displays, `offset` and `limit` page it. */
     public function listAction($status = null)
@@ -79,6 +93,9 @@ class ThreatsController extends ApiControllerBase
             (new Backend())->configdpRun('firewallmap threats set', [$address, $status, $note]) ?? '',
             true
         );
+        if (($result['result'] ?? '') === 'saved') {
+            $this->audit("set threat {$address} to {$status}" . ($note !== '-' ? ' and changed its note' : ''));
+        }
         return is_array($result) ? $result : ['result' => 'failed', 'error' => 'no response'];
     }
 
@@ -96,6 +113,9 @@ class ThreatsController extends ApiControllerBase
         $query = ConfigdArgument::text($this->request->getPost('query') ?? '', 200);
         $output = (new Backend())->configdpRun('firewallmap threats bulk', [$from, $to, $query]);
         $result = json_decode($output ?? '', true);
+        if (($result['result'] ?? '') === 'saved') {
+            $this->audit("set {$result['changed']} {$from} threat entries to {$to}" . $this->searched());
+        }
         return is_array($result) ? $result : ['result' => 'failed', 'error' => 'no response'];
     }
 
@@ -111,6 +131,9 @@ class ThreatsController extends ApiControllerBase
         }
         $query = ConfigdArgument::text($this->request->getPost('query') ?? '', 200);
         $result = json_decode((new Backend())->configdpRun('firewallmap threats purge', [$status, $query]) ?? '', true);
+        if (($result['result'] ?? '') === 'deleted') {
+            $this->audit("deleted {$result['deleted']} {$status} threat entries" . $this->searched());
+        }
         return is_array($result) ? $result : ['result' => 'failed', 'error' => 'no response'];
     }
 }

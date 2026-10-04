@@ -25,37 +25,21 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+namespace OPNsense\FirewallMap;
 
-function firewallmap_cron()
-{
-    /* the updater only downloads when the database is older than the configured age */
-    return [
-        ['autocron' => ['/usr/local/sbin/configctl -d firewallmap geodb update', '17', '4']],
-        /* at most once a day; skipped without an AbuseIPDB key */
-        ['autocron' => ['/usr/local/sbin/configctl -d firewallmap abuseipdb update', '43', '4']],
-        /* the curated feeds in use, at most once a day */
-        ['autocron' => ['/usr/local/sbin/configctl -d firewallmap feeds update', '51', '4']],
-        /* keeps threat history fed after a reboot; a no-op unless the widget is in use */
-        ['autocron' => ['/usr/local/sbin/configctl -d firewallmap ensure', '*/10']],
-    ];
-}
+use OPNsense\Core\Syslog;
 
-function firewallmap_xmlrpc_sync()
+/**
+ * Administrator actions in the plugin's log (Reporting: Firewall Map: Log File), when "Log
+ * administrator actions" is on in the settings.
+ */
+class AuditLog
 {
-    /*
-     * System > High Availability: the plugin settings, including the MaxMind and AbuseIPDB
-     * keys, copy to the peer like any other service. Threat history, caches and downloaded
-     * databases stay local to each firewall.
-     */
-    return [[
-        'description' => gettext('Firewall Map+'),
-        'id' => 'firewallmap',
-        'section' => 'OPNsense.FirewallMap',
-    ]];
-}
-
-function firewallmap_syslog()
-{
-    /* what the scripts log as "firewallmap": Reporting: Firewall Map: Log File */
-    return ['firewallmap' => ['facility' => ['firewallmap']]];
+    public static function record(string $user, string $action): void
+    {
+        if ((string)(new FirewallMap())->general->audit_log === '1') {
+            $who = $user !== '' ? $user : '(unknown user)';
+            (new Syslog('firewallmap', null, LOG_DAEMON))->notice("{$who}: {$action}");
+        }
+    }
 }

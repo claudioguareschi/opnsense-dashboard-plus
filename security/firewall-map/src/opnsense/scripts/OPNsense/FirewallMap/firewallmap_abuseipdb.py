@@ -48,7 +48,8 @@ import xml.etree.ElementTree as ElementTree
 
 import firewallmap_investigate as investigate
 from lib.common import (
-    ABUSEIPDB_BLACKLIST, CONFIG_XML, PFCTL, STATE_DIR, config_root, read_json, secure_umask, write_json, write_text,
+    ABUSEIPDB_BLACKLIST, CONFIG_XML, PFCTL, STATE_DIR, config_root, log_notice, log_warning, read_json, secure_umask,
+    write_json, write_text,
 )
 
 LIST_FILE = ABUSEIPDB_BLACKLIST
@@ -156,12 +157,15 @@ def update(force=False, key=None, fetch=download, now=None):
         status.update({"updated": now, "count": len(addresses), "count_v4": counts[4], "count_v6": counts[6],
                        "error": None, "pf": sync_pf_table()})
         result = {"result": "ok", "count": len(addresses)}
+        log_notice(f"AbuseIPDB blacklist downloaded: {len(addresses)} addresses")
     except urllib.error.HTTPError as error:
         status["error"] = f"HTTP {error.code}"
         result = {"result": "failed", "error": status["error"]}
     except Exception as error:  # network or parse errors; never let the key reach the status file
         status["error"] = str(error).replace(key, "<key>")[:200]
         result = {"result": "failed", "error": status["error"]}
+    if result["result"] == "failed":
+        log_warning(f"AbuseIPDB blacklist download failed: {result['error']} (the previous list stays in use)")
     write_json(STATUS_FILE, status)
     return result
 

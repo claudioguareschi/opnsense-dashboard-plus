@@ -25,4 +25,11 @@
             <pattern>api/firewallmap/snapshot_admin/*</pattern>
         </patterns>
     </page-firewall-map-settings>
+    <page-diagnostics-logs-firewallmap>
+        <name>Reporting: Firewall Map: Log File</name>
+        <patterns>
+            <pattern>ui/diagnostics/log/core/firewallmap/*</pattern>
+            <pattern>api/diagnostics/log/core/firewallmap/*</pattern>
+        </patterns>
+    </page-diagnostics-logs-firewallmap>
 </acl>

@@ -44,7 +44,7 @@ import sqlite3
 import sys
 import time
 
-from lib.common import CACHE_DB, THREATS_DB, is_icmp, remote_target, secure_umask, service_name
+from lib.common import CACHE_DB, THREATS_DB, is_icmp, log_error, remote_target, secure_umask, service_name
 from lib.leases import lease_names
 from lib.pf import flow_endpoints, inside_endpoint, orientation
 
@@ -102,7 +102,7 @@ def move_from_cache(db, cache=CACHE_DB):
     except sqlite3.Error as error:
         if db.in_transaction:
             db.execute("ROLLBACK")
-        print(f"firewallmap: could not move the threat history out of the cache: {error}", file=sys.stderr)
+        log_error(f"could not move the threat history out of the cache: {error}")
     finally:
         db.execute("DETACH DATABASE old")
 

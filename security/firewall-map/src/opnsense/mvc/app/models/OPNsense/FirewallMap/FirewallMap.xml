@@ -41,6 +41,11 @@
                 <Required>Y</Required>
                 <Default>0</Default>
             </blocklist_aliases>
+            <!-- administrator actions (investigations, threat statuses, snapshots) in the plugin's log -->
+            <audit_log type="BooleanField">
+                <Required>Y</Required>
+                <Default>0</Default>
+            </audit_log>
             <update_days type="IntegerField">
                 <Required>Y</Required>
                 <Default>3</Default>

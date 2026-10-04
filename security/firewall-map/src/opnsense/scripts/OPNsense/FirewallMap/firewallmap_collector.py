@@ -52,6 +52,7 @@ import binascii
 import json
 import os
 import re
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -70,8 +71,8 @@ from lib.blocks import BlockTracker, FilterLogTail, block_event_time, block_summ
 from lib.cache import CacheStore, GeoCache
 from lib.common import (
     CONFIG_XML, HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, SNAPSHOT_DIR, SNAPSHOT_REQUEST_DIR,
-    config_root, host_port, remote_target, requested, secure_umask, service_name, service_port_label, write_json,
-    write_text,
+    config_root, host_port, log_error, log_notice, log_warning, remote_target, requested, secure_umask, service_name,
+    service_port_label, write_json, write_text,
 )
 from lib.ids import (
     ALERT_BACKLOG_BYTES, EVE_LOG, AlertTracker, Correlator, alert_summary, connection_keys, connection_summary, firewall_blocks,
@@ -374,6 +375,8 @@ class ThreatRecorder:
     def __init__(self, path=threats.DATABASE):
         self.path = path
         self.db = None
+        # a database problem is logged once, then again when recording works
+        self.failing = False
         self.recorded = None
         self.pruned = None
         self.last_wall = 0.0
@@ -413,13 +416,18 @@ class ThreatRecorder:
                                                           index=index)
             self.last_wall = time.time()
             threats.record(self.db, seen)
+            if self.failing:
+                log_notice("threat recording works again")
+                self.failing = False
             # hourly by age; at once when a burst of flagged addresses overfills history
             over = self.db.execute("SELECT count(*) FROM threats").fetchone()[0] > threats.KEEP_ROWS
             if over or self.pruned is None or now - self.pruned >= THREAT_PRUNE_SECONDS:
                 threats.prune(self.db)
                 self.pruned = now
         except sqlite3.Error as error:
-            print(f"firewallmap: threat recording failed: {error}", file=sys.stderr)
+            if not self.failing:
+                log_error(f"threat recording failed: {error}")
+                self.failing = True
             # reconnect on the next recording, without leaving the failed connection open
             try:
                 self.db.close()
@@ -526,6 +534,7 @@ class Collector:
         if token != self.reload_seen:
             self.reload_seen = token
             self.checked["settings"] = self.checked["blocklists"] = None
+            log_notice("settings changed: reloading them")
         if self._due("host", now, HOST_REFRESH_SECONDS):
             self.local_addresses, self.role, self.networks = host_info()
             self.checked["host"] = now
@@ -534,7 +543,13 @@ class Collector:
             self.recording = recording_wanted(self.values)
             # DB-IP while it stands in for a failing MaxMind download (its credit is then shown)
             self.provider = geodb.lookup_provider(self.values)
-            city, asn, self.problem = database_state(self.values)
+            city, asn, problem = database_state(self.values)
+            if problem != self.problem:
+                if problem:
+                    log_warning(f"no geolocation database ({problem}): the map waits until one is downloaded")
+                elif self.problem:
+                    log_notice("geolocation database available")
+                self.problem = problem
             # a new provider or a refreshed database invalidates cached locations
             if self.geo is None or self.geo.database != city or self.geo.database_mtime != self.geo._database_mtime():
                 if self.geo is not None:
@@ -675,8 +690,13 @@ class Collector:
         """One iteration. Returns the seconds to rest before the next, or None to stop."""
         started = time.monotonic()
         self.refresh_settings(started)
-        background = self.background = idle(self.started_at)
+        background = idle(self.started_at)
+        if background != self.background:
+            log_notice("no map open: recording threats in the background" if background and self.recording
+                       else "no map open" if background else "a map is open: sampling every 2 seconds")
+            self.background = background
         if background and not self.recording:
+            log_notice("collector stopping: no map open and background recording is off")
             return None
         if not background and self.problem:
             write_json(OUTPUT_FILE, status_document("no_database", reason=self.problem,
@@ -691,15 +711,20 @@ class Collector:
             if not background:
                 write_json(OUTPUT_FILE, status_document("too_many_states", count=error.count, limit=error.limit))
             if not self.too_many_states:
-                print(f"firewallmap: sampling paused: {error}", file=sys.stderr)
+                log_warning(f"sampling paused: {error}")
             self.too_many_states = True
             return TOO_MANY_STATES_INTERVAL
         except (OSError, subprocess.TimeoutExpired, RuntimeError) as error:
+            if not self.failures:
+                log_error(f"reading the firewall states failed: {error}")
             self.failures += 1
-            print(f"firewallmap: sample failed: {error}", file=sys.stderr)
             if not background:
                 write_json(OUTPUT_FILE, status_document("failed", error=str(error)))
             return self._rest(started, background)
+        if self.failures:
+            log_notice(f"reading the firewall states works again, after {self.failures} failed attempts")
+        if self.too_many_states:
+            log_notice("sampling resumed: the state table is below the limit again")
         self.failures = 0
         self.too_many_states = False
         now = time.monotonic()
@@ -746,22 +771,33 @@ def sleep_until_viewer(seconds):
         time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
 
 
+def stop_on_signal(number, _frame):
+    raise SystemExit(f"signal {signal.Signals(number).name}")
+
+
 def run():
     lock = acquire_lock()
     if lock is None:
         return
+    # the service stop (SIGTERM) ends the loop through its finally, which saves the caches
+    signal.signal(signal.SIGTERM, stop_on_signal)
+    log_notice("collector started: " + ("a map is open" if requested(REQUEST_MARKER, IDLE_SECONDS)
+                                        else "recording threats in the background"))
     collector = Collector()
     errors = 0
     try:
         while True:
             try:
                 rest = collector.step()
+                if errors:
+                    log_notice(f"collector works again, after {errors} failed iterations")
                 errors = 0
             except Exception:
-                # any bug in one iteration is logged and retried with backoff; the daemon must
-                # not die silently and stop recording threats until someone opens a map
+                # any bug in one iteration is logged (once, with its traceback) and retried with
+                # backoff; the daemon must not die silently and stop recording threats
+                if not errors:
+                    log_error("collector iteration failed: " + " | ".join(traceback.format_exc().strip().splitlines()))
                 errors += 1
-                print(f"firewallmap: collector iteration failed:\n{traceback.format_exc()}", file=sys.stderr)
                 rest = min(MAX_FAILURE_BACKOFF, 2.0 ** errors)
             if rest is None:
                 return
@@ -769,6 +805,8 @@ def run():
                 sleep_until_viewer(rest)
             else:
                 time.sleep(rest)
+    except SystemExit as reason:
+        log_notice(f"collector stopped ({reason})")
     finally:
         collector.close()
 
