@@ -18,6 +18,8 @@ export default class VnstatPlus extends BaseWidget {
         this.showChart = true;
         this.showHistory = true;
         this.barRange = '3';
+        this.chartOffset = 0;
+        this.trafficChart = null;
         this.fetchPromise = null;
     }
 
@@ -101,6 +103,8 @@ export default class VnstatPlus extends BaseWidget {
         const interfaceId = this._elementId('interface');
         const periodId = this._elementId('period');
         const rangeId = this._elementId('range');
+        const previousId = this._elementId('previous');
+        const nextId = this._elementId('next');
         const refreshId = this._elementId('refresh');
 
         return $(`
@@ -109,15 +113,18 @@ export default class VnstatPlus extends BaseWidget {
                     #${rootId} .vnstat-plus-controls { display: flex; flex-wrap: wrap; gap: 0.4em; align-items: center; margin: 0 0 0.55em; }
                     #${rootId} .vnstat-plus-controls select { min-width: 7em; flex: 1 1 7em; }
                     #${rootId} .vnstat-plus-controls button { flex: 0 0 auto; }
+                    #${rootId} .vnstat-plus-chart-navigation { display: flex; gap: 0.25em; }
                     #${rootId} .vnstat-plus-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.45em; margin-bottom: 0.7em; }
-                    #${rootId} .vnstat-plus-card { border: 1px solid rgba(128,128,128,0.32); border-radius: 4px; padding: 0.45em 0.55em; min-width: 0; }
+                    #${rootId} .vnstat-plus-card { border: 1px solid rgba(127,127,127,0.24); border-radius: 3px; background: rgba(127,127,127,0.06); padding: 0.6em 0.65em; min-width: 0; }
                     #${rootId} .vnstat-plus-card-label { color: var(--vnstat-plus-muted); font-size: 0.78em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-                    #${rootId} .vnstat-plus-card-value { font-size: 1.15em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+                    #${rootId} .vnstat-plus-card-value { margin-top: 0.18em; font-size: 1.16em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+                    #${rootId} .vnstat-plus-card-detail { margin-top: 0.12em; color: var(--vnstat-plus-muted); font-size: 0.76em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                     #${rootId} .vnstat-plus-card-rx .vnstat-plus-card-value { color: var(--vnstat-plus-rx); }
                     #${rootId} .vnstat-plus-card-tx .vnstat-plus-card-value { color: var(--vnstat-plus-tx); }
                     #${rootId} .vnstat-plus-card-total .vnstat-plus-card-value { color: var(--vnstat-plus-total); }
-                    #${rootId} .vnstat-plus-section-title { color: var(--vnstat-plus-muted); font-size: 0.9em; font-weight: 600; margin: 0.4em 0; }
-                    #${rootId} .vnstat-plus-chart { display: flex; flex-direction: column; gap: 0.25em; }
+                    #${rootId} .vnstat-plus-section-title { color: var(--vnstat-plus-muted); font-size: 0.9em; font-weight: 600; margin: 0.7em 0 0.4em; text-align: left; }
+                    #${rootId} .vnstat-plus-chart { height: 16em; min-height: 12em; position: relative; }
+                    #${rootId} .vnstat-plus-chart canvas { height: 100% !important; width: 100% !important; }
                     #${rootId} .vnstat-plus-bar-row { display: grid; grid-template-columns: 6.2em minmax(0, 1fr) 5.2em; gap: 0.45em; align-items: center; font-size: 0.82em; position: relative; outline: none; }
                     #${rootId} .vnstat-plus-bar-label, #${rootId} .vnstat-plus-bar-total { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                     #${rootId} .vnstat-plus-bar-total { text-align: right; color: var(--vnstat-plus-muted); }
@@ -148,21 +155,16 @@ export default class VnstatPlus extends BaseWidget {
                         <option value="year">${this._escape(this.translations.period_yearly)}</option>
                     </select>
                     <select id="${rangeId}" class="form-control" aria-label="${this._escape(this.translations.bar_range)}">
-                        <option value="current">${this._escape(this.translations.current_period)}</option>
-                        <option value="1">${this._escape(this.translations.latest_one)}</option>
-                        <option value="3" selected>${this._escape(this.translations.latest_three)}</option>
-                        <option value="6">${this._escape(this.translations.latest_six)}</option>
-                        <option value="12">${this._escape(this.translations.latest_twelve)}</option>
                     </select>
+                    <span class="vnstat-plus-chart-navigation">
+                        <button id="${previousId}" type="button" class="btn btn-default" title="${this._escape(this.translations.previous)}" aria-label="${this._escape(this.translations.previous)}"><i class="fa fa-chevron-left"></i></button>
+                        <button id="${nextId}" type="button" class="btn btn-default" title="${this._escape(this.translations.next)}" aria-label="${this._escape(this.translations.next)}"><i class="fa fa-chevron-right"></i></button>
+                    </span>
                     <button id="${refreshId}" type="button" class="btn btn-default" title="${this._escape(this.translations.refresh)}" aria-label="${this._escape(this.translations.refresh)}"><i class="fa fa-refresh"></i></button>
                 </div>
                 <div id="${this._elementId('summary')}" class="vnstat-plus-summary"></div>
                 <div id="${this._elementId('chart-title')}" class="vnstat-plus-section-title">${this._escape(this.translations.traffic_chart)}</div>
                 <div id="${this._elementId('chart')}" class="vnstat-plus-chart"></div>
-                <div id="${this._elementId('legend')}" class="vnstat-plus-legend">
-                    <span><i class="vnstat-plus-dot" style="background:var(--vnstat-plus-rx);"></i>${this._escape(this.translations.download)}</span>
-                    <span><i class="vnstat-plus-dot" style="background:var(--vnstat-plus-tx);"></i>${this._escape(this.translations.upload)}</span>
-                </div>
                 <div id="${this._elementId('history-title')}" class="vnstat-plus-section-title">${this._escape(this.translations.history)}</div>
                 <div id="${this._elementId('table')}" class="vnstat-plus-table-wrap"></div>
             </div>
@@ -188,17 +190,20 @@ export default class VnstatPlus extends BaseWidget {
         }
         if (prefs?.barRange) {
             this.barRange = prefs.barRange;
-            $range.val(this.barRange);
         }
+        this._populateRangeDropdown();
 
         $root.on('change.vnstat-plus-widget', `#${this._elementId('period')}`, async event => {
             this.currentPeriod = event.target.value;
+            this.chartOffset = 0;
+            this._populateRangeDropdown();
             this._savePrefs();
             await this._fetchAndRender();
             this.config.callbacks?.updateGrid?.();
         });
         $root.on('change.vnstat-plus-widget', `#${this._elementId('range')}`, async event => {
             this.barRange = event.target.value;
+            this.chartOffset = 0;
             this._savePrefs();
             await this._fetchAndRender();
             this.config.callbacks?.updateGrid?.();
@@ -213,6 +218,18 @@ export default class VnstatPlus extends BaseWidget {
             event.preventDefault();
             await this._fetchAndRender();
         });
+        $root.on('click.vnstat-plus-widget', `#${this._elementId('previous')}`, async event => {
+            event.preventDefault();
+            this.chartOffset += 1;
+            await this._fetchAndRender();
+        });
+        $root.on('click.vnstat-plus-widget', `#${this._elementId('next')}`, async event => {
+            event.preventDefault();
+            if (this.chartOffset > 0) {
+                this.chartOffset -= 1;
+                await this._fetchAndRender();
+            }
+        });
 
         await this._populateInterfaceDropdown();
         await this._fetchAndRender();
@@ -226,6 +243,8 @@ export default class VnstatPlus extends BaseWidget {
 
     onWidgetClose() {
         $(`#${this._elementId('root')}`).off('.vnstat-plus-widget');
+        this.trafficChart?.destroy();
+        this.trafficChart = null;
     }
 
     _applyConfig(config = {}) {
@@ -244,7 +263,7 @@ export default class VnstatPlus extends BaseWidget {
         this.showChart = sections.includes('chart');
         this.showHistory = sections.includes('history');
         this.barRange = ['current', '1', '3', '6', '12'].includes(config.bar_range) ? config.bar_range : '3';
-        $(`#${this._elementId('range')}`).val(this.barRange);
+        this._populateRangeDropdown();
         this._applyVisibility();
     }
 
@@ -282,9 +301,42 @@ export default class VnstatPlus extends BaseWidget {
 
     _applyVisibility() {
         $(`#${this._elementId('summary')}`).toggle(this.showKpi);
-        $(`#${this._elementId('chart-title')}, #${this._elementId('chart')}, #${this._elementId('legend')}`).toggle(this.showChart);
+        $(`#${this._elementId('chart-title')}, #${this._elementId('chart')}`).toggle(this.showChart);
         $(`#${this._elementId('history-title')}, #${this._elementId('table')}`).toggle(this.showHistory);
-        $(`#${this._elementId('range')}`).toggle(this.showChart);
+        $(`#${this._elementId('range')}, #${this._elementId('previous')}, #${this._elementId('next')}`).toggle(this.showChart);
+    }
+
+    _rangeOptions() {
+        const units = {
+            hour: this.translations.hours,
+            day: this.translations.days,
+            month: this.translations.months,
+            year: this.translations.years
+        };
+        const values = {
+            hour: [6, 12, 24],
+            day: [7, 14, 30],
+            month: [3, 6, 12],
+            year: [1, 3, 5]
+        };
+        return (values[this.currentPeriod] || values.month).map(value => ({
+            value: String(value),
+            label: `${this.translations.latest} ${value} ${units[this.currentPeriod] || units.month}`
+        }));
+    }
+
+    _populateRangeDropdown() {
+        const options = this._rangeOptions();
+        if (!options.some(option => option.value === this.barRange)) {
+            this.barRange = options[0].value;
+        }
+        const $range = $(`#${this._elementId('range')}`);
+        if (!$range.length) {
+            return;
+        }
+        $range.empty();
+        options.forEach(option => $range.append($('<option></option>').val(option.value).text(option.label)));
+        $range.val(this.barRange);
     }
 
     async _populateInterfaceDropdown() {
@@ -342,15 +394,18 @@ export default class VnstatPlus extends BaseWidget {
         const entries = traffic.slice().sort((a, b) => this._dateToSortKey(a) - this._dateToSortKey(b));
         const tableLimits = {hour: 12, day: 14, month: 12, year: 5};
         const tableEntries = entries.slice(-tableLimits[this.currentPeriod]);
-        const chartEntries = this._chartEntries(entries);
+        const chart = this._chartEntries(entries);
         this._renderSummary(entries[entries.length - 1]);
-        this._renderChart(chartEntries);
+        this._renderChart(chart.entries);
+        this._updateChartNavigation(chart);
         this._renderTable(tableEntries.slice().reverse());
     }
 
     _renderEmpty(message) {
         const empty = `<div class="vnstat-plus-empty">${this._escape(message)}</div>`;
         $(`#${this._elementId('summary')}`).html(empty);
+        this.trafficChart?.destroy();
+        this.trafficChart = null;
         $(`#${this._elementId('chart')}`).empty();
         $(`#${this._elementId('table')}`).html(empty);
     }
@@ -358,40 +413,65 @@ export default class VnstatPlus extends BaseWidget {
     _renderSummary(entry) {
         const rx = Number(entry?.rx) || 0;
         const tx = Number(entry?.tx) || 0;
+        const period = this._formatDate(entry);
         const cards = [
-            {className: 'rx', label: this.translations.download, value: this._formatBytes(rx)},
-            {className: 'tx', label: this.translations.upload, value: this._formatBytes(tx)},
-            {className: 'total', label: this.translations.total, value: this._formatBytes(rx + tx)}
+            {className: 'rx', icon: 'arrow-down', label: this.translations.download, value: this._formatBytes(rx), detail: period},
+            {className: 'tx', icon: 'arrow-up', label: this.translations.upload, value: this._formatBytes(tx), detail: period},
+            {className: 'total', icon: 'exchange', label: this.translations.total, value: this._formatBytes(rx + tx), detail: period}
         ];
         const html = cards.map(card => `
             <div class="vnstat-plus-card vnstat-plus-card-${card.className}">
-                <div class="vnstat-plus-card-label">${this._escape(card.label)}</div>
+                <div class="vnstat-plus-card-label"><i class="fa fa-fw fa-${card.icon}" aria-hidden="true"></i> ${this._escape(card.label)}</div>
                 <div class="vnstat-plus-card-value">${this._escape(card.value)}</div>
+                <div class="vnstat-plus-card-detail">${this._escape(card.detail)}</div>
             </div>
         `).join('');
         $(`#${this._elementId('summary')}`).html(html);
     }
 
     _renderChart(entries) {
-        const maxTotal = Math.max(...entries.map(entry => (Number(entry.rx) || 0) + (Number(entry.tx) || 0)), 1);
-        const html = entries.map(entry => {
-            const rx = Number(entry.rx) || 0;
-            const tx = Number(entry.tx) || 0;
-            const total = rx + tx;
-            const rxWidth = Math.min(100, (rx / maxTotal) * 100);
-            const txWidth = Math.min(100 - rxWidth, (tx / maxTotal) * 100);
-            const date = this._formatDate(entry);
-            const tooltip = `${date} · ${this.translations.download}: ${this._formatBytes(rx)} · ${this.translations.upload}: ${this._formatBytes(tx)} · ${this.translations.total}: ${this._formatBytes(total)}`;
-            return `
-                <div class="vnstat-plus-bar-row" tabindex="0" aria-label="${this._escape(tooltip)}">
-                    <span class="vnstat-plus-bar-label">${this._escape(date)}</span>
-                    <span class="vnstat-plus-bar-track"><i class="vnstat-plus-bar-rx" style="width:${rxWidth}%;" title="${this._escape(`${this.translations.download}: ${this._formatBytes(rx)}`)}"></i><i class="vnstat-plus-bar-tx" style="width:${txWidth}%;" title="${this._escape(`${this.translations.upload}: ${this._formatBytes(tx)}`)}"></i></span>
-                    <span class="vnstat-plus-bar-total">${this._escape(this._formatBytes(total))}</span>
-                    <span class="vnstat-plus-tooltip">${this._escape(tooltip)}</span>
-                </div>
-            `;
-        }).join('');
-        $(`#${this._elementId('chart')}`).html(html);
+        this.trafficChart?.destroy();
+        this.trafficChart = null;
+        const $chart = $(`#${this._elementId('chart')}`);
+        if (typeof Chart === 'undefined' || !entries.length) {
+            $chart.html(`<div class="vnstat-plus-empty">${this._escape(this.translations.msg_no_data)}</div>`);
+            return;
+        }
+        $chart.html(`<canvas id="${this._elementId('chart-canvas')}"></canvas>`);
+        const root = document.getElementById(this._elementId('root'));
+        const theme = getComputedStyle(root);
+        const color = name => theme.getPropertyValue(name).trim();
+        const fillColor = value => value.startsWith('rgb(') ? value.replace('rgb(', 'rgba(').replace(')', ', 0.2)') : value;
+        const labels = entries.map(entry => this._formatDate(entry));
+        const rx = entries.map(entry => Number(entry.rx) || 0);
+        const tx = entries.map(entry => Number(entry.tx) || 0);
+        const total = entries.map((entry, index) => rx[index] + tx[index]);
+        const canvas = document.getElementById(this._elementId('chart-canvas'));
+        this.trafficChart = new Chart(canvas.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    {label: this.translations.download, data: rx, borderColor: color('--vnstat-plus-rx'), backgroundColor: fillColor(color('--vnstat-plus-rx')), fill: true, tension: 0.22, pointRadius: 2},
+                    {label: this.translations.upload, data: tx, borderColor: color('--vnstat-plus-tx'), backgroundColor: fillColor(color('--vnstat-plus-tx')), fill: true, tension: 0.22, pointRadius: 2},
+                    {label: this.translations.total, data: total, borderColor: color('--vnstat-plus-total'), borderDash: [5, 3], fill: false, tension: 0.22, pointRadius: 2}
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {mode: 'index', intersect: false},
+                plugins: {
+                    colorschemes: false,
+                    legend: {position: 'bottom'},
+                    tooltip: {callbacks: {label: context => `${context.dataset.label}: ${this._formatBytes(context.raw)}`}}
+                },
+                scales: {
+                    y: {beginAtZero: true, ticks: {callback: value => this._formatBytes(value)}},
+                    x: {ticks: {maxRotation: 0, autoSkip: true, maxTicksLimit: 8}}
+                }
+            }
+        });
     }
 
     _renderTable(entries) {
@@ -438,10 +518,20 @@ export default class VnstatPlus extends BaseWidget {
     }
 
     _chartEntries(entries) {
-        if (this.barRange === 'current') {
-            return entries.slice(-1);
-        }
-        return entries.slice(-Math.max(1, Number(this.barRange) || 3));
+        const size = Math.max(1, Number(this.barRange) || 3);
+        const maxOffset = Math.max(0, Math.ceil(entries.length / size) - 1);
+        this.chartOffset = Math.min(this.chartOffset, maxOffset);
+        const end = entries.length - this.chartOffset * size;
+        return {
+            entries: entries.slice(Math.max(0, end - size), end),
+            canGoPrevious: end > size,
+            canGoNext: this.chartOffset > 0
+        };
+    }
+
+    _updateChartNavigation(chart) {
+        $(`#${this._elementId('previous')}`).prop('disabled', !chart.canGoPrevious);
+        $(`#${this._elementId('next')}`).prop('disabled', !chart.canGoNext);
     }
 
     _formatBytes(bytes) {
