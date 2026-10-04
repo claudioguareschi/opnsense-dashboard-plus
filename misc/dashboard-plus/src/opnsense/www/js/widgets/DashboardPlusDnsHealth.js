@@ -118,6 +118,9 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 opacity: 0.64;
                 font-size: 0.76em;
             }
+            .dashboard-plus-dns-health-metric-detail + .dashboard-plus-dns-health-metric-detail {
+                margin-top: 0.08em;
+            }
             .dashboard-plus-dns-health-section {
                 margin: 0 0.4em;
                 border-top: 1px solid rgba(127, 127, 127, 0.2);
@@ -187,14 +190,6 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 padding: 0.6em 0.4em 0.15em;
                 font-size: 0.8em;
             }
-            .dashboard-plus-dns-health-summary {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 0.35em 0.9em;
-                padding: 0 0.4em 0.55em;
-                font-size: 0.78em;
-                opacity: 0.72;
-            }
             .dashboard-plus-dns-health-panels {
                 display: grid;
                 grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -218,9 +213,14 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 align-items: center;
                 gap: 0.5em;
             }
+            .dashboard-plus-dns-health-types-chart {
+                width: min(100%, 10em);
+                aspect-ratio: 1;
+                justify-self: center;
+            }
             .dashboard-plus-dns-health-types canvas {
                 width: 100% !important;
-                max-height: 10em;
+                height: 100% !important;
             }
             .dashboard-plus-dns-health-type-legend {
                 display: grid;
@@ -292,12 +292,11 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                     <div id="${this._elementId('mode')}" class="dashboard-plus-dns-health-mode">${escapeHtml(this.translations.loading)}</div>
                 </div>
                 <div id="${this._elementId('metrics')}" class="dashboard-plus-dns-health-metrics"></div>
-                <div id="${this._elementId('summary')}" class="dashboard-plus-dns-health-summary"></div>
                 <div class="dashboard-plus-dns-health-panels">
                     <section class="dashboard-plus-dns-health-panel">
                         <div class="dashboard-plus-dns-health-panel-head">${escapeHtml(this.translations.query_types)}</div>
                         <div class="dashboard-plus-dns-health-types">
-                            <canvas id="${this._elementId('types-chart')}"></canvas>
+                            <div class="dashboard-plus-dns-health-types-chart"><canvas id="${this._elementId('types-chart')}"></canvas></div>
                             <div id="${this._elementId('types-legend')}" class="dashboard-plus-dns-health-type-legend"></div>
                         </div>
                     </section>
@@ -388,11 +387,12 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         return this.translations.unavailable;
     }
 
-    _metric(label, value, detail) {
+    _metric(label, value, detail, secondary = '') {
         return `<div class="dashboard-plus-dns-health-metric">
             <div class="dashboard-plus-dns-health-metric-label">${escapeHtml(label)}</div>
             <div class="dashboard-plus-dns-health-metric-value">${escapeHtml(value)}</div>
             <div class="dashboard-plus-dns-health-metric-detail">${escapeHtml(detail)}</div>
+            ${secondary ? `<div class="dashboard-plus-dns-health-metric-detail">${escapeHtml(secondary)}</div>` : ''}
         </div>`;
     }
 
@@ -421,6 +421,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             rate,
             totalQueries,
             cacheHits,
+            cacheMisses,
             cacheRate: cacheTotal ? cacheHits / cacheTotal * 100 : null,
             blocked,
             blockedRate: blocked !== null && dnsTotal ? blocked / dnsTotal * 100 : null,
@@ -441,7 +442,8 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             entries.push(['Other', other]);
         }
         const chart = typeof Chart === 'undefined' ? null : Chart;
-        const palette = chart?.colorschemes?.tableau?.Tableau20 ?? ['#4e79a7', '#59a14f', '#f28e2b', '#e15759', '#b07aa1', '#bab0ac'];
+        // Use the same Tableau palette as the Interface Statistics and Firewall charts.
+        const palette = chart?.colorschemes?.tableau?.Tableau20 ?? ['#4e79a7', '#a0cbe8', '#f28e2b', '#ffbe7d', '#59a14f', '#8cd17d'];
         const total = entries.reduce((sum, [, count]) => sum + count, 0);
         const $legend = $(`#${this._elementId('types-legend')}`);
         $legend.html(entries.length ? entries.map(([type, count], index) => `
@@ -465,7 +467,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             },
             options: {
                 responsive: true,
-                maintainAspectRatio: true,
+                maintainAspectRatio: false,
                 cutout: '62%',
                 plugins: {legend: {display: false}}
             }
@@ -502,18 +504,16 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         $(`#${this._elementId('mode')}`).text(this._mode());
         $(`#${this._elementId('metrics')}`).html([
             this._metric(this.translations.queries, this._formatRate(stats.rate),
-                `${this._formatCount(stats.totalQueries)} ${this.translations.total}`),
+                `${this._formatCount(stats.totalQueries)} ${this.translations.total}`,
+                `${this._formatCount(stats.resolved)} ${this.translations.resolved.toLowerCase()} · ${this._formatCount(stats.local)} ${this.translations.local.toLowerCase()}`),
             this._metric(this.translations.cache_hit, this._formatPercent(stats.cacheRate),
-                `${this._formatCount(stats.cacheHits)} ${this.translations.cached.toLowerCase()}`),
+                `${this._formatCount(stats.cacheHits)} ${this.translations.cached.toLowerCase()}`,
+                `${this._formatCount(stats.cacheMisses)} ${this.translations.cache_misses.toLowerCase()}`),
             this._metric(this.translations.blocked, this._formatCount(stats.blocked),
                 stats.blockedRate === null ? this.translations.dnsbl :
-                    `${this._formatPercent(stats.blockedRate)} ${this.translations.of_queries}`)
+                    `${this._formatPercent(stats.blockedRate)} ${this.translations.of_queries}`,
+                `${this.translations.avg_recursive_lookup} ${this._formatLookup(stats.lookup)}`)
         ].join(''));
-        $(`#${this._elementId('summary')}`).html([
-            `${escapeHtml(this.translations.resolved)} ${escapeHtml(this._formatCount(stats.resolved))}`,
-            `${escapeHtml(this.translations.local)} ${escapeHtml(this._formatCount(stats.local))}`,
-            `${escapeHtml(this.translations.avg_recursive_lookup)} ${escapeHtml(this._formatLookup(stats.lookup))}`
-        ].map(item => `<span>${item}</span>`).join(''));
 
         const upstreams = this.data.upstreams || [];
         $(`#${this._elementId('upstream-count')}`).text(upstreams.length ? `${upstreams.length} ${this.translations.configured}` : '');

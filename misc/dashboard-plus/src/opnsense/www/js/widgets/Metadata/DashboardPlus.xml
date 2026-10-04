@@ -256,6 +256,7 @@
             <unbound_cache>Unbound cache</unbound_cache>
             <blocked>Blocked DNS</blocked>
             <cached>Cached</cached>
+            <cache_misses>Cache misses</cache_misses>
             <resolved>Resolved</resolved>
             <local>Local</local>
             <avg_recursive_lookup>Avg recursive lookup</avg_recursive_lookup>
