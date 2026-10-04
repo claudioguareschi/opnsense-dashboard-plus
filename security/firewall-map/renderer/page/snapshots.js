@@ -133,7 +133,7 @@ function enterSnapshotMode(meta, data) {
   }
   state.mode = 'snapshot';
   state.frozen = {meta, data};
-  state.snapshot = data;
+  state.data = data;
   state.selection = null;
   state.renderer.setFrozen(true);
   // a frozen map does not follow anything; the live choice is kept for later
@@ -152,11 +152,11 @@ export function backToLive() {
   state.frozen = null;
   state.selection = null;
   state.renderer.setFrozen(false);
-  state.snapshot = state.live;
+  state.data = state.live;
   hooks.setTab(state.tabBeforeSnapshots && state.tabBeforeSnapshots !== 'snapshots' ? state.tabBeforeSnapshots : 'hosts');
   state.tabBeforeSnapshots = null;
   hooks.setFollow(state.follow);
-  if (state.snapshot) {
+  if (state.data) {
     hooks.refresh();
   }
   hooks.renderDetails();

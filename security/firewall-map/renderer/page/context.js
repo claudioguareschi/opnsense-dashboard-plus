@@ -45,9 +45,9 @@ export const MAX_ABUSE_SCORES = 500;
 
 export const state = {
   renderer: null,
-  // what the map shows: the live document, or a saved snapshot's in snapshot mode
-  snapshot: null,
-  // the newest live document, kept up to date in snapshot mode too
+  // what the map shows: the live summary, or a saved snapshot's data in snapshot mode
+  data: null,
+  // the newest live summary, kept up to date in snapshot mode too
   live: null,
   mode: 'live',
   // the saved snapshot on screen: {meta, data}

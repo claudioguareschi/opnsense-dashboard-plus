@@ -34,7 +34,7 @@ from datetime import datetime
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from support import BLOCKS, SNAPSHOT, Geo  # noqa: E402
+from support import BLOCKS, SUMMARY, Geo  # noqa: E402
 
 
 class BlockTest(unittest.TestCase):
@@ -70,7 +70,7 @@ class BlockTest(unittest.TestCase):
         event = BLOCKS.parse_block(self.LINE)
         blocks.add(event, now=0.0)
         blocks.add(event, now=30.0)
-        (block,) = BLOCKS.block_snapshot(blocks, Geo(), {"1.2.3.163"}, "1.2.3.163", 30.0, {}, {})
+        (block,) = BLOCKS.block_summary(blocks, Geo(), {"1.2.3.163"}, "1.2.3.163", 30.0, {}, {})
         self.assertEqual(block["services"], [{"name": "Telnet", "port": "23/tcp", "hits": 2}])
         self.assertEqual((block["port_count"], block["seconds"], block["country"]), (1, 30, "The Netherlands"))
 
@@ -189,7 +189,7 @@ class BlockTest(unittest.TestCase):
 
     def test_reader_applies_viewer_threshold(self):
         payload = {"blocks": [{"hits": 1}, {"hits": 3}, {"hits": 7}]}
-        result = SNAPSHOT.apply_block_threshold(payload, 3)
+        result = SUMMARY.apply_block_threshold(payload, 3)
         self.assertEqual([block["hits"] for block in result["blocks"]], [3, 7])
         self.assertEqual(result["blocks_below"], 1)
 

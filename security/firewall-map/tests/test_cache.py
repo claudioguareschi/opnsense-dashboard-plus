@@ -48,8 +48,8 @@ class RobustnessTest(unittest.TestCase):
         self.assertEqual(record["state"], "ESTABLISHED:ESTABLISHED")
 
     def test_cgnat_counts_as_inside(self):
-        self.assertTrue(COMMON.private_ipv4("100.101.102.103"))
-        self.assertFalse(COMMON.public_ipv4("100.101.102.103"))
+        self.assertTrue(COMMON.private_ip("100.101.102.103"))
+        self.assertFalse(COMMON.public_ip("100.101.102.103"))
 
     def test_transient_geo_failures_are_not_cached(self):
         calls = []

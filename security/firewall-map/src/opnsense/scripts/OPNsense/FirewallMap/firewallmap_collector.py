@@ -67,7 +67,7 @@ from fwmap_blocklists import (  # noqa: E402
     REPUTATION_LIST, BlocklistIndex, Reputation, chosen_threat_lists, tables_report, threat_fields,
     threat_lists_for,
 )
-from fwmap_blocks import BlockTracker, FilterLogTail, block_event_time, block_snapshot, parse_block  # noqa: E402
+from fwmap_blocks import BlockTracker, FilterLogTail, block_event_time, block_summary, parse_block  # noqa: E402
 from fwmap_cache import CacheStore, GeoCache  # noqa: E402
 from fwmap_common import (  # noqa: E402
     CONFIG_XML, HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, SNAPSHOT_DIR, SNAPSHOT_REQUEST_DIR,
@@ -75,7 +75,7 @@ from fwmap_common import (  # noqa: E402
     write_text,
 )
 from fwmap_ids import (  # noqa: E402
-    ALERT_BACKLOG_BYTES, EVE_LOG, AlertTracker, Correlator, alert_snapshot, connection_keys, connection_snapshot, firewall_blocks,
+    ALERT_BACKLOG_BYTES, EVE_LOG, AlertTracker, Correlator, alert_summary, connection_keys, connection_summary, firewall_blocks,
     ips_drops,
 )
 from fwmap_leases import HostnameResolver, describe_inside, describe_target, lease_names  # noqa: E402
@@ -98,8 +98,6 @@ MAX_FAILURE_BACKOFF = 30.0
 # while the state table is too large to walk, check its size this often
 TOO_MANY_STATES_INTERVAL = 30.0
 COLLECTOR_LOCK = f"{RUN_DIR}/collector.lock"
-# files earlier versions wrote that nothing reads any more
-LEGACY_FILES = (f"{RUN_DIR}/ids_stats.json", "/var/db/firewallmap/geo.json")
 RELOAD_MARKER = f"{RUN_DIR}/reload"
 # rule descriptions, interface names, DHCP names and port forwards
 METADATA_REFRESH_SECONDS = 60
@@ -315,7 +313,7 @@ def _location_entry(address, location, local_addresses):
     return entry
 
 
-def snapshot(tracker, geo, local_addresses, role, now, wall_time, hostnames=None, context=None, limit=MAX_FLOWS):
+def summarize_flows(tracker, geo, local_addresses, role, now, wall_time, hostnames=None, context=None, limit=MAX_FLOWS):
     context = context or {}
     visible = tracker.visible(now, limit)
     geo.resolve([address for _, local, remote, _, _ in visible for address in (local, remote)])
@@ -412,7 +410,7 @@ class ThreatRecorder:
             for address, entry in seen.items():
                 entry["remote"] = self._identity(address, collector)
                 entry["ids"] = collector.alerts.summary(address)
-                entry["connections"] = connection_snapshot(address, correlator, collector.leases, collector.interfaces,
+                entry["connections"] = connection_summary(address, correlator, collector.leases, collector.interfaces,
                                                            index=index)
             self.last_wall = time.time()
             threats.record(self.db, seen)
@@ -596,19 +594,19 @@ class Collector:
             "blocklists": self.blocklists, "reputation": self.reputation, "alerts": self.alerts,
             "descriptions": self.descriptions,
         }
-        payload = snapshot(self.tracker, geo, self.local_addresses, self.role, now, time.time(), resolver, context,
+        payload = summarize_flows(self.tracker, geo, self.local_addresses, self.role, now, time.time(), resolver, context,
                            limit)
         origin = next((location["id"] for location in payload["locations"] if location["local"]), None)
         if origin is None and self.local_addresses:
             origin = sorted(self.local_addresses)[0]
             geo.resolve([origin])
-        payload["blocks"] = block_snapshot(
+        payload["blocks"] = block_summary(
             self.blocks, geo, self.local_addresses, origin, now, self.descriptions, self.interfaces,
             self.blocklists, self.reputation, self.alerts,
         )
         shown = {flow["dest"] for flow in payload["flows"]} | {block["source"] for block in payload["blocks"]}
-        payload["alerts"] = alert_snapshot(self.alerts, geo, origin, shown, self.blocklists, self.reputation)
-        payload["ids_flows"] = self.correlator.snapshot(geo, origin, self.leases, self.networks, self.interfaces,
+        payload["alerts"] = alert_summary(self.alerts, geo, origin, shown, self.blocklists, self.reputation)
+        payload["ids_flows"] = self.correlator.summary(geo, origin, self.leases, self.networks, self.interfaces,
                                                         self.blocklists, self.reputation)
         # which lists are consulted, so the details can show "not listed" per list
         # every configured interface, so the interface filter lists the quiet ones too
@@ -624,7 +622,7 @@ class Collector:
         payload["provider"] = self.provider
         return payload
 
-    def publish_snapshot(self, now):
+    def publish_summary(self, now):
         write_json(OUTPUT_FILE, self.build_payload(now))
 
     def state_rows(self, records, remotes):
@@ -715,7 +713,7 @@ class Collector:
         # whether recording continues in the background
         self.recorder.update(records, self, now)
         if not background:
-            self.publish_snapshot(now)
+            self.publish_summary(now)
             self.save_requested_snapshots(records, now)
         # locations resolved for the queue in the background are saved too (at most once a minute)
         self.geo.save()
@@ -753,11 +751,6 @@ def run():
     lock = acquire_lock()
     if lock is None:
         return
-    for path in LEGACY_FILES:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
     collector = Collector()
     errors = 0
     try:

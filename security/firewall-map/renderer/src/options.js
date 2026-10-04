@@ -53,11 +53,11 @@ export function parseSettings(config = {}) {
 }
 
 /** The live data request's parameters: the viewer's block threshold and reverse DNS choice. */
-export function snapshotParams(settings) {
+export function summaryParams(settings) {
   return {blocks_min: settings.blockMin ?? DEFAULT_OPTIONS.blockMin, ...(settings.hostnames ? {hostnames: 1} : {})};
 }
 
 /** The same as a query string, for a request that does not build it itself (the page). */
-export function snapshotQuery(settings) {
+export function summaryQuery(settings) {
   return `?blocks_min=${settings.blockMin ?? DEFAULT_OPTIONS.blockMin}${settings.hostnames ? '&hostnames=1' : ''}`;
 }

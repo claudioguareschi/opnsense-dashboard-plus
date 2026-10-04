@@ -30,7 +30,7 @@
  * Built with vite.page.config.js into src/opnsense/www/js/firewall-map-page.js.
  */
 import {escapeHtml} from '../src/format.js';
-import {parseSettings, snapshotQuery} from '../src/options.js';
+import {parseSettings, summaryQuery} from '../src/options.js';
 import {addCountry, addToAlias, killStates, markThreat, showStates} from './actions.js';
 import {getJSON} from './api.js';
 import {POLL_MS, resetFilters, state, T} from './context.js';
@@ -46,11 +46,11 @@ import {bindChips, syncChips, updateLegend, updateToolbar} from './toolbar.js';
 const host = () => window.FirewallMapRenderer.host;
 
 /** Suricata counts in the status line, each a one-click filter; connections and address history apart. */
-function idsLinks(snapshot) {
-  const idsFlows = (snapshot.ids_flows || []).filter((flow) => flow.kind !== 'blocked').length;
-  const idsAddresses = new Set([...(snapshot.alerts || []).map((alert) => alert.source),
-    ...(snapshot.flows || []).filter((flow) => flow.ids).map((flow) => flow.dest),
-    ...(snapshot.blocks || []).filter((block) => block.ids).map((block) => block.source)]).size;
+function idsLinks(summary) {
+  const idsFlows = (summary.ids_flows || []).filter((flow) => flow.kind !== 'blocked').length;
+  const idsAddresses = new Set([...(summary.alerts || []).map((alert) => alert.source),
+    ...(summary.flows || []).filter((flow) => flow.ids).map((flow) => flow.dest),
+    ...(summary.blocks || []).filter((block) => block.ids).map((block) => block.source)]).size;
   const link = (filter, text) => `<a href="#" class="fwmap-status-ids${state.filters.traffic === filter ? ' active' : ''}" `
     + `data-filter="${filter}" aria-pressed="${state.filters.traffic === filter}">${escapeHtml(text)}</a>`;
   const links = [];
@@ -63,11 +63,11 @@ function idsLinks(snapshot) {
   return links;
 }
 
-function statusLine(snapshot, shown) {
-  const parts = host().statusParts(snapshot, shown, state.settings, T);
+function statusLine(summary, shown) {
+  const parts = host().statusParts(summary, shown, state.settings, T);
   // the Suricata links sit before the CARP note, which stays last
-  const carp = snapshot.carp === 'backup' ? parts.pop() : null;
-  $('#fwmap-status').html([...parts, ...idsLinks(snapshot), carp].filter(Boolean).join(' · '));
+  const carp = summary.carp === 'backup' ? parts.pop() : null;
+  $('#fwmap-status').html([...parts, ...idsLinks(summary), carp].filter(Boolean).join(' · '));
   if (state.mode === 'live') {
     state.updatedAt = Date.now();
   }
@@ -88,24 +88,24 @@ function updatedLine() {
 }
 
 function refresh() {
-  const snapshot = state.snapshot;
-  if (!snapshot || snapshot.status !== 'ok') {
+  const summary = state.data;
+  if (!summary || summary.status !== 'ok') {
     return;
   }
-  const shown = filtered(snapshot);
+  const shown = filtered(summary);
   state.renderer.render(shown);
-  updateToolbar(snapshot);
+  updateToolbar(summary);
   updateLegend();
-  statusLine(snapshot, shown);
-  $('#fwmap-credit').html(host().creditHtml(snapshot.provider));
+  statusLine(summary, shown);
+  $('#fwmap-credit').html(host().creditHtml(summary.provider));
 }
 
 /**
  * The geolocation card over an empty map (downloading, failed, key missing), or the small note when
  * only network names are missing; re-rendered only when it changes, so Retry stays pressed.
  */
-function showGeo(snapshot) {
-  const html = snapshot ? host().geoCardHtml(snapshot, T, {admin: state.isAdmin}) || host().geoNoteHtml(snapshot, T, state.geoNoteDismissed) : '';
+function showGeo(summary) {
+  const html = summary ? host().geoCardHtml(summary, T, {admin: state.isAdmin}) || host().geoNoteHtml(summary, T, state.geoNoteDismissed) : '';
   const $slot = $('#fwmap-geo');
   if ($slot.data('html') !== html) {
     $slot.html(html).data('html', html);
@@ -122,22 +122,22 @@ function poll(query) {
       return;
     }
     try {
-      const snapshot = await getJSON(`/api/firewallmap/flow/snapshot${query}`);
-      const problem = host().problemText(snapshot, T);
-      showGeo(state.mode === 'live' ? snapshot : null);
+      const summary = await getJSON(`/api/firewallmap/flow/summary${query}`);
+      const problem = host().problemText(summary, T);
+      showGeo(state.mode === 'live' ? summary : null);
       if (problem && state.mode === 'live') {
         // no database or no sample: an empty map, not the last picture
-        if (snapshot.status === 'no_database' || snapshot.status === 'too_many_states') {
+        if (summary.status === 'no_database' || summary.status === 'too_many_states') {
           state.renderer.render({flows: [], locations: []});
         }
         // the geolocation card says it on the map itself
-        $('#fwmap-status').text(snapshot.status === 'no_database' ? '' : problem);
+        $('#fwmap-status').text(summary.status === 'no_database' ? '' : problem);
       } else {
-        state.live = snapshot;
+        state.live = summary;
         // the sparklines keep their history in snapshot mode too
-        const groups = talkers(snapshot);
+        const groups = talkers(summary);
         if (state.mode === 'live') {
-          state.snapshot = snapshot;
+          state.data = summary;
           renderTabs(groups);
           refresh();
         }
@@ -178,7 +178,7 @@ function setTab(tab) {
   state.talkerTab = tab;
   $('#fwmap-talkers .nav li').removeClass('active').find('a').attr('aria-selected', 'false');
   $(`#fwmap-talkers .nav a[data-tab="${tab}"]`).attr('aria-selected', 'true').parent().addClass('active');
-  renderTabs(state.snapshot ? talkersFromLast() : null);
+  renderTabs(state.data ? talkersFromLast() : null);
 }
 
 function selectTalker(row) {
@@ -253,7 +253,7 @@ function bindTalkers() {
       }
     });
   $('#fwmap-talker-search, #fwmap-talker-sort').on('input change', () => {
-    renderTabs(state.snapshot ? talkersFromLast() : null);
+    renderTabs(state.data ? talkersFromLast() : null);
   });
   $('#fwmap-talkers .nav a').on('click', function (event) {
     event.preventDefault();
@@ -425,7 +425,7 @@ $(async () => {
       backToLive();
     }
   });
-  poll(snapshotQuery(state.settings));
+  poll(summaryQuery(state.settings));
   // ?debug=1: the diagnostics panel, a separate script that only development packages install
   if (new URLSearchParams(window.location.search).get('debug') === '1' && window.FirewallMapDiagnostics) {
     window.FirewallMapDiagnostics.start({renderer: () => state.renderer, mode: () => state.mode, contextLosses: () => state.contextLosses});

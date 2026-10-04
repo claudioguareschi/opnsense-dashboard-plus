@@ -97,8 +97,8 @@ class ThreatQueueTest(unittest.TestCase):
             self.assertNotIn("seen_after_block", THREATS.listing(db)["rows"][0])
 
     def test_multicast_is_not_a_remote_endpoint(self):
-        self.assertFalse(COMMON.public_ipv4("224.0.0.18"))
-        self.assertTrue(COMMON.public_ipv4("9.9.9.9"))
+        self.assertFalse(COMMON.public_ip("224.0.0.18"))
+        self.assertTrue(COMMON.public_ip("9.9.9.9"))
         self.assertTrue(COMMON.public_ip("2606:4700:4700::1111"))
         self.assertTrue(COMMON.private_ip("fd00::1"))
         self.assertFalse(COMMON.public_ip("ff02::1"))
@@ -112,16 +112,6 @@ class ThreatQueueTest(unittest.TestCase):
             THREATS.record(db, self.observe(self.INBOUND), now=200.0)  # a sample without the facts
             self.assertEqual(THREATS.listing(db)["rows"][0]["remote"],
                              {"org": "Example ISP", "country": "United States", "asn": 64500})
-
-    def test_country_code_from_geo_cache(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, "cache.db")
-            store = CACHE.CacheStore(path)
-            store.put_many("geo:2:city.mmdb:1", [("108.188.77.155", {"country": "RO", "lat": 1, "lon": 2})])
-            db = THREATS.connect(os.path.join(directory, "threats.db"))
-            THREATS.record(db, self.observe(self.INBOUND), now=100.0)
-            with mock.patch.object(THREATS, "CACHE_DB", path):
-                self.assertEqual(THREATS.listing(db)["rows"][0]["remote"]["country_code"], "RO")
 
     def test_bulk_dismiss_and_purge(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -189,20 +179,6 @@ class ThreatQueueTest(unittest.TestCase):
             self.assertEqual((row["targets"][0], row["services"][0]), ("tcp|192.168.1.2|80", "HTTP"))
             self.assertEqual(row["connections"][0]["key"], "pass")
             self.assertEqual(row["lists"], ["FWMAP_FireHOL_L1", "AbuseIPDB blacklist"])
-
-    def test_old_dropped_status_migrates_to_ips_disposition(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, "cache.db")
-            db = sqlite3.connect(path)
-            db.execute("CREATE TABLE threats (address TEXT PRIMARY KEY, first_seen REAL, last_seen REAL, "
-                       "samples INTEGER, data TEXT, status TEXT, note TEXT, status_changed REAL)")
-            db.execute("INSERT INTO threats VALUES (?, 1, 2, 1, ?, 'dropped', '', NULL)",
-                       ("2001:4860:4860::8888", json.dumps({})))
-            db.commit()
-            db.close()
-            migrated = THREATS.connect(path)
-            self.assertEqual(migrated.execute("SELECT status, disposition FROM threats").fetchone(),
-                             ("new", "ips_dropped"))
 
     def test_rejects_bad_input(self):
         with tempfile.TemporaryDirectory() as directory:

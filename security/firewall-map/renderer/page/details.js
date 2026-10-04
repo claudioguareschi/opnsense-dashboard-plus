@@ -36,10 +36,10 @@ const REVEAL_MS = 900;
 
 /** What the map knows about a remote address: hostname, network, country. */
 export function remoteOf(address) {
-  const location = (state.snapshot?.locations || []).find((item) => item.id === address) || {};
+  const location = (state.data?.locations || []).find((item) => item.id === address) || {};
   return {
     ip: address,
-    hostname: state.snapshot?.hostnames?.[address],
+    hostname: state.data?.hostnames?.[address],
     org: state.settings.asn ? location.as_org : null,
     country: location.country,
     country_code: location.country_code,
@@ -48,7 +48,7 @@ export function remoteOf(address) {
 
 function reputationCard(item) {
   const listed = new Set(item.lists || []);
-  const lists = [...new Set([...(state.snapshot?.threat_lists || []), ...listed])];
+  const lists = [...new Set([...(state.data?.threat_lists || []), ...listed])];
   const address = item.address;
   const score = item.abuseipdb ?? state.abuseScores.get(address);
   // already on the downloaded AbuseIPDB blacklist: that row says it all, no lookup to offer
@@ -103,7 +103,7 @@ function firewallBox(sub) {
 }
 
 function localOrigin() {
-  return (state.snapshot?.locations || []).find((entry) => entry.local)?.id || '';
+  return (state.data?.locations || []).find((entry) => entry.local)?.id || '';
 }
 
 function rateText(rateIn, rateOut, format = formatRate) {
@@ -245,10 +245,10 @@ function detailsModel(selection, address) {
   const block = selection.kind === 'blocked' ? selection.block : null;
   const alert = selection.kind === 'alert' ? selection.alert : null;
   const ids = selection.kind === 'idsflow' ? selection.idsFlow : null;
-  const location = (state.snapshot?.locations || []).find((entry) => entry.id === address) || {};
+  const location = (state.data?.locations || []).find((entry) => entry.id === address) || {};
   const source = block || alert || ids || {};
   const item = {...location, ...source, country_code: source.country_code || location.country_code};
-  const hostname = state.snapshot?.hostnames?.[address];
+  const hostname = state.data?.hostnames?.[address];
   const remote = {
     title: hostname || address, hostname, place: place(item), cc: item.country_code,
     org: state.settings.asn ? plain(item.as_org || '') : '',

@@ -111,13 +111,13 @@ export function toast(frame, html, ms = 6000) {
  * through, CARP backup. `text` holds active_flows_one/_many, blocked_sources_one/_many,
  * below_threshold, listed_flows_one/_many, no_flows and carp_backup.
  */
-export function statusParts(snapshot, shown, settings, text) {
+export function statusParts(summary, shown, settings, text) {
   const parts = [];
   const count = shown.flows.length;
   parts.push(escapeHtml(count ? plural(text, 'active_flows', count) : text.no_flows));
   if (settings.blocks) {
     const blocked = (shown.blocks || []).length;
-    const below = snapshot.blocks_below || 0;
+    const below = summary.blocks_below || 0;
     if (blocked || below) {
       parts.push(escapeHtml(plural(text, 'blocked_sources', blocked)));
       if (below) {
@@ -129,7 +129,7 @@ export function statusParts(snapshot, shown, settings, text) {
   if (threats && text.listed_flows_many) {
     parts.push(escapeHtml(plural(text, 'listed_flows', threats)));
   }
-  if (snapshot.carp === 'backup') {
+  if (summary.carp === 'backup') {
     parts.push(escapeHtml(text.carp_backup));
   }
   return parts;
@@ -140,19 +140,19 @@ export function creditHtml(provider) {
   return provider === 'dbip' ? '<a href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a>' : '';
 }
 
-/** The status text for a snapshot that is not "ok" (starting, no database, failed), or null. */
-export function problemText(snapshot, text) {
-  if (snapshot.status === 'starting') {
+/** The status text for a summary that is not "ok" (starting, no database, failed), or null. */
+export function problemText(summary, text) {
+  if (summary.status === 'starting') {
     return text.starting;
   }
-  if (snapshot.status === 'too_many_states') {
-    return fill(text.too_many_states, {count: Number(snapshot.count).toLocaleString(), limit: Number(snapshot.limit).toLocaleString()});
+  if (summary.status === 'too_many_states') {
+    return fill(text.too_many_states, {count: Number(summary.count).toLocaleString(), limit: Number(summary.limit).toLocaleString()});
   }
-  if (snapshot.status === 'no_database') {
-    return snapshot.reason === 'maxmind_key_missing' ? text.key_missing
-      : snapshot.error ? `${text.database_failed}: ${plain(snapshot.error)}` : text.downloading;
+  if (summary.status === 'no_database') {
+    return summary.reason === 'maxmind_key_missing' ? text.key_missing
+      : summary.error ? `${text.database_failed}: ${plain(summary.error)}` : text.downloading;
   }
-  return snapshot.status !== 'ok' ? text.unavailable : null;
+  return summary.status !== 'ok' ? text.unavailable : null;
 }
 
 /* The geolocation database card: shown over an empty map while the database downloads (a
@@ -253,17 +253,17 @@ function geoCard(kind, icon, title, body) {
  * changes when what it shows changes, so a caller can skip re-rendering an unchanged card (and
  * keep a pressed Retry button pressed).
  */
-export function geoCardHtml(snapshot, text, {admin = false} = {}) {
-  if (snapshot?.status !== 'no_database') {
+export function geoCardHtml(summary, text, {admin = false} = {}) {
+  if (summary?.status !== 'no_database') {
     return '';
   }
   installGeo();
   const t = textTable(text);
-  const geo = snapshot.geodb || {state: 'idle'};
+  const geo = summary.geodb || {state: 'idle'};
   if (geo.now) {
     skew = Date.now() / 1000 - geo.now;
   }
-  if (snapshot.reason === 'maxmind_key_missing') {
+  if (summary.reason === 'maxmind_key_missing') {
     // the status-line message starts with what the title already says ("…is needed: add it…")
     const advice = t.key_missing.includes(': ') ? t.key_missing.slice(t.key_missing.indexOf(': ') + 2) : t.key_missing;
     return geoCard('key', 'fa-key', t.geo_key_title, `<p>${escapeHtml(advice.charAt(0).toUpperCase() + advice.slice(1))}.</p>`);
@@ -295,9 +295,9 @@ export function geoCardHtml(snapshot, text, {admin = false} = {}) {
  * The small note for a map that works but whose AS database failed (network names missing), or
  * '' when there is none. `dismissed` is the key of a note the viewer closed.
  */
-export function geoNoteHtml(snapshot, text, dismissed = null) {
-  const geo = snapshot?.geodb;
-  if (snapshot?.status !== 'ok' || geo?.state !== 'failed' || geoNoteKey(snapshot) === dismissed) {
+export function geoNoteHtml(summary, text, dismissed = null) {
+  const geo = summary?.geodb;
+  if (summary?.status !== 'ok' || geo?.state !== 'failed' || geoNoteKey(summary) === dismissed) {
     return '';
   }
   installGeo();
@@ -316,6 +316,6 @@ export function geoNoteHtml(snapshot, text, dismissed = null) {
 }
 
 /** Which failure a note is about: closing it hides that failure, not the next one. */
-export function geoNoteKey(snapshot) {
-  return (snapshot?.geodb?.errors || []).map((error) => `${error.edition}:${error.code}`).join('|');
+export function geoNoteKey(summary) {
+  return (summary?.geodb?.errors || []).map((error) => `${error.edition}:${error.code}`).join('|');
 }

@@ -26,7 +26,7 @@
 
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {DEFAULT_OPTIONS, parseSettings, snapshotParams, snapshotQuery} from '../src/options.js';
+import {DEFAULT_OPTIONS, parseSettings, summaryParams, summaryQuery} from '../src/options.js';
 
 test('unset options take the defaults', () => {
   const settings = parseSettings({});
@@ -48,7 +48,7 @@ test('the dialog values ("0", "1", numbers as text) become settings', () => {
 });
 
 test('the live data request carries the threshold and the reverse DNS choice', () => {
-  assert.deepEqual(snapshotParams({blockMin: 5, hostnames: true}), {blocks_min: 5, hostnames: 1});
-  assert.deepEqual(snapshotParams({blockMin: 2}), {blocks_min: 2});
-  assert.equal(snapshotQuery({blockMin: 5, hostnames: true}), '?blocks_min=5&hostnames=1');
+  assert.deepEqual(summaryParams({blockMin: 5, hostnames: true}), {blocks_min: 5, hostnames: 1});
+  assert.deepEqual(summaryParams({blockMin: 2}), {blocks_min: 2});
+  assert.equal(summaryQuery({blockMin: 5, hostnames: true}), '?blocks_min=5&hostnames=1');
 });

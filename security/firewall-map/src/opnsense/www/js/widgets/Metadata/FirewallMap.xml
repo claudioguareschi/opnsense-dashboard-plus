@@ -5,7 +5,7 @@
         <!-- what a viewer needs (the widget privilege). The camera's save (same privilege) and the
              optional administrator calls are made outside ajaxCall; see FirewallMap.js. -->
         <endpoints>
-            <endpoint>/api/firewallmap/flow/snapshot</endpoint>
+            <endpoint>/api/firewallmap/flow/summary</endpoint>
         </endpoints>
         <translations>
             <title>Firewall Map+</title>

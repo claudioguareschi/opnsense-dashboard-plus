@@ -39,8 +39,8 @@ function shortInterface(name) {
 }
 
 /** Top talkers by host, country and network, plus the addresses Suricata alerted on. */
-function groupTalkers(snapshot) {
-  const locations = locationsById(snapshot);
+function groupTalkers(summary) {
+  const locations = locationsById(summary);
   const groups = {hosts: new Map(), countries: new Map(), networks: new Map(), ids: new Map()};
   const add = (group, key, fields, rate) => {
     const entry = groups[group].get(key) || {key, rate: 0, flows: 0, ...fields};
@@ -48,7 +48,7 @@ function groupTalkers(snapshot) {
     entry.flows += 1;
     groups[group].set(key, entry);
   };
-  for (const flow of snapshot.flows || []) {
+  for (const flow of summary.flows || []) {
     const rate = flow.rate || 0;
     const dest = locations.get(flow.dest) || {};
     for (const inside of (flow.inside || []).slice(0, 1)) {
@@ -74,26 +74,26 @@ function groupTalkers(snapshot) {
     groups.ids.set(address, {key: address, label: address, sub: top ? plain(top.signature) : '', severity,
       count, connection, icon: connection ? 'fa-exclamation-circle' : 'fa-flag', rate: 0, select});
   };
-  for (const flow of snapshot.ids_flows || []) {
+  for (const flow of summary.ids_flows || []) {
     if (flow.kind !== 'blocked') {
       idsEntry(flow.dest, flow, flow.count, flow.severity, {kind: 'idsflow', addresses: [flow.dest], idsFlow: flow,
         country: flow.country, countryCode: flow.country_code, title: flow.city || flow.country}, true);
     }
   }
-  for (const flow of snapshot.flows || []) {
+  for (const flow of summary.flows || []) {
     if (flow.ids) {
       const dest = locations.get(flow.dest) || {};
       idsEntry(flow.dest, flow.ids, flow.ids.count, flow.ids.severity, {kind: 'flow', addresses: [flow.dest], members: [flow],
         country: dest.country, countryCode: dest.country_code, title: dest.city || dest.country}, false);
     }
   }
-  for (const block of snapshot.blocks || []) {
+  for (const block of summary.blocks || []) {
     if (block.ids) {
       idsEntry(block.source, block.ids, block.ids.count, block.ids.severity, {kind: 'blocked', addresses: [block.source],
         block, country: block.country, countryCode: block.country_code, title: block.city || block.country}, false);
     }
   }
-  for (const alert of snapshot.alerts || []) {
+  for (const alert of summary.alerts || []) {
     idsEntry(alert.source, alert.ids, alert.ids?.count || 0, alert.ids?.severity || 3, {kind: 'alert', addresses: [alert.source],
       alert, country: alert.country, countryCode: alert.country_code, title: alert.city || alert.country}, false);
   }
@@ -106,8 +106,8 @@ function groupTalkers(snapshot) {
   return result;
 }
 
-export function talkers(snapshot) {
-  const result = groupTalkers(snapshot);
+export function talkers(summary) {
+  const result = groupTalkers(summary);
   for (const [group, entries] of Object.entries(result)) {
     if (group === 'ids') {
       continue;
@@ -227,9 +227,9 @@ export function renderTalkers(groups) {
   });
 }
 
-// re-rank the current tab from the last snapshot without adding a history point
+// re-rank the current tab from the data on screen without adding a history point
 export function talkersFromLast() {
-  const groups = groupTalkers(state.snapshot);
+  const groups = groupTalkers(state.data);
   for (const [group, entries] of Object.entries(groups)) {
     for (const entry of entries) {
       // a saved snapshot has no history of its own: no sparkline rather than today's

@@ -566,27 +566,27 @@ export default class FirewallMap extends BaseWidget {
         this.polling = true;
         try {
             const host = window.FirewallMapRenderer.host;
-            const snapshot = await this.ajaxCall('/api/firewallmap/flow/snapshot', window.FirewallMapRenderer.snapshotParams(this.settings));
+            const summary = await this.ajaxCall('/api/firewallmap/flow/summary', window.FirewallMapRenderer.summaryParams(this.settings));
             // removed while the request was under way
             if (!this.renderer) {
                 return;
             }
-            const problem = host.problemText(snapshot, this._text());
-            await this._showGeo(snapshot);
+            const problem = host.problemText(summary, this._text());
+            await this._showGeo(summary);
             if (problem) {
-                if (snapshot.status === 'no_database' || snapshot.status === 'too_many_states') {
+                if (summary.status === 'no_database' || summary.status === 'too_many_states') {
                     // no locations or no sample: keep the map empty and say why
                     this.renderer.render({flows: [], locations: []});
-                } else if (snapshot.status !== 'starting') {
-                    console.error('Firewall Map+: collector reported', snapshot);
+                } else if (summary.status !== 'starting') {
+                    console.error('Firewall Map+: collector reported', summary);
                 }
                 // the geolocation card says it on the map itself
-                this._status(snapshot.status === 'no_database' ? '' : problem);
+                this._status(summary.status === 'no_database' ? '' : problem);
                 return;
             }
-            this.renderer.render(snapshot);
-            $(`#${this.id}-firewall-map-credit`).html(host.creditHtml(snapshot.provider));
-            const parts = host.statusParts(snapshot, snapshot, this.settings, this._text());
+            this.renderer.render(summary);
+            $(`#${this.id}-firewall-map-credit`).html(host.creditHtml(summary.provider));
+            const parts = host.statusParts(summary, summary, this.settings, this._text());
             // the parts are HTML-escaped: set them as HTML, not text
             $(`#${this.id}-firewall-map-status`).html(parts.join(' · '));
         } catch (error) {
@@ -616,20 +616,20 @@ export default class FirewallMap extends BaseWidget {
      * when only network names are missing. Retry now is for administrators: whether this user is
      * one is learned once, from the plugin settings they can (or cannot) read.
      */
-    async _showGeo(snapshot) {
+    async _showGeo(summary) {
         const host = window.FirewallMapRenderer.host;
-        if (snapshot?.geodb?.state === 'failed' && this.geoSettings === null && !this.geoAsked) {
+        if (summary?.geodb?.state === 'failed' && this.geoSettings === null && !this.geoAsked) {
             this.geoAsked = true;
             await this._loadGeoSettings();
         }
         const admin = Boolean(this.geoSettings?.provider);
-        const html = host.geoCardHtml(snapshot, this._text(), {admin}) || host.geoNoteHtml(snapshot, this._text(), this.geoNoteDismissed);
+        const html = host.geoCardHtml(summary, this._text(), {admin}) || host.geoNoteHtml(summary, this._text(), this.geoNoteDismissed);
         const slot = document.getElementById(`${this.id}-firewall-map-geo`);
         if (slot && slot.dataset.html !== html) {
             slot.innerHTML = html;
             slot.dataset.html = html;
             slot.querySelector('.fwmap-geo-note-close')?.addEventListener('click', () => {
-                this.geoNoteDismissed = host.geoNoteKey(snapshot);
+                this.geoNoteDismissed = host.geoNoteKey(summary);
                 slot.innerHTML = '';
                 slot.dataset.html = '';
             });

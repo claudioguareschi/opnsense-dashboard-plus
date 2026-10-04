@@ -39,14 +39,14 @@ class FlowController extends ApiControllerBase
      * request only reads its output, so dashboard polling never walks the
      * state table or performs GeoIP lookups.
      */
-    public function snapshotAction()
+    public function summaryAction()
     {
         $backend = new Backend();
         /* reverse DNS only runs while a viewer who enabled it is polling */
         $mode = $this->request->get('hostnames') === '1' ? 'hostnames' : 'plain';
         /* per-viewer threshold: blocked sources need this many hits before they are drawn */
         $minimum = max(1, min(100, (int)($this->request->get('blocks_min') ?? 1)));
-        $output = $backend->configdpRun('firewallmap flow snapshot', [$mode, (string)$minimum]);
+        $output = $backend->configdpRun('firewallmap flow summary', [$mode, (string)$minimum]);
         $result = json_decode($output ?? '', true);
 
         return is_array($result) ? $result : ['status' => 'failed', 'flows' => []];

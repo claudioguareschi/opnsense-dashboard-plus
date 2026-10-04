@@ -34,7 +34,7 @@ from datetime import datetime
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from support import COLLECTOR, COMMON, PF, SNAPSHOT, THREATS, Geo, nat_state  # noqa: E402
+from support import COLLECTOR, COMMON, PF, SUMMARY, THREATS, Geo, nat_state  # noqa: E402
 
 
 class TrackerTest(unittest.TestCase):
@@ -101,7 +101,7 @@ class IdleTest(unittest.TestCase):
             marker = os.path.join(directory, "last_request")
             self.assertFalse(COLLECTOR.idle(started=1000, now=1100, marker=marker, idle_seconds=300))
             self.assertTrue(COLLECTOR.idle(started=1000, now=1400, marker=marker, idle_seconds=300))
-            SNAPSHOT.mark_request(marker)
+            SUMMARY.mark_request(marker)
             now = os.stat(marker).st_mtime
             self.assertFalse(COLLECTOR.idle(started=now - 1000, now=now + 10, marker=marker, idle_seconds=300))
             self.assertTrue(COLLECTOR.idle(started=now - 1000, now=now + 301, marker=marker, idle_seconds=300))

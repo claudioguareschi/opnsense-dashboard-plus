@@ -168,7 +168,7 @@ class CorrelationTest(unittest.TestCase):
         correlator.resolve(self.LOCAL, 1000.0)
         self.assertEqual(correlator.stats["current"], 1)
 
-    def test_ids_flow_snapshot_and_evidence_flag(self):
+    def test_ids_flow_summary_and_evidence_flag(self):
         class Geo:
             def resolve(self, addresses):
                 pass
@@ -181,7 +181,7 @@ class CorrelationTest(unittest.TestCase):
         correlator.resolve(self.LOCAL, 1000.0)
         self.assertTrue(correlator.flags("162.217.103.70"))
         self.assertFalse(correlator.flags("8.8.8.8"))
-        (flow,) = correlator.snapshot(Geo(), "1.2.3.163", {"192.168.30.52": "laptop"}, [], {"igb1": "WAN"}, now=1000.0)
+        (flow,) = correlator.summary(Geo(), "1.2.3.163", {"192.168.30.52": "laptop"}, [], {"igb1": "WAN"}, now=1000.0)
         self.assertEqual((flow["inside"], flow["inside_host"]["name"], flow["rule"], flow["interface"], flow["active"]),
                          ("192.168.30.52:52114", "laptop", "IoT to Internet", "WAN", True))
         self.assertEqual((flow["severity"], flow["count"], flow["kind"]), (1, 1, "current"))
@@ -203,7 +203,7 @@ class CorrelationTest(unittest.TestCase):
         correlator.observe_states(PF.parse_states(self.OUTBOUND), self.LOCAL, 1000.0, {"abc123": "IoT to Internet"})
         correlator.add_alert(self.alert("1.2.3.163", 13526, "162.217.103.70", 443), 1000.0)
         correlator.resolve(self.LOCAL, 1000.0)
-        (item,) = IDS.connection_snapshot("162.217.103.70", correlator, {"192.168.30.52": "laptop"}, {"igb1": "WAN"},
+        (item,) = IDS.connection_summary("162.217.103.70", correlator, {"192.168.30.52": "laptop"}, {"igb1": "WAN"},
                                                 wall=1240.0)
         self.assertEqual((item["inside"], item["inside_name"], item["public"], item["remote"], item["rule"], item["started"]),
                          ("192.168.30.52:52114", "laptop", "1.2.3.163:13526", "162.217.103.70:443", "IoT to Internet", 1000))
@@ -245,7 +245,7 @@ class CorrelationTest(unittest.TestCase):
             entries = IDS.ips_drops(correlator, {}, 0.0)
             entry = entries["94.154.43.203"]
             self.assertEqual((entry["disposition"], entry["targets"], entry["inbound"]), ("ips_dropped", ["tcp|192.168.1.2|443"], 1))
-            (snap,) = IDS.connection_snapshot("94.154.43.203", correlator, {"192.168.1.2": "mail"}, {})
+            (snap,) = IDS.connection_summary("94.154.43.203", correlator, {"192.168.1.2": "mail"}, {})
             self.assertEqual((snap["inside_name"], snap["ips_dropped"], snap["decision"]), ("mail", True, None))
             db = THREATS.connect(os.path.join(directory, "cache.db"))
             THREATS.record(db, entries, now=1000.0)

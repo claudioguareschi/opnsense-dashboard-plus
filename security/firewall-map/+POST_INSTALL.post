@@ -6,8 +6,6 @@ fi
 /usr/local/sbin/pluginctl -s cron restart > /dev/null 2>&1
 # fetch the geolocation database right away (MaxMind with a key, otherwise DB-IP Lite)
 /usr/local/sbin/configctl -d firewallmap geodb update > /dev/null 2>&1
-# first run of this version: set "Maintain blocklist aliases" from the aliases already present
-/usr/local/opnsense/scripts/OPNsense/FirewallMap/blocklist_aliases.php > /dev/null 2>&1
 # download the curated feeds in use and, with a key, the AbuseIPDB blacklist (each at most daily)
 /usr/local/sbin/configctl -d firewallmap feeds update > /dev/null 2>&1
 /usr/local/sbin/configctl -d firewallmap abuseipdb update > /dev/null 2>&1

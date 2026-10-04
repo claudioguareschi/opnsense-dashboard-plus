@@ -55,13 +55,13 @@ function withIcons($select) {
   }
 }
 
-export function updateToolbar(snapshot) {
-  const locations = locationsById(snapshot);
+export function updateToolbar(summary) {
+  const locations = locationsById(summary);
   const services = new Map();
   const ifaces = new Map();
   const hosts = new Map();
   const countries = new Map();
-  for (const flow of snapshot.flows || []) {
+  for (const flow of summary.flows || []) {
     const service = flowService(flow);
     services.set(service, {value: service, label: service});
     for (const inside of flow.inside || []) {
@@ -75,10 +75,10 @@ export function updateToolbar(snapshot) {
       countries.set(country, {value: country, label: plain(country)});
     }
   }
-  for (const name of snapshot.interfaces || []) {
+  for (const name of summary.interfaces || []) {
     ifaces.set(name, {value: name, label: name});
   }
-  for (const block of snapshot.blocks || []) {
+  for (const block of summary.blocks || []) {
     if (block.country) {
       countries.set(block.country, {value: block.country, label: plain(block.country)});
     }

@@ -40,7 +40,7 @@ var FirewallMapDiagnostics = (function(exports) {
 	};
 	var SAMPLE_MS = 1e3;
 	var KEEP = 600;
-	var POLL_PATH = "/api/firewallmap/flow/snapshot";
+	var POLL_PATH = "/api/firewallmap/flow/summary";
 	var samples = [];
 	var polls = [];
 	var longTasks = 0;

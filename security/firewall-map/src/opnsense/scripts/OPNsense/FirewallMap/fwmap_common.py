@@ -162,12 +162,6 @@ def normalize_ip(value):
         return value
 
 
-# Kept for callers outside this package that imported the old helpers. New code uses the
-# family-neutral names; these aliases can be removed in a future major release.
-public_ipv4 = public_ip
-private_ipv4 = private_ip
-
-
 def write_text(path, text):
     """Write atomically, through a unique temporary file, so readers never see a partial
     document and two writers never share a temporary name."""

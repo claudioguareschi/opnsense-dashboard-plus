@@ -75,14 +75,9 @@ def connect(path=DATABASE):
     # one-time steps, recorded in user_version (not repeated on every connection, which is every
     # list request)
     if db.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
-        columns = {row[1] for row in db.execute("PRAGMA table_info(threats)")}
-        if "disposition" not in columns:
-            db.execute("ALTER TABLE threats ADD COLUMN disposition TEXT DEFAULT 'passed'")
         db.execute("CREATE INDEX IF NOT EXISTS threats_view ON threats(status, disposition, last_seen DESC)")
         if path == DATABASE:
             move_from_cache(db)
-        # releases before disposition tabs used status=dropped for IPS evidence
-        db.execute("UPDATE threats SET disposition = 'ips_dropped', status = 'new' WHERE status = 'dropped'")
         db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return db
 
@@ -265,22 +260,6 @@ def prune(db, now=None):
                "ORDER BY disposition = 'passed' DESC, last_seen DESC LIMIT ?)", (KEEP_ROWS,))
 
 
-_caches = {}
-
-
-def cached_country(address, cache=None):
-    """Country code of an address from the collector's local GeoIP cache (read only)."""
-    cache = cache or CACHE_DB
-    try:
-        if cache not in _caches:
-            _caches[cache] = sqlite3.connect(f"file:{cache}?mode=ro", uri=True, timeout=1, check_same_thread=False)
-        found = _caches[cache].execute(
-            "SELECT value FROM cache WHERE kind LIKE 'geo:%' AND key = ? ORDER BY stored DESC LIMIT 1", (address,)).fetchone()
-        return (json.loads(found[0]) or {}).get("country") if found else None
-    except (sqlite3.Error, ValueError, AttributeError):
-        return None
-
-
 def inside_names():
     """DHCP names of inside hosts, so entries read "mail" rather than 192.168.1.2."""
     try:
@@ -357,12 +336,7 @@ def _decorate(db, row):
     for target in row.get("targets", []):
         protocol, port = str(target).split("|")[0], str(target).split("|")[-1]
         row["target_services"][target] = service_name(protocol, port or None)
-    remote = row.setdefault("remote", {})
-    if not remote.get("country_code"):
-        # entries recorded before the code was kept: take it from the local geolocation cache
-        code = cached_country(row["address"])
-        if code:
-            remote["country_code"] = code
+    row.setdefault("remote", {})
     return row
 
 

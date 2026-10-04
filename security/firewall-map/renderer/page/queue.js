@@ -41,7 +41,7 @@ const QUEUE_PAGE = 100;
 // inside host names from the live map, for addresses recorded in the queue
 function insideNames(extra = {}) {
   const names = new Map(Object.entries(extra));
-  for (const flow of state.snapshot?.flows || []) {
+  for (const flow of state.data?.flows || []) {
     for (const host of [...(flow.inside || []), ...(flow.targets || [])]) {
       if (host.name && host.ip) {
         names.set(host.ip, host.name);
@@ -233,7 +233,7 @@ function queueItem(row, names) {
 
 /** Country name to code from the live map (older queue entries only stored the name). */
 function countryCodeOf(name) {
-  const match = (state.snapshot?.locations || []).find((location) => location.country === name && location.country_code);
+  const match = (state.data?.locations || []).find((location) => location.country === name && location.country_code);
   return match ? match.country_code : '';
 }
 

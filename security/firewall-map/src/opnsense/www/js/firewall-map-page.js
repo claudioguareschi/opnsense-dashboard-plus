@@ -125,7 +125,7 @@
 		};
 	}
 	/** The same as a query string, for a request that does not build it itself (the page). */
-	function snapshotQuery(settings) {
+	function summaryQuery(settings) {
 		return `?blocks_min=${settings.blockMin ?? DEFAULT_OPTIONS.blockMin}${settings.hostnames ? "&hostnames=1" : ""}`;
 	}
 	//#endregion
@@ -234,7 +234,7 @@
 	var ABUSEIPDB_LOOKUP_LIST = "AbuseIPDB (looked up)";
 	var state = {
 		renderer: null,
-		snapshot: null,
+		data: null,
 		live: null,
 		mode: "live",
 		frozen: null,
@@ -705,10 +705,10 @@
 	var REVEAL_MS = 900;
 	/** What the map knows about a remote address: hostname, network, country. */
 	function remoteOf(address) {
-		const location = (state.snapshot?.locations || []).find((item) => item.id === address) || {};
+		const location = (state.data?.locations || []).find((item) => item.id === address) || {};
 		return {
 			ip: address,
-			hostname: state.snapshot?.hostnames?.[address],
+			hostname: state.data?.hostnames?.[address],
 			org: state.settings.asn ? location.as_org : null,
 			country: location.country,
 			country_code: location.country_code
@@ -716,7 +716,7 @@
 	}
 	function reputationCard(item) {
 		const listed = new Set(item.lists || []);
-		const lists = [.../* @__PURE__ */ new Set([...state.snapshot?.threat_lists || [], ...listed])];
+		const lists = [.../* @__PURE__ */ new Set([...state.data?.threat_lists || [], ...listed])];
 		const address = item.address;
 		const score = item.abuseipdb ?? state.abuseScores.get(address);
 		const blacklisted = listed.has(ABUSEIPDB_BLACKLIST_LIST);
@@ -762,7 +762,7 @@
 		return endBox("fa-shield", T.this_firewall_title, [sub]);
 	}
 	function localOrigin() {
-		return (state.snapshot?.locations || []).find((entry) => entry.local)?.id || "";
+		return (state.data?.locations || []).find((entry) => entry.local)?.id || "";
 	}
 	function rateText(rateIn, rateOut, format = formatRate) {
 		return `↓ ${escapeHtml(format(rateIn || 0))} ↑ ${escapeHtml(format(rateOut || 0))}`;
@@ -918,14 +918,14 @@
 		const block = selection.kind === "blocked" ? selection.block : null;
 		const alert = selection.kind === "alert" ? selection.alert : null;
 		const ids = selection.kind === "idsflow" ? selection.idsFlow : null;
-		const location = (state.snapshot?.locations || []).find((entry) => entry.id === address) || {};
+		const location = (state.data?.locations || []).find((entry) => entry.id === address) || {};
 		const source = block || alert || ids || {};
 		const item = {
 			...location,
 			...source,
 			country_code: source.country_code || location.country_code
 		};
-		const hostname = state.snapshot?.hostnames?.[address];
+		const hostname = state.data?.hostnames?.[address];
 		const remote = {
 			title: hostname || address,
 			hostname,
@@ -1060,8 +1060,8 @@
 	}
 	//#endregion
 	//#region page/filters.js
-	function locationsById(snapshot) {
-		return new Map((snapshot.locations || []).map((location) => [location.id, location]));
+	function locationsById(summary) {
+		return new Map((summary.locations || []).map((location) => [location.id, location]));
 	}
 	function flowService(flow) {
 		return serviceCategory((flow.services || [])[0]);
@@ -1105,24 +1105,24 @@
 		if (f.country && alert.country !== f.country) return false;
 		return !(f.asn && String(alert.asn || "") !== f.asn);
 	}
-	function filtered(snapshot) {
-		const locations = locationsById(snapshot);
-		const flows = (snapshot.flows || []).filter((flow) => flowMatches(flow, locations));
-		const blocks = state.settings.blocks ? (snapshot.blocks || []).filter(blockMatches) : [];
+	function filtered(summary) {
+		const locations = locationsById(summary);
+		const flows = (summary.flows || []).filter((flow) => flowMatches(flow, locations));
+		const blocks = state.settings.blocks ? (summary.blocks || []).filter(blockMatches) : [];
 		const alerts = [
 			"",
 			"all",
 			"ids",
 			"ids_addresses"
-		].includes(state.filters.traffic || "") ? (snapshot.alerts || []).filter(alertMatches) : [];
+		].includes(state.filters.traffic || "") ? (summary.alerts || []).filter(alertMatches) : [];
 		const used = new Set(flows.flatMap((flow) => [flow.origin, flow.dest]));
 		return {
-			...snapshot,
+			...summary,
 			flows,
 			blocks,
 			alerts,
-			ids_flows: (snapshot.ids_flows || []).filter(idsFlowMatches),
-			locations: (snapshot.locations || []).filter((location) => location.local || used.has(location.id))
+			ids_flows: (summary.ids_flows || []).filter(idsFlowMatches),
+			locations: (summary.locations || []).filter((location) => location.local || used.has(location.id))
 		};
 	}
 	//#endregion
@@ -1384,7 +1384,7 @@
 	var QUEUE_PAGE = 100;
 	function insideNames(extra = {}) {
 		const names = new Map(Object.entries(extra));
-		for (const flow of state.snapshot?.flows || []) for (const host of [...flow.inside || [], ...flow.targets || []]) if (host.name && host.ip) names.set(host.ip, host.name);
+		for (const flow of state.data?.flows || []) for (const host of [...flow.inside || [], ...flow.targets || []]) if (host.name && host.ip) names.set(host.ip, host.name);
 		return names;
 	}
 	function queueItem(row, names) {
@@ -1559,7 +1559,7 @@
 	}
 	/** Country name to code from the live map (older queue entries only stored the name). */
 	function countryCodeOf(name) {
-		const match = (state.snapshot?.locations || []).find((location) => location.country === name && location.country_code);
+		const match = (state.data?.locations || []).find((location) => location.country === name && location.country_code);
 		return match ? match.country_code : "";
 	}
 	async function refreshQueueCount() {
@@ -1860,7 +1860,7 @@
 			meta,
 			data
 		};
-		state.snapshot = data;
+		state.data = data;
 		state.selection = null;
 		state.renderer.setFrozen(true);
 		state.renderer.setFollow(false);
@@ -1875,11 +1875,11 @@
 		state.frozen = null;
 		state.selection = null;
 		state.renderer.setFrozen(false);
-		state.snapshot = state.live;
+		state.data = state.live;
 		hooks.setTab(state.tabBeforeSnapshots && state.tabBeforeSnapshots !== "snapshots" ? state.tabBeforeSnapshots : "hosts");
 		state.tabBeforeSnapshots = null;
 		hooks.setFollow(state.follow);
-		if (state.snapshot) hooks.refresh();
+		if (state.data) hooks.refresh();
 		hooks.renderDetails();
 		renderChrome();
 	}
@@ -2214,8 +2214,8 @@
 		return match ? `${match[2]} (VLAN${match[1]})` : plain(name || "");
 	}
 	/** Top talkers by host, country and network, plus the addresses Suricata alerted on. */
-	function groupTalkers(snapshot) {
-		const locations = locationsById(snapshot);
+	function groupTalkers(summary) {
+		const locations = locationsById(summary);
 		const groups = {
 			hosts: /* @__PURE__ */ new Map(),
 			countries: /* @__PURE__ */ new Map(),
@@ -2233,7 +2233,7 @@
 			entry.flows += 1;
 			groups[group].set(key, entry);
 		};
-		for (const flow of snapshot.flows || []) {
+		for (const flow of summary.flows || []) {
 			const rate = flow.rate || 0;
 			const dest = locations.get(flow.dest) || {};
 			for (const inside of (flow.inside || []).slice(0, 1)) add("hosts", inside.ip, {
@@ -2272,7 +2272,7 @@
 				select
 			});
 		};
-		for (const flow of snapshot.ids_flows || []) if (flow.kind !== "blocked") idsEntry(flow.dest, flow, flow.count, flow.severity, {
+		for (const flow of summary.ids_flows || []) if (flow.kind !== "blocked") idsEntry(flow.dest, flow, flow.count, flow.severity, {
 			kind: "idsflow",
 			addresses: [flow.dest],
 			idsFlow: flow,
@@ -2280,7 +2280,7 @@
 			countryCode: flow.country_code,
 			title: flow.city || flow.country
 		}, true);
-		for (const flow of snapshot.flows || []) if (flow.ids) {
+		for (const flow of summary.flows || []) if (flow.ids) {
 			const dest = locations.get(flow.dest) || {};
 			idsEntry(flow.dest, flow.ids, flow.ids.count, flow.ids.severity, {
 				kind: "flow",
@@ -2291,7 +2291,7 @@
 				title: dest.city || dest.country
 			}, false);
 		}
-		for (const block of snapshot.blocks || []) if (block.ids) idsEntry(block.source, block.ids, block.ids.count, block.ids.severity, {
+		for (const block of summary.blocks || []) if (block.ids) idsEntry(block.source, block.ids, block.ids.count, block.ids.severity, {
 			kind: "blocked",
 			addresses: [block.source],
 			block,
@@ -2299,7 +2299,7 @@
 			countryCode: block.country_code,
 			title: block.city || block.country
 		}, false);
-		for (const alert of snapshot.alerts || []) idsEntry(alert.source, alert.ids, alert.ids?.count || 0, alert.ids?.severity || 3, {
+		for (const alert of summary.alerts || []) idsEntry(alert.source, alert.ids, alert.ids?.count || 0, alert.ids?.severity || 3, {
 			kind: "alert",
 			addresses: [alert.source],
 			alert,
@@ -2311,8 +2311,8 @@
 		for (const [group, entries] of Object.entries(groups)) result[group] = [...entries.values()].sort(group === "ids" ? (a, b) => b.connection - a.connection || a.severity - b.severity || b.count - a.count : (a, b) => b.rate - a.rate);
 		return result;
 	}
-	function talkers(snapshot) {
-		const result = groupTalkers(snapshot);
+	function talkers(summary) {
+		const result = groupTalkers(summary);
 		for (const [group, entries] of Object.entries(result)) {
 			if (group === "ids") continue;
 			for (const entry of entries) {
@@ -2408,7 +2408,7 @@
 		});
 	}
 	function talkersFromLast() {
-		const groups = groupTalkers(state.snapshot);
+		const groups = groupTalkers(state.data);
 		for (const [group, entries] of Object.entries(groups)) for (const entry of entries) entry.series = state.mode === "snapshot" ? null : state.history.get(`${group}:${entry.key}`);
 		return groups;
 	}
@@ -2431,13 +2431,13 @@
 		const icon = $select.closest(".fwmap-filter").data("icon");
 		if (icon) $select.find("option").attr("data-icon", icon);
 	}
-	function updateToolbar(snapshot) {
-		const locations = locationsById(snapshot);
+	function updateToolbar(summary) {
+		const locations = locationsById(summary);
 		const services = /* @__PURE__ */ new Map();
 		const ifaces = /* @__PURE__ */ new Map();
 		const hosts = /* @__PURE__ */ new Map();
 		const countries = /* @__PURE__ */ new Map();
-		for (const flow of snapshot.flows || []) {
+		for (const flow of summary.flows || []) {
 			const service = flowService(flow);
 			services.set(service, {
 				value: service,
@@ -2459,11 +2459,11 @@
 				label: plain(country)
 			});
 		}
-		for (const name of snapshot.interfaces || []) ifaces.set(name, {
+		for (const name of summary.interfaces || []) ifaces.set(name, {
 			value: name,
 			label: name
 		});
-		for (const block of snapshot.blocks || []) if (block.country) countries.set(block.country, {
+		for (const block of summary.blocks || []) if (block.country) countries.set(block.country, {
 			value: block.country,
 			label: plain(block.country)
 		});
@@ -2549,12 +2549,12 @@
 	//#region page/main.js
 	var host = () => window.FirewallMapRenderer.host;
 	/** Suricata counts in the status line, each a one-click filter; connections and address history apart. */
-	function idsLinks(snapshot) {
-		const idsFlows = (snapshot.ids_flows || []).filter((flow) => flow.kind !== "blocked").length;
+	function idsLinks(summary) {
+		const idsFlows = (summary.ids_flows || []).filter((flow) => flow.kind !== "blocked").length;
 		const idsAddresses = (/* @__PURE__ */ new Set([
-			...(snapshot.alerts || []).map((alert) => alert.source),
-			...(snapshot.flows || []).filter((flow) => flow.ids).map((flow) => flow.dest),
-			...(snapshot.blocks || []).filter((block) => block.ids).map((block) => block.source)
+			...(summary.alerts || []).map((alert) => alert.source),
+			...(summary.flows || []).filter((flow) => flow.ids).map((flow) => flow.dest),
+			...(summary.blocks || []).filter((block) => block.ids).map((block) => block.source)
 		])).size;
 		const link = (filter, text) => `<a href="#" class="fwmap-status-ids${state.filters.traffic === filter ? " active" : ""}" data-filter="${filter}" aria-pressed="${state.filters.traffic === filter}">${escapeHtml(text)}</a>`;
 		const links = [];
@@ -2562,12 +2562,12 @@
 		if (idsAddresses) links.push(link("ids_addresses", `${idsAddresses} ${idsAddresses === 1 ? T.ids_address : T.ids_addresses}`));
 		return links;
 	}
-	function statusLine(snapshot, shown) {
-		const parts = host().statusParts(snapshot, shown, state.settings, T);
-		const carp = snapshot.carp === "backup" ? parts.pop() : null;
+	function statusLine(summary, shown) {
+		const parts = host().statusParts(summary, shown, state.settings, T);
+		const carp = summary.carp === "backup" ? parts.pop() : null;
 		$("#fwmap-status").html([
 			...parts,
-			...idsLinks(snapshot),
+			...idsLinks(summary),
 			carp
 		].filter(Boolean).join(" · "));
 		if (state.mode === "live") state.updatedAt = Date.now();
@@ -2583,21 +2583,21 @@
 		$("#fwmap-updated").html(`${escapeHtml(T.last_updated)} ${escapeHtml(seconds)} s ${escapeHtml(T.ago)} <i class="fwmap-live${seconds > 10 ? " stale" : ""}"></i>`);
 	}
 	function refresh() {
-		const snapshot = state.snapshot;
-		if (!snapshot || snapshot.status !== "ok") return;
-		const shown = filtered(snapshot);
+		const summary = state.data;
+		if (!summary || summary.status !== "ok") return;
+		const shown = filtered(summary);
 		state.renderer.render(shown);
-		updateToolbar(snapshot);
+		updateToolbar(summary);
 		updateLegend();
-		statusLine(snapshot, shown);
-		$("#fwmap-credit").html(host().creditHtml(snapshot.provider));
+		statusLine(summary, shown);
+		$("#fwmap-credit").html(host().creditHtml(summary.provider));
 	}
 	/**
 	* The geolocation card over an empty map (downloading, failed, key missing), or the small note when
 	* only network names are missing; re-rendered only when it changes, so Retry stays pressed.
 	*/
-	function showGeo(snapshot) {
-		const html = snapshot ? host().geoCardHtml(snapshot, T, { admin: state.isAdmin }) || host().geoNoteHtml(snapshot, T, state.geoNoteDismissed) : "";
+	function showGeo(summary) {
+		const html = summary ? host().geoCardHtml(summary, T, { admin: state.isAdmin }) || host().geoNoteHtml(summary, T, state.geoNoteDismissed) : "";
 		const $slot = $("#fwmap-geo");
 		if ($slot.data("html") !== html) {
 			$slot.html(html).data("html", html);
@@ -2611,20 +2611,20 @@
 			timer = null;
 			if (document.hidden) return;
 			try {
-				const snapshot = await getJSON(`/api/firewallmap/flow/snapshot${query}`);
-				const problem = host().problemText(snapshot, T);
-				showGeo(state.mode === "live" ? snapshot : null);
+				const summary = await getJSON(`/api/firewallmap/flow/summary${query}`);
+				const problem = host().problemText(summary, T);
+				showGeo(state.mode === "live" ? summary : null);
 				if (problem && state.mode === "live") {
-					if (snapshot.status === "no_database" || snapshot.status === "too_many_states") state.renderer.render({
+					if (summary.status === "no_database" || summary.status === "too_many_states") state.renderer.render({
 						flows: [],
 						locations: []
 					});
-					$("#fwmap-status").text(snapshot.status === "no_database" ? "" : problem);
+					$("#fwmap-status").text(summary.status === "no_database" ? "" : problem);
 				} else {
-					state.live = snapshot;
-					const groups = talkers(snapshot);
+					state.live = summary;
+					const groups = talkers(summary);
 					if (state.mode === "live") {
-						state.snapshot = snapshot;
+						state.data = summary;
 						renderTabs(groups);
 						refresh();
 					}
@@ -2655,7 +2655,7 @@
 		state.talkerTab = tab;
 		$("#fwmap-talkers .nav li").removeClass("active").find("a").attr("aria-selected", "false");
 		$(`#fwmap-talkers .nav a[data-tab="${tab}"]`).attr("aria-selected", "true").parent().addClass("active");
-		renderTabs(state.snapshot ? talkersFromLast() : null);
+		renderTabs(state.data ? talkersFromLast() : null);
 	}
 	function selectTalker(row) {
 		if (row?.select) {
@@ -2721,7 +2721,7 @@
 			}
 		});
 		$("#fwmap-talker-search, #fwmap-talker-sort").on("input change", () => {
-			renderTabs(state.snapshot ? talkersFromLast() : null);
+			renderTabs(state.data ? talkersFromLast() : null);
 		});
 		$("#fwmap-talkers .nav a").on("click", function(event) {
 			event.preventDefault();
@@ -2882,7 +2882,7 @@
 		$(document).on("keydown", (event) => {
 			if (event.key === "Escape" && state.mode === "snapshot" && !$(".modal.in").length) backToLive();
 		});
-		poll(snapshotQuery(state.settings));
+		poll(summaryQuery(state.settings));
 		if (new URLSearchParams(window.location.search).get("debug") === "1" && window.FirewallMapDiagnostics) window.FirewallMapDiagnostics.start({
 			renderer: () => state.renderer,
 			mode: () => state.mode,

@@ -232,7 +232,7 @@ def _service(port, hits):
             "hits": hits}
 
 
-def block_snapshot(blocks, geo, local_addresses, origin, now, descriptions, interfaces, blocklists=None,
+def block_summary(blocks, geo, local_addresses, origin, now, descriptions, interfaces, blocklists=None,
                    reputation=None, alerts=None):
     """Map-ready blocked sources; each arc ends at the firewall address that was hit."""
     visible = blocks.visible(now)

@@ -36,7 +36,7 @@ let page = {renderer: () => null, mode: () => '', contextLosses: () => 0};
 
 const SAMPLE_MS = 1000;
 const KEEP = 600;
-const POLL_PATH = '/api/firewallmap/flow/snapshot';
+const POLL_PATH = '/api/firewallmap/flow/summary';
 
 const samples = [];
 const polls = [];

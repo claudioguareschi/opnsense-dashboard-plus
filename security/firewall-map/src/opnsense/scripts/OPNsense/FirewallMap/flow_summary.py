@@ -55,7 +55,7 @@ def start_collector():
         pass
 
 
-def read_snapshot(path=None, now=None):
+def read_summary(path=None, now=None):
     path = path or OUTPUT_FILE
     try:
         age = (now or time.time()) - os.stat(path).st_mtime
@@ -119,7 +119,7 @@ def main(want_hostnames=False, block_minimum=1):
     mark_request()
     if want_hostnames:
         mark_request(HOSTNAME_MARKER)
-    payload = read_snapshot()
+    payload = read_summary()
     if payload is None:
         start_collector()
         payload = {"status": "starting", "flows": [], "locations": []}

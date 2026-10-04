@@ -62,17 +62,6 @@ class BlocklistAliases
             ((string)$alias->type === 'external' && $description === self::ABUSE_DESCRIPTION);
     }
 
-    /** Whether any alias in config.xml was made by this plugin (decides the switch on upgrade). */
-    public static function anyExisting(): bool
-    {
-        foreach ((new Alias())->aliases->alias->iterateItems() as $alias) {
-            if (self::ours($alias)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     /**
      * Bring the aliases in line with the settings. $threatLists empty means automatic: existing
      * feed aliases are kept, none are added. Returns [alias model, changed, error].

@@ -24,12 +24,12 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* What the map shows: the snapshot narrowed by the toolbar filters. */
+/* What the map shows: the summary (live, or a saved snapshot's) narrowed by the toolbar filters. */
 import {serviceCategory} from '../src/palette.js';
 import {state} from './context.js';
 
-export function locationsById(snapshot) {
-  return new Map((snapshot.locations || []).map((location) => [location.id, location]));
+export function locationsById(summary) {
+  return new Map((summary.locations || []).map((location) => [location.id, location]));
 }
 
 export function flowService(flow) {
@@ -125,19 +125,19 @@ function alertMatches(alert) {
   return !(f.asn && String(alert.asn || '') !== f.asn);
 }
 
-export function filtered(snapshot) {
-  const locations = locationsById(snapshot);
-  const flows = (snapshot.flows || []).filter((flow) => flowMatches(flow, locations));
-  const blocks = state.settings.blocks ? (snapshot.blocks || []).filter(blockMatches) : [];
+export function filtered(summary) {
+  const locations = locationsById(summary);
+  const flows = (summary.flows || []).filter((flow) => flowMatches(flow, locations));
+  const blocks = state.settings.blocks ? (summary.blocks || []).filter(blockMatches) : [];
   // alerting addresses without an arc: shown with everything, or when looking at IDS alerts
-  const alerts = ['', 'all', 'ids', 'ids_addresses'].includes(state.filters.traffic || '') ? (snapshot.alerts || []).filter(alertMatches) : [];
+  const alerts = ['', 'all', 'ids', 'ids_addresses'].includes(state.filters.traffic || '') ? (summary.alerts || []).filter(alertMatches) : [];
   const used = new Set(flows.flatMap((flow) => [flow.origin, flow.dest]));
   return {
-    ...snapshot,
+    ...summary,
     flows,
     blocks,
     alerts,
-    ids_flows: (snapshot.ids_flows || []).filter(idsFlowMatches),
-    locations: (snapshot.locations || []).filter((location) => location.local || used.has(location.id)),
+    ids_flows: (summary.ids_flows || []).filter(idsFlowMatches),
+    locations: (summary.locations || []).filter((location) => location.local || used.has(location.id)),
   };
 }

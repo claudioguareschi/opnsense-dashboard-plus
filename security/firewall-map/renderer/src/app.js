@@ -31,6 +31,6 @@ import {createFirewallMap} from './map.js';
 
 // only what the widget and the page use (the page's own modules import the rest directly)
 export {createFirewallMap as create, host};
-export {DEFAULT_OPTIONS, parseSettings, snapshotParams} from './options.js';
+export {DEFAULT_OPTIONS, parseSettings, summaryParams} from './options.js';
 export {readTheme} from './palette.js';
 export {escapeHtml} from './format.js';

@@ -50,7 +50,7 @@ MAX_SIGNATURES_PER_SOURCE = 10
 ALERT_BACKLOG_BYTES = 2 * 1024 * 1024
 
 
-def alert_snapshot(alerts, geo, origin, shown, blocklists=None, reputation=None, now=None):
+def alert_summary(alerts, geo, origin, shown, blocklists=None, reputation=None, now=None):
     """Alerting addresses with no arc on the map right now (the connection ended or never got one)."""
     if alerts is None:
         return []
@@ -331,7 +331,7 @@ class Correlator:
             "ips_dropped": any(item["action"] == "blocked" for item in items),
         }
 
-    def snapshot(self, geo, origin, names, networks, interfaces, blocklists=None, reputation=None, now=None):
+    def summary(self, geo, origin, names, networks, interfaces, blocklists=None, reputation=None, now=None):
         """Correlated connections for the map: each is drawn as its own arc."""
         now = time.time() if now is None else now
         geo.resolve([key[3] for key in self.flows])
@@ -503,7 +503,7 @@ def connection_keys(correlator):
     return index
 
 
-def connection_snapshot(address, correlator, names, interfaces, wall=None, index=None):
+def connection_summary(address, correlator, names, interfaces, wall=None, index=None):
     """The connections to one flagged address as PF sees them right now (plus any Suricata linked).
 
     Each carries both sides (inside host, public side, remote), the rule and interface that let it
