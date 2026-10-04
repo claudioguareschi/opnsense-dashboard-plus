@@ -10,8 +10,6 @@ const AUTO_HEIGHT = 10000;
 // address, so a browser never runs an old cached copy with a newer widget
 const RENDERER_VERSION = '80c3d3a1d213';
 const FOLLOW_KEY = 'firewallmap.widget.follow';
-const CAMERA_ICON = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.6l1.6-2.4h6.6L16.9 7h2.6A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.8" r="3.4"/></svg>';
-const TARGET_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>';
 
 function readStorage(key) {
     try {
@@ -165,8 +163,7 @@ export default class FirewallMap extends BaseWidget {
         if (this.settings) {
             this.settings.follow = on;
         }
-        $(`#${this.id}-firewall-map-follow`).attr('aria-pressed', String(on))
-            .css({color: on ? 'var(--fwmap-accent)' : 'inherit', background: on ? 'rgba(128, 128, 128, .22)' : 'transparent'});
+        $(`#${this.id}-firewall-map-follow`).toggleClass('active', on).attr('aria-pressed', String(on));
         if (tellRenderer) {
             this.renderer?.setFollow(on);
         }
@@ -224,9 +221,9 @@ export default class FirewallMap extends BaseWidget {
                 <div id="${this.id}-firewall-map-geo"></div>
                 <div id="${this.id}-firewall-map-status" style="position: absolute; left: 12px; right: 150px; bottom: 9px; z-index: 2; font-size: .82em; letter-spacing: .02em; pointer-events: none; text-align: left;"></div>
                 <div id="${this.id}-firewall-map-credit" style="position: absolute; right: 10px; bottom: 9px; z-index: 2; font-size: .75em; opacity: .7;"></div>
-                <div style="position: absolute; right: 10px; top: 10px; z-index: 3; display: flex; flex-direction: column; border: 1px solid rgba(128, 128, 128, .3); border-radius: 6px; overflow: hidden; background: var(--fwmap-panel, #fff); color: var(--fwmap-text, inherit); box-shadow: 0 1px 3px rgba(0, 0, 0, .08);">
-                    <button type="button" id="${this.id}-firewall-map-follow" aria-pressed="false" title="${this.translations.follow}" aria-label="${this.translations.follow}" style="width: 30px; height: 30px; padding: 0; border: 0; background: transparent; color: inherit; display: flex; align-items: center; justify-content: center;">${TARGET_ICON}</button>
-                    <button type="button" id="${this.id}-firewall-map-camera" title="${this.translations.snapshot_take}" aria-label="${this.translations.snapshot_take}" style="width: 30px; height: 30px; padding: 0; border: 0; border-top: 1px solid rgba(128, 128, 128, .25); background: transparent; color: var(--fwmap-accent, inherit); display: flex; align-items: center; justify-content: center;">${CAMERA_ICON}</button>
+                <div class="btn-group-vertical btn-group-sm" role="group" style="position: absolute; right: 10px; top: 10px; z-index: 3;">
+                    <button type="button" class="btn btn-default" id="${this.id}-firewall-map-follow" aria-pressed="false" title="${this.translations.follow}" aria-label="${this.translations.follow}"><i class="fa fa-fw fa-crosshairs" aria-hidden="true"></i></button>
+                    <button type="button" class="btn btn-default" id="${this.id}-firewall-map-camera" title="${this.translations.snapshot_take}" aria-label="${this.translations.snapshot_take}"><i class="fa fa-fw fa-camera" aria-hidden="true"></i></button>
                 </div>
             </div>
         `);
