@@ -30,6 +30,8 @@
     // json_encode: a translation containing a quote cannot break out of the string. The strings the
     // page shares with the dashboard widget (and the renderer) come from the widget's translations
     // (sharedText, see IndexController); the ones below are the page's own, and win where both exist.
+    // what this user may do (see IndexController::permissions()): only flags, true or false
+    window.FirewallMapPermissions = {{ permissions }};
     window.FirewallMapPageText = Object.assign({{ sharedText }}, {
         firewall_map: {{ lang._('Firewall Map')|json_encode }},
         starting: {{ lang._('Starting flow collector…')|json_encode }},

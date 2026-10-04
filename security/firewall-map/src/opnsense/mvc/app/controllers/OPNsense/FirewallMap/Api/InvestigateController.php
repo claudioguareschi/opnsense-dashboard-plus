@@ -53,8 +53,13 @@ class InvestigateController extends ApiControllerBase
         $sources = $this->request->getPost('sources') === 'abuseipdb' ? 'abuseipdb' : 'all';
         $output = (new Backend())->configdpRun('firewallmap investigate', [$address, $sources]);
         $result = json_decode($output ?? '', true);
-        AuditLog::record((string)$this->session->get('Username'), $sources === 'abuseipdb'
-            ? "checked {$address} on AbuseIPDB" : "investigated {$address} (RDAP, RIPEstat, AbuseIPDB)");
-        return is_array($result) ? $result : ['status' => 'failed', 'error' => 'no response'];
+        if (!is_array($result)) {
+            return ['status' => 'failed', 'error' => 'no response'];
+        }
+        if (($result['status'] ?? '') === 'ok') {
+            AuditLog::record((string)$this->getUserName(), $sources === 'abuseipdb'
+                ? "checked {$address} on AbuseIPDB" : "investigated {$address} (RDAP, RIPEstat, AbuseIPDB)");
+        }
+        return $result;
     }
 }

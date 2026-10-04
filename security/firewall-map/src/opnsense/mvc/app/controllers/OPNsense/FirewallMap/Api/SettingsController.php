@@ -28,14 +28,11 @@ namespace OPNsense\FirewallMap\Api;
 
 use OPNsense\Base\ApiMutableModelControllerBase;
 use OPNsense\Core\Backend;
-use OPNsense\Core\Config;
-use OPNsense\Core\Syslog;
-use OPNsense\FirewallMap\BlocklistAliases;
 
 /**
- * Firewall Map+ settings (Reporting: Firewall Map: Settings): OPNsense's standard get and set, and
- * reconfigure for the Apply button. The keys are write-only fields: never sent back, an empty key
- * keeps the stored one, and "Remove the stored key" clears it.
+ * Firewall Map+ settings (Reporting: Firewall Map: Settings): OPNsense's standard get and set; the
+ * Apply button calls service/reconfigure. The keys are write-only fields: never sent back, an empty
+ * key keeps the stored one, and "Remove the stored key" clears it.
  */
 class SettingsController extends ApiMutableModelControllerBase
 {
@@ -85,16 +82,6 @@ class SettingsController extends ApiMutableModelControllerBase
         ];
     }
 
-    /**
-     * Apply the saved settings. Every step only does what the settings ask for and is not done yet,
-     * so applying twice changes nothing: the blocklist aliases (definitions only, never rules), the
-     * collector's settings, and the feed, AbuseIPDB and geolocation downloads.
-     */
-    public function reconfigureAction()
-    {
-        if (!$this->request->isPost()) {
-            return ['status' => 'failed'];
-        }
         $backend = new Backend();
         Config::getInstance()->lock();
         $general = $this->getModel()->general;

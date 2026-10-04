@@ -105,7 +105,7 @@ function refresh() {
  * only network names are missing; re-rendered only when it changes, so Retry stays pressed.
  */
 function showGeo(summary) {
-  const html = summary ? host().geoCardHtml(summary, T, {admin: state.isAdmin}) || host().geoNoteHtml(summary, T, state.geoNoteDismissed) : '';
+  const html = summary ? host().geoCardHtml(summary, T, {admin: state.can.manage}) || host().geoNoteHtml(summary, T, state.geoNoteDismissed) : '';
   const $slot = $('#fwmap-geo');
   if ($slot.data('html') !== html) {
     $slot.html(html).data('html', html);
@@ -321,14 +321,14 @@ async function loadSettings() {
     console.error('Firewall Map+: dashboard settings unavailable', error);
   }
   state.settings = {...parseSettings(config), colorMode: state.colorMode};
-  // investigation actions are offered to administrators (who can read the plugin status)
-  try {
-    state.pluginStatus = await getJSON('/api/firewallmap/settings/status');
-    state.isAdmin = true;
-    state.abuseConfigured = Boolean(state.pluginStatus.abuseipdb_configured);
-  } catch (_) {
-    state.pluginStatus = null;
-    state.isAdmin = false;
+  // the plugin's status (background recording, the AbuseIPDB key) for those who may manage it
+  if (state.can.manage) {
+    try {
+      state.pluginStatus = await getJSON('/api/firewallmap/settings/status');
+      state.abuseConfigured = Boolean(state.pluginStatus.abuseipdb_configured);
+    } catch (error) {
+      console.error('Firewall Map+: plugin status unavailable', error);
+    }
   }
 }
 
@@ -413,8 +413,8 @@ $(async () => {
   bindControls();
   bindSplitters();
   watchSideWidth();
-  $('#fwmap-review').toggle(state.isAdmin);
-  if (state.isAdmin) {
+  $('#fwmap-review').toggle(state.can.manage);
+  if (state.can.manage) {
     refreshQueueCount();
     setInterval(refreshQueueCount, 60000);
   }

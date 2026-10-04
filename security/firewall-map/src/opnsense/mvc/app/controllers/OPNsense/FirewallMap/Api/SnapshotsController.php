@@ -48,7 +48,7 @@ class SnapshotsController extends ApiControllerBase
         if (!$this->request->isPost()) {
             return ['result' => 'failed'];
         }
-        $user = $this->session->has('Username') ? $this->session->get('Username') : '';
+        $user = (string)$this->getUserName();
         $result = $this->run('save', [ConfigdArgument::text($user, 256)]);
         if ($result['result'] === 'saved') {
             AuditLog::record($user, "saved snapshot {$result['snapshot']['id']}");
@@ -77,7 +77,7 @@ class SnapshotsController extends ApiControllerBase
         }
         $result = $this->run('note', [(string)$id, ConfigdArgument::text($this->request->getPost('note') ?? '', 1500)]);
         if ($result['result'] === 'saved') {
-            AuditLog::record((string)$this->session->get('Username'), "changed the note of snapshot {$id}");
+            AuditLog::record((string)$this->getUserName(), "changed the note of snapshot {$id}");
         }
         return $result;
     }

@@ -27,6 +27,8 @@
  */
 namespace OPNsense\FirewallMap;
 
+use OPNsense\Core\ACL;
+
 /**
  * Full-size Firewall Map+ view, opened from the dashboard widget's link button.
  */
@@ -57,6 +59,34 @@ class IndexController extends \OPNsense\Base\IndexController
         return json_encode((object)$texts, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     }
 
+    /**
+     * What this user may do on the page, from the privileges of the endpoints each action calls,
+     * so the page offers only actions that work (and never probes an endpoint it may not use).
+     */
+    private function permissions()
+    {
+        $acl = new ACL();
+        $user = $this->getUserName();
+        $may = function (array $urls) use ($acl, $user) {
+            foreach ($urls as $url) {
+                if (!$acl->isPageAccessible($user, $url)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        return json_encode([
+            /* the plugin's settings privilege: investigations, Threats, snapshot deletion, Retry now */
+            'manage' => $may(['/api/firewallmap/settings/status']),
+            'aliases' => $may([
+                '/api/firewall/alias/search_item', '/api/firewall/alias/get_item', '/api/firewall/alias/set_item',
+                '/api/firewall/alias/add_item', '/api/firewall/alias/reconfigure', '/api/firewall/alias_util/add',
+            ]),
+            'states' => $may(['/api/diagnostics/firewall/query_states']),
+            'kill' => $may(['/api/diagnostics/firewall/kill_states']),
+        ]);
+    }
+
     public function indexAction()
     {
         $this->view->title = gettext('Firewall Map');
@@ -64,9 +94,11 @@ class IndexController extends \OPNsense\Base\IndexController
         $this->view->rendererVersion = $this->version('js/firewall-map-renderer.js');
         $this->view->pageVersion = $this->version('js/firewall-map-page.js');
         $this->view->styleVersion = $this->version('css/firewall-map.css');
-        /* the ?debug=1 panel: installed by development packages only */
-        $this->view->diagnosticsVersion = $this->version('js/firewall-map-diagnostics.js');
+        /* the ?debug=1 panel: only development packages install it, and only ?debug=1 loads it */
+        $this->view->diagnosticsVersion = $this->request->get('debug') === '1'
+            ? $this->version('js/firewall-map-diagnostics.js') : 0;
         $this->view->sharedText = $this->sharedText();
+        $this->view->permissions = $this->permissions();
         $this->view->pick('OPNsense/FirewallMap/index');
     }
 }

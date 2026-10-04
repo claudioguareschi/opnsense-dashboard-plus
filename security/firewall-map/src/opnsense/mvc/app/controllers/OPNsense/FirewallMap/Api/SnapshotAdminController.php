@@ -41,7 +41,7 @@ class SnapshotAdminController extends ApiControllerBase
         }
         $result = json_decode((new Backend())->configdpRun('firewallmap snapshot delete', [(string)$id]) ?? '', true);
         if (($result['result'] ?? '') === 'deleted') {
-            AuditLog::record((string)$this->session->get('Username'), "deleted snapshot {$id}");
+            AuditLog::record((string)$this->getUserName(), "deleted snapshot {$id}");
         }
         return is_array($result) ? $result : ['result' => 'failed', 'error' => 'no response'];
     }

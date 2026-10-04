@@ -46,7 +46,7 @@ class ThreatsController extends ApiControllerBase
 
     private function audit($action)
     {
-        AuditLog::record((string)$this->session->get('Username'), $action);
+        AuditLog::record((string)$this->getUserName(), $action);
     }
 
     /** The search a bulk action applied to, as the administrator typed it. */

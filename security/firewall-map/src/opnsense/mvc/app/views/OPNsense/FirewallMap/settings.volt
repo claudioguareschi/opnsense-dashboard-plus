@@ -27,27 +27,35 @@
 <script>
     $(document).ready(function () {
         const keyField = (name) => $(`#firewallmap\\.general\\.${name}`);
+        const provider = $('#firewallmap\\.general\\.provider');
+        let status = {};
+        // DB-IP Lite needs no key: its rows (and removing a stored MaxMind key) show only for MaxMind
+        const showRows = function () {
+            const maxmind = provider.val() !== 'dbip';
+            keyField('license_key').closest('tr').toggle(maxmind);
+            keyField('remove_license_key').closest('tr').toggle(maxmind && Boolean(status.license_key_set));
+            keyField('remove_abuseipdb_key').closest('tr').toggle(Boolean(status.abuseipdb_configured));
+        };
         // the keys are never sent back: say whether one is stored instead
         const describeKeys = function () {
-            ajaxGet('/api/firewallmap/settings/status', {}, function (status) {
+            ajaxGet('/api/firewallmap/settings/status', {}, function (data) {
+                status = data || {};
                 const stored = "{{ lang._('A key is stored') }}";
                 const alias = "{{ lang._('Using the key of the GeoIP alias') }}";
                 keyField('license_key').attr('placeholder', status.license_key_set ? stored
                     : (status.database && status.database.key_source === 'alias' ? alias : ''));
                 keyField('abuseipdb_key').attr('placeholder', status.abuseipdb_configured ? stored : '');
-                // removing is offered only for a key that is stored
-                keyField('remove_license_key').prop('checked', false).closest('tr').toggle(Boolean(status.license_key_set));
-                keyField('remove_abuseipdb_key').prop('checked', false).closest('tr').toggle(Boolean(status.abuseipdb_configured));
+                keyField('remove_license_key').prop('checked', false);
+                keyField('remove_abuseipdb_key').prop('checked', false);
+                showRows();
             });
         };
+        provider.change(showRows);
         mapDataToFormUI({'frm_settings': '/api/firewallmap/settings/get'}).done(function () {
             $('.selectpicker').selectpicker('refresh');
+            // the form is filled without change events: show the provider's rows now
+            showRows();
             describeKeys();
-        });
-
-        // DB-IP Lite needs no key
-        $('#firewallmap\\.general\\.provider').change(function () {
-            keyField('license_key').closest('tr').toggle($(this).val() !== 'dbip');
         });
 
         updateServiceControlUI('firewallmap');
@@ -55,9 +63,9 @@
         $('#reconfigureAct').SimpleActionButton({
             onPreAction: function () {
                 const done = new $.Deferred();
-                saveFormToEndpoint('/api/firewallmap/settings/set', 'frm_settings', function () {
-                    done.resolve();
-                });
+                // a validation error rejects, so the button stops spinning (as on OPNsense's own pages)
+                saveFormToEndpoint('/api/firewallmap/settings/set', 'frm_settings',
+                    () => done.resolve(), true, () => done.reject());
                 return done;
             },
             onAction: function () {
@@ -73,4 +81,4 @@
     {{ partial("layout_partials/base_form", ['fields': formSettings, 'id': 'frm_settings']) }}
 </div>
 
-{{ partial('layout_partials/base_apply_button', {'data_endpoint': '/api/firewallmap/settings/reconfigure'}) }}
+{{ partial('layout_partials/base_apply_button', {'data_endpoint': '/api/firewallmap/service/reconfigure', 'data_service_widget': 'firewallmap'}) }}

@@ -263,7 +263,7 @@ function renderBanner() {
     <span class="fwmap-banner-actions">
       <button type="button" class="btn btn-default btn-sm fwmap-snap-note-btn">${ic('pen')} ${escapeHtml(meta.note ? T.snapshot_edit_note : T.snapshot_add_note)}</button>
       <button type="button" class="btn btn-default btn-sm fwmap-snap-download" title="${escapeHtml(T.snapshot_download)}" aria-label="${escapeHtml(T.snapshot_download)}">${ic('download')}</button>
-      ${state.isAdmin ? `<button type="button" class="btn btn-default btn-sm fwmap-snap-delete" title="${escapeHtml(T.snapshot_delete)}" aria-label="${escapeHtml(T.snapshot_delete)}">${ic('trash-can')}</button>` : ''}
+      ${state.can.manage ? `<button type="button" class="btn btn-default btn-sm fwmap-snap-delete" title="${escapeHtml(T.snapshot_delete)}" aria-label="${escapeHtml(T.snapshot_delete)}">${ic('trash-can')}</button>` : ''}
     </span>`).show();
 }
 

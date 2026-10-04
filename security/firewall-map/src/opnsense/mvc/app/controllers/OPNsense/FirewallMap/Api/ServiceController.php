@@ -28,10 +28,14 @@ namespace OPNsense\FirewallMap\Api;
 
 use OPNsense\Base\ApiMutableServiceControllerBase;
 use OPNsense\Core\Backend;
+use OPNsense\Core\Config;
+use OPNsense\Core\Syslog;
+use OPNsense\FirewallMap\BlocklistAliases;
+use OPNsense\FirewallMap\FirewallMap;
 
 /**
- * Reporting: Firewall Map: Status. The collector is a standard OPNsense service (status, start,
- * stop, restart for the page header's controls), plus the downloads' freshness and "Update now".
+ * The collector as a standard OPNsense service (status, start, stop, restart for the page header's
+ * controls), Apply for the settings (reconfigure), and the Status page's downloads ("Update now").
  */
 class ServiceController extends ApiMutableServiceControllerBase
 {
@@ -53,6 +57,18 @@ class ServiceController extends ApiMutableServiceControllerBase
     {
         return true;
     }
+
+    /**
+     * Apply the saved settings (the settings page's Apply button). Every step only does what the
+     * settings ask for and is not done yet, so applying twice changes nothing: the blocklist aliases
+     * (definitions only, never rules), the collector's settings, and the feed, AbuseIPDB and
+     * geolocation downloads.
+     */
+    public function reconfigureAction()
+    {
+        if (!$this->request->isPost()) {
+            return ['status' => 'failed'];
+        }
 
     /** The collector, the geolocation database and the threat-list downloads. */
     public function overviewAction()

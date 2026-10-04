@@ -28,7 +28,8 @@
 # (with deck.gl and luma.gl) and its third-party license file, the map page, and the
 # development-only diagnostics panel. Versions are pinned in package-lock.json.
 #
-#   tools/build-renderer.sh           install, build, test and copy into src/opnsense/www/js
+#   tools/build-renderer.sh           install, build, test and copy into src/opnsense/www/js (the
+#                                     diagnostics panel into devel/: development packages only)
 #   tools/build-renderer.sh --check   build and compare with the committed files instead
 #
 # Needs Node.js 20 or newer and npm (any machine; the output does not depend on it).
@@ -38,8 +39,11 @@ set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RENDERER="${ROOT}/security/firewall-map/renderer"
 TARGET="${ROOT}/security/firewall-map/src/opnsense/www/js"
+# outside src/, so no package includes it: tools/build.sh adds it to development packages only
+DEVEL="${ROOT}/security/firewall-map/devel"
 FILES="dist-firewall-map/firewall-map-renderer.js dist-firewall-map/firewall-map-renderer.LICENSE
-dist-firewall-map-page/firewall-map-page.js dist-firewall-map-diagnostics/firewall-map-diagnostics.js"
+dist-firewall-map-page/firewall-map-page.js"
+DIAGNOSTICS="dist-firewall-map-diagnostics/firewall-map-diagnostics.js"
 
 cd "${RENDERER}"
 npm ci --ignore-scripts --no-audit --no-fund
@@ -67,6 +71,12 @@ if [ "${1:-}" = "--check" ]; then
             STATUS=1
         fi
     done
+    if cmp -s "${DIAGNOSTICS}" "${DEVEL}/$(basename "${DIAGNOSTICS}")"; then
+        echo "same      $(basename "${DIAGNOSTICS}")"
+    else
+        echo "DIFFERENT $(basename "${DIAGNOSTICS}")"
+        STATUS=1
+    fi
     if grep -q "^const RENDERER_VERSION = '${VERSION}';" "${WIDGET}"; then
         echo "same      RENDERER_VERSION"
     else
@@ -80,4 +90,7 @@ sed -i.bak "s/^const RENDERER_VERSION = '.*';/const RENDERER_VERSION = '${VERSIO
 for FILE in ${FILES}; do
     cp "${FILE}" "${TARGET}/"
 done
-cd "${TARGET}" && shasum -a 256 firewall-map-renderer.js firewall-map-renderer.LICENSE firewall-map-page.js firewall-map-diagnostics.js
+mkdir -p "${DEVEL}"
+cp "${DIAGNOSTICS}" "${DEVEL}/"
+(cd "${TARGET}" && shasum -a 256 firewall-map-renderer.js firewall-map-renderer.LICENSE firewall-map-page.js)
+(cd "${DEVEL}" && shasum -a 256 firewall-map-diagnostics.js)

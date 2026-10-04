@@ -214,7 +214,7 @@ function queueItem(row, names) {
       <div class="btn-toolbar pull-left">
         <div class="btn-group btn-group-sm"><button type="button" class="btn btn-primary fwmap-q-investigate">${ic('magnifying-glass')} ${escapeHtml(T.investigate)}</button></div>
         <div class="btn-group btn-group-sm">
-          ${btn('fwmap-q-states', 'list', T.show_states)}
+          ${state.can.states ? btn('fwmap-q-states', 'list', T.show_states) : ''}
           ${link(`https://bgp.he.net/ip/${encodeURIComponent(row.address)}`, 'globe', T.whois)}
           ${link(`https://www.abuseipdb.com/check/${encodeURIComponent(row.address)}`, 'arrow-up-right-from-square', 'AbuseIPDB')}
         </div>
@@ -225,11 +225,11 @@ function queueItem(row, names) {
           ${status !== 'dismissed' ? btn('fwmap-q-status', 'eye-slash', T.dismiss, 'data-status="dismissed"') : ''}
         </div>
         <div class="btn-group btn-group-sm">
-          <button type="button" class="btn btn-danger fwmap-q-block">${ic('ban')} ${escapeHtml(T.block)}</button>
-          <button type="button" class="btn btn-danger dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-label="${escapeHtml(T.more)}"><span class="caret"></span></button>
+          ${state.can.aliases ? `<button type="button" class="btn btn-danger fwmap-q-block">${ic('ban')} ${escapeHtml(T.block)}</button>` : ''}
+          <button type="button" class="btn ${state.can.aliases ? 'btn-danger' : 'btn-default'} dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-label="${escapeHtml(T.more)}">${state.can.aliases ? '' : `${escapeHtml(T.more)} `}<span class="caret"></span></button>
           <ul class="dropdown-menu dropdown-menu-right">
             <li><a href="#" class="fwmap-q-edit-note">${ic('pen')} ${escapeHtml(T.edit_note)}</a></li>
-            <li><a href="#" class="fwmap-q-kill">${ic('trash-can')} ${escapeHtml(T.kill_states)}</a></li>
+            ${state.can.kill ? `<li><a href="#" class="fwmap-q-kill">${ic('trash-can')} ${escapeHtml(T.kill_states)}</a></li>` : ''}
           </ul>
         </div>
       </div>
@@ -299,12 +299,21 @@ export async function showQueue() {
       if (saved.result !== 'saved') {
         throw new Error(Object.values(saved.validations || {}).flat().join(' ') || saved.result);
       }
-      await postJSON('/api/firewallmap/settings/reconfigure', {});
-      if (state.pluginStatus) {
-        state.pluginStatus.record_threats = value;
-      }
     } catch (error) {
       this.checked = value !== '1';
+      notifyFailure(error);
+      return;
+    }
+    if (state.pluginStatus) {
+      state.pluginStatus.record_threats = value;
+    }
+    // the setting is saved; applying it can still fail (an FWMAP_* alias name taken): say so
+    try {
+      const applied = await postJSON('/api/firewallmap/service/reconfigure', {});
+      if (applied.status !== 'ok') {
+        throw new Error(applied.status_msg || applied.status);
+      }
+    } catch (error) {
       notifyFailure(error);
     }
   });

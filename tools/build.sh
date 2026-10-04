@@ -64,10 +64,13 @@ for PLUGIN in ${PLUGINS}; do
     # Bytecode from running the tests locally must not ship in the package.
     find "${WORK}/${PLUGIN}" -name __pycache__ -type d -prune -exec rm -rf {} +
     if [ -n "${DEVEL:-}" ]; then
+        # development-only tooling (the map's ?debug=1 diagnostics panel) lives outside src/, so
+        # only development packages get it
+        if [ -d "${WORK}/${PLUGIN}/devel" ]; then
+            cp "${WORK}/${PLUGIN}"/devel/*.js "${WORK}/${PLUGIN}/src/opnsense/www/js/"
+        fi
         (cd "${WORK}/${PLUGIN}" && make PLUGIN_DEVEL=yes package > /dev/null)
     else
-        # development-only tooling (the map's ?debug=1 diagnostics panel) stays out of releases
-        rm -f "${WORK}/${PLUGIN}/src/opnsense/www/js/firewall-map-diagnostics.js"
         (cd "${WORK}/${PLUGIN}" && make PLUGIN_DEVEL= package > /dev/null)
     fi
     cp "${WORK}/${PLUGIN}"/work/pkg/*.pkg "${ROOT}/dist/"

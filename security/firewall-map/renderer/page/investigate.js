@@ -98,7 +98,7 @@ function noteScore(result, address) {
   }
 }
 
-// a lookup that fails outright (the firewall busy, a registry slow to answer) is tried again once
+// a lookup the firewall did not answer (busy, or the request lost) is tried again once
 const RETRY_MS = 1500;
 
 function failureCard(address, text) {
@@ -118,7 +118,12 @@ async function lookup(address) {
       if (result.status === 'ok') {
         return {result};
       }
-      failure = result.error || T.lookup_failed;
+      // only a firewall too busy to answer is asked again: a definite failure would spend
+      // another lookup (and AbuseIPDB quota) for the same answer
+      if (result.error !== 'no response') {
+        return {failure: result.error || T.lookup_failed};
+      }
+      failure = result.error;
     } catch (error) {
       failure = errorText(error);
     }

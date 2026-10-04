@@ -270,7 +270,13 @@
 		talkerTab: "hosts",
 		talkerRows: [],
 		history: /* @__PURE__ */ new Map(),
-		isAdmin: false,
+		can: {
+			manage: false,
+			aliases: false,
+			states: false,
+			kill: false,
+			...window.FirewallMapPermissions || {}
+		},
 		selection: null,
 		detailsAddress: null,
 		renderedSelection: null,
@@ -725,7 +731,8 @@
 			try {
 				const result = await postJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`, {});
 				if (result.status === "ok") return { result };
-				failure = result.error || T.lookup_failed;
+				if (result.error !== "no response") return { failure: result.error || T.lookup_failed };
+				failure = result.error;
 			} catch (error) {
 				failure = errorText(error);
 			}
@@ -782,7 +789,7 @@
 		const known = score !== null && score !== void 0;
 		let abuse;
 		if (state.abuseChecking.has(address)) abuse = `<span class="text-muted">${escapeHtml(T.checking)}</span>`;
-		else if (!known) abuse = state.isAdmin && state.abuseConfigured ? `<a href="#" class="fwmap-abuse-check" data-address="${escapeHtml(address)}">${ic("magnifying-glass")} ${escapeHtml(T.check_now)}</a>` : `<span class="text-muted" title="${escapeHtml(T.abuseipdb_hint)}">${escapeHtml(T.no_key)}</span>`;
+		else if (!known) abuse = state.can.manage && state.abuseConfigured ? `<a href="#" class="fwmap-abuse-check" data-address="${escapeHtml(address)}">${ic("magnifying-glass")} ${escapeHtml(T.check_now)}</a>` : `<span class="text-muted" title="${escapeHtml(T.abuseipdb_hint)}">${escapeHtml(T.no_key)}</span>`;
 		else abuse = score >= 75 ? pill("danger", `${score}%`) : score >= 25 ? pill("warning", `${score}%`) : pill("success", T.clean, "check");
 		const notListed = `<span class="text-success text-nowrap">${ic("check")} ${escapeHtml(T.not_listed_short)}</span>`;
 		const left = rows([["AbuseIPDB", blacklisted && !known ? "" : abuse], ...lists.filter((name) => name !== ABUSEIPDB_LOOKUP_LIST).map((name) => [listLabel(name), listed.has(name) ? pill("danger", T.listed, "ban") : notListed])]);
@@ -791,7 +798,7 @@
 			[T.organization, escapeHtml(plain(item.as_org || ""))],
 			[T.country, item.country ? `${flagHtml(item.country_code)} ${escapeHtml(plain(item.country))}` : ""]
 		]);
-		return card("layer-group", T.sec_reputation, `<div class="fwmap-two">${left}${right}</div>`, state.isAdmin ? {
+		return card("layer-group", T.sec_reputation, `<div class="fwmap-two">${left}${right}</div>`, state.can.manage ? {
 			cls: "fwmap-investigate",
 			address,
 			title: T.investigate
@@ -1009,13 +1016,13 @@
 			`<li><a href="https://www.abuseipdb.com/check/${encodeURIComponent(address)}" target="_blank" rel="noopener noreferrer">${ic("arrow-up-right-from-square")} AbuseIPDB</a></li>`,
 			item("fwmap-copy", "clipboard", T.copy, `data-address="${escapeHtml(address)}"`)
 		];
-		if (state.isAdmin) {
+		if (state.can.aliases) {
 			more.push("<li role=\"separator\" class=\"divider\"></li>", item("fwmap-alias", "list", T.add_to_alias, `data-address="${escapeHtml(address)}"`), item("fwmap-mark", "flag", T.mark_threat, `data-address="${escapeHtml(address)}"`));
 			if (countryCode) more.push(item("fwmap-country", "location-dot", `${T.add_country} (${countryCode})`, `data-code="${escapeHtml(countryCode)}"`));
 		}
 		const button = (cls, icon, label, color = "default") => `<button type="button" class="btn btn-${color} ${cls}" data-address="${escapeHtml(address)}">${ic(icon)} ${escapeHtml(label)}</button>`;
-		const investigate = state.isAdmin ? `<div class="btn-group btn-group-sm">${button("fwmap-investigate", "magnifying-glass", T.investigate, "primary")}</div>` : "";
-		const states = state.mode === "snapshot" ? [button("fwmap-states", "list", `${T.states_at} ${capturedTime()}`), state.isAdmin ? button("fwmap-states-now", "clock", T.current_states) : ""] : state.isAdmin ? [button("fwmap-states", "list", T.show_states), button("fwmap-kill", "trash-can", T.kill_states)] : [];
+		const investigate = state.can.manage ? `<div class="btn-group btn-group-sm">${button("fwmap-investigate", "magnifying-glass", T.investigate, "primary")}</div>` : "";
+		const states = state.mode === "snapshot" ? [button("fwmap-states", "list", `${T.states_at} ${capturedTime()}`), state.can.states ? button("fwmap-states-now", "clock", T.current_states) : ""] : [state.can.states ? button("fwmap-states", "list", T.show_states) : "", state.can.kill ? button("fwmap-kill", "trash-can", T.kill_states) : ""];
 		return `<div class="btn-toolbar fwmap-actions">${investigate}${states.filter(Boolean).length ? `<div class="btn-group btn-group-sm">${states.join("")}</div>` : ""}
     <div class="btn-group btn-group-sm dropup pull-right"><button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true">${escapeHtml(T.more)} <span class="caret"></span></button>
     <ul class="dropdown-menu dropdown-menu-right">${more.join("")}</ul></div></div>`;
@@ -1069,7 +1076,7 @@
       ${picker}
       ${diagramHtml(model.diagram)}
       <div class="fwmap-cards">
-        ${card("chart-column", T.sec_connection, model.connection, state.isAdmin || state.mode === "snapshot" ? {
+        ${card("chart-column", T.sec_connection, model.connection, state.can.states || state.mode === "snapshot" ? {
 			cls: "fwmap-states",
 			address,
 			title: T.show_states
@@ -1515,7 +1522,7 @@
       <div class="btn-toolbar pull-left">
         <div class="btn-group btn-group-sm"><button type="button" class="btn btn-primary fwmap-q-investigate">${ic("magnifying-glass")} ${escapeHtml(T.investigate)}</button></div>
         <div class="btn-group btn-group-sm">
-          ${btn("fwmap-q-states", "list", T.show_states)}
+          ${state.can.states ? btn("fwmap-q-states", "list", T.show_states) : ""}
           ${link(`https://bgp.he.net/ip/${encodeURIComponent(row.address)}`, "globe", T.whois)}
           ${link(`https://www.abuseipdb.com/check/${encodeURIComponent(row.address)}`, "arrow-up-right-from-square", "AbuseIPDB")}
         </div>
@@ -1526,11 +1533,11 @@
           ${status !== "dismissed" ? btn("fwmap-q-status", "eye-slash", T.dismiss, "data-status=\"dismissed\"") : ""}
         </div>
         <div class="btn-group btn-group-sm">
-          <button type="button" class="btn btn-danger fwmap-q-block">${ic("ban")} ${escapeHtml(T.block)}</button>
-          <button type="button" class="btn btn-danger dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-label="${escapeHtml(T.more)}"><span class="caret"></span></button>
+          ${state.can.aliases ? `<button type="button" class="btn btn-danger fwmap-q-block">${ic("ban")} ${escapeHtml(T.block)}</button>` : ""}
+          <button type="button" class="btn ${state.can.aliases ? "btn-danger" : "btn-default"} dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-label="${escapeHtml(T.more)}">${state.can.aliases ? "" : `${escapeHtml(T.more)} `}<span class="caret"></span></button>
           <ul class="dropdown-menu dropdown-menu-right">
             <li><a href="#" class="fwmap-q-edit-note">${ic("pen")} ${escapeHtml(T.edit_note)}</a></li>
-            <li><a href="#" class="fwmap-q-kill">${ic("trash-can")} ${escapeHtml(T.kill_states)}</a></li>
+            ${state.can.kill ? `<li><a href="#" class="fwmap-q-kill">${ic("trash-can")} ${escapeHtml(T.kill_states)}</a></li>` : ""}
           </ul>
         </div>
       </div>
@@ -1591,10 +1598,16 @@
 			try {
 				const saved = await postJSON("/api/firewallmap/settings/set", { firewallmap: { general: { record_threats: value } } });
 				if (saved.result !== "saved") throw new Error(Object.values(saved.validations || {}).flat().join(" ") || saved.result);
-				await postJSON("/api/firewallmap/settings/reconfigure", {});
-				if (state.pluginStatus) state.pluginStatus.record_threats = value;
 			} catch (error) {
 				this.checked = value !== "1";
+				notifyFailure(error);
+				return;
+			}
+			if (state.pluginStatus) state.pluginStatus.record_threats = value;
+			try {
+				const applied = await postJSON("/api/firewallmap/service/reconfigure", {});
+				if (applied.status !== "ok") throw new Error(applied.status_msg || applied.status);
+			} catch (error) {
 				notifyFailure(error);
 			}
 		});
@@ -1962,7 +1975,7 @@
     <span class="fwmap-banner-actions">
       <button type="button" class="btn btn-default btn-sm fwmap-snap-note-btn">${ic("pen")} ${escapeHtml(meta.note ? T.snapshot_edit_note : T.snapshot_add_note)}</button>
       <button type="button" class="btn btn-default btn-sm fwmap-snap-download" title="${escapeHtml(T.snapshot_download)}" aria-label="${escapeHtml(T.snapshot_download)}">${ic("download")}</button>
-      ${state.isAdmin ? `<button type="button" class="btn btn-default btn-sm fwmap-snap-delete" title="${escapeHtml(T.snapshot_delete)}" aria-label="${escapeHtml(T.snapshot_delete)}">${ic("trash-can")}</button>` : ""}
+      ${state.can.manage ? `<button type="button" class="btn btn-default btn-sm fwmap-snap-delete" title="${escapeHtml(T.snapshot_delete)}" aria-label="${escapeHtml(T.snapshot_delete)}">${ic("trash-can")}</button>` : ""}
     </span>`).show();
 	}
 	var CLUSTER_PX = 18;
@@ -2589,7 +2602,7 @@
 	* only network names are missing; re-rendered only when it changes, so Retry stays pressed.
 	*/
 	function showGeo(summary) {
-		const html = summary ? host().geoCardHtml(summary, T, { admin: state.isAdmin }) || host().geoNoteHtml(summary, T, state.geoNoteDismissed) : "";
+		const html = summary ? host().geoCardHtml(summary, T, { admin: state.can.manage }) || host().geoNoteHtml(summary, T, state.geoNoteDismissed) : "";
 		const $slot = $("#fwmap-geo");
 		if ($slot.data("html") !== html) {
 			$slot.html(html).data("html", html);
@@ -2773,13 +2786,11 @@
 			...parseSettings(config),
 			colorMode: state.colorMode
 		};
-		try {
+		if (state.can.manage) try {
 			state.pluginStatus = await getJSON("/api/firewallmap/settings/status");
-			state.isAdmin = true;
 			state.abuseConfigured = Boolean(state.pluginStatus.abuseipdb_configured);
-		} catch (_) {
-			state.pluginStatus = null;
-			state.isAdmin = false;
+		} catch (error) {
+			console.error("Firewall Map+: plugin status unavailable", error);
 		}
 	}
 	function createRenderer() {
@@ -2858,8 +2869,8 @@
 		bindControls();
 		bindSplitters();
 		watchSideWidth();
-		$("#fwmap-review").toggle(state.isAdmin);
-		if (state.isAdmin) {
+		$("#fwmap-review").toggle(state.can.manage);
+		if (state.can.manage) {
 			refreshQueueCount();
 			setInterval(refreshQueueCount, 6e4);
 		}

@@ -43,7 +43,7 @@ class BlocklistAliases
     public const FEED_PREFIX = 'Firewall Map+ threat feed: ';
 
     /** Curated feeds as the collector lists them: [name => [url, label]] */
-    private static function feeds(): array
+    public static function feeds(): array
     {
         $report = json_decode((string)(new Backend())->configdRun('firewallmap tables'), true);
         $feeds = [];
@@ -67,10 +67,10 @@ class BlocklistAliases
      * feed aliases are kept, none are added. Returns [alias model, changes ("added FWMAP_x",
      * "removed FWMAP_y"), error].
      */
-    public static function reconcile(bool $enabled, string $threatLists, bool $abuseKey): array
+    public static function reconcile(bool $enabled, string $threatLists, bool $abuseKey, ?array $feeds = null): array
     {
         $model = new Alias();
-        $feeds = self::feeds();
+        $feeds = $feeds ?? self::feeds();
         $chosen = array_filter(array_map('trim', explode(',', $threatLists)));
         $existing = [];
         foreach ($model->aliases->alias->iterateItems() as $uuid => $alias) {

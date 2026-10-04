@@ -329,8 +329,9 @@ tools/build-renderer.sh           # npm ci with the pinned versions, build, test
 tools/build-renderer.sh --check   # rebuild and confirm the committed files are identical
 ```
 
-It needs Node.js 20 or newer. Development packages also ship `firewall-map-diagnostics.js`, a
-diagnostics panel (add `?debug=1` to the map's address); release packages leave it out.
+It needs Node.js 20 or newer. The build also makes `firewall-map-diagnostics.js`, a diagnostics
+panel (add `?debug=1` to the map's address). It is kept in `security/firewall-map/devel/`, outside
+`src/`, so no package includes it; only development builds (`DEVEL=1 tools/build.sh`) add it.
 
 ### Publishing (maintainer)
 

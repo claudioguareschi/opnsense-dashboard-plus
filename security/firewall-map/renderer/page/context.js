@@ -64,7 +64,9 @@ export const state = {
   talkerTab: 'hosts',
   talkerRows: [],
   history: new Map(),
-  isAdmin: false,
+  // what this user may do, worked out by the server from the endpoints' own privileges: the
+  // plugin's settings (investigations, Threats, snapshot deletion), aliases, and states
+  can: {manage: false, aliases: false, states: false, kill: false, ...(window.FirewallMapPermissions || {})},
   selection: null,
   detailsAddress: null,
   renderedSelection: null,
