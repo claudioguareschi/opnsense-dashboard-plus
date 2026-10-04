@@ -13,17 +13,19 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         super(config);
         this.configurable = true;
         this.currentConfig = {};
-        this.data = {status: null, stats: null, totals: null, settings: null, upstreams: []};
+        this.data = {status: null, stats: null, totals: null, settings: null, upstreams: [], recent: {queries: [], types: {}}};
         this.previousSample = null;
         this.error = '';
         this.totalsError = '';
         this.totalsLoading = false;
         this.refreshSeconds = 30;
         this.tickTimeout = 30;
+        this.queryChart = null;
+        this.recentRows = 6;
     }
 
     getGridOptions() {
-        return {sizeToContent: 420, minH: 4};
+        return {sizeToContent: 620, minW: 4, minH: 6};
     }
 
     _elementId(name) {
@@ -185,6 +187,87 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 padding: 0.6em 0.4em 0.15em;
                 font-size: 0.8em;
             }
+            .dashboard-plus-dns-health-summary {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.35em 0.9em;
+                padding: 0 0.4em 0.55em;
+                font-size: 0.78em;
+                opacity: 0.72;
+            }
+            .dashboard-plus-dns-health-panels {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 0.7em;
+                margin: 0 0.4em;
+            }
+            .dashboard-plus-dns-health-panel {
+                min-width: 0;
+                border: 1px solid rgba(127, 127, 127, 0.24);
+                border-radius: 3px;
+                padding: 0.6em 0.65em;
+            }
+            .dashboard-plus-dns-health-panel-head {
+                margin-bottom: 0.45em;
+                font-size: 0.86em;
+                font-weight: 600;
+            }
+            .dashboard-plus-dns-health-types {
+                display: grid;
+                grid-template-columns: minmax(7em, 1fr) minmax(7em, 1fr);
+                align-items: center;
+                gap: 0.5em;
+            }
+            .dashboard-plus-dns-health-types canvas {
+                width: 100% !important;
+                max-height: 10em;
+            }
+            .dashboard-plus-dns-health-type-legend {
+                display: grid;
+                gap: 0.25em;
+                min-width: 0;
+                font-size: 0.78em;
+            }
+            .dashboard-plus-dns-health-type-row {
+                display: grid;
+                grid-template-columns: 0.8em minmax(0, 1fr) auto;
+                align-items: center;
+                gap: 0.35em;
+            }
+            .dashboard-plus-dns-health-type-color {
+                width: 0.75em;
+                height: 0.75em;
+                border-radius: 50%;
+            }
+            .dashboard-plus-dns-health-recent {
+                margin: 0.7em 0.4em 0;
+            }
+            .dashboard-plus-dns-health-recent-list {
+                max-height: var(--dashboard-plus-dns-health-recent-height, 12em);
+                overflow-y: auto;
+            }
+            .dashboard-plus-dns-health-recent-row {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto auto;
+                align-items: center;
+                gap: 0.7em;
+                padding: 0.32em 0;
+                border-top: 1px solid rgba(127, 127, 127, 0.15);
+                font-size: 0.82em;
+            }
+            .dashboard-plus-dns-health-recent-domain {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .dashboard-plus-dns-health-recent-meta {
+                white-space: nowrap;
+                opacity: 0.7;
+                font-variant-numeric: tabular-nums;
+            }
+            @media (max-width: 28em) {
+                .dashboard-plus-dns-health-panels { grid-template-columns: 1fr; }
+            }
         `;
         const existing = document.getElementById(STYLE_ID);
         if (existing) {
@@ -209,13 +292,27 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                     <div id="${this._elementId('mode')}" class="dashboard-plus-dns-health-mode">${escapeHtml(this.translations.loading)}</div>
                 </div>
                 <div id="${this._elementId('metrics')}" class="dashboard-plus-dns-health-metrics"></div>
-                <div class="dashboard-plus-dns-health-section">
-                    <div class="dashboard-plus-dns-health-section-head">
-                        <span class="dashboard-plus-dns-health-section-label">${escapeHtml(this.translations.upstreams)}</span>
-                        <span id="${this._elementId('upstream-count')}" class="dashboard-plus-dns-health-section-label"></span>
-                    </div>
-                    <div id="${this._elementId('upstreams')}" class="dashboard-plus-dns-health-upstreams"></div>
+                <div id="${this._elementId('summary')}" class="dashboard-plus-dns-health-summary"></div>
+                <div class="dashboard-plus-dns-health-panels">
+                    <section class="dashboard-plus-dns-health-panel">
+                        <div class="dashboard-plus-dns-health-panel-head">${escapeHtml(this.translations.query_types)}</div>
+                        <div class="dashboard-plus-dns-health-types">
+                            <canvas id="${this._elementId('types-chart')}"></canvas>
+                            <div id="${this._elementId('types-legend')}" class="dashboard-plus-dns-health-type-legend"></div>
+                        </div>
+                    </section>
+                    <section class="dashboard-plus-dns-health-panel">
+                        <div class="dashboard-plus-dns-health-section-head">
+                            <span class="dashboard-plus-dns-health-panel-head">${escapeHtml(this.translations.upstreams)}</span>
+                            <span id="${this._elementId('upstream-count')}" class="dashboard-plus-dns-health-section-label"></span>
+                        </div>
+                        <div id="${this._elementId('upstreams')}" class="dashboard-plus-dns-health-upstreams"></div>
+                    </section>
                 </div>
+                <section class="dashboard-plus-dns-health-recent dashboard-plus-dns-health-panel">
+                    <div class="dashboard-plus-dns-health-panel-head">${escapeHtml(this.translations.recent_external_queries)}</div>
+                    <div id="${this._elementId('recent')}" class="dashboard-plus-dns-health-recent-list"></div>
+                </section>
                 <div id="${this._elementId('error')}" class="dashboard-plus-dns-health-error" style="display: none;"></div>
                 <div class="dashboard-plus-dns-health-footer">
                     <span id="${this._elementId('updated')}">${escapeHtml(this.translations.waiting)}</span>
@@ -243,6 +340,25 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
     _formatPercent(value) {
         const number = this._asNumber(value);
         return number === null ? '—' : `${number.toFixed(1)}%`;
+    }
+
+    _formatLookup(value) {
+        const milliseconds = this._asNumber(value);
+        return milliseconds === null ? '—' : `${Math.round(milliseconds)} ms`;
+    }
+
+    _formatAge(value) {
+        const seconds = this._asNumber(value);
+        if (seconds === null) {
+            return '';
+        }
+        if (seconds < 60) {
+            return `${Math.round(seconds)}s`;
+        }
+        if (seconds < 3600) {
+            return `${Math.floor(seconds / 60)}m`;
+        }
+        return `${Math.floor(seconds / 3600)}h`;
     }
 
     _status() {
@@ -300,14 +416,76 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         }
         const blocked = this._asNumber(this.data.totals?.blocked?.total ?? this.data.totals?.blocked);
         const dnsTotal = this._asNumber(this.data.totals?.total);
+        const recursiveSeconds = this._asNumber(this.data.stats?.data?.total?.recursion?.time?.avg);
         return {
             rate,
             totalQueries,
+            cacheHits,
             cacheRate: cacheTotal ? cacheHits / cacheTotal * 100 : null,
             blocked,
             blockedRate: blocked !== null && dnsTotal ? blocked / dnsTotal * 100 : null,
-            timeouts: this._asNumber(statsTotal.queries_timed_out)
+            resolved: this._asNumber(this.data.totals?.resolved?.total),
+            local: this._asNumber(this.data.totals?.local?.total),
+            lookup: recursiveSeconds === null ? null : recursiveSeconds * 1000
         };
+    }
+
+    _renderTypes() {
+        const allTypes = this.data.recent?.types || {};
+        const primary = ['A', 'AAAA', 'PTR', 'TXT', 'MX'];
+        const entries = primary.filter(type => allTypes[type]).map(type => [type, Number(allTypes[type])]);
+        const other = Object.entries(allTypes)
+            .filter(([type]) => !primary.includes(type))
+            .reduce((total, [, count]) => total + Number(count), 0);
+        if (other) {
+            entries.push(['Other', other]);
+        }
+        const chart = typeof Chart === 'undefined' ? null : Chart;
+        const palette = chart?.colorschemes?.tableau?.Tableau20 ?? ['#4e79a7', '#59a14f', '#f28e2b', '#e15759', '#b07aa1', '#bab0ac'];
+        const total = entries.reduce((sum, [, count]) => sum + count, 0);
+        const $legend = $(`#${this._elementId('types-legend')}`);
+        $legend.html(entries.length ? entries.map(([type, count], index) => `
+            <div class="dashboard-plus-dns-health-type-row">
+                <span class="dashboard-plus-dns-health-type-color" style="background: ${palette[index % palette.length]};"></span>
+                <span class="dashboard-plus-ellipsis">${escapeHtml(type)}</span>
+                <span>${this._formatPercent(total ? count / total * 100 : null)}</span>
+            </div>`).join('') : `<div class="dashboard-plus-dns-health-empty">${escapeHtml(this.translations.waiting)}</div>`);
+
+        this.queryChart?.destroy();
+        this.queryChart = null;
+        const canvas = document.getElementById(this._elementId('types-chart'));
+        if (!canvas || !entries.length || !chart) {
+            return;
+        }
+        this.queryChart = new chart(canvas.getContext('2d'), {
+            type: 'doughnut',
+            data: {
+                labels: entries.map(([type]) => type),
+                datasets: [{data: entries.map(([, count]) => count), backgroundColor: palette, borderColor: chart.defaults.backgroundColor}]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                cutout: '62%',
+                plugins: {legend: {display: false}}
+            }
+        });
+    }
+
+    _renderRecent() {
+        const $recent = $(`#${this._elementId('recent')}`);
+        const queries = (this.data.recent?.queries || []).slice(0, this.recentRows);
+        $recent.css('--dashboard-plus-dns-health-recent-height', `${this.recentRows * 2.1}em`);
+        $recent.html(queries.length ? queries.map(query => {
+            const lookup = this._asNumber(query.lookup_ms);
+            const details = [lookup === null ? '' : this._formatLookup(lookup), this._formatAge(query.age)].filter(Boolean).join(' · ') || '—';
+            return `
+            <div class="dashboard-plus-dns-health-recent-row">
+                <span class="dashboard-plus-dns-health-recent-domain" title="${escapeHtml(query.domain)}">${escapeHtml(query.domain)}</span>
+                <span class="dashboard-plus-dns-health-recent-meta">${escapeHtml(query.type)}</span>
+                <span class="dashboard-plus-dns-health-recent-meta">${escapeHtml(details)}</span>
+            </div>`;
+        }).join('') : `<div class="dashboard-plus-dns-health-empty">${escapeHtml(this.translations.no_recent_queries)}</div>`);
     }
 
     _render() {
@@ -326,11 +504,16 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             this._metric(this.translations.queries, this._formatRate(stats.rate),
                 `${this._formatCount(stats.totalQueries)} ${this.translations.total}`),
             this._metric(this.translations.cache_hit, this._formatPercent(stats.cacheRate),
-                this.translations.unbound_cache),
+                `${this._formatCount(stats.cacheHits)} ${this.translations.cached.toLowerCase()}`),
             this._metric(this.translations.blocked, this._formatCount(stats.blocked),
                 stats.blockedRate === null ? this.translations.dnsbl :
                     `${this._formatPercent(stats.blockedRate)} ${this.translations.of_queries}`)
         ].join(''));
+        $(`#${this._elementId('summary')}`).html([
+            `${escapeHtml(this.translations.resolved)} ${escapeHtml(this._formatCount(stats.resolved))}`,
+            `${escapeHtml(this.translations.local)} ${escapeHtml(this._formatCount(stats.local))}`,
+            `${escapeHtml(this.translations.avg_recursive_lookup)} ${escapeHtml(this._formatLookup(stats.lookup))}`
+        ].map(item => `<span>${item}</span>`).join(''));
 
         const upstreams = this.data.upstreams || [];
         $(`#${this._elementId('upstream-count')}`).text(upstreams.length ? `${upstreams.length} ${this.translations.configured}` : '');
@@ -343,6 +526,8 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 </div>
                 <span class="label label-success dashboard-plus-dns-health-badge">${escapeHtml(this.translations.configured)}</span>
             </div>`).join('') : `<div class="dashboard-plus-dns-health-empty">${escapeHtml(this.translations.no_upstreams)}</div>`);
+        this._renderTypes();
+        this._renderRecent();
 
         const displayError = this.error || this.totalsError;
         $(`#${this._elementId('error')}`).text(displayError).toggle(Boolean(displayError))
@@ -383,7 +568,8 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             this.ajaxCall('/api/unbound/service/status'),
             this.ajaxCall('/api/unbound/diagnostics/stats'),
             this.ajaxCall('/api/unbound/settings/get'),
-            this.ajaxCall('/api/unbound/settings/searchForward')
+            this.ajaxCall('/api/unbound/settings/searchForward'),
+            this.ajaxCall('/api/dashboardplus/dns/recent')
         ]);
         const value = (index, fallback) => responses[index].status === 'fulfilled' ? responses[index].value : fallback;
         if (responses.every(response => response.status === 'rejected')) {
@@ -394,7 +580,8 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             stats: value(1, null),
             totals: this.data.totals,
             settings: value(2, null),
-            upstreams: value(3, {rows: []})?.rows || []
+            upstreams: value(3, {rows: []})?.rows || [],
+            recent: value(4, {queries: [], types: {}})
         };
         this._refreshTotals();
     }
@@ -448,5 +635,22 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         const config = await this.getWidgetConfig();
         this.setWidgetConfig(config);
         this._applyConfig(config);
+    }
+
+    onWidgetResize(elem, width, height) {
+        const layoutChanged = super.onWidgetResize(elem, width, height);
+        const rows = Math.max(4, Math.min(16, Math.floor((height - 320) / 28)));
+        if (rows !== this.recentRows) {
+            this.recentRows = rows;
+            this._renderRecent();
+            return true;
+        }
+        this.queryChart?.resize();
+        return layoutChanged;
+    }
+
+    onWidgetClose() {
+        this.queryChart?.destroy();
+        super.onWidgetClose();
     }
 }

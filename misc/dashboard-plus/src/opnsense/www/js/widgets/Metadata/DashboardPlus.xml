@@ -236,6 +236,7 @@
             <endpoint>/api/unbound/overview/totals/*</endpoint>
             <endpoint>/api/unbound/settings/get</endpoint>
             <endpoint>/api/unbound/settings/searchForward</endpoint>
+            <endpoint>/api/dashboardplus/dns/recent</endpoint>
         </endpoints>
         <translations>
             <title>DNS Health+</title>
@@ -254,9 +255,20 @@
             <cache_hit>Cache hit rate</cache_hit>
             <unbound_cache>Unbound cache</unbound_cache>
             <blocked>Blocked DNS</blocked>
+            <cached>Cached</cached>
+            <resolved>Resolved</resolved>
+            <local>Local</local>
+            <avg_recursive_lookup>Avg recursive lookup</avg_recursive_lookup>
             <dnsbl>DNSBL total</dnsbl>
             <of_queries>of queries</of_queries>
             <upstreams>AdGuard upstreams</upstreams>
+            <query_types>Query types</query_types>
+            <recent_query_types>Recent query types</recent_query_types>
+            <recent_external_queries>Recent external queries</recent_external_queries>
+            <domain>Domain</domain>
+            <type>Type</type>
+            <lookup>Lookup</lookup>
+            <no_recent_queries>No recent external queries</no_recent_queries>
             <configured>Configured</configured>
             <no_upstreams>No AdGuard upstreams configured</no_upstreams>
             <updated>Updated</updated>
