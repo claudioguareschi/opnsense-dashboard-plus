@@ -50,16 +50,6 @@ class GeoDatabaseTest(unittest.TestCase):
             self.assertIsNone(GEODB.alias_license_key(path))
             self.assertIsNone(GEODB.alias_license_key(os.path.join(directory, "missing.conf")))
 
-    def test_reads_plugin_settings_from_config(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, "config.xml")
-            with open(path, "w") as handle:
-                handle.write("<opnsense><OPNsense><FirewallMap><general><provider>dbip</provider>"
-                             "<license_key/><update_days>7</update_days></general></FirewallMap></OPNsense></opnsense>")
-            self.assertEqual(GEODB.settings(path), {"provider": "dbip", "license_key": "", "update_days": 7,
-                             "threat_lists": "", "record_threats": "1", "blocklist_aliases": "0"})
-            self.assertEqual(GEODB.settings(os.path.join(directory, "none.xml"))["provider"], "auto")
-
     def test_automatic_provider_prefers_maxmind_with_a_key(self):
         with mock.patch.object(GEODB, "alias_license_key", lambda path=None: None):
             self.assertEqual(GEODB.effective_provider({"provider": "auto", "license_key": ""}), "dbip")

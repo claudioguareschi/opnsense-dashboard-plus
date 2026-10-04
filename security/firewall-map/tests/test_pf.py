@@ -166,13 +166,19 @@ vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
             with open(kea6, "w") as handle:
                 handle.write("address,duid,valid_lifetime,expire,subnet_id,pref_lifetime,lease_type,iaid,prefix_len,fqdn_fwd,fqdn_rev,hostname,state\n"
                              "fd12:3456:789a:30:0:0:0:80,aa,3600,9999999999,30,3600,0,1,128,0,0,sensor6,0\n")
-            config = os.path.join(directory, "config.xml")
-            with open(config, "w") as handle:
-                handle.write("<opnsense><OPNsense><Kea><dhcp6><reservations><reservation>"
-                             "<ip_address>fd12:3456:789a:30::81</ip_address><hostname>reserved6</hostname>"
-                             "</reservation></reservations></dhcp6></Kea></OPNsense></opnsense>")
-            names = LEASES.lease_names(kea, dnsmasq, config, now=1000, kea6=kea6)
-            self.assertEqual(names, {"192.168.30.80": "homeassistant", "192.168.40.5": "tv",
+            # Kea's configuration as OPNsense renders it; an unconfigured family is an empty file
+            kea4_conf, kea6_conf = os.path.join(directory, "kea-dhcp4.conf"), os.path.join(directory, "kea-dhcp6.conf")
+            with open(kea4_conf, "w") as handle:
+                json.dump({"Dhcp4": {"subnet4": [{"reservations": [
+                    {"hw-address": "aa", "ip-address": "192.168.30.80", "hostname": "ha-reserved"}]}]}}, handle)
+            with open(kea6_conf, "w") as handle:
+                json.dump({"Dhcp6": {"subnet6": [{"reservations": [
+                    {"duid": "01", "ip-addresses": ["fd12:3456:789a:30::81"], "hostname": "reserved6"}]}]}}, handle)
+            empty = os.path.join(directory, "empty.conf")
+            open(empty, "w").close()
+            names = LEASES.lease_names(kea, dnsmasq, (kea4_conf, kea6_conf, empty), now=1000, kea6=kea6)
+            # a reservation's name wins over the lease's
+            self.assertEqual(names, {"192.168.30.80": "ha-reserved", "192.168.40.5": "tv",
                                      "192.168.40.6": "printer", "2606:4700:4700::99": "workstation6",
                                      "fd12:3456:789a:30::80": "sensor6",
                                      "fd12:3456:789a:30::81": "reserved6"})

@@ -32,9 +32,8 @@ import re
 import subprocess
 import sys
 import threading
-import xml.etree.ElementTree as ElementTree
 
-from .common import CONFIG_XML, PFCTL, RULES_DEBUG, config_root, host_port, normalize_ip, private_ip, public_ip
+from .common import PFCTL, RULES_DEBUG, host_port, normalize_ip, private_ip, public_ip
 
 
 IFCONFIG = "/sbin/ifconfig"
@@ -424,20 +423,6 @@ def pf_tables():
         return []
 
 
-def config_aliases(config=CONFIG_XML):
-    """Firewall aliases from config.xml: [{"name", "type", "enabled", "description"}]."""
-    try:
-        root = config_root(config)
-    except (OSError, ElementTree.ParseError):
-        return []
-    return [{
-        "name": alias.findtext("name"),
-        "type": alias.findtext("type"),
-        "enabled": alias.findtext("enabled") != "0",
-        "description": alias.findtext("description") or "",
-    } for alias in root.iterfind(".//OPNsense/Firewall/Alias/aliases/alias")]
-
-
 def rule_descriptions(path=RULES_DEBUG):
     """Map rule labels to their descriptions, as the firewall log view does."""
     descriptions = {}
@@ -451,20 +436,6 @@ def rule_descriptions(path=RULES_DEBUG):
     except OSError:
         pass
     return descriptions
-
-
-def interface_names(path=CONFIG_XML):
-    """Map devices (igb1, vlan01, ...) to their configured names (WAN, LAN, ...)."""
-    names = {}
-    try:
-        interfaces = config_root(path).find("interfaces")
-    except (OSError, ElementTree.ParseError):
-        return names
-    for node in list(interfaces) if interfaces is not None else []:
-        device = node.findtext("if")
-        if device:
-            names[device] = (node.findtext("descr") or "").strip() or node.tag.upper()
-    return names
 
 
 PORT_FORWARD = re.compile(

@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# The configuration changed (an alias, an interface, a dashboard or the plugin's settings): render
+# the plugin's settings file again and note whether a dashboard holds the widget. The directory is
+# root-only: the settings file holds the keys and takes the directory's permissions.
+install -d -m 0700 /usr/local/etc/firewallmap
+configctl -q template reload OPNsense/FirewallMap
+configctl -q firewallmap dashboards

@@ -1,0 +1,33 @@
+{#
+    What the Firewall Map+ scripts read from the configuration: the plugin's settings (with the
+    keys: the directory is root-only and the file takes its permissions), the firewall aliases
+    and the interface names. Regenerated on Apply, on install and after every configuration save
+    (rc.syshook.d/config/50-firewallmap).
+#}
+{% set general = OPNsense.FirewallMap.general if helpers.exists('OPNsense.FirewallMap.general') else {} %}
+{
+    "general": {
+        "provider": {{ general.provider | default('auto', true) | tojson }},
+        "license_key": {{ general.license_key | default('', true) | tojson }},
+        "abuseipdb_key": {{ general.abuseipdb_key | default('', true) | tojson }},
+        "update_days": {{ general.update_days | default('3', true) | tojson }},
+        "threat_lists": {{ general.threat_lists | default('', true) | tojson }},
+        "record_threats": {{ general.record_threats | default('1', true) | tojson }},
+        "blocklist_aliases": {{ general.blocklist_aliases | default('0', true) | tojson }}
+    },
+    "aliases": [
+{% for alias in helpers.toList('OPNsense.Firewall.Alias.aliases.alias') %}
+        {
+            "name": {{ alias.name | default('', true) | tojson }},
+            "type": {{ alias.type | default('', true) | tojson }},
+            "enabled": {{ "false" if alias.enabled == '0' else "true" }},
+            "description": {{ alias.description | default('', true) | tojson }}
+        }{{ "," if not loop.last else "" }}
+{% endfor %}
+    ],
+    "interfaces": {
+{% for name, interface in interfaces.items() if interface['if'] is defined and interface['if'] %}
+        {{ interface['if'] | tojson }}: {{ (interface.descr or name | upper) | tojson }}{{ "," if not loop.last else "" }}
+{% endfor %}
+    }
+}

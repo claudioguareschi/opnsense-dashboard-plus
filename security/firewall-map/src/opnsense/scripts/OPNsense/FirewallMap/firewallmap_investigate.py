@@ -34,7 +34,7 @@ Queries, only when an administrator asks for this address:
   - AbuseIPDB (only when an API key is configured): abuse confidence and reports
 
 Results are cached in the collector's SQLite store, so repeated clicks do not repeat the
-lookups. The AbuseIPDB key is read from config.xml and never printed.
+lookups. The AbuseIPDB key comes from the plugin settings file and is never printed.
 """
 
 import ipaddress
@@ -44,11 +44,11 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ElementTree
 from concurrent.futures import ThreadPoolExecutor
 
 from lib.cache import CacheStore
-from lib.common import CONFIG_XML, REPUTATION_KIND, REPUTATION_MAX_AGE, config_root, secure_umask
+from lib.common import REPUTATION_KIND, REPUTATION_MAX_AGE, secure_umask
+from lib.config import abuseipdb_key
 
 TIMEOUT = 10
 # an RDAP, RIPEstat or AbuseIPDB answer is a few kB; anything far larger is not one
@@ -56,14 +56,6 @@ MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 USER_AGENT = "OPNsense-FirewallMap"
 MAX_AGE = {"rdap": 7 * 86400, "ripestat": 86400, "abuseipdb": 6 * 3600}
 MAX_ENTRIES = {"rdap": 5000, "ripestat": 5000, "abuseipdb": 5000}
-
-
-def abuseipdb_key(path=CONFIG_XML):
-    try:
-        node = config_root(path).find("./OPNsense/FirewallMap/general/abuseipdb_key")
-    except (OSError, ElementTree.ParseError):
-        return None
-    return node.text.strip() if node is not None and node.text and node.text.strip() else None
 
 
 def fetch_json(url, secret_headers=None):

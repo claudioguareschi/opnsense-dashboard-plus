@@ -137,14 +137,9 @@ class AbuseBlacklistTest(unittest.TestCase):
 
 class AbuseAliasTest(unittest.TestCase):
     def test_alias_settings(self):
-        with tempfile.TemporaryDirectory() as directory:
-            config = os.path.join(directory, "config.xml")
-            with open(config, "w") as handle:
-                handle.write("<opnsense><OPNsense><FirewallMap><general><blocklist_aliases>1</blocklist_aliases>"
-                             "</general></FirewallMap><Firewall><Alias><aliases><alias><name>FWMAP_AbuseIPDB</name>"
-                             "</alias></aliases></Alias></Firewall></OPNsense></opnsense>")
-            self.assertEqual(ABUSEIPDB.alias_settings(config), (True, True))
-            self.assertEqual(ABUSEIPDB.alias_settings(os.path.join(directory, "missing.xml")), (False, False))
+        alias = {"name": "FWMAP_AbuseIPDB", "type": "external", "enabled": True, "description": ""}
+        self.assertEqual(ABUSEIPDB.alias_settings({"blocklist_aliases": "1"}, [alias]), (True, True))
+        self.assertEqual(ABUSEIPDB.alias_settings({"blocklist_aliases": "0"}, []), (False, False))
 
     def test_pf_table_sync(self):
         with tempfile.TemporaryDirectory() as directory:

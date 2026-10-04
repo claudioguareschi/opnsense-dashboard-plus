@@ -46,7 +46,7 @@ class FeedTest(unittest.TestCase):
         chosen = {"threat_lists": "FWMAP_Feodo,Other"}
         self.assertEqual([feed["name"] for feed in FEEDS.feeds_in_use(chosen)], ["FWMAP_Feodo"])
         # automatic: the feeds that already have an alias
-        with mock.patch.object(FEEDS, "config_aliases", return_value=[{"name": "FWMAP_FireHOL_L1", "enabled": True}]):
+        with mock.patch.object(FEEDS, "aliases", return_value=[{"name": "FWMAP_FireHOL_L1", "enabled": True}]):
             self.assertEqual([feed["name"] for feed in FEEDS.feeds_in_use({"threat_lists": ""})], ["FWMAP_FireHOL_L1"])
 
     def test_update_downloads_once_a_day_and_keeps_the_last_copy(self):

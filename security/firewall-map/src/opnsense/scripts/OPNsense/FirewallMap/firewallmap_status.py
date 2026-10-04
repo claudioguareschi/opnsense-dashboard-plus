@@ -37,8 +37,8 @@ import time
 import firewallmap_abuseipdb as abuseipdb
 import firewallmap_feeds as feeds
 import firewallmap_geodb as geodb
-from firewallmap_collector import IDLE_SECONDS, recording_wanted, widget_in_use
-from firewallmap_investigate import abuseipdb_key
+from firewallmap_collector import IDLE_SECONDS, recording_wanted
+from lib.config import abuseipdb_key, settings, widget_in_use
 from lib.blocklists import FEEDS
 from lib.common import OUTPUT_FILE, REQUEST_MARKER, read_json, secure_umask
 
@@ -69,7 +69,7 @@ def collector(now=None):
         "mode": ("live" if watched else "background") if pid is not None else "stopped",
         "last_viewed": requested,
         "last_map_update": modified(OUTPUT_FILE),
-        "recording": geodb.settings().get("record_threats", "1") != "0",
+        "recording": settings().get("record_threats", "1") != "0",
         "widget_in_use": widget_in_use(),
         "recording_wanted": recording_wanted(),
     }

@@ -44,13 +44,12 @@ import sys
 import time
 import urllib.error
 import urllib.request
-import xml.etree.ElementTree as ElementTree
 
 import firewallmap_investigate as investigate
 from lib.common import (
-    ABUSEIPDB_BLACKLIST, CONFIG_XML, PFCTL, STATE_DIR, config_root, log_notice, log_warning, read_json, secure_umask,
-    write_json, write_text,
+    ABUSEIPDB_BLACKLIST, PFCTL, STATE_DIR, log_notice, log_warning, read_json, secure_umask, write_json, write_text,
 )
+from lib.config import abuseipdb_key, aliases, settings
 
 LIST_FILE = ABUSEIPDB_BLACKLIST
 STATUS_FILE = f"{STATE_DIR}/abuseipdb.json"
@@ -94,16 +93,11 @@ def download(key):
     return body.decode("utf-8", "replace")
 
 
-def alias_settings(path=CONFIG_XML):
-    """(option on, alias defined) from config.xml; the alias may exist without the option."""
-    try:
-        root = config_root(path)
-    except (OSError, ElementTree.ParseError):
-        return False, False
-    enabled = (root.findtext("./OPNsense/FirewallMap/general/blocklist_aliases") or "").strip() == "1"
-    defined = any((alias.findtext("name") or "").strip() == PF_TABLE
-                  for alias in root.iterfind("./OPNsense/Firewall/Alias/aliases/alias"))
-    return enabled, defined
+def alias_settings(values=None, alias_list=None):
+    """(option on, alias defined); the alias may exist without the option."""
+    values = settings() if values is None else values
+    alias_list = aliases() if alias_list is None else alias_list
+    return values.get("blocklist_aliases") == "1", any(alias["name"] == PF_TABLE for alias in alias_list)
 
 
 def sync_pf_table(settings=None, run=subprocess.run):
@@ -134,7 +128,7 @@ def sync_pf_table(settings=None, run=subprocess.run):
 
 def update(force=False, key=None, fetch=download, now=None):
     now = time.time() if now is None else now
-    key = key if key is not None else investigate.abuseipdb_key()
+    key = key if key is not None else abuseipdb_key()
     if not key:
         return {"result": "skipped", "reason": "no key"}
     status = read_status()

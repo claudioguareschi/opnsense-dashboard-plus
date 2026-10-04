@@ -3,6 +3,8 @@ if [ -x /usr/local/etc/rc.d/firewallmap ]; then
 fi
 # the snapshot and markers are ephemeral
 rm -rf /var/run/firewallmap
+# the settings file rendered from the configuration (it holds the keys); an upgrade renders it again
+rm -rf /usr/local/etc/firewallmap
 # kept on purpose: /var/db/firewallmap (threat history with its notes, and the caches) survives
 # an upgrade or a reinstall, and the GeoIP databases in /usr/local/share/GeoIP may be shared with
 # the firewall's own GeoIP aliases

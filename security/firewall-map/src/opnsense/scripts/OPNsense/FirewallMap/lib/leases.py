@@ -27,12 +27,12 @@
 """Names for addresses in Firewall Map+: DHCP leases and reservations, reverse DNS."""
 
 import ipaddress
+import json
 import socket
 import time
-import xml.etree.ElementTree as ElementTree
 from concurrent.futures import ThreadPoolExecutor
 
-from .common import CONFIG_XML, config_root, service_name
+from .common import service_name
 
 
 HOSTNAME_TTL = 6 * 3600
@@ -41,9 +41,36 @@ MAX_HOSTNAMES = 5000
 KEA_LEASES = "/var/db/kea/kea-leases4.csv"
 KEA6_LEASES = "/var/db/kea/kea-leases6.csv"
 DNSMASQ_LEASES = "/var/db/dnsmasq.leases"
+# Kea's configuration as OPNsense renders it (its reservations carry the host names)
+KEA_CONFIGS = ("/usr/local/etc/kea/kea-dhcp4.conf", "/usr/local/etc/kea/kea-dhcp6.conf")
 
 
-def lease_names(kea=KEA_LEASES, dnsmasq=DNSMASQ_LEASES, config=CONFIG_XML, now=None, kea6=KEA6_LEASES):
+def kea_reservations(paths=KEA_CONFIGS):
+    """IP -> hostname from the Kea reservations, IPv4 ("ip-address") and IPv6 ("ip-addresses")."""
+    names = {}
+    for path in paths:
+        try:
+            with open(path) as handle:
+                document = json.load(handle)
+        except (OSError, ValueError):
+            continue  # not configured (an empty file) or not installed
+        for service in document.values() if isinstance(document, dict) else []:
+            if not isinstance(service, dict):
+                continue
+            subnets = service.get("subnet4") or service.get("subnet6") or []
+            reservations = [*service.get("reservations", []), *(item for subnet in subnets for item in subnet.get("reservations", []))]
+            for reservation in reservations:
+                name = str(reservation.get("hostname") or "").strip()
+                for address in [reservation.get("ip-address"), *reservation.get("ip-addresses", [])]:
+                    try:
+                        if name and address:
+                            names[str(ipaddress.ip_address(str(address).strip()))] = name
+                    except ValueError:
+                        continue
+    return names
+
+
+def lease_names(kea=KEA_LEASES, dnsmasq=DNSMASQ_LEASES, kea_configs=KEA_CONFIGS, now=None, kea6=KEA6_LEASES):
     """IP -> hostname from DHCP: Kea reservations win over Kea leases, then dnsmasq leases."""
     now = time.time() if now is None else now
     leases = {}
@@ -79,18 +106,7 @@ def lease_names(kea=KEA_LEASES, dnsmasq=DNSMASQ_LEASES, config=CONFIG_XML, now=N
                         continue
     except OSError:
         pass
-    try:
-        root = config_root(config)
-        for family in ("dhcp4", "dhcp6"):
-            for reservation in root.iterfind(f".//Kea/{family}/reservations/reservation"):
-                address, name = reservation.findtext("ip_address"), reservation.findtext("hostname")
-                if address and name:
-                    try:
-                        leases[str(ipaddress.ip_address(address.strip()))] = name.strip()
-                    except ValueError:
-                        continue
-    except (OSError, ElementTree.ParseError):
-        pass
+    leases.update(kea_reservations(kea_configs))
     return leases
 
 

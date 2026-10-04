@@ -1,31 +1,15 @@
 <acl>
     <page-dashboard-widget-dashboard-plus>
         <!--
-            One privilege for all eight widgets, as the core widgets do it. It also grants the
-            core endpoints the widgets read: the live firewall log, gateway status, pf state
-            counts and interface details. The name says so, since the privilege key has to stay
-            as it is for existing user and group assignments.
+            Only the plugin's own endpoints. The data the widgets show from OPNsense itself (the
+            firewall log, gateways, states, interfaces, system resources) stays under OPNsense's
+            own privileges: the dashboard shows a widget only to users who may read every endpoint
+            it lists, as for OPNsense's own widgets.
         -->
-        <name>Dashboard: Dashboard Plus widgets (reads firewall log, gateways, states)</name>
+        <name>Dashboard: Dashboard Plus widgets</name>
         <patterns>
             <pattern>api/dashboardplus/system/info</pattern>
             <pattern>api/dashboardplus/system/frequency</pattern>
-            <pattern>api/diagnostics/system/system_information</pattern>
-            <pattern>api/diagnostics/system/system_time</pattern>
-            <pattern>api/diagnostics/system/system_temperature</pattern>
-            <pattern>api/diagnostics/system/system_resources</pattern>
-            <pattern>api/diagnostics/system/system_mbuf</pattern>
-            <pattern>api/diagnostics/system/system_swap</pattern>
-            <pattern>api/diagnostics/system/system_disk</pattern>
-            <pattern>api/diagnostics/cpu_usage/stream</pattern>
-            <pattern>api/diagnostics/firewall/pf_states</pattern>
-            <pattern>api/diagnostics/traffic/interface</pattern>
-            <pattern>api/diagnostics/traffic/stream/*</pattern>
-            <pattern>api/routing/settings/search_gateway</pattern>
-            <pattern>api/interfaces/overview/interfaces_info</pattern>
-            <pattern>api/diagnostics/firewall/log</pattern>
-            <pattern>api/diagnostics/firewall/stream_log</pattern>
-            <pattern>api/diagnostics/interface/get_interface_names</pattern>
         </patterns>
     </page-dashboard-widget-dashboard-plus>
 </acl>

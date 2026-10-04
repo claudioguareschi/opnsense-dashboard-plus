@@ -43,9 +43,8 @@ import urllib.error
 import urllib.request
 
 from lib.blocklists import FEEDS, FEED_DIR, feed_file
-from lib.common import CONFIG_XML, STATE_DIR, log_notice, log_warning, read_json, secure_umask, write_json, write_text
-from lib.pf import config_aliases
-from firewallmap_geodb import settings
+from lib.common import STATE_DIR, log_notice, log_warning, read_json, secure_umask, write_json, write_text
+from lib.config import aliases, settings
 
 STATUS_FILE = f"{STATE_DIR}/feeds.json"
 MIN_AGE_SECONDS = 20 * 3600
@@ -54,12 +53,12 @@ MAX_BYTES = 32 * 1024 * 1024
 USER_AGENT = "OPNsense-FirewallMap"
 
 
-def feeds_in_use(values=None, config=CONFIG_XML):
+def feeds_in_use(values=None):
     """The curated feeds chosen as threat lists; with none chosen (automatic), those with an alias."""
-    values = settings(config) if values is None else values
+    values = settings() if values is None else values
     chosen = {name.strip() for name in (values.get("threat_lists") or "").split(",") if name.strip()}
     if not chosen:
-        chosen = {alias["name"] for alias in config_aliases(config) if alias["enabled"]}
+        chosen = {alias["name"] for alias in aliases() if alias["enabled"]}
     return [feed for feed in FEEDS if feed["name"] in chosen]
 
 

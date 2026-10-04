@@ -35,7 +35,7 @@ from datetime import datetime
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from support import CACHE, COLLECTOR, COMMON, PF, THREATS, NAT_OUT  # noqa: E402
+from support import CACHE, COMMON, PF, THREATS, NAT_OUT  # noqa: E402
 
 
 class ThreatQueueTest(unittest.TestCase):
@@ -204,20 +204,6 @@ class ThreatQueueTest(unittest.TestCase):
                 THREATS.prune(db, now=20.0)
             self.assertEqual({row[0] for row in db.execute("SELECT address FROM threats")},
                              {"198.51.100.1", "203.0.113.2"})
-
-    def test_widget_in_use(self):
-        dashboard = __import__("base64").b64encode(json.dumps({"widgets": [{"id": "firewallmap"}]}).encode()).decode()
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, "config.xml")
-            with open(path, "w") as handle:
-                handle.write(f"<opnsense><system><user><dashboard>{dashboard}</dashboard></user></system></opnsense>")
-            self.assertTrue(COLLECTOR.widget_in_use(path))
-            self.assertTrue(COLLECTOR.recording_wanted({"record_threats": "1"}, path))
-            self.assertFalse(COLLECTOR.recording_wanted({"record_threats": "0"}, path))
-            with open(path, "w") as handle:
-                handle.write("<opnsense><system><user><dashboard>bnVsbA==</dashboard></user>"
-                             "<user><dashboard>e30=</dashboard></user></system></opnsense>")
-            self.assertFalse(COLLECTOR.widget_in_use(path))
 
 
 class ThreatHistoryFileTest(unittest.TestCase):

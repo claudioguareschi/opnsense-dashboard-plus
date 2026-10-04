@@ -34,8 +34,9 @@ import threading
 from array import array
 from bisect import bisect_left
 
-from .common import ABUSEIPDB_BLACKLIST, CONFIG_XML, PFCTL, REPUTATION_KIND, REPUTATION_MAX_AGE, STATE_DIR, log_warning
-from .pf import blocked_rule_tables, config_aliases, pf_tables
+from .common import ABUSEIPDB_BLACKLIST, PFCTL, REPUTATION_KIND, REPUTATION_MAX_AGE, STATE_DIR, log_warning
+from .config import aliases as configured_aliases
+from .pf import blocked_rule_tables, pf_tables
 
 
 IDS_LIST = "Suricata IDS"
@@ -52,7 +53,7 @@ REPUTATION_THRESHOLD = 75
 REPUTATION_REFRESH_SECONDS = 60
 
 
-def blocklist_tables(config=CONFIG_XML, tables=None, blocked=None, aliases=None):
+def blocklist_tables(tables=None, blocked=None, aliases=None):
     """Names of pf tables that hold threat lists.
 
     URL/external aliases count only when a block or reject rule uses them, since the same alias
@@ -60,7 +61,7 @@ def blocklist_tables(config=CONFIG_XML, tables=None, blocked=None, aliases=None)
     (CrowdSec, Q-Feeds, Spamhaus...) always count.
     """
     blocked = blocked_rule_tables() if blocked is None else blocked
-    aliases = config_aliases(config) if aliases is None else aliases
+    aliases = configured_aliases() if aliases is None else aliases
     tables = pf_tables() if tables is None else tables
     alias_names = {alias["name"] for alias in aliases}
     names = {alias["name"] for alias in aliases
@@ -107,13 +108,13 @@ def downloaded_feeds():
     return {feed["name"] for feed in FEEDS if os.path.exists(feed_file(feed["name"]))}
 
 
-def threat_list_candidates(config=CONFIG_XML, tables=None, aliases=None):
+def threat_list_candidates(tables=None, aliases=None):
     """Tables an administrator may choose as threat lists, with their alias type.
 
     Only list-type aliases are sensible threat lists (not LAN host or network aliases).
     """
     tables = pf_tables() if tables is None else tables
-    aliases = config_aliases(config) if aliases is None else aliases
+    aliases = configured_aliases() if aliases is None else aliases
     alias_names = {alias["name"] for alias in aliases}
     candidates = {alias["name"]: {"name": alias["name"], "type": alias["type"], "description": alias["description"]}
                   for alias in aliases if alias["name"] in tables and alias["type"] in BLOCKLIST_ALIAS_TYPES}
@@ -127,21 +128,21 @@ def threat_list_candidates(config=CONFIG_XML, tables=None, aliases=None):
     return sorted(candidates.values(), key=lambda item: (not item.get("curated"), item["name"].lower()))
 
 
-def tables_report(config=CONFIG_XML):
-    """What the settings page lists: candidates and the automatic choice, from one pf and config read."""
+def tables_report():
+    """What the settings page lists: candidates and the automatic choice, from one pf and alias read."""
     tables = pf_tables()
-    aliases = config_aliases(config)
-    return {"tables": threat_list_candidates(config, tables, aliases),
-            "automatic": sorted(blocklist_tables(config, tables, aliases=aliases))}
+    aliases = configured_aliases()
+    return {"tables": threat_list_candidates(tables, aliases),
+            "automatic": sorted(blocklist_tables(tables, aliases=aliases))}
 
 
-def chosen_threat_lists(setting, config=CONFIG_XML):
+def chosen_threat_lists(setting):
     """The administrator's choice when set, otherwise the automatic selection."""
     names = {name.strip() for name in (setting or "").split(",") if name.strip()}
     tables = set(pf_tables())
     # a curated feed counts from its downloaded copy, with or without its alias
     available = tables | downloaded_feeds()
-    chosen = (names & available) if names else blocklist_tables(config, list(tables))
+    chosen = (names & available) if names else blocklist_tables(list(tables))
     # The same cache is indexed below under one stable, friendly badge; reading its PF alias too
     # would duplicate both work and the badge whenever optional alias maintenance is enabled.
     chosen.discard(ABUSEIPDB_TABLE)

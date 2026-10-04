@@ -47,8 +47,6 @@ A map snapshot (the camera button) is a request file in SNAPSHOT_REQUEST_DIR: th
 writes every tracked flow, not just the capped summary, plus the PF states behind them.
 """
 
-import base64
-import binascii
 import json
 import os
 import re
@@ -58,7 +56,6 @@ import subprocess
 import sys
 import time
 import traceback
-import xml.etree.ElementTree as ElementTree
 from datetime import datetime, timezone
 
 import firewallmap_geodb as geodb
@@ -70,10 +67,11 @@ from lib.blocklists import (
 from lib.blocks import BlockTracker, FilterLogTail, block_event_time, block_summary, parse_block
 from lib.cache import CacheStore, GeoCache
 from lib.common import (
-    CONFIG_XML, HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, SNAPSHOT_DIR, SNAPSHOT_REQUEST_DIR,
-    config_root, host_port, log_error, log_notice, log_warning, remote_target, requested, secure_umask, service_name,
-    service_port_label, write_json, write_text,
+    HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, SNAPSHOT_DIR, SNAPSHOT_REQUEST_DIR, host_port,
+    log_error, log_notice, log_warning, remote_target, requested, secure_umask, service_name, service_port_label,
+    write_json, write_text,
 )
+from lib.config import interface_names, settings, widget_in_use
 from lib.ids import (
     ALERT_BACKLOG_BYTES, EVE_LOG, AlertTracker, Correlator, alert_summary, connection_keys, connection_summary, firewall_blocks,
     ips_drops,
@@ -81,7 +79,7 @@ from lib.ids import (
 from lib.leases import HostnameResolver, describe_inside, describe_target, lease_names
 from firewallmap_snapshots import valid_id as snapshot_valid_id
 from lib.pf import (
-    TooManyStates, flow_endpoints, host_info, inside_endpoint, interface_names, lan_rule_index, orientation,
+    TooManyStates, flow_endpoints, host_info, inside_endpoint, lan_rule_index, orientation,
     port_forwards, rule_descriptions, rule_for, sample_states,
 )
 
@@ -341,28 +339,10 @@ def summarize_flows(tracker, geo, local_addresses, role, now, wall_time, hostnam
     }
 
 
-def widget_in_use(path=CONFIG_XML):
-    """True when any user's dashboard contains the Firewall Map widget."""
-    try:
-        root = config_root(path)
-    except (OSError, ElementTree.ParseError):
-        return False
-    for node in root.iterfind("./system/user/dashboard"):
-        try:
-            dashboard = json.loads(base64.b64decode(node.text or "").decode("utf-8", "replace"))
-        except (ValueError, binascii.Error):
-            continue
-        if not isinstance(dashboard, dict):
-            continue
-        if any(isinstance(widget, dict) and widget.get("id") == "firewallmap" for widget in dashboard.get("widgets") or []):
-            return True
-    return False
-
-
-def recording_wanted(values=None, path=CONFIG_XML):
+def recording_wanted(values=None):
     """Record threats for review while the widget is in use, unless switched off."""
-    values = values if values is not None else geodb.settings(path)
-    return values.get("record_threats", "1") != "0" and widget_in_use(path)
+    values = values if values is not None else settings()
+    return values.get("record_threats", "1") != "0" and widget_in_use()
 
 
 class ThreatRecorder:
@@ -539,7 +519,7 @@ class Collector:
             self.local_addresses, self.role, self.networks = host_info()
             self.checked["host"] = now
         if self._due("settings", now, SETTINGS_REFRESH_SECONDS):
-            self.values = geodb.settings()
+            self.values = settings()
             self.recording = recording_wanted(self.values)
             # DB-IP while it stands in for a failing MaxMind download (its credit is then shown)
             self.provider = geodb.lookup_provider(self.values)

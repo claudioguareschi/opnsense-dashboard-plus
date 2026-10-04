@@ -118,6 +118,8 @@ class SettingsController extends ApiMutableModelControllerBase
             $log->notice('blocklist aliases: ' . implode(', ', $changes));
         }
         $log->notice('settings applied');
+        /* the scripts read the settings from the file this template renders, never from config.xml */
+        $backend->configdRun('template reload OPNsense/FirewallMap');
         /* reload in place: keep live flow and alert history while the chosen list index is rebuilt */
         $backend->configdRun('firewallmap reload');
         $backend->configdRun('firewallmap feeds update', true);

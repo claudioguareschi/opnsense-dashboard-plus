@@ -221,6 +221,13 @@ Eight widgets that sit next to OPNsense's built-in ones in **Add widget**. Every
 locally from the firewall's own API. Each widget's options are in its settings dialog (gear icon
 on the widget).
 
+**Access.** The *Dashboard: Dashboard Plus widgets* privilege covers only the plugin's own system
+details. The data a widget shows from OPNsense itself stays under OPNsense's own privileges, as for
+OPNsense's own widgets: a user sees a widget only with the privileges for everything it reads (for
+example Firewall Logs+ needs *Diagnostics: Logs: Firewall: Live View*). Administrators see every
+widget. Upgrading from 0.50: a user who had only the Dashboard Plus privilege also needs those
+OPNsense privileges for the widgets that show firewall, gateway or interface data.
+
 Since some of these widgets are meant to extend the information provided by the existing OPNsense widgets, so their name may collide with the existing ones. For this reason the widgets in this package are marked with a **+** trailing sign in the **Add widget** selection box. This does not imply these widget are better then the OPNsense, they are just a little different and to me a little bit more familiar as I am coming from pfSense (**and very happy to ditch it!**). 
 
 ### System Information+

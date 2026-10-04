@@ -1,5 +1,10 @@
 #!/bin/sh
 
+# the plugin's settings file (root-only: it holds the keys) and whether a dashboard holds the widget
+install -d -m 0700 /usr/local/etc/firewallmap
+configctl -q template reload OPNsense/FirewallMap
+configctl -q firewallmap dashboards
+
 # PF starts with an empty FWMAP_AbuseIPDB table; load it from the cached blacklist
 # (does nothing unless the option is on)
 configctl -dq firewallmap abuseipdb sync

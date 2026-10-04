@@ -37,6 +37,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from support import BLOCKLISTS, COLLECTOR, PF  # noqa: E402
 
 
+def alias(name, kind, enabled=True):
+    """An alias as the plugin's settings file lists it."""
+    return {"name": name, "type": kind, "enabled": enabled, "description": ""}
+
+
 class BlocklistTest(unittest.TestCase):
     def test_reload_marker_changes_without_restarting_collector(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -70,22 +75,15 @@ class BlocklistTest(unittest.TestCase):
         self.assertTrue(index.refresh(set(), background=False))
 
     def test_selects_feed_tables(self):
-        with tempfile.TemporaryDirectory() as directory:
-            config = os.path.join(directory, "config.xml")
-            with open(config, "w") as handle:
-                handle.write("<opnsense><OPNsense><Firewall><Alias><aliases>"
-                             "<alias><name>Drop</name><type>urltable</type><enabled>1</enabled></alias>"
-                             "<alias><name>Office</name><type>host</type><enabled>1</enabled></alias>"
-                             "<alias><name>Off</name><type>url</type><enabled>0</enabled></alias>"
-                             "</aliases></Alias></Firewall></OPNsense></opnsense>")
-            tables = ["Drop", "Office", "Off", "crowdsec_blacklists", "bogons"]
-            self.assertEqual(BLOCKLISTS.blocklist_tables(config, tables, blocked={"Drop", "Off"}),
-                             {"Drop", "crowdsec_blacklists"})
-            # a leftover FWMAP_ table whose alias was deleted is ignored
-            self.assertEqual(BLOCKLISTS.blocklist_tables(config, tables + ["FWMAP_Old"], blocked=set()),
-                             {"crowdsec_blacklists"})
-            # a URL alias used only by pass rules (an allowlist) is not a threat list
-            self.assertEqual(BLOCKLISTS.blocklist_tables(config, tables, blocked=set()), {"crowdsec_blacklists"})
+        aliases = [alias("Drop", "urltable"), alias("Office", "host"), alias("Off", "url", enabled=False)]
+        tables = ["Drop", "Office", "Off", "crowdsec_blacklists", "bogons"]
+        self.assertEqual(BLOCKLISTS.blocklist_tables(tables, blocked={"Drop", "Off"}, aliases=aliases),
+                         {"Drop", "crowdsec_blacklists"})
+        # a leftover FWMAP_ table whose alias was deleted is ignored
+        self.assertEqual(BLOCKLISTS.blocklist_tables(tables + ["FWMAP_Old"], blocked=set(), aliases=aliases),
+                         {"crowdsec_blacklists"})
+        # a URL alias used only by pass rules (an allowlist) is not a threat list
+        self.assertEqual(BLOCKLISTS.blocklist_tables(tables, blocked=set(), aliases=aliases), {"crowdsec_blacklists"})
 
     def test_builtin_abuse_cache_is_not_indexed_again_through_its_alias(self):
         with mock.patch.object(BLOCKLISTS, "pf_tables", return_value=["FWMAP_AbuseIPDB", "Other"]), \
@@ -93,23 +91,16 @@ class BlocklistTest(unittest.TestCase):
             self.assertEqual(BLOCKLISTS.chosen_threat_lists(""), {"Other"})
 
     def test_threat_list_candidates_offer_feeds_not_lan_aliases(self):
-        with tempfile.TemporaryDirectory() as directory:
-            config = os.path.join(directory, "config.xml")
-            with open(config, "w") as handle:
-                handle.write("<opnsense><OPNsense><Firewall><Alias><aliases>"
-                             "<alias><name>Drop</name><type>urltable</type><enabled>1</enabled></alias>"
-                             "<alias><name>RFC1918</name><type>network</type><enabled>1</enabled></alias>"
-                             "<alias><name>FWMAP_Feodo</name><type>urltable</type><enabled>1</enabled></alias>"
-                             "</aliases></Alias></Firewall></OPNsense></opnsense>")
-            candidates = BLOCKLISTS.threat_list_candidates(config, ["Drop", "RFC1918", "FWMAP_Feodo", "crowdsec_blacklists"])
-            names = [item["name"] for item in candidates]
-            self.assertNotIn("RFC1918", names)
-            self.assertIn("Drop", names)
-            self.assertIn("crowdsec_blacklists", names)
-            feeds = {item["name"]: item for item in candidates if item.get("curated")}
-            self.assertEqual(len(feeds), len(BLOCKLISTS.FEEDS))
-            self.assertTrue(feeds["FWMAP_Feodo"]["installed"])
-            self.assertFalse(feeds["FWMAP_Spamhaus_DROP"]["installed"])
+        aliases = [alias("Drop", "urltable"), alias("RFC1918", "network"), alias("FWMAP_Feodo", "urltable")]
+        candidates = BLOCKLISTS.threat_list_candidates(["Drop", "RFC1918", "FWMAP_Feodo", "crowdsec_blacklists"], aliases)
+        names = [item["name"] for item in candidates]
+        self.assertNotIn("RFC1918", names)
+        self.assertIn("Drop", names)
+        self.assertIn("crowdsec_blacklists", names)
+        feeds = {item["name"]: item for item in candidates if item.get("curated")}
+        self.assertEqual(len(feeds), len(BLOCKLISTS.FEEDS))
+        self.assertTrue(feeds["FWMAP_Feodo"]["installed"])
+        self.assertFalse(feeds["FWMAP_Spamhaus_DROP"]["installed"])
 
     def test_reads_block_rule_tables(self):
         with tempfile.TemporaryDirectory() as directory:

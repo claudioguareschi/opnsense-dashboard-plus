@@ -64,7 +64,6 @@ GEODB_STALE_SECONDS = 30
 
 PFCTL = "/sbin/pfctl"
 RULES_DEBUG = "/tmp/rules.debug"
-CONFIG_XML = "/conf/config.xml"
 REPUTATION_MAX_AGE = 30 * 86400
 # verdicts from AbuseIPDB lookups, kept longer than the full lookup results
 REPUTATION_KIND = "reputation"
@@ -92,22 +91,6 @@ SERVICES = {
 
 # files written by these scripts hold notes, host names and topology: not world-readable
 FILE_MODE = 0o640
-
-
-_config = {}
-
-
-def config_root(path=CONFIG_XML):
-    """config.xml parsed, shared by every reader in this process and parsed again only when the
-    file changes (several readers ran per settings refresh, each parsing it in full). Raises
-    OSError or ElementTree.ParseError like ElementTree.parse(). The tree is read only."""
-    from xml.etree import ElementTree
-    stat = os.stat(path)
-    key = (stat.st_mtime_ns, stat.st_size)
-    cached = _config.get(path)
-    if cached is None or cached[0] != key:
-        cached = _config[path] = (key, ElementTree.parse(path).getroot())
-    return cached[1]
 
 
 # Reporting: Firewall Map: Log File shows what the scripts send to syslog under this name. Log what
