@@ -33,7 +33,7 @@ dashboard API to read; the browser never triggers a PF walk or a GeoIP lookup.
 
 A flow is active only while its counters advance. Idle flows fade out over
 FADE_SECONDS and a flow is dropped as soon as its last PF state disappears.
-All geolocation lookups are local (mmdblookup against the installed MaxMind or DB-IP database).
+All geolocation lookups are local: the installed MaxMind or DB-IP database, read in process (lib/mmdb.py).
 
 This module is the orchestrator; parsing, caches, threat lists, names, blocks and
 Suricata correlation live in the lib/ modules next to it.

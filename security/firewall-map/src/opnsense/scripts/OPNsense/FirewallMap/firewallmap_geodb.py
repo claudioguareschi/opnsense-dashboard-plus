@@ -42,7 +42,6 @@ import gzip
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tarfile
 import tempfile
@@ -55,6 +54,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from lib.common import GEODB_STATUS, STATE_DIR, read_json, secure_umask, write_json
+from lib import mmdb
 from lib.config import settings
 
 
@@ -62,7 +62,6 @@ GEOIP_ALIAS_CONF = "/usr/local/etc/filter_geoip.conf"
 GEOIP_DIR = "/usr/local/share/GeoIP"
 STATUS_FILE = GEODB_STATUS
 LOCK_FILE = f"{STATE_DIR}/geodb.lock"
-MMDBLOOKUP = "/usr/local/bin/mmdblookup"
 MAXMIND_URL = "https://download.maxmind.com/app/geoip_download"
 DBIP_URL = "https://download.db-ip.com/free/{edition}-{month}.mmdb.gz"
 TIMEOUT = 120
@@ -175,12 +174,17 @@ def status():
 
 
 def validate(path, probe):
-    """Make sure a downloaded database answers a lookup before it replaces the current one."""
-    result = subprocess.run(
-        [MMDBLOOKUP, "--file", path, "--ip", "8.8.8.8", *probe],
-        capture_output=True, check=False, text=True, timeout=10,
-    )
-    if result.returncode != 0 or not result.stdout.strip():
+    """Make sure a downloaded database answers a lookup (and has the field `probe` names, when
+    given) before it replaces the current one."""
+    try:
+        reader = mmdb.Reader(path)
+    except (OSError, mmdb.InvalidDatabaseError) as error:
+        raise RuntimeError(f"downloaded database failed validation ({error})") from None
+    try:
+        values = mmdb.flatten(reader.get("8.8.8.8") or {})
+    finally:
+        reader.close()
+    if not values or (probe and tuple(probe) not in values):
         raise RuntimeError("downloaded database failed validation")
 
 

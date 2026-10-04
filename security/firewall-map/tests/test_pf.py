@@ -81,44 +81,6 @@ class ParseTest(unittest.TestCase):
         }
         self.assertIsNone(PF.flow_endpoints(record, {"1.2.2.230", "1.2.3.163"}))
 
-    def test_parses_mmdblookup_dump(self):
-        output = """
-  {
-    "city":
-      {
-        "names":
-          {
-            "en":
-              "Mountain View" <utf8_string>
-          }
-      }
-    "country":
-      {
-        "iso_code":
-          "US" <utf8_string>
-      }
-    "location":
-      {
-        "latitude":
-          37.751000 <double>
-        "longitude":
-          -97.822000 <double>
-      }
-    "subdivisions":
-      [
-        {
-          "iso_code":
-            "CA" <utf8_string>
-        }
-      ]
-  }
-"""
-        values = CACHE.parse_mmdb(output)
-        self.assertEqual(values[("city", "names", "en")], "Mountain View")
-        self.assertEqual(values[("country", "iso_code")], "US")
-        self.assertEqual(float(values[("location", "longitude")]), -97.822)
-        self.assertEqual(values[("subdivisions", "iso_code")], "CA")
-
 
 class InsideTest(unittest.TestCase):
     NAT_OUT = NAT_OUT

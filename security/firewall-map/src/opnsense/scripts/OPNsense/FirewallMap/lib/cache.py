@@ -28,67 +28,48 @@
 
 import json
 import os
-import re
 import sqlite3
-import subprocess
 import sys
 import threading
 import time
 
+from . import mmdb
 from .common import CACHE_DB
 
 
-MMDBLOOKUP = "/usr/local/bin/mmdblookup"
 # database paths follow the provider chosen in the firewall-wide settings (see firewallmap_geodb)
 GEO_CACHE_SAVE_SECONDS = 60.0
 GEO_LOOKUPS_PER_SAMPLE = 25
 GEO_CACHE_MAX = 20000
 GEO_CACHE_VERSION = 2
-MMDB_KEY = re.compile(r'^"(?P<key>[^"]+)":\s*$')
-MMDB_STRING = re.compile(r'^"(?P<value>.*)" <utf8_string>$')
-MMDB_NUMBER = re.compile(r"^(?P<value>[-+]?\d+(?:\.\d+)?) <(?:double|float|uint\d+|int\d+)>$")
 
 
-def parse_mmdb(output):
-    """Flatten mmdblookup's annotated dump into {("a", "b"): value} (array indices omitted)."""
-    values = {}
-    path = []
-    pending = None
-    for raw in output.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        key = MMDB_KEY.match(line)
-        if key:
-            pending = key.group("key")
-        elif line in ("{", "["):
-            path.append(pending)
-            pending = None
-        elif line in ("}", "]"):
-            if path:
-                path.pop()
-        else:
-            match = MMDB_STRING.match(line) or MMDB_NUMBER.match(line)
-            if match and pending is not None:
-                values[tuple(part for part in path if part is not None) + (pending,)] = match.group("value")
-            pending = None
-    return values
+# open readers, one per database file, reopened when the file is replaced (an update)
+_readers = {}
+
+
+def database_reader(path):
+    stat = os.stat(path)
+    key = (stat.st_mtime_ns, stat.st_size)
+    cached = _readers.get(path)
+    if cached is None or cached[0] != key:
+        if cached is not None:
+            cached[1].close()
+        cached = _readers[path] = (key, mmdb.Reader(path))
+    return cached[1]
 
 
 def mmdb_lookup(database, address):
+    """{("location", "latitude"): "37.751", ...} for `address`; {} when the database has no entry
+    (a definite miss that is cached). Raises LookupError when the file cannot be read (transient:
+    callers must not cache it)."""
     try:
-        result = subprocess.run(
-            [MMDBLOOKUP, "--file", database, "--ip", address],
-            capture_output=True, check=False, text=True, timeout=2,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        # a transient failure, not "no data": callers must not cache it
+        record = database_reader(database).get(address)
+    except (OSError, mmdb.InvalidDatabaseError) as error:
         raise LookupError(str(error)) from error
-    if result.returncode == 6 or "Could not find an entry" in result.stderr:
-        return {}  # not in the database: a definite miss that is cached
-    if result.returncode != 0:
-        raise LookupError(result.stderr.strip() or "mmdblookup failed")
-    return parse_mmdb(result.stdout)
+    except ValueError:
+        return {}  # not an address this database covers (IPv6 in an IPv4-only file)
+    return mmdb.flatten(record) if record is not None else {}
 
 
 def lookup_location(address, city_database, asn_database):
