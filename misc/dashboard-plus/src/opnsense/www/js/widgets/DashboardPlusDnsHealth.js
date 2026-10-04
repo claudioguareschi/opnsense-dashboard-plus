@@ -327,7 +327,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                         </div>
                     </section>
                     <section class="dashboard-plus-dns-health-panel">
-                        <div class="dashboard-plus-dns-health-panel-head">${escapeHtml(this.translations.requests_per_minute)}</div>
+                        <div class="dashboard-plus-dns-health-panel-head">${escapeHtml(this.translations.requests_per_second)}</div>
                         <div class="dashboard-plus-dns-health-rate-chart">
                             <canvas id="${this._elementId('rate-chart')}"></canvas>
                             <div id="${this._elementId('rate-empty')}" class="dashboard-plus-dns-health-rate-empty">${escapeHtml(this.translations.waiting)}</div>
@@ -456,9 +456,9 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             const delta = totalQueries - this.previousSample.queries;
             if (elapsed > 0 && delta >= 0) {
                 this.queryRateSamples.push({at: now, ratePerSecond: delta / elapsed});
-                this.queryRateSamples = this.queryRateSamples.slice(-30);
             }
         }
+        this.queryRateSamples = this.queryRateSamples.filter(sample => sample.at >= now - 10 * 60 * 1000);
         if (totalQueries !== null) {
             this.previousSample = {queries: totalQueries, at: now};
         }
@@ -481,8 +481,8 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             data: {
                 labels: this.queryRateSamples.map(sample => new Date(sample.at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})),
                 datasets: [{
-                    label: this.translations.requests_per_minute,
-                    data: this.queryRateSamples.map(sample => sample.ratePerSecond * 60),
+                    label: this.translations.requests_per_second,
+                    data: this.queryRateSamples.map(sample => sample.ratePerSecond),
                     borderColor: color,
                     backgroundColor: 'rgba(44, 160, 44, 0.16)',
                     fill: true,
@@ -496,7 +496,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 maintainAspectRatio: false,
                 plugins: {colorschemes: false, legend: {display: false}},
                 scales: {
-                    y: {beginAtZero: true, ticks: {maxTicksLimit: 5, callback: value => this._formatCount(value)}},
+                    y: {beginAtZero: true, ticks: {maxTicksLimit: 5, callback: value => this._formatRate(value)}},
                     x: {ticks: {maxRotation: 0, autoSkip: true, maxTicksLimit: 5}}
                 }
             }
