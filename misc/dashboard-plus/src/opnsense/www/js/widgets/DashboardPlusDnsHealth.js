@@ -24,6 +24,8 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         this.queryChart = null;
         this.queryRateChart = null;
         this.queryRateSamples = [];
+        this.queryRateTimer = null;
+        this.queryRatePolling = false;
         this.recentRows = 5;
     }
 
@@ -214,7 +216,8 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 align-items: center;
                 gap: 0.5em;
                 flex: 1;
-                padding: 0 0.65em 0.65em;
+                padding: 0 1em 0.65em;
+                box-sizing: border-box;
             }
             .dashboard-plus-dns-health-types-chart {
                 width: min(100%, 10em);
@@ -468,8 +471,6 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
     }
 
     _renderQueryRate() {
-        this.queryRateChart?.destroy();
-        this.queryRateChart = null;
         const chart = typeof Chart === 'undefined' ? null : Chart;
         const canvas = document.getElementById(this._elementId('rate-chart'));
         const $empty = $(`#${this._elementId('rate-empty')}`);
@@ -479,13 +480,21 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             return;
         }
         const color = '#2ca02c';
+        const labels = this.queryRateSamples.map(sample => new Date(sample.at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'}));
+        const data = this.queryRateSamples.map(sample => sample.ratePerSecond);
+        if (this.queryRateChart) {
+            this.queryRateChart.data.labels = labels;
+            this.queryRateChart.data.datasets[0].data = data;
+            this.queryRateChart.update('none');
+            return;
+        }
         this.queryRateChart = new chart(canvas.getContext('2d'), {
             type: 'line',
             data: {
-                labels: this.queryRateSamples.map(sample => new Date(sample.at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})),
+                labels,
                 datasets: [{
                     label: this.translations.requests_per_second,
-                    data: this.queryRateSamples.map(sample => sample.ratePerSecond),
+                    data,
                     borderColor: color,
                     backgroundColor: 'rgba(44, 160, 44, 0.16)',
                     fill: true,
@@ -567,18 +576,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         }).join('') : `<div class="dashboard-plus-dns-health-empty">${escapeHtml(this.translations.no_recent_queries)}</div>`);
     }
 
-    _render() {
-        const status = this._status();
-        const stats = this._stats();
-        const dot = $(`#${this._elementId('dot')}`);
-        dot.removeClass('text-success text-warning text-danger text-muted').addClass({
-            healthy: 'text-success',
-            warning: 'text-warning',
-            danger: 'text-danger',
-            muted: 'text-muted'
-        }[status.state]);
-        $(`#${this._elementId('state')}`).text(status.label);
-        $(`#${this._elementId('mode')}`).text(this._mode());
+    _renderMetrics(stats = this._stats()) {
         $(`#${this._elementId('metrics')}`).html([
             this._metric(this.translations.queries, this._formatRate(stats.rate),
                 `${this._formatCount(stats.totalQueries)} ${this.translations.total}`,
@@ -591,6 +589,21 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                     `${this._formatPercent(stats.blockedRate)} ${this.translations.of_queries}`,
                 `${this.translations.avg_recursive_lookup} ${this._formatLookup(stats.lookup)}`)
         ].join(''));
+    }
+
+    _render() {
+        const status = this._status();
+        const stats = this._stats();
+        const dot = $(`#${this._elementId('dot')}`);
+        dot.removeClass('text-success text-warning text-danger text-muted').addClass({
+            healthy: 'text-success',
+            warning: 'text-warning',
+            danger: 'text-danger',
+            muted: 'text-muted'
+        }[status.state]);
+        $(`#${this._elementId('state')}`).text(status.label);
+        $(`#${this._elementId('mode')}`).text(this._mode());
+        this._renderMetrics(stats);
 
         const upstreams = Array.isArray(this.data.upstreams) ? this.data.upstreams : [];
         $(`#${this._elementId('upstreams')}`).html(this.loading ? `<div class="dashboard-plus-dns-health-empty">${escapeHtml(this.translations.waiting)}</div>` : upstreams.length ? upstreams.map(upstream => `
@@ -637,6 +650,28 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         });
     }
 
+    async _pollQueryRate() {
+        if (this.loading || this.queryRatePolling) {
+            return;
+        }
+        this.queryRatePolling = true;
+        try {
+            this.data.stats = await this.ajaxCall('/api/unbound/diagnostics/stats');
+            this._recordQueryRate(this._asNumber(this.data.stats?.data?.total?.num?.queries));
+            this._renderMetrics();
+            this._renderQueryRate();
+        } finally {
+            this.queryRatePolling = false;
+        }
+    }
+
+    _startQueryRatePolling() {
+        clearInterval(this.queryRateTimer);
+        this.queryRateTimer = setInterval(() => {
+            this._pollQueryRate().catch(() => {});
+        }, 1000);
+    }
+
     async _fetchData() {
         const responses = await Promise.allSettled([
             this.ajaxCall('/api/unbound/service/status'),
@@ -680,6 +715,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         }
         this._render();
         this.fitToContent();
+        this._startQueryRatePolling();
     }
 
     async onWidgetTick() {
@@ -718,11 +754,15 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
     onWidgetResize(elem, width, height) {
         const layoutChanged = super.onWidgetResize(elem, width, height);
         this.queryChart?.resize();
+        this.queryRateChart?.resize();
         return layoutChanged;
     }
 
     onWidgetClose() {
         this.queryChart?.destroy();
+        this.queryRateChart?.destroy();
+        clearInterval(this.queryRateTimer);
+        this.queryRateTimer = null;
         super.onWidgetClose();
     }
 }
