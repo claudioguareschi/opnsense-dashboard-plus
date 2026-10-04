@@ -194,6 +194,8 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 margin: 0 0.4em;
             }
             .dashboard-plus-dns-health-panel {
+                display: flex;
+                flex-direction: column;
                 min-width: 0;
                 border: 1px solid rgba(127, 127, 127, 0.24);
                 border-radius: 3px;
@@ -211,6 +213,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 grid-template-columns: minmax(7em, 1fr) minmax(7em, 1fr);
                 align-items: center;
                 gap: 0.5em;
+                flex: 1;
                 padding: 0 0.65em 0.65em;
             }
             .dashboard-plus-dns-health-types-chart {
