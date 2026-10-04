@@ -56,6 +56,7 @@ function firewallmap_xmlrpc_sync()
 
 function firewallmap_syslog()
 {
-    /* what the scripts log as "firewallmap": Reporting: Firewall Map: Log File */
+    /* the "firewallmap" application for remote logging; the local log file comes from the
+       syslog template (Syslog/local/firewallmap.conf): Reporting: Firewall Map: Log File */
     return ['firewallmap' => ['facility' => ['firewallmap']]];
 }
