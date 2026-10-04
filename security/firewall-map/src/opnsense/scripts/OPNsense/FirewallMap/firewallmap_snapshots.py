@@ -65,6 +65,9 @@ WAIT_SECONDS = 8.0
 WAIT_STEP = 0.2
 # a summary older than this is not "what the map shows now"
 FRESH_SECONDS = 10
+# one snapshot per this many seconds, from anyone: each is a full capture, and only KEEP_SNAPSHOTS
+# are kept, so a held-down camera button must not push everyone else's out
+MIN_INTERVAL_SECONDS = 10
 
 
 def valid_id(snapshot_id):
@@ -129,6 +132,9 @@ def request_full(snapshot_id, user, wait=WAIT_SECONDS, directory=SNAPSHOT_DIR, r
 def save(user, now=None, wait=WAIT_SECONDS, directory=SNAPSHOT_DIR, requests=SNAPSHOT_REQUEST_DIR,
          summary_file=OUTPUT_FILE):
     now = time.time() if now is None else now
+    newest = metas(directory)[:1]
+    if newest and 0 <= now - (newest[0].get("taken") or 0) < MIN_INTERVAL_SECONDS:
+        return {"result": "failed", "error": "too_soon", "snapshot": newest[0]}
     snapshot_id = new_id(now)
     os.makedirs(directory, exist_ok=True)
     partial = False

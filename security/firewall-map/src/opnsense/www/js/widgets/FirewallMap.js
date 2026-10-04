@@ -206,6 +206,9 @@ export default class FirewallMap extends BaseWidget {
             const toggleKey = () => $key.toggle(($provider.val() || '') !== 'dbip');
             $provider.on('change', toggleKey);
             toggleKey();
+            // keys are secrets: masked while typed and kept out of the browser's form history
+            $(`#${this.id}-option-geo-key, #${this.id}-option-abuseipdb-key`)
+                .attr({type: 'password', autocomplete: 'new-password', spellcheck: 'false'});
         };
         poll();
     }
@@ -359,7 +362,8 @@ export default class FirewallMap extends BaseWidget {
                 + `<a href="/ui/firewallmap#snapshot=${encodeURIComponent(meta.id)}" class="btn btn-primary btn-xs">${escape(this.translations.snapshot_open)}</a>`);
         } catch (error) {
             console.error('Firewall Map+: snapshot not saved', error);
-            host.toast(frame, `<span>${window.FirewallMapRenderer.escapeHtml(this.translations.snapshot_failed)}</span>`);
+            const text = error?.message === 'too_soon' ? this.translations.snapshot_too_soon : this.translations.snapshot_failed;
+            host.toast(frame, `<span>${window.FirewallMapRenderer.escapeHtml(text)}</span>`);
         } finally {
             $button.prop('disabled', false);
         }

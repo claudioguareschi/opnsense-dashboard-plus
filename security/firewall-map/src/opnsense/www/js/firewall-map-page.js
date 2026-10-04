@@ -57,6 +57,10 @@
 		}
 		return `${value >= 100 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
 	}
+	/** "TCP" for display; empty for an entry without a protocol (an old queue row, a bare Suricata event). */
+	function protocolLabel(value) {
+		return String(value || "").toUpperCase();
+	}
 	function formatBytes(bytes) {
 		return formatRate(bytes || 0).replace("/s", "");
 	}
@@ -404,8 +408,7 @@
 			"host",
 			"hosts",
 			"network",
-			"networks",
-			"external"
+			"networks"
 		], escapeHtml(`${T.add_to_alias}: ${address}`), (name) => {
 			confirmAction(`${T.add_confirm} ${address} → ${name}?`, async () => {
 				try {
@@ -816,8 +819,8 @@
 		const [publicAddress] = splitHostPort(ids.public);
 		const [insideAddress] = splitHostPort(ids.inside);
 		const service = {
-			name: ids.protocol.toUpperCase(),
-			port: port ? `${ids.protocol.toUpperCase()}/${port}` : ""
+			name: protocolLabel(ids.protocol),
+			port: port ? `${protocolLabel(ids.protocol)}/${port}` : ""
 		};
 		const serious = ids.severity <= 2 || (ids.lists || []).length > 0;
 		return {
@@ -836,7 +839,7 @@
 				blocked: false
 			},
 			connection: rows([
-				[T.protocol, escapeHtml(ids.protocol.toUpperCase())],
+				[T.protocol, escapeHtml(protocolLabel(ids.protocol))],
 				[T.inside_side, escapeHtml(ids.inside || T.this_firewall)],
 				[T.via, escapeHtml(ids.public)],
 				[T.remote_side, escapeHtml(ids.remote)],
@@ -1178,7 +1181,7 @@
 		for (let attempt = 0; attempt < 2; attempt++) {
 			if (attempt) await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
 			try {
-				const result = await getJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`);
+				const result = await postJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`, {});
 				if (result.status === "ok") return { result };
 				failure = result.error || T.lookup_failed;
 			} catch (error) {
@@ -1205,7 +1208,7 @@
 		state.abuseChecking.add(address);
 		rerender();
 		try {
-			const result = await getJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`);
+			const result = await postJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`, { sources: "abuseipdb" });
 			noteScore(result, address);
 			if (!state.abuseScores.has(address)) notify(`AbuseIPDB: ${result.abuseipdb?.error || result.error || T.lookup_failed}`, BootstrapDialog.TYPE_WARNING);
 		} catch (error) {
@@ -1384,7 +1387,7 @@
 	function queueItem(row, names) {
 		const insideAddresses = new Set(row.inside || []);
 		const ports = row.service_ports || {};
-		const serviceFor = (protocol, port) => Object.keys(ports).find((name) => ports[name] === `${port}/${protocol}`) || (port ? `${String(protocol).toUpperCase()}/${port}` : "ICMP");
+		const serviceFor = (protocol, port) => Object.keys(ports).find((name) => ports[name] === `${port}/${protocol}`) || (port ? `${protocolLabel(protocol)}/${port}` : "ICMP");
 		const disposition = [
 			"passed",
 			"firewall_blocked",
@@ -1447,7 +1450,7 @@
 		let otherTargets = "";
 		let service = row.services?.[0] ? `${row.services[0]}${ports[row.services[0]] ? ` · ${ports[row.services[0]].split("/").reverse().join("/").toUpperCase()}` : ""}` : "";
 		if (inbound && target) {
-			service = `${target.service}${target.port ? ` · ${target.protocol.toUpperCase()}/${target.port}` : ""}`;
+			service = `${target.service}${target.port ? ` · ${protocolLabel(target.protocol)}/${target.port}` : ""}`;
 			if (!target.firewall) {
 				localIcon = "server";
 				localName = target.name || target.ip;
@@ -1476,7 +1479,7 @@
 			const insideText = `${item.inside_name ? `${item.inside_name} ` : ""}${item.inside || T.this_firewall}`;
 			const path = item.remote_started ? `${item.remote} → ${insideText}` : `${insideText} → ${item.remote}`;
 			const ids = (item.ids || []).map((sig) => `<div class="${sig.severity <= 2 ? "fwmap-ids-high" : "fwmap-ids"}">${ic("flag")} ${escapeHtml(sig.signature)} ×${escapeHtml(sig.count)}</div>` + (sig.query ? `<div class="fwmap-q-muted">${escapeHtml(T.query)}: ${escapeHtml(sig.query)}</div>` : "")).join("");
-			return `<tr><td><div>${escapeHtml(path)} <span class="fwmap-q-muted">${escapeHtml(item.protocol.toUpperCase())}</span></div><div class="fwmap-q-muted">${escapeHtml(T.via)} ${escapeHtml(item.public || "")}${item.open ? "" : ` · ${escapeHtml(T.closed)}`}</div></td><td>${decision(item)}</td><td>${escapeHtml(item.rule || "—")}</td><td>${escapeHtml(item.interface || "—")}</td><td>↓ ${escapeHtml(formatBytes(item.bytes_in || 0))} ↑ ${escapeHtml(formatBytes(item.bytes_out || 0))}</td><td>${item.started ? escapeHtml(`${ago(item.started)} ${T.ago}`) : "—"}</td><td>${ids || "<span class=\"fwmap-q-muted\">—</span>"}</td></tr>`;
+			return `<tr><td><div>${escapeHtml(path)} <span class="fwmap-q-muted">${escapeHtml(protocolLabel(item.protocol))}</span></div><div class="fwmap-q-muted">${escapeHtml(T.via)} ${escapeHtml(item.public || "")}${item.open ? "" : ` · ${escapeHtml(T.closed)}`}</div></td><td>${decision(item)}</td><td>${escapeHtml(item.rule || "—")}</td><td>${escapeHtml(item.interface || "—")}</td><td>↓ ${escapeHtml(formatBytes(item.bytes_in || 0))} ↑ ${escapeHtml(formatBytes(item.bytes_out || 0))}</td><td>${item.started ? escapeHtml(`${ago(item.started)} ${T.ago}`) : "—"}</td><td>${ids || "<span class=\"fwmap-q-muted\">—</span>"}</td></tr>`;
 		}).join("") + "</tbody></table>" : "";
 		const org = saved.org || live.org;
 		const chips = (row.lists || []).map((name) => `<span class="fwmap-q-chip">${escapeHtml(listLabel(name))}</span>`).join("");
@@ -1711,7 +1714,7 @@
 		}).on("click", ".fwmap-q-edit-note", function(event) {
 			event.preventDefault();
 			const address = addressOf(this);
-			const $text = $("<textarea class=\"form-control\" rows=\"4\" maxlength=\"1000\"></textarea>").attr("aria-label", `${T.note_title} ${address}`).val(plain(rowOf(address).note || ""));
+			const $text = $("<textarea class=\"form-control\" rows=\"4\" maxlength=\"800\"></textarea>").attr("aria-label", `${T.note_title} ${address}`).val(plain(rowOf(address).note || ""));
 			BootstrapDialog.show({
 				title: escapeHtml(`${T.note_title} ${address}`),
 				message: $text,
@@ -1838,7 +1841,8 @@
 			});
 			await loadSnapshots();
 		} catch (error) {
-			notifyFailure(error);
+			if (error?.message === "too_soon") window.FirewallMapRenderer.host.toast(frame, `<span>${escapeHtml(T.snapshot_too_soon)}</span>`);
+			else notifyFailure(error);
 		} finally {
 			$button.prop("disabled", false);
 		}

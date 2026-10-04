@@ -38,11 +38,18 @@ class ThreatsController extends ApiControllerBase
     private const STATUSES = ['new', 'reviewed', 'dismissed', 'blocked'];
     private const VIEWS = ['passed', 'firewall_blocked', 'ips_dropped', 'all', 'reviewed', 'dismissed'];
 
-    /** Free text travels as base64url so configd only ever sees [A-Za-z0-9_-]; "-" means none. */
-    private function encodeText($text, $length)
+    /* a note's limit in bytes, not characters: configd reads one 4 kB message, and base64 grows the
+       text by a third (2400 bytes: 800 characters of CJK, 600 emoji, 2400 of Latin text) */
+    private const NOTE_BYTES = 2400;
+
+    /**
+     * Free text travels as base64url so configd only ever sees [A-Za-z0-9_-]. Cut to `$bytes`
+     * bytes on a character boundary; `$empty` stands for no text.
+     */
+    private function encodeText($text, $bytes, $empty = '-')
     {
-        $text = mb_substr(trim((string)$text), 0, $length);
-        return $text === '' ? '-' : rtrim(strtr(base64_encode($text), '+/', '-_'), '=');
+        $text = mb_strcut(trim((string)$text), 0, $bytes, 'UTF-8');
+        return $text === '' ? $empty : rtrim(strtr(base64_encode($text), '+/', '-_'), '=');
     }
 
     /** One page of a tab; `q` searches what the queue displays, `offset` and `limit` page it. */
@@ -72,12 +79,8 @@ class ThreatsController extends ApiControllerBase
         if (!in_array($status, self::STATUSES, true)) {
             return ['result' => 'failed', 'error' => 'unknown status'];
         }
-        /* free text travels as base64url so configd only ever sees [A-Za-z0-9_-] */
-        $note = '-';
-        if ($this->request->hasPost('note')) {
-            $text = mb_substr((string)$this->request->getPost('note'), 0, 1000);
-            $note = $text === '' ? '=' : rtrim(strtr(base64_encode($text), '+/', '-_'), '=');
-        }
+        /* "-": no note sent, keep the old one; "=": an empty note, clear it */
+        $note = $this->request->hasPost('note') ? $this->encodeText($this->request->getPost('note'), self::NOTE_BYTES, '=') : '-';
         $result = json_decode(
             (new Backend())->configdpRun('firewallmap threats set', [$address, $status, $note]) ?? '',
             true

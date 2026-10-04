@@ -74,6 +74,10 @@ TIMEOUT = 120
 RETRY_STEPS = (60, 120, 300, 900)
 # progress is written at most this often while downloading
 PROGRESS_SECONDS = 0.5
+# the databases are about 10 to 140 MB; far more is a broken mirror or a decompression bomb, and
+# must not fill /var/db
+MAX_DOWNLOAD_BYTES = 300 * 1024 * 1024
+MAX_DATABASE_BYTES = 1024 * 1024 * 1024
 
 DATABASES = {
     "maxmind": {
@@ -216,8 +220,23 @@ def download(url, target, progress=None):
                 break
             handle.write(chunk)
             done += len(chunk)
+            if done > MAX_DOWNLOAD_BYTES:
+                raise RuntimeError("download larger than expected")
             if progress:
                 progress(done, total)
+
+
+def copy_bounded(source, handle, limit=MAX_DATABASE_BYTES):
+    """Copy an unpacked database, refusing more than `limit` bytes (a decompression bomb)."""
+    written = 0
+    while True:
+        chunk = source.read(1024 * 1024)
+        if not chunk:
+            return
+        written += len(chunk)
+        if written > limit:
+            raise RuntimeError("database larger than expected")
+        handle.write(chunk)
 
 
 def fetch_maxmind(edition, key, workdir, progress=None):
@@ -227,10 +246,11 @@ def fetch_maxmind(edition, key, workdir, progress=None):
         member = next((item for item in tar.getmembers() if item.name.endswith(f"{edition}.mmdb")), None)
         if member is None:
             raise RuntimeError(f"{edition} archive has no database")
-        source = tar.extractfile(member)
+        if member.size > MAX_DATABASE_BYTES:
+            raise RuntimeError(f"{edition} database larger than expected")
         target = os.path.join(workdir, f"{edition}.mmdb")
         with open(target, "wb") as handle:
-            shutil.copyfileobj(source, handle)
+            copy_bounded(tar.extractfile(member), handle)
     return target
 
 
@@ -251,7 +271,7 @@ def fetch_dbip(edition, workdir, progress=None):
         raise last_error
     target = os.path.join(workdir, f"{edition}.mmdb")
     with gzip.open(compressed, "rb") as source, open(target, "wb") as handle:
-        shutil.copyfileobj(source, handle)
+        copy_bounded(source, handle)
     return target
 
 

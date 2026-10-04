@@ -701,6 +701,7 @@
         snapshot_flagged_one: {{ lang._('{count} flagged')|json_encode }},
         snapshot_flagged_many: {{ lang._('{count} flagged')|json_encode }},
         snapshot_saved: {{ lang._('Snapshot saved')|json_encode }},
+        snapshot_too_soon: {{ lang._('A snapshot was taken seconds ago: try again in a moment')|json_encode }},
         snapshot_open: {{ lang._('Open')|json_encode }},
         snapshot_note: {{ lang._('Snapshot note')|json_encode }},
         snapshot_add_note: {{ lang._('Add a note')|json_encode }},

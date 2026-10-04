@@ -26,7 +26,7 @@
 
 /* Investigations: registry, routing and AbuseIPDB lookups for one address. */
 import {escapeHtml} from '../src/format.js';
-import {errorText, getJSON, notify} from './api.js';
+import {errorText, notify, postJSON} from './api.js';
 import {MAX_ABUSE_SCORES, MAX_INVESTIGATIONS, state, T} from './context.js';
 import {rows} from './parts.js';
 
@@ -108,7 +108,7 @@ async function lookup(address) {
       await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
     }
     try {
-      const result = await getJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`);
+      const result = await postJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`, {});
       if (result.status === 'ok') {
         return {result};
       }
@@ -142,7 +142,8 @@ export async function checkAbuse(address, rerender) {
   state.abuseChecking.add(address);
   rerender();
   try {
-    const result = await getJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`);
+    // only AbuseIPDB: the card asks for the verdict, not the registry and routing lookups
+    const result = await postJSON(`/api/firewallmap/investigate/address/${encodeURIComponent(address)}`, {sources: 'abuseipdb'});
     noteScore(result, address);
     if (!state.abuseScores.has(address)) {
       notify(`AbuseIPDB: ${result.abuseipdb?.error || result.error || T.lookup_failed}`, BootstrapDialog.TYPE_WARNING);

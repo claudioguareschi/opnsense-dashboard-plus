@@ -35,6 +35,7 @@
             <snapshot_saved>Snapshot saved</snapshot_saved>
             <snapshot_open>Open in full map</snapshot_open>
             <snapshot_failed>The snapshot could not be saved</snapshot_failed>
+            <snapshot_too_soon>A snapshot was taken seconds ago: try again in a moment</snapshot_too_soon>
             <provider_auto>Automatic (MaxMind with a key, otherwise DB-IP Lite)</provider_auto>
             <provider_maxmind>MaxMind GeoLite2 (free)</provider_maxmind>
             <provider_maxmind_paid>MaxMind GeoIP2 City (paid subscription)</provider_maxmind_paid>

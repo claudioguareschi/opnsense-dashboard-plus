@@ -25,7 +25,7 @@
  */
 
 /* The details panel for what was clicked on the map or in the IDS list. */
-import {escapeHtml, flagHtml, formatBytes, formatRate, hostPort, listLabel, plain, splitHostPort} from '../src/format.js';
+import {escapeHtml, flagHtml, formatBytes, formatRate, hostPort, listLabel, plain, protocolLabel, splitHostPort} from '../src/format.js';
 import {idsOutcome} from '../src/summaries.js';
 import {ABUSEIPDB_BLACKLIST_LIST, ABUSEIPDB_LOOKUP_LIST, state, T} from './context.js';
 import {ic} from './icons.js';
@@ -161,7 +161,7 @@ function idsFlowModel(ids, context) {
   const [, port] = splitHostPort(ids.remote);
   const [publicAddress] = splitHostPort(ids.public);
   const [insideAddress] = splitHostPort(ids.inside);
-  const service = {name: ids.protocol.toUpperCase(), port: port ? `${ids.protocol.toUpperCase()}/${port}` : ''};
+  const service = {name: protocolLabel(ids.protocol), port: port ? `${protocolLabel(ids.protocol)}/${port}` : ''};
   const serious = ids.severity <= 2 || (ids.lists || []).length > 0;
   const verdicts = {
     ok: bigPill('ok', T.allowed, 'fa-check'),
@@ -175,7 +175,7 @@ function idsFlowModel(ids, context) {
     diagram: {from: ids.remote_started ? remoteBox : insideBox, service, rate: rateText(ids.bytes_in, ids.bytes_out, formatBytes),
       to: ids.remote_started ? insideBox : remoteBox, blocked: false},
     connection: rows([
-      [T.protocol, escapeHtml(ids.protocol.toUpperCase())],
+      [T.protocol, escapeHtml(protocolLabel(ids.protocol))],
       [T.inside_side, escapeHtml(ids.inside || T.this_firewall)],
       [T.via, escapeHtml(ids.public)],
       [T.remote_side, escapeHtml(ids.remote)],

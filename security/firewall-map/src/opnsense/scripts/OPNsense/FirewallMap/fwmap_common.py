@@ -88,8 +88,12 @@ SERVICES = {
 }
 
 
+# files written by these scripts hold notes, host names and topology: not world-readable
+FILE_MODE = 0o640
+
+
 def secure_umask():
-    """Files written by these scripts hold notes, host names and topology: not world-readable."""
+    """Directories and files these scripts create: owner and group only (see FILE_MODE)."""
     os.umask(0o027)
 
 
@@ -155,10 +159,9 @@ def write_text(path, text):
     os.makedirs(directory, exist_ok=True)
     handle, temporary = tempfile.mkstemp(dir=directory, prefix=f".{os.path.basename(path)}.")
     try:
-        # mkstemp creates the file 0600; give it the mode the process umask allows instead
-        mask = os.umask(0)
-        os.umask(mask)
-        os.fchmod(handle, 0o666 & ~mask)
+        # mkstemp creates the file 0600; give it the mode secure_umask() means (reading the umask
+        # would mean setting it, and the umask is process-wide: a thread could create a file then)
+        os.fchmod(handle, FILE_MODE)
         with os.fdopen(handle, "w") as output:
             output.write(text)
         os.replace(temporary, path)

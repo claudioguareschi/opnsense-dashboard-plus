@@ -25,7 +25,7 @@
  */
 
 /* Threat history: flagged traffic organized by what the firewall or IPS actually did. */
-import {escapeHtml, flagHtml, formatBytes, hostPort, listLabel, plain, privateAddress, splitHostPort} from '../src/format.js';
+import {escapeHtml, flagHtml, formatBytes, hostPort, listLabel, plain, privateAddress, protocolLabel, splitHostPort} from '../src/format.js';
 import {flowSummary} from '../src/summaries.js';
 import {addAddressToAlias, chooseAlias, killStates, showStates} from './actions.js';
 import {confirmAction, getJSON, notifyFailure, postJSON} from './api.js';
@@ -56,7 +56,7 @@ function queueItem(row, names) {
   // the same sentence as on the map, rebuilt from what the queue recorded
   const ports = row.service_ports || {};
   const serviceFor = (protocol, port) => Object.keys(ports).find((name) => ports[name] === `${port}/${protocol}`)
-    || (port ? `${String(protocol).toUpperCase()}/${port}` : 'ICMP');
+    || (port ? `${protocolLabel(protocol)}/${port}` : 'ICMP');
   const disposition = ['passed', 'firewall_blocked', 'ips_dropped'].includes(row.disposition) ? row.disposition : 'passed';
   // the per-connection snapshot the collector took from PF (and Suricata) for this address. The
   // card leads with a connection that shows the disposition: an address that got through once and
@@ -103,7 +103,7 @@ function queueItem(row, names) {
   let otherTargets = '';
   let service = row.services?.[0] ? `${row.services[0]}${ports[row.services[0]] ? ` · ${ports[row.services[0]].split('/').reverse().join('/').toUpperCase()}` : ''}` : '';
   if (inbound && target) {
-    service = `${target.service}${target.port ? ` · ${target.protocol.toUpperCase()}/${target.port}` : ''}`;
+    service = `${target.service}${target.port ? ` · ${protocolLabel(target.protocol)}/${target.port}` : ''}`;
     if (!target.firewall) {
       localIcon = 'server';
       localName = target.name || target.ip;
@@ -145,7 +145,7 @@ function queueItem(row, names) {
       const path = item.remote_started ? `${item.remote} → ${insideText}` : `${insideText} → ${item.remote}`;
       const ids = (item.ids || []).map((sig) => `<div class="${sig.severity <= 2 ? 'fwmap-ids-high' : 'fwmap-ids'}">${ic('flag')} ${escapeHtml(sig.signature)} ×${escapeHtml(sig.count)}</div>`
         + (sig.query ? `<div class="fwmap-q-muted">${escapeHtml(T.query)}: ${escapeHtml(sig.query)}</div>` : '')).join('');
-      return `<tr><td><div>${escapeHtml(path)} <span class="fwmap-q-muted">${escapeHtml(item.protocol.toUpperCase())}</span></div>`
+      return `<tr><td><div>${escapeHtml(path)} <span class="fwmap-q-muted">${escapeHtml(protocolLabel(item.protocol))}</span></div>`
         + `<div class="fwmap-q-muted">${escapeHtml(T.via)} ${escapeHtml(item.public || '')}${item.open ? '' : ` · ${escapeHtml(T.closed)}`}</div></td>`
         + `<td>${decision(item)}</td><td>${escapeHtml(item.rule || '—')}</td><td>${escapeHtml(item.interface || '—')}</td>`
         + `<td>↓ ${escapeHtml(formatBytes(item.bytes_in || 0))} ↑ ${escapeHtml(formatBytes(item.bytes_out || 0))}</td>`
@@ -417,7 +417,8 @@ export async function showQueue() {
     .on('click', '.fwmap-q-edit-note', function (event) {
       event.preventDefault();
       const address = addressOf(this);
-      const $text = $('<textarea class="form-control" rows="4" maxlength="1000"></textarea>')
+      // the server keeps 2400 bytes; 800 characters fit in any script
+      const $text = $('<textarea class="form-control" rows="4" maxlength="800"></textarea>')
         .attr('aria-label', `${T.note_title} ${address}`).val(plain(rowOf(address).note || ''));
       BootstrapDialog.show({
         title: escapeHtml(`${T.note_title} ${address}`), message: $text,

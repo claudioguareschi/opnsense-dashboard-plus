@@ -33,8 +33,9 @@ use OPNsense\FirewallMap\BlocklistAliases;
 use OPNsense\FirewallMap\FirewallMap;
 
 /**
- * Firewall-wide Firewall Map+ settings (geolocation database), edited from the widget's
- * settings dialog. The license key is write-only: it is never returned to the browser.
+ * Firewall-wide Firewall Map+ settings, edited from the widget's settings dialog: the geolocation
+ * provider and key, the AbuseIPDB key, the threat lists, threat recording and the blocklist
+ * aliases. The keys are write-only: they are never returned to the browser.
  */
 class SettingsController extends ApiControllerBase
 {
@@ -65,6 +66,9 @@ class SettingsController extends ApiControllerBase
         if (!$this->request->isPost()) {
             return ['result' => 'failed'];
         }
+        /* before loading any model, as core does: a concurrent save (another administrator, an HA
+           sync) cannot then be overwritten with what this request read */
+        Config::getInstance()->lock();
         $model = new FirewallMap();
         $general = $model->general;
         $ensure = false;
@@ -95,8 +99,9 @@ class SettingsController extends ApiControllerBase
             if ($abuse === '-') {
                 $general->abuseipdb_key = '';
             } elseif ($abuse !== '') {
+                /* the free plan allows only a few list downloads a day: fetch again only for a new key */
+                $fetchBlacklist = $abuse !== (string)$general->abuseipdb_key;
                 $general->abuseipdb_key = $abuse;
-                $fetchBlacklist = true;
             }
         }
         if ($this->request->hasPost('license_key')) {

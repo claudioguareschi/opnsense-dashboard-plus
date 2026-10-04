@@ -36,12 +36,21 @@ use OPNsense\Core\Backend;
  */
 class InvestigateController extends ApiControllerBase
 {
+    /**
+     * POST only: a lookup spends third-party quota (the AbuseIPDB key) and stores a verdict, so it
+     * must not be started by a link (OPNsense checks the CSRF token on POST).
+     */
     public function addressAction($address = null)
     {
+        if (!$this->request->isPost()) {
+            return ['status' => 'failed', 'error' => 'POST required'];
+        }
         if (!is_string($address) || filter_var($address, FILTER_VALIDATE_IP) === false) {
             return ['status' => 'failed', 'error' => 'not an IP address'];
         }
-        $result = json_decode((new Backend())->configdpRun('firewallmap investigate', [$address]) ?? '', true);
+        // "abuseipdb" for the Reputation card's check; anything else looks up every source
+        $sources = $this->request->getPost('sources') === 'abuseipdb' ? 'abuseipdb' : 'all';
+        $result = json_decode((new Backend())->configdpRun('firewallmap investigate', [$address, $sources]) ?? '', true);
         return is_array($result) ? $result : ['status' => 'failed', 'error' => 'no response'];
     }
 }

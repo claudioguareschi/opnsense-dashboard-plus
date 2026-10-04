@@ -114,7 +114,12 @@ export async function takeSnapshot() {
     });
     await loadSnapshots();
   } catch (error) {
-    notifyFailure(error);
+    if (error?.message === 'too_soon') {
+      // someone (maybe this viewer) took one seconds ago: that one already shows this moment
+      window.FirewallMapRenderer.host.toast(frame, `<span>${escapeHtml(T.snapshot_too_soon)}</span>`);
+    } else {
+      notifyFailure(error);
+    }
   } finally {
     $button.prop('disabled', false);
   }

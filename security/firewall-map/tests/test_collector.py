@@ -166,6 +166,8 @@ class CollectorLoopTest(unittest.TestCase):
         self.collector = COLLECTOR.Collector(store=COLLECTOR.CacheStore(os.path.join(self.directory, "cache.db")))
         self.collector.log = COLLECTOR.FilterLogTail(os.path.join(self.directory, "filter.log"))
         self.collector.eve = COLLECTOR.FilterLogTail(os.path.join(self.directory, "eve.json"))
+        self.addCleanup(self.collector.log.close)
+        self.addCleanup(self.collector.eve.close)
         self.queue = os.path.join(self.directory, "queue.db")
         self.collector.recorder = COLLECTOR.ThreatRecorder(self.queue)
         self.collector.blocklists.index = COLLECTOR.BlocklistIndex.build({"Test list": [self.REMOTE]})

@@ -57,6 +57,8 @@ URL = "https://api.abuseipdb.com/api/v2/blacklist?confidenceMinimum=100&limit=10
 PF_TABLE = "FWMAP_AbuseIPDB"
 MIN_AGE_SECONDS = 20 * 3600
 TIMEOUT = 60
+# 10,000 addresses are about 150 kB; a body far larger is not the list
+MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 
 def read_status(path=None):
@@ -85,7 +87,10 @@ def download(key):
     request = urllib.request.Request(URL, headers={"User-Agent": investigate.USER_AGENT, "Accept": "text/plain"})
     request.add_unredirected_header("Key", key)
     with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-        return response.read().decode("utf-8", "replace")
+        body = response.read(MAX_RESPONSE_BYTES + 1)
+    if len(body) > MAX_RESPONSE_BYTES:
+        raise ValueError("response too large")
+    return body.decode("utf-8", "replace")
 
 
 def alias_settings(path=CONFIG_XML):

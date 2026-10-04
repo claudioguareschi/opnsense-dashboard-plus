@@ -53,7 +53,8 @@ MAX_LINE_BYTES = 64 * 1024
 
 
 class FilterLogTail:
-    """Follow the firewall log from its current end, surviving the daily rotation of latest.log.
+    """Follow a log from its current end, surviving the daily rotation of latest.log and a log
+    truncated in place (the IDS "clear log" action empties eve.json).
 
     Only complete lines are returned; a line still being written is kept until its newline arrives.
     """
@@ -76,6 +77,11 @@ class FilterLogTail:
             self.handle.close()
         self.handle, self.inode, self.pending = handle, inode, b""
 
+    def close(self):
+        if self.handle:
+            self.handle.close()
+            self.handle = None
+
     def backlog(self, max_bytes=BACKLOG_BYTES):
         """Lines from the end of the current log, used once at start to fill the hit window."""
         self._open(at_end=True)
@@ -92,6 +98,10 @@ class FilterLogTail:
         if self.handle is None:
             self._open(at_end=True)
             return []
+        if os.fstat(self.handle.fileno()).st_size < self.handle.tell():
+            # emptied in place: read the new content from the start
+            self.handle.seek(0)
+            self.pending = b""
         data = self.handle.read(limit_bytes)
         if len(data) >= limit_bytes:
             # a burst larger than we can draw: skip ahead instead of falling behind, keeping only

@@ -119,6 +119,7 @@ class BlockTest(unittest.TestCase):
             with open(path, "w") as handle:
                 handle.write("old line\n")
             tail = BLOCKS.FilterLogTail(path)
+            self.addCleanup(tail.close)
             self.assertEqual(tail.lines(), [])
             with open(path, "a") as handle:
                 handle.write("first\nsec")
@@ -133,6 +134,7 @@ class BlockTest(unittest.TestCase):
             with open(path, "w") as handle:
                 handle.write("before\n")
             tail = BLOCKS.FilterLogTail(path)
+            self.addCleanup(tail.close)
             tail.lines()
             with open(path, "a") as handle:
                 handle.write("last of the old file\n")
@@ -146,11 +148,28 @@ class BlockTest(unittest.TestCase):
                 handle.write("next\n")
             self.assertEqual(tail.lines(), ["first of the new file", "next"])
 
+    def test_log_tail_starts_over_after_the_log_is_emptied(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "eve.json")
+            with open(path, "w") as handle:
+                handle.write("old alert\n" * 50)
+            tail = BLOCKS.FilterLogTail(path)
+            self.addCleanup(tail.close)
+            tail.lines()
+            # the IDS "clear log" action truncates the file in place
+            with open(path, "w") as handle:
+                handle.write("new alert\n")
+            self.assertEqual(tail.lines(), ["new alert"])
+            with open(path, "a") as handle:
+                handle.write("next alert\n")
+            self.assertEqual(tail.lines(), ["next alert"])
+
     def test_a_log_without_newlines_does_not_grow_the_buffer(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "latest.log")
             open(path, "w").close()
             tail = BLOCKS.FilterLogTail(path)
+            self.addCleanup(tail.close)
             tail.lines()
             for _ in range(5):
                 with open(path, "a") as handle:

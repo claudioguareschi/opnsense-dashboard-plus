@@ -59,6 +59,9 @@ class SnapshotTest(unittest.TestCase):
         if collector:
             thread = threading.Thread(target=collector)
             thread.start()
+        if now is not None and os.path.exists(self.summary):
+            # the map's summary is current at the simulated time
+            os.utime(self.summary, (now, now))
         result = SNAPSHOTS.save("admin", now=now, wait=2.0 if collector else 0.2, directory=self.snapshots, requests=self.requests,
                                 summary_file=self.summary)
         if collector:
@@ -121,10 +124,19 @@ class SnapshotTest(unittest.TestCase):
             old = self.save(now=now - 40 * 86400)["snapshot"]["id"]
             # the old one goes at once (older than 30 days); then only the newest three stay
             self.assertEqual(SNAPSHOTS.metas(self.snapshots), [])
-            ids = [self.save(now=now + index)["snapshot"]["id"] for index in range(5)]
+            step = SNAPSHOTS.MIN_INTERVAL_SECONDS + 1
+            ids = [self.save(now=now + index * step)["snapshot"]["id"] for index in range(5)]
         kept = [meta["id"] for meta in SNAPSHOTS.metas(self.snapshots)]
         self.assertEqual(kept, list(reversed(ids))[:3])
         self.assertNotIn(old, kept)
+
+    def test_one_snapshot_per_interval(self):
+        COMMON.write_json(self.summary, SUMMARY)
+        now = time.time()
+        first = self.save(now=now)["snapshot"]["id"]
+        again = self.save(now=now + 3)
+        self.assertEqual((again["result"], again["error"], again["snapshot"]["id"]), ("failed", "too_soon", first))
+        self.assertEqual(self.save(now=now + SNAPSHOTS.MIN_INTERVAL_SECONDS + 1)["result"], "saved")
 
     def test_main_rejects_bad_ids_and_decodes_the_user(self):
         self.assertEqual(SNAPSHOTS.main(["delete", "x/../y"])["result"], "failed")

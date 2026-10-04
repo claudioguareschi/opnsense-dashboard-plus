@@ -59,6 +59,11 @@ export function formatRate(bytes) {
   return `${value >= 100 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
 }
 
+/** "TCP" for display; empty for an entry without a protocol (an old queue row, a bare Suricata event). */
+export function protocolLabel(value) {
+  return String(value || '').toUpperCase();
+}
+
 export function formatBytes(bytes) {
   return formatRate(bytes || 0).replace('/s', '');
 }

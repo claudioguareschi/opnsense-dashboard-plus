@@ -54,6 +54,8 @@ from fwmap_common import REPUTATION_KIND, REPUTATION_MAX_AGE, secure_umask  # no
 
 CONFIG_XML = "/conf/config.xml"
 TIMEOUT = 10
+# an RDAP, RIPEstat or AbuseIPDB answer is a few kB; anything far larger is not one
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 USER_AGENT = "OPNsense-FirewallMap"
 MAX_AGE = {"rdap": 7 * 86400, "ripestat": 86400, "abuseipdb": 6 * 3600}
 MAX_ENTRIES = {"rdap": 5000, "ripestat": 5000, "abuseipdb": 5000}
@@ -73,7 +75,10 @@ def fetch_json(url, secret_headers=None):
         # never forwarded if the provider redirects elsewhere
         request.add_unredirected_header(name, value)
     with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-        return json.loads(response.read().decode("utf-8", "replace"))
+        body = response.read(MAX_RESPONSE_BYTES + 1)
+    if len(body) > MAX_RESPONSE_BYTES:
+        raise ValueError("response too large")
+    return json.loads(body.decode("utf-8", "replace"))
 
 
 def vcard(entity):
@@ -155,7 +160,9 @@ def lookups(address, key):
     return sources
 
 
-def investigate(address, store=None, key=None, fetchers=None, now=None):
+def investigate(address, store=None, key=None, fetchers=None, now=None, sources=None):
+    """Look `address` up in every source, or only in `sources` (e.g. {"abuseipdb"} for the
+    Reputation card's check), from the cache where it is fresh."""
     try:
         parsed = ipaddress.ip_address(address)
     except ValueError:
@@ -167,6 +174,8 @@ def investigate(address, store=None, key=None, fetchers=None, now=None):
     store = store if store is not None else CacheStore()
     fetchers = fetchers if fetchers is not None else lookups(address, key)
     result = {"status": "ok", "address": address, "abuseipdb_configured": "abuseipdb" in fetchers}
+    if sources:
+        fetchers = {source: fetch for source, fetch in fetchers.items() if source in sources}
     missing = {}
     for source, fetch in fetchers.items():
         cached = store.get(source, address, max_age=MAX_AGE[source], now=now)
@@ -201,4 +210,7 @@ def investigate(address, store=None, key=None, fetchers=None, now=None):
 if __name__ == "__main__":
     secure_umask()
     target = sys.argv[1] if len(sys.argv) > 1 else ""
-    print(json.dumps(investigate(target, key=abuseipdb_key())))
+    # "all", or a comma-separated subset of rdap, ripestat and abuseipdb
+    wanted = sys.argv[2] if len(sys.argv) > 2 else "all"
+    sources = None if wanted == "all" else set(wanted.split(",")) & set(MAX_AGE)
+    print(json.dumps(investigate(target, key=abuseipdb_key(), sources=sources)))

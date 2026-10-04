@@ -36,6 +36,7 @@ dismissed or manually blocked) is kept separately in ``status``.
 
 import base64
 import binascii
+import contextlib
 import ipaddress
 import json
 import os
@@ -398,6 +399,18 @@ def decode_note(value):
         return None
 
 
+@contextlib.contextmanager
+def transaction(db):
+    """One commit for many statements (the connection autocommits each one otherwise)."""
+    db.execute("BEGIN")
+    try:
+        yield
+    except BaseException:
+        db.execute("ROLLBACK")
+        raise
+    db.execute("COMMIT")
+
+
 def _addresses(db, view, query):
     return [row["address"] for row in matching(db, view, query)] if query else None
 
@@ -416,9 +429,10 @@ def bulk_status(db, current, status, query=None, now=None):
                             (status, now, *parameters))
         return {"result": "saved", "changed": cursor.rowcount}
     changed = 0
-    for address in addresses:
-        changed += db.execute(f"UPDATE threats SET status = ?, status_changed = ?, data = {clear} "
-                              "WHERE address = ?", (status, now, address)).rowcount
+    with transaction(db):
+        for address in addresses:
+            changed += db.execute(f"UPDATE threats SET status = ?, status_changed = ?, data = {clear} "
+                                  "WHERE address = ?", (status, now, address)).rowcount
     return {"result": "saved", "changed": changed}
 
 
@@ -430,8 +444,9 @@ def purge(db, status, query=None):
     if addresses is None:
         return {"result": "deleted", "deleted": db.execute("DELETE FROM threats WHERE status = ?", (status,)).rowcount}
     deleted = 0
-    for address in addresses:
-        deleted += db.execute("DELETE FROM threats WHERE status = ? AND address = ?", (status, address)).rowcount
+    with transaction(db):
+        for address in addresses:
+            deleted += db.execute("DELETE FROM threats WHERE status = ? AND address = ?", (status, address)).rowcount
     return {"result": "deleted", "deleted": deleted}
 
 

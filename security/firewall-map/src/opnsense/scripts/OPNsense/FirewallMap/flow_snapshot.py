@@ -41,6 +41,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fwmap_common import (  # noqa: E402
     GEODB_STATUS, HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, geodb_retry_due, geodb_view, read_json,
+    secure_umask,
 )
 
 GEODB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "firewallmap_geodb.py")
@@ -136,6 +137,9 @@ def main(want_hostnames=False, block_minimum=1):
 
 
 if __name__ == "__main__":
+    # often the first script to create /var/run/firewallmap (the first dashboard poll): 0750 like
+    # everything else here, not configd's default
+    secure_umask()
     arguments = sys.argv[1:]
     minimum = next((int(value) for value in arguments if value.isdigit()), 1)
     print(json.dumps(main(want_hostnames="hostnames" in arguments, block_minimum=max(1, min(minimum, 100))),

@@ -25,7 +25,7 @@
  */
 
 /* Plain-language sentences about flows, blocks and Suricata alerts, and the outcome legend. */
-import {fill, formatBytes, plain, plural} from './format.js';
+import {fill, formatBytes, plain, plural, protocolLabel} from './format.js';
 import {DEFAULT_TEXT} from './text.js';
 
 export function duration(seconds, text = DEFAULT_TEXT) {
@@ -172,7 +172,7 @@ export function idsFlowSummary(flow, text = DEFAULT_TEXT) {
   const inside = flow.inside_host?.name ? `${plain(flow.inside_host.name)} (${flow.inside})` : (flow.inside || text.map_this_firewall);
   const who = flow.remote_started ? `${flow.remote} → ${inside}` : `${inside} → ${flow.remote}`;
   const state = flow.active ? fill(text.map_open_state, {duration: duration(flow.age, text) || text.map_moments}) : text.map_closed;
-  return `${who} ${flow.protocol.toUpperCase()} · ${state} · ↓ ${formatBytes(flow.bytes_in)} ↑ ${formatBytes(flow.bytes_out)}`;
+  return `${who} ${protocolLabel(flow.protocol)} · ${state} · ↓ ${formatBytes(flow.bytes_in)} ↑ ${formatBytes(flow.bytes_out)}`;
 }
 
 /**

@@ -105,7 +105,8 @@ export async function addAddressToAlias(name, address) {
 }
 
 export function addToAlias(address) {
-  chooseAlias(['host', 'hosts', 'network', 'networks', 'external'], escapeHtml(`${T.add_to_alias}: ${address}`), (name) => {
+  // not External aliases: alias_util only adds to their pf table, which a reload or reboot empties
+  chooseAlias(['host', 'hosts', 'network', 'networks'], escapeHtml(`${T.add_to_alias}: ${address}`), (name) => {
     confirmAction(`${T.add_confirm} ${address} → ${name}?`, async () => {
       try {
         await addAddressToAlias(name, address);
