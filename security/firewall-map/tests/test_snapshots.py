@@ -144,6 +144,13 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual((again["result"], again["error"], again["snapshot"]["id"]), ("failed", "too_soon", first))
         self.assertEqual(self.save(now=now + SNAPSHOTS.MIN_INTERVAL_SECONDS + 1)["result"], "saved")
 
+    def test_saves_that_take_the_lock_out_of_order_share_one_slot(self):
+        # the save that read the clock later reaches the lock first
+        os.makedirs(self.requests)
+        now = time.time()
+        self.assertIsNotNone(SNAPSHOTS.reserve(now + 0.05, self.requests))
+        self.assertIsNone(SNAPSHOTS.reserve(now, self.requests))
+
     def test_main_rejects_bad_ids_and_decodes_the_user(self):
         self.assertEqual(SNAPSHOTS.main(["delete", "x/../y"])["result"], "failed")
         self.assertEqual(SNAPSHOTS.decode_text(base64.urlsafe_b64encode("rené".encode()).decode().rstrip("="), 64), "rené")

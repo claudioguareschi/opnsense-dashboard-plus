@@ -27,12 +27,22 @@
 <link rel="stylesheet" href="/ui/css/firewall-map.css?v={{ styleVersion }}">
 <link rel="stylesheet" href="/ui/css/flags/flag-icon.css">
 <script>
-    // json_encode: a translation containing a quote cannot break out of the string. The strings the
-    // page shares with the dashboard widget (and the renderer) come from the widget's translations
-    // (sharedText, see IndexController); the ones below are the page's own, and win where both exist.
+    // The strings the page shares with the dashboard widget (and the renderer) come from the widget's
+    // translations (sharedText, see IndexController, already plain text); the ones below are the
+    // page's own, and win where both exist. lang._() returns HTML-escaped text and the page escapes
+    // again where it builds HTML, so they are decoded once here; json_encode makes each a valid
+    // JavaScript string.
+    function firewallMapPlain(strings) {
+        const box = document.createElement('textarea');
+        Object.keys(strings).forEach(function (key) {
+            box.innerHTML = strings[key];
+            strings[key] = box.value;
+        });
+        return strings;
+    }
     // what this user may do (see IndexController::permissions()): only flags, true or false
     window.FirewallMapPermissions = {{ permissions }};
-    window.FirewallMapPageText = Object.assign({{ sharedText }}, {
+    window.FirewallMapPageText = Object.assign({{ sharedText }}, firewallMapPlain({
         firewall_map: {{ lang._('Firewall Map')|json_encode }},
         starting: {{ lang._('Starting flow collector…')|json_encode }},
         unavailable: {{ lang._('Live flow data is unavailable')|json_encode }},
@@ -278,7 +288,7 @@
         may_have_closed: {{ lang._('this connection may have closed since')|json_encode }},
         states_at: {{ lang._('States at')|json_encode }},
         current_states: {{ lang._('Current states')|json_encode }},
-    });
+    }));
 </script>
 <script src="/ui/js/firewall-map-renderer.js?v={{ rendererVersion }}"></script>
 <script src="/ui/js/firewall-map-page.js?v={{ pageVersion }}"></script>

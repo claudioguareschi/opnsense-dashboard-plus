@@ -272,7 +272,10 @@ def needs_update(path, update_days, force):
     if info is None:
         return True
     age = time.time() - info.st_mtime
-    return not 0 <= age < FORCED_REPEAT_SECONDS if force else age > update_days * 86400
+    if force:
+        # "Update now" right after a download is skipped (a clock set back counts as old)
+        return not 0 <= age < FORCED_REPEAT_SECONDS
+    return age > update_days * 86400
 
 
 def in_backoff(last, now=None):

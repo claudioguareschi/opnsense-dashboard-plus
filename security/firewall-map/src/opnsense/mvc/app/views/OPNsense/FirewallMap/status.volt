@@ -26,7 +26,17 @@
 
 <script>
     $(document).ready(function () {
-        const T = {
+        // lang._() returns HTML-escaped text and the page escapes again where it builds HTML: decode
+        // once here (json_encode makes each a valid JavaScript string)
+        const plain = function (strings) {
+            const box = document.createElement('textarea');
+            Object.keys(strings).forEach(function (key) {
+                box.innerHTML = strings[key];
+                strings[key] = box.value;
+            });
+            return strings;
+        };
+        const T = plain({
             running_live: {{ lang._('Running: a map is open')|json_encode }},
             running_background: {{ lang._('Running: recording threats in the background')|json_encode }},
             stopped: {{ lang._('Stopped: starts when a map is opened')|json_encode }},
@@ -55,10 +65,10 @@
             minutes: {{ lang._('%s min')|json_encode }},
             hours: {{ lang._('%s h')|json_encode }},
             days: {{ lang._('%s days')|json_encode }},
-        };
-        const PROVIDERS = {
+        });
+        const PROVIDERS = plain({
             auto: {{ lang._('Automatic')|json_encode }}, maxmind: 'MaxMind GeoLite2', maxmind_paid: 'MaxMind GeoIP2 City', dbip: 'DB-IP Lite',
-        };
+        });
         const escape = (text) => $('<div/>').text(text === null || text === undefined ? '' : String(text)).html();
         const duration = (seconds) => {
             seconds = Math.abs(seconds);

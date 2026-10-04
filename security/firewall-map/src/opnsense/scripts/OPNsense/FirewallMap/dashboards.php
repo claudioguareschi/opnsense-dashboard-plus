@@ -55,8 +55,12 @@ $content = json_encode(['widget_in_use' => $inUse]) . "\n";
 /* a private temporary name, and the old file stays until the new one is complete (a full disk or
  * two runs at once never leave an empty file behind) */
 $temporary = tempnam($directory, 'dashboards.');
-if ($temporary === false || file_put_contents($temporary, $content) !== strlen($content)
-    || !chmod($temporary, 0640) || !rename($temporary, $file)) {
+if (
+    $temporary === false
+    || file_put_contents($temporary, $content) !== strlen($content)
+    || !chmod($temporary, 0640)
+    || !rename($temporary, $file)
+) {
     if ($temporary !== false && is_file($temporary)) {
         unlink($temporary);
     }

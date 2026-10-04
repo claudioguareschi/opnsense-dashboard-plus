@@ -182,8 +182,9 @@ def _slot(directory, update):
 def reserve(now, directory=SNAPSHOT_REQUEST_DIR):
     """Take the save slot (at most one save every MIN_INTERVAL_SECONDS): checked and taken under a
     lock, since a save then waits seconds for the collector and configd runs requests in parallel.
-    The previous slot time when taken (for release()), None when it is too soon."""
-    last, taken = _slot(directory, lambda last: None if 0 <= now - last < MIN_INTERVAL_SECONDS else now)
+    Two saves may take the lock in the other order than they read the clock, so a slot taken a
+    moment "later" also counts. The previous slot time when taken (for release()), None when it is too soon."""
+    last, taken = _slot(directory, lambda last: None if abs(now - last) < MIN_INTERVAL_SECONDS else now)
     return None if taken is None else last
 
 

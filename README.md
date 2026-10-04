@@ -134,8 +134,10 @@ Each entry shows every threat list the address is on, who it belongs to and wher
 reached and from which inside host, services, first and last seen, volume and Suricata
 signatures. You can investigate, add a note, mark it reviewed or dismissed, and *Block…* adds the
 address (IPv4 or IPv6) to an alias you choose; it blocks only if a firewall rule uses that alias.
-When history is full, blocked and dropped entries are removed before passed ones. Entries are kept
-for 90 days.
+When history is full (5,000 entries), blocked and dropped entries are removed before passed ones.
+Entries you reviewed, dismissed or annotated are kept apart, up to 1,000. Entries are kept for 90
+days, counted from the last sighting (for reviewed or annotated ones, from the last sighting or
+status change, whichever is later).
 
 While the widget is on a dashboard, threat history keeps being fed in the background (a light
 sample every 20 seconds) even with no map open; switch this off in the Threats footer.
@@ -351,6 +353,28 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.52** (both packages):
+  - Users with only the map privilege now get live data (before, only administrators did).
+  - The map walks at most as many states as 5% of RAM allows, at about 6 KB per state: about
+    35,000 on a 4 GB firewall instead of about 100,000. Above that it says so instead of mapping.
+  - Apply on the settings page calls `service/reconfigure`; `settings/reconfigure` is gone.
+  - The diagnostics panel ships only in development builds.
+  - Reviewed, dismissed and annotated threat entries survive pruning (up to 1,000).
+  - A stuck geolocation download restarts on its own; "Update now" right after a download is
+    skipped.
+  - A damaged geolocation file, a half-written settings file or an oversized feed no longer
+    trips up the collector.
+  - Translated text on the map, Status and Settings pages is shown as written (no `&#039;`).
+- **0.51** (both packages):
+  - Firewall Map+ settings move to **Reporting ▸ Firewall Map ▸ Settings**, next to **Map**,
+    **Status** (collector, geolocation database, feeds, with *Update now*) and **Log File** (its own
+    log). The widget's gear keeps only display options. Stored keys can be removed.
+  - Firewall Map+ reads its own settings file instead of `config.xml`, and no longer needs
+    libmaxminddb.
+  - System Information+: choose which sections show in the widget settings and drag them into any
+    order in edit mode.
+  - Dashboard Plus follows the theme colors and uses Font Awesome 6; its privilege now covers only
+    its own two endpoints.
 - **0.50** (both packages): first public beta. Dashboard Plus and Firewall Map+ share one version
   number and are released together.
 

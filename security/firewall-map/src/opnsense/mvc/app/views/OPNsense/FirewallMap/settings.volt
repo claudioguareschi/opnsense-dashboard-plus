@@ -47,8 +47,10 @@
         const describeKeys = function () {
             ajaxGet('/api/firewallmap/settings/status', {}, function (data) {
                 status = data || {};
-                const stored = {{ lang._('A key is stored')|json_encode }};
-                const alias = {{ lang._('Using the key of the GeoIP alias')|json_encode }};
+                // lang._() returns HTML-escaped text and .attr() takes plain text: decode once
+                const plain = (html) => $('<textarea/>').html(html).text();
+                const stored = plain({{ lang._('A key is stored')|json_encode }});
+                const alias = plain({{ lang._('Using the key of the GeoIP alias')|json_encode }});
                 keyField('license_key').attr('placeholder', status.license_key_set ? stored
                     : (status.database && status.database.key_source === 'alias' ? alias : ''));
                 keyField('abuseipdb_key').attr('placeholder', status.abuseipdb_configured ? stored : '');
