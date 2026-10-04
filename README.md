@@ -282,7 +282,7 @@ WireGuard and OpenVPN tunnels; rows can be dragged into any order. Settings: whi
 <img src="docs/screenshots/interface-statistics.png" alt="Interface Statistics+" width="795">
 
 *A table showing Bytes, packets, errors and collisions in and out per interface; rows can be dragged into any
-order. Settings: which interfaces, which fields, and the refresh interval (1, 5 or 10 seconds).*
+order. Settings: which interfaces, which fields, and the refresh interval (5, 10 or 30 seconds).*
 
 ### Thermal Sensors+
 
@@ -353,6 +353,17 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.53** (both packages): less CPU while a dashboard is open.
+  - Firewall Map+: each collector sample costs about a third of the CPU it did, and the Status
+    page shows how long the last sample took. Map polls are answered by a small shell script
+    instead of starting Python every 2 seconds.
+  - System Metrics+, Thermal Sensors+ and System Information+ share one request per refresh
+    instead of System Metrics+ alone making seven; slow-changing numbers (mbufs, swap, disks) are
+    read once a minute. The Dashboard Plus privilege now covers these numbers.
+  - Interfaces+ refreshes every 30 seconds, Gateways+ loads its gateway list once and then only
+    the status, and Interface Statistics+ refreshes every 5, 10 (default) or 30 seconds (a saved
+    1 second becomes 5).
+  - Dashboard Plus widgets pause while their browser tab is hidden and refresh when it shows again.
 - **0.52** (both packages):
   - Users with only the map privilege now get live data (before, only administrators did).
   - The map walks at most as many states as 5% of RAM allows, at about 6 KB per state: about
