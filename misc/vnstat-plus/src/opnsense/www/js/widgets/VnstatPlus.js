@@ -121,12 +121,9 @@ export default class VnstatPlus extends BaseWidget {
                     #${rootId} .vnstat-plus-chart-navigation { display: flex; gap: 0.25em; }
                     #${rootId} .vnstat-plus-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.45em; margin-bottom: 0.7em; }
                     #${rootId} .vnstat-plus-card { border: 1px solid rgba(127,127,127,0.24); border-radius: 3px; background: rgba(127,127,127,0.06); padding: 0.6em 0.65em; min-width: 0; }
-                    #${rootId} .vnstat-plus-card-label { color: var(--vnstat-plus-muted); font-size: 0.78em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+                    #${rootId} .vnstat-plus-card-label { color: currentColor; opacity: 0.68; font-size: 0.78em; letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                     #${rootId} .vnstat-plus-card-value { margin-top: 0.18em; font-size: 1.16em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-                    #${rootId} .vnstat-plus-card-detail { margin-top: 0.12em; color: var(--vnstat-plus-muted); font-size: 0.76em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-                    #${rootId} .vnstat-plus-card-rx .vnstat-plus-card-value { color: var(--vnstat-plus-rx); }
-                    #${rootId} .vnstat-plus-card-tx .vnstat-plus-card-value { color: var(--vnstat-plus-tx); }
-                    #${rootId} .vnstat-plus-card-total .vnstat-plus-card-value { color: var(--vnstat-plus-total); }
+                    #${rootId} .vnstat-plus-card-detail { margin-top: 0.12em; color: currentColor; opacity: 0.64; font-size: 0.76em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                     #${rootId} .vnstat-plus-section-title { color: var(--vnstat-plus-muted); font-size: 0.9em; font-weight: 600; margin: 0.7em 0 0.4em; text-align: left; }
                     #${rootId} .vnstat-plus-chart { height: 16em; min-height: 12em; position: relative; }
                     #${rootId} .vnstat-plus-chart canvas { height: 100% !important; width: 100% !important; }
