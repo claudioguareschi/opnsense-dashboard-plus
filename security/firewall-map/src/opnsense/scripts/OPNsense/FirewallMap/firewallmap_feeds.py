@@ -42,11 +42,10 @@ import time
 import urllib.error
 import urllib.request
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fwmap_blocklists import FEEDS, FEED_DIR, feed_file  # noqa: E402
-from fwmap_common import CONFIG_XML, STATE_DIR, read_json, secure_umask, write_json, write_text  # noqa: E402
-from fwmap_pf import config_aliases  # noqa: E402
-from firewallmap_geodb import settings  # noqa: E402
+from lib.blocklists import FEEDS, FEED_DIR, feed_file
+from lib.common import CONFIG_XML, STATE_DIR, read_json, secure_umask, write_json, write_text
+from lib.pf import config_aliases
+from firewallmap_geodb import settings
 
 STATUS_FILE = f"{STATE_DIR}/feeds.json"
 MIN_AGE_SECONDS = 20 * 3600

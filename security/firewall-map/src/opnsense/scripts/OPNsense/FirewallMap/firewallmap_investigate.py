@@ -39,7 +39,6 @@ lookups. The AbuseIPDB key is read from config.xml and never printed.
 
 import ipaddress
 import json
-import os
 import sys
 import time
 import urllib.error
@@ -48,9 +47,8 @@ import urllib.request
 import xml.etree.ElementTree as ElementTree
 from concurrent.futures import ThreadPoolExecutor
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fwmap_cache import CacheStore  # noqa: E402
-from fwmap_common import CONFIG_XML, REPUTATION_KIND, REPUTATION_MAX_AGE, config_root, secure_umask  # noqa: E402
+from lib.cache import CacheStore
+from lib.common import CONFIG_XML, REPUTATION_KIND, REPUTATION_MAX_AGE, config_root, secure_umask
 
 TIMEOUT = 10
 # an RDAP, RIPEstat or AbuseIPDB answer is a few kB; anything far larger is not one

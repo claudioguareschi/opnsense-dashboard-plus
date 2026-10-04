@@ -22,7 +22,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Unit tests for inbound blocks and the log tail (fwmap_blocks)."""
+"""Unit tests for inbound blocks and the log tail (lib/blocks.py)."""
 
 import json
 import os

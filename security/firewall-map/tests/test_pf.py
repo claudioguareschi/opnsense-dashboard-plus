@@ -22,7 +22,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Unit tests for PF state parsing and flow endpoints (fwmap_pf)."""
+"""Unit tests for PF state parsing and flow endpoints (lib/pf.py)."""
 
 import json
 import ipaddress

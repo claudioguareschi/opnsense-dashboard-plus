@@ -22,7 +22,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Unit tests for the SQLite cache and geolocation (fwmap_cache)."""
+"""Unit tests for the SQLite cache and geolocation (lib/cache.py)."""
 
 import json
 import os

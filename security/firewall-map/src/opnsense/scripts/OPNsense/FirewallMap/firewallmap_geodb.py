@@ -50,13 +50,12 @@ import socket
 import time
 import urllib.error
 import urllib.request
-import xml.etree.ElementTree as ElementTree
 from configparser import ConfigParser
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlencode, urlparse
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fwmap_common import CONFIG_XML, GEODB_STATUS, STATE_DIR, config_root, read_json, secure_umask, write_json  # noqa: E402
+from lib.common import GEODB_STATUS, STATE_DIR, read_json, secure_umask, write_json
+from lib.config import settings
 
 
 GEOIP_ALIAS_CONF = "/usr/local/etc/filter_geoip.conf"
@@ -96,28 +95,6 @@ DATABASES = {
         "editions": {"city": "dbip-city-lite", "asn": "dbip-asn-lite"},
     },
 }
-
-
-def settings(path=CONFIG_XML):
-    """Read the plugin's firewall-wide settings straight from config.xml."""
-    values = {"provider": "auto", "license_key": "", "update_days": 3, "threat_lists": "",
-              "record_threats": "1", "blocklist_aliases": "0"}
-    try:
-        general = config_root(path).find("./OPNsense/FirewallMap/general")
-    except (OSError, ElementTree.ParseError):
-        general = None
-    if general is not None:
-        for field in values:
-            node = general.find(field)
-            if node is not None and node.text:
-                values[field] = node.text.strip()
-    try:
-        values["update_days"] = max(1, int(values["update_days"]))
-    except ValueError:
-        values["update_days"] = 3
-    if values["provider"] not in DATABASES and values["provider"] != "auto":
-        values["provider"] = "auto"
-    return values
 
 
 def effective_provider(values):

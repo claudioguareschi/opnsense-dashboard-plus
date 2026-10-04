@@ -45,9 +45,8 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ElementTree
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import firewallmap_investigate as investigate  # noqa: E402
-from fwmap_common import (  # noqa: E402
+import firewallmap_investigate as investigate
+from lib.common import (
     ABUSEIPDB_BLACKLIST, CONFIG_XML, PFCTL, STATE_DIR, config_root, read_json, secure_umask, write_json, write_text,
 )
 

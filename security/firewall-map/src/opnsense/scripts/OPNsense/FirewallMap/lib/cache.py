@@ -35,7 +35,7 @@ import sys
 import threading
 import time
 
-from fwmap_common import CACHE_DB
+from .common import CACHE_DB
 
 
 MMDBLOOKUP = "/usr/local/bin/mmdblookup"

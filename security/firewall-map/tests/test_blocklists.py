@@ -22,7 +22,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Unit tests for threat lists (fwmap_blocklists)."""
+"""Unit tests for threat lists (lib/blocklists.py)."""
 
 import json
 import os

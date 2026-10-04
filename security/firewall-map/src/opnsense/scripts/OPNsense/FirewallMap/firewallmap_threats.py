@@ -44,10 +44,9 @@ import sqlite3
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fwmap_common import CACHE_DB, THREATS_DB, is_icmp, remote_target, secure_umask, service_name  # noqa: E402
-from fwmap_leases import lease_names  # noqa: E402
-from fwmap_pf import flow_endpoints, inside_endpoint, orientation  # noqa: E402
+from lib.common import CACHE_DB, THREATS_DB, is_icmp, remote_target, secure_umask, service_name
+from lib.leases import lease_names
+from lib.pf import flow_endpoints, inside_endpoint, orientation
 
 DATABASE = THREATS_DB
 STATUSES = ("new", "reviewed", "dismissed", "blocked")

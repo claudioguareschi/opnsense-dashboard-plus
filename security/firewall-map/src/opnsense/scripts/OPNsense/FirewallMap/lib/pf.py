@@ -32,7 +32,7 @@ import re
 import subprocess
 import xml.etree.ElementTree as ElementTree
 
-from fwmap_common import CONFIG_XML, PFCTL, RULES_DEBUG, config_root, host_port, normalize_ip, private_ip, public_ip
+from .common import CONFIG_XML, PFCTL, RULES_DEBUG, config_root, host_port, normalize_ip, private_ip, public_ip
 
 
 IFCONFIG = "/sbin/ifconfig"

@@ -31,13 +31,13 @@ import time
 from collections import deque
 from datetime import datetime
 
-from fwmap_blocklists import IDS_LIST, threat_fields, threat_lists_for
-from fwmap_blocks import MAX_BLOCK_SOURCES
-from fwmap_common import (connection_target, host_port, location_fields, normalize_ip, public_ip,
-                          service_name, service_port_label, split_host_port)
-from fwmap_leases import describe_inside
-from fwmap_pf import (flow_endpoints, forward_target, inside_address, inside_endpoint, lan_rule_index,
-                      orientation, outside_key, rule_for, state_outside)
+from .blocklists import IDS_LIST, threat_fields, threat_lists_for
+from .blocks import MAX_BLOCK_SOURCES
+from .common import (connection_target, host_port, location_fields, normalize_ip, public_ip,
+                     service_name, service_port_label, split_host_port)
+from .leases import describe_inside
+from .pf import (flow_endpoints, forward_target, inside_address, inside_endpoint, lan_rule_index,
+                 orientation, outside_key, rule_for, state_outside)
 
 
 # Suricata's alert log (EVE JSON); read locally, only alert events

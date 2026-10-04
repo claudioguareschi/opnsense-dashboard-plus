@@ -45,13 +45,13 @@ import firewallmap_snapshots as SNAPSHOTS  # noqa: E402,F401
 import firewallmap_investigate as INVESTIGATE  # noqa: E402,F401
 import firewallmap_threats as THREATS  # noqa: E402,F401
 import flow_summary as SUMMARY  # noqa: E402,F401
-import fwmap_blocklists as BLOCKLISTS  # noqa: E402,F401
-import fwmap_blocks as BLOCKS  # noqa: E402,F401
-import fwmap_cache as CACHE  # noqa: E402,F401
-import fwmap_common as COMMON  # noqa: E402,F401
-import fwmap_ids as IDS  # noqa: E402,F401
-import fwmap_leases as LEASES  # noqa: E402,F401
-import fwmap_pf as PF  # noqa: E402,F401
+from lib import blocklists as BLOCKLISTS  # noqa: E402,F401
+from lib import blocks as BLOCKS  # noqa: E402,F401
+from lib import cache as CACHE  # noqa: E402,F401
+from lib import common as COMMON  # noqa: E402,F401
+from lib import ids as IDS  # noqa: E402,F401
+from lib import leases as LEASES  # noqa: E402,F401
+from lib import pf as PF  # noqa: E402,F401
 
 NAT_STATE = """all tcp 1.2.3.163:443 (192.168.1.2:443) <- 45.56.79.53:35799       ESTABLISHED:ESTABLISHED
    [123 + 456] wscale 9  [789 + 101112] wscale 6

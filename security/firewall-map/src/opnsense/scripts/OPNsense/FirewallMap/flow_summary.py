@@ -38,8 +38,7 @@ import subprocess
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fwmap_common import (  # noqa: E402
+from lib.common import (
     GEODB_STATUS, HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, geodb_retry_due, geodb_view, read_json,
     secure_umask,
 )

@@ -35,8 +35,8 @@ import threading
 from array import array
 from bisect import bisect_left
 
-from fwmap_common import ABUSEIPDB_BLACKLIST, CONFIG_XML, PFCTL, REPUTATION_KIND, REPUTATION_MAX_AGE, STATE_DIR
-from fwmap_pf import blocked_rule_tables, config_aliases, pf_tables
+from .common import ABUSEIPDB_BLACKLIST, CONFIG_XML, PFCTL, REPUTATION_KIND, REPUTATION_MAX_AGE, STATE_DIR
+from .pf import blocked_rule_tables, config_aliases, pf_tables
 
 
 IDS_LIST = "Suricata IDS"

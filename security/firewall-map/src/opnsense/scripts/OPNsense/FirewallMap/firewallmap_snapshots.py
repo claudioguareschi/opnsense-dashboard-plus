@@ -49,8 +49,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fwmap_common import (  # noqa: E402
+from lib.common import (
     OUTPUT_FILE, REQUEST_MARKER, SNAPSHOT_DIR, SNAPSHOT_REQUEST_DIR, read_json, secure_umask, write_json,
 )
 

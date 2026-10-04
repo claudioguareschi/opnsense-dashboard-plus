@@ -29,8 +29,8 @@
 import os
 from datetime import datetime
 
-from fwmap_blocklists import threat_fields
-from fwmap_common import location_fields, normalize_ip, public_ip, service_name
+from .blocklists import threat_fields
+from .common import location_fields, normalize_ip, public_ip, service_name
 
 
 FILTER_LOG = "/var/log/filter/latest.log"
@@ -233,7 +233,7 @@ def _service(port, hits):
 
 
 def block_summary(blocks, geo, local_addresses, origin, now, descriptions, interfaces, blocklists=None,
-                   reputation=None, alerts=None):
+                  reputation=None, alerts=None):
     """Map-ready blocked sources; each arc ends at the firewall address that was hit."""
     visible = blocks.visible(now)
     geo.resolve([address for address, _ in visible])

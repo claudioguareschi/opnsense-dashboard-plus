@@ -22,7 +22,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Unit tests for names of addresses: reverse DNS (fwmap_leases)."""
+"""Unit tests for names of addresses: reverse DNS (lib/leases.py)."""
 
 import os
 import sys

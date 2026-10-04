@@ -22,7 +22,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Unit tests for Suricata alerts and connection matching (fwmap_ids)."""
+"""Unit tests for Suricata alerts and connection matching (lib/ids.py)."""
 
 import json
 import ipaddress

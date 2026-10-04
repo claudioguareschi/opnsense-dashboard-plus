@@ -36,7 +36,7 @@ FADE_SECONDS and a flow is dropped as soon as its last PF state disappears.
 All geolocation lookups are local (mmdblookup against the installed MaxMind or DB-IP database).
 
 This module is the orchestrator; parsing, caches, threat lists, names, blocks and
-Suricata correlation live in the fwmap_* modules next to it.
+Suricata correlation live in the lib/ modules next to it.
 
     firewallmap_collector.py           run the collector (started by rc.d/firewallmap)
     firewallmap_collector.py tables    JSON threat list candidates for the settings dialog
@@ -60,27 +60,26 @@ import traceback
 import xml.etree.ElementTree as ElementTree
 from datetime import datetime, timezone
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import firewallmap_geodb as geodb  # noqa: E402
-import firewallmap_threats as threats  # noqa: E402
-from fwmap_blocklists import (  # noqa: E402
+import firewallmap_geodb as geodb
+import firewallmap_threats as threats
+from lib.blocklists import (
     REPUTATION_LIST, BlocklistIndex, Reputation, chosen_threat_lists, tables_report, threat_fields,
     threat_lists_for,
 )
-from fwmap_blocks import BlockTracker, FilterLogTail, block_event_time, block_summary, parse_block  # noqa: E402
-from fwmap_cache import CacheStore, GeoCache  # noqa: E402
-from fwmap_common import (  # noqa: E402
+from lib.blocks import BlockTracker, FilterLogTail, block_event_time, block_summary, parse_block
+from lib.cache import CacheStore, GeoCache
+from lib.common import (
     CONFIG_XML, HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, SNAPSHOT_DIR, SNAPSHOT_REQUEST_DIR,
     config_root, host_port, remote_target, requested, secure_umask, service_name, service_port_label, write_json,
     write_text,
 )
-from fwmap_ids import (  # noqa: E402
+from lib.ids import (
     ALERT_BACKLOG_BYTES, EVE_LOG, AlertTracker, Correlator, alert_summary, connection_keys, connection_summary, firewall_blocks,
     ips_drops,
 )
-from fwmap_leases import HostnameResolver, describe_inside, describe_target, lease_names  # noqa: E402
-from firewallmap_snapshots import valid_id as snapshot_valid_id  # noqa: E402
-from fwmap_pf import (  # noqa: E402
+from lib.leases import HostnameResolver, describe_inside, describe_target, lease_names
+from firewallmap_snapshots import valid_id as snapshot_valid_id
+from lib.pf import (
     TooManyStates, flow_endpoints, host_info, inside_endpoint, interface_names, lan_rule_index, orientation,
     port_forwards, rule_descriptions, rule_for, sample_states,
 )
@@ -411,7 +410,7 @@ class ThreatRecorder:
                 entry["remote"] = self._identity(address, collector)
                 entry["ids"] = collector.alerts.summary(address)
                 entry["connections"] = connection_summary(address, correlator, collector.leases, collector.interfaces,
-                                                           index=index)
+                                                          index=index)
             self.last_wall = time.time()
             threats.record(self.db, seen)
             # hourly by age; at once when a burst of flagged addresses overfills history
@@ -595,7 +594,7 @@ class Collector:
             "descriptions": self.descriptions,
         }
         payload = summarize_flows(self.tracker, geo, self.local_addresses, self.role, now, time.time(), resolver, context,
-                           limit)
+                                  limit)
         origin = next((location["id"] for location in payload["locations"] if location["local"]), None)
         if origin is None and self.local_addresses:
             origin = sorted(self.local_addresses)[0]
@@ -607,7 +606,7 @@ class Collector:
         shown = {flow["dest"] for flow in payload["flows"]} | {block["source"] for block in payload["blocks"]}
         payload["alerts"] = alert_summary(self.alerts, geo, origin, shown, self.blocklists, self.reputation)
         payload["ids_flows"] = self.correlator.summary(geo, origin, self.leases, self.networks, self.interfaces,
-                                                        self.blocklists, self.reputation)
+                                                       self.blocklists, self.reputation)
         # which lists are consulted, so the details can show "not listed" per list
         # every configured interface, so the interface filter lists the quiet ones too
         # (not loopback or the IPsec encapsulation device: no inside host lives behind them)

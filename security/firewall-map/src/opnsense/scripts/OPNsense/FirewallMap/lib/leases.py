@@ -32,7 +32,7 @@ import time
 import xml.etree.ElementTree as ElementTree
 from concurrent.futures import ThreadPoolExecutor
 
-from fwmap_common import CONFIG_XML, config_root, service_name
+from .common import CONFIG_XML, config_root, service_name
 
 
 HOSTNAME_TTL = 6 * 3600
