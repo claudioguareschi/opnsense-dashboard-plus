@@ -136,8 +136,8 @@ signatures. You can investigate, add a note, mark it reviewed or dismissed, and 
 address (IPv4 or IPv6) to an alias you choose; it blocks only if a firewall rule uses that alias.
 When history is full (5,000 entries), blocked and dropped entries are removed before passed ones.
 Entries you reviewed, dismissed or annotated are kept apart, up to 1,000. Entries are kept for 90
-days, counted from the last sighting (for reviewed or annotated ones, from the last sighting or
-status change, whichever is later).
+days, counted from the last sighting (for those, from the last sighting or status change,
+whichever is later).
 
 While the widget is on a dashboard, threat history keeps being fed in the background (a light
 sample every 20 seconds) even with no map open; switch this off in the Threats footer.
@@ -358,6 +358,7 @@ versions and signs the whole catalog.
   - The map walks at most as many states as 5% of RAM allows, at about 6 KB per state: about
     35,000 on a 4 GB firewall instead of about 100,000. Above that it says so instead of mapping.
   - Apply on the settings page calls `service/reconfigure`; `settings/reconfigure` is gone.
+  - The map page offers only the actions the user may use.
   - The diagnostics panel ships only in development builds.
   - Reviewed, dismissed and annotated threat entries survive pruning (up to 1,000).
   - A stuck geolocation download restarts on its own; "Update now" right after a download is
