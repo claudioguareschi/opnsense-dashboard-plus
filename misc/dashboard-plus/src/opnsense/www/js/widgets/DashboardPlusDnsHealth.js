@@ -18,6 +18,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         this.error = '';
         this.totalsError = '';
         this.totalsLoading = false;
+        this.loading = true;
         this.refreshSeconds = 30;
         this.tickTimeout = 30;
         this.queryChart = null;
@@ -430,7 +431,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
     }
 
     _renderTypes() {
-        const allTypes = this.data.recent?.types || {};
+        const allTypes = this.data.recent?.types && typeof this.data.recent.types === 'object' ? this.data.recent.types : {};
         const primary = ['A', 'AAAA', 'PTR', 'TXT', 'MX'];
         const entries = primary.filter(type => allTypes[type]).map(type => [type, Number(allTypes[type])]);
         const other = Object.entries(allTypes)
@@ -474,9 +475,9 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
 
     _renderRecent() {
         const $recent = $(`#${this._elementId('recent')}`);
-        const queries = this.data.recent?.queries || [];
+        const queries = Array.isArray(this.data.recent?.queries) ? this.data.recent.queries : [];
         $recent.css('--dashboard-plus-dns-health-recent-height', `${this.recentRows * 2.1}em`);
-        $recent.html(queries.length ? queries.map(query => {
+        $recent.html(this.loading ? `<div class="dashboard-plus-dns-health-empty">${escapeHtml(this.translations.waiting)}</div>` : queries.length ? queries.map(query => {
             const lookup = this._asNumber(query.lookup_ms);
             const details = [lookup === null ? '' : this._formatLookup(lookup), this._formatAge(query.age)].filter(Boolean).join(' · ') || '—';
             const isError = ['SERVFAIL', 'REFUSED'].includes(query.rcode);
@@ -515,8 +516,8 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 `${this.translations.avg_recursive_lookup} ${this._formatLookup(stats.lookup)}`)
         ].join(''));
 
-        const upstreams = this.data.upstreams || [];
-        $(`#${this._elementId('upstreams')}`).html(upstreams.length ? upstreams.map(upstream => `
+        const upstreams = Array.isArray(this.data.upstreams) ? this.data.upstreams : [];
+        $(`#${this._elementId('upstreams')}`).html(this.loading ? `<div class="dashboard-plus-dns-health-empty">${escapeHtml(this.translations.waiting)}</div>` : upstreams.length ? upstreams.map(upstream => `
             <div class="dashboard-plus-dns-health-upstream">
                 <i class="fa fa-fw fa-server dashboard-plus-dns-health-upstream-icon" title="${escapeHtml(this.translations.upstreams)}" aria-hidden="true"></i>
                 <div class="dashboard-plus-dns-health-upstream-name" title="${escapeHtml(upstream.domain || upstream.description || upstream.server)}">${escapeHtml(upstream.domain || upstream.description || upstream.server)}</div>
@@ -525,10 +526,10 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         this._renderTypes();
         this._renderRecent();
 
-        const displayError = this.error || this.totalsError;
+        const displayError = this.loading ? '' : this.error || this.totalsError;
         $(`#${this._elementId('error')}`).text(displayError).toggle(Boolean(displayError))
             .toggleClass('text-danger', Boolean(displayError));
-        $(`#${this._elementId('updated')}`).text(displayError ? this.translations.fetch_failed :
+        $(`#${this._elementId('updated')}`).text(this.loading ? this.translations.waiting : displayError ? this.translations.fetch_failed :
             `${this.translations.updated} ${new Date().toLocaleTimeString()}`);
         this.config.callbacks?.updateGrid?.();
     }
@@ -579,6 +580,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             upstreams: value(3, {rows: []})?.rows || [],
             recent: value(4, {queries: [], types: {}})
         };
+        this.loading = false;
         this._refreshTotals();
     }
 
@@ -595,6 +597,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             await this._fetchData();
             this.error = '';
         } catch (error) {
+            this.loading = false;
             this.error = error?.message || this.translations.fetch_failed;
         }
         this._render();
@@ -606,6 +609,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             await this._fetchData();
             this.error = '';
         } catch (error) {
+            this.loading = false;
             this.error = error?.message || this.translations.fetch_failed;
         }
         this._render();
