@@ -784,7 +784,7 @@
 		if (state.abuseChecking.has(address)) abuse = `<span class="text-muted">${escapeHtml(T.checking)}</span>`;
 		else if (!known) abuse = state.isAdmin && state.abuseConfigured ? `<a href="#" class="fwmap-abuse-check" data-address="${escapeHtml(address)}">${ic("magnifying-glass")} ${escapeHtml(T.check_now)}</a>` : `<span class="text-muted" title="${escapeHtml(T.abuseipdb_hint)}">${escapeHtml(T.no_key)}</span>`;
 		else abuse = score >= 75 ? pill("danger", `${score}%`) : score >= 25 ? pill("warning", `${score}%`) : pill("success", T.clean, "check");
-		const notListed = `<span class="text-success">${ic("check")} ${escapeHtml(T.not_listed_short)}</span>`;
+		const notListed = `<span class="text-success text-nowrap">${ic("check")} ${escapeHtml(T.not_listed_short)}</span>`;
 		const left = rows([["AbuseIPDB", blacklisted && !known ? "" : abuse], ...lists.filter((name) => name !== ABUSEIPDB_LOOKUP_LIST).map((name) => [listLabel(name), listed.has(name) ? pill("danger", T.listed, "ban") : notListed])]);
 		const right = rows([
 			["ASN", item.asn ? escapeHtml(`AS${item.asn}`) : ""],
