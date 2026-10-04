@@ -480,10 +480,8 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             return;
         }
         const color = '#2ca02c';
-        const labels = this.queryRateSamples.map(sample => new Date(sample.at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'}));
-        const data = this.queryRateSamples.map(sample => sample.ratePerSecond);
+        const data = this.queryRateSamples.map(sample => ({x: sample.at, y: sample.ratePerSecond}));
         if (this.queryRateChart) {
-            this.queryRateChart.data.labels = labels;
             this.queryRateChart.data.datasets[0].data = data;
             this.queryRateChart.update('none');
             return;
@@ -491,14 +489,12 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         this.queryRateChart = new chart(canvas.getContext('2d'), {
             type: 'line',
             data: {
-                labels,
                 datasets: [{
                     label: this.translations.requests_per_second,
                     data,
                     borderColor: color,
-                    backgroundColor: 'rgba(44, 160, 44, 0.16)',
+                    backgroundColor: 'rgba(44, 160, 44, 0.28)',
                     fill: true,
-                    tension: 0.22,
                     pointRadius: 0,
                     borderWidth: 2
                 }]
@@ -506,10 +502,22 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: {colorschemes: false, legend: {display: false}},
+                normalized: true,
+                elements: {line: {fill: true, cubicInterpolationMode: 'monotone', clip: 0}},
+                plugins: {
+                    colorschemes: false,
+                    legend: {display: false},
+                    tooltip: {callbacks: {label: context => `${this.translations.requests_per_second}: ${this._formatRate(context.raw.y)}`}},
+                    streaming: {frameRate: 30, ttl: 70000}
+                },
                 scales: {
                     y: {beginAtZero: true, ticks: {maxTicksLimit: 5, callback: value => this._formatRate(value)}},
-                    x: {ticks: {maxRotation: 0, autoSkip: true, maxTicksLimit: 5}}
+                    x: {
+                        type: 'realtime',
+                        time: {tooltipFormat: 'HH:mm:ss', unit: 'second', displayFormats: {second: 'HH:mm:ss'}},
+                        realtime: {duration: 60000, delay: 2000},
+                        ticks: {maxRotation: 0, autoSkip: true, maxTicksLimit: 5}
+                    }
                 }
             }
         });
