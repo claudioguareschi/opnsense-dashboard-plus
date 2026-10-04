@@ -315,13 +315,13 @@ async function loadSettings() {
     console.error('Firewall Map+: dashboard settings unavailable', error);
   }
   state.settings = {...parseSettings(config), colorMode: state.colorMode};
-  // investigation actions are offered to administrators (who can read the plugin settings)
+  // investigation actions are offered to administrators (who can read the plugin status)
   try {
-    state.pluginSettings = host().pluginSettings(await getJSON('/api/firewallmap/settings/get'));
-    state.isAdmin = Boolean(state.pluginSettings.provider);
-    state.abuseConfigured = Boolean(state.pluginSettings.abuseipdb_configured);
+    state.pluginStatus = await getJSON('/api/firewallmap/settings/status');
+    state.isAdmin = true;
+    state.abuseConfigured = Boolean(state.pluginStatus.abuseipdb_configured);
   } catch (_) {
-    state.pluginSettings = null;
+    state.pluginStatus = null;
     state.isAdmin = false;
   }
 }

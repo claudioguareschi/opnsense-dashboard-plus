@@ -25,31 +25,16 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-
 namespace OPNsense\FirewallMap;
 
-use OPNsense\Base\BaseModel;
-use OPNsense\Base\Messages\Message;
-
-class FirewallMap extends BaseModel
+/**
+ * Reporting: Firewall Map: Settings, the plugin's settings.
+ */
+class SettingsController extends \OPNsense\Base\IndexController
 {
-    /** Whether "Maintain blocklist aliases" can be applied: our aliases never replace or drop others' */
-    public function performValidation($validateFullModel = false)
+    public function indexAction()
     {
-        $messages = parent::performValidation($validateFullModel);
-        $general = $this->general;
-        $changed = $validateFullModel || $general->blocklist_aliases->isFieldChanged() ||
-            $general->threat_lists->isFieldChanged() || $general->abuseipdb_key->isFieldChanged();
-        if ($changed) {
-            [, , $error] = BlocklistAliases::reconcile(
-                (string)$general->blocklist_aliases === '1',
-                (string)$general->threat_lists,
-                $general->abuseipdb_key->getValue() !== ''
-            );
-            if ($error !== null) {
-                $messages->appendMessage(new Message($error, 'general.blocklist_aliases'));
-            }
-        }
-        return $messages;
+        $this->view->formSettings = $this->getForm('settings');
+        $this->view->pick('OPNsense/FirewallMap/settings');
     }
 }

@@ -33,9 +33,6 @@
  * the singular and plural of one phrase.
  */
 export const DEFAULT_TEXT = {
-  geo_provider: "Geolocation service",
-  geo_key: "MaxMind license key",
-  geo_update: "Update frequency",
   geo_downloading_title: "Downloading the geolocation database",
   geo_preparing: "Starting the download…",
   geo_progress: "{done} of {total}",
@@ -45,6 +42,7 @@ export const DEFAULT_TEXT = {
   geo_retry_in: "Trying again in {time}",
   geo_retrying: "Trying again…",
   geo_retry_now: "Retry now",
+  geo_settings: "Settings",
   geo_partial: "Network names are unavailable",
   geo_fallback: "Using {provider} Lite while the MaxMind download fails",
   geo_stale: "The geolocation database could not be updated",

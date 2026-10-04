@@ -261,10 +261,10 @@ async function setThreat(address, status, note) {
   }
 }
 
-function blacklistStatus(settings) {
-  const status = settings.abuseipdb_blacklist || {};
+function blacklistStatus(plugin) {
+  const status = plugin.abuseipdb_blacklist || {};
   let text = T.blacklist_no_key;
-  if (settings.abuseipdb_configured) {
+  if (plugin.abuseipdb_configured) {
     text = status.updated
       ? `${Number(status.count).toLocaleString()} ${T.blacklist_addresses}, ${T.updated} ${new Date(status.updated * 1000).toLocaleString([], {dateStyle: 'medium', timeStyle: 'short'})}`
       : T.blacklist_pending;
@@ -282,15 +282,22 @@ export async function showQueue() {
   // seq: only the answer to the latest request is drawn (quick tab switches, typing)
   const view = {status: 'passed', rows: [], total: 0, counts: {}, names: {}, query: '', seq: 0};
   const $body = $('<div></div>');
-  const settings = state.pluginSettings || {};
+  const status = state.pluginStatus || {};
   const $record = $(`<label class="fwmap-q-record" title="${escapeHtml(T.record_threats_hint)}"><input type="checkbox"> ${escapeHtml(T.record_threats)}</label>`);
-  $record.find('input').prop('checked', settings.record_threats !== '0').on('change', async function () {
+  $record.find('input').prop('checked', status.record_threats !== '0').on('change', async function () {
+    const value = this.checked ? '1' : '0';
     try {
-      await postJSON('/api/firewallmap/settings/set', {record_threats: this.checked ? '1' : '0'});
-      if (state.pluginSettings) {
-        state.pluginSettings.record_threats = this.checked ? '1' : '0';
+      // the plugin setting (also at Reporting: Firewall Map: Settings), saved and applied
+      const saved = await postJSON('/api/firewallmap/settings/set', {firewallmap: {general: {record_threats: value}}});
+      if (saved.result !== 'saved') {
+        throw new Error(Object.values(saved.validations || {}).flat().join(' ') || saved.result);
+      }
+      await postJSON('/api/firewallmap/settings/reconfigure', {});
+      if (state.pluginStatus) {
+        state.pluginStatus.record_threats = value;
       }
     } catch (error) {
+      this.checked = value !== '1';
       notifyFailure(error);
     }
   });
@@ -455,7 +462,7 @@ export async function showQueue() {
     });
 
   // what the queue is and where its data comes from, out of the way of the entries
-  const $footer = $('<div class="fwmap-q-footer"></div>').append($record).append(blacklistStatus(settings));
+  const $footer = $('<div class="fwmap-q-footer"></div>').append($record).append(blacklistStatus(status));
   BootstrapDialog.show({
     title: `<div class="fwmap-q-titlebar">${ic('list-box', 'fwmap-q-title-ic')}<div><div class="fwmap-q-title">${escapeHtml(T.review_queue)}</div>`
       + `<div class="fwmap-q-subtitle">${escapeHtml(T.review_intro)}</div></div>`

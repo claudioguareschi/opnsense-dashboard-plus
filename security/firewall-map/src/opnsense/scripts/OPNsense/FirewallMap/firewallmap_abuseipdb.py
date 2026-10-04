@@ -26,7 +26,7 @@
 
 """Daily download of the AbuseIPDB blacklist for Firewall Map+.
 
-    firewallmap_abuseipdb.py update [force]   download when older than a day (needs a key)
+    firewallmap_abuseipdb.py update [force]   download when older than a day or the key is new
     firewallmap_abuseipdb.py sync             load the optional FWMAP_AbuseIPDB table from the cache
     firewallmap_abuseipdb.py status           JSON status (never includes the key)
 
@@ -35,6 +35,7 @@ API calls. The free tier returns up to 10,000 addresses at 100% confidence and a
 few downloads a day, so an automatic run never repeats within MIN_AGE_SECONDS.
 """
 
+import hashlib
 import ipaddress
 import json
 import os
@@ -137,10 +138,13 @@ def update(force=False, key=None, fetch=download, now=None):
         return {"result": "skipped", "reason": "no key"}
     status = read_status()
     attempted = status.get("attempted")
+    # a new key downloads at once: the earlier attempt was another account's (or a rejected key's)
+    key_id = hashlib.sha256(key.encode()).hexdigest()[:16]
+    new_key = status.get("key_id") != key_id
     # a timestamp from the future (clock fixed after boot) must not block updates
-    if not force and attempted is not None and 0 <= now - attempted < MIN_AGE_SECONDS:
+    if not (force or new_key) and attempted is not None and 0 <= now - attempted < MIN_AGE_SECONDS:
         return {"result": "skipped", "reason": "recent"}
-    status["attempted"] = now
+    status.update({"attempted": now, "key_id": key_id})
     try:
         addresses = parse_list(fetch(key))
         if not addresses:
@@ -173,4 +177,4 @@ if __name__ == "__main__":
         write_json(STATUS_FILE, status)
         print(json.dumps(status["pf"]))
     else:
-        print(json.dumps(read_status()))
+        print(json.dumps({name: value for name, value in read_status().items() if name != "key_id"}))

@@ -39,7 +39,7 @@ This module is the orchestrator; parsing, caches, threat lists, names, blocks an
 Suricata correlation live in the lib/ modules next to it.
 
     firewallmap_collector.py           run the collector (started by rc.d/firewallmap)
-    firewallmap_collector.py tables    JSON threat list candidates for the settings dialog
+    firewallmap_collector.py tables    JSON threat list candidates for the settings page
     firewallmap_collector.py ensure    start the collector when background recording is wanted
     firewallmap_collector.py reload    ask a running collector to re-read its settings
 

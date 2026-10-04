@@ -58,7 +58,7 @@ export const state = {
   tabBeforeSnapshots: null,
   settings: null,
   // the plugin settings (null for users who may not read them)
-  pluginSettings: null,
+  pluginStatus: null,
   filters: {traffic: 'all', service: '', iface: '', host: '', country: '', asn: ''},
   colorMode: 'initiator',
   talkerTab: 'hosts',

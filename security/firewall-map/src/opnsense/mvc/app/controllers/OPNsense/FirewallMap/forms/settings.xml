@@ -1,0 +1,53 @@
+<form>
+    <field>
+        <type>header</type>
+        <label>Geolocation</label>
+    </field>
+    <field>
+        <id>firewallmap.general.provider</id>
+        <label>Geolocation service</label>
+        <type>dropdown</type>
+        <help>Where the map looks up the location and network of each address. Downloads go only to the chosen provider; addresses are never sent anywhere.</help>
+    </field>
+    <field>
+        <id>firewallmap.general.license_key</id>
+        <label>MaxMind license key</label>
+        <type>password</type>
+        <help>Leave empty to keep the stored key. Without a key here, the key of a MaxMind GeoIP alias is used when one exists.</help>
+    </field>
+    <field>
+        <id>firewallmap.general.update_days</id>
+        <label>Update every (days)</label>
+        <type>text</type>
+        <help>How old the database may get before a new one is downloaded.</help>
+    </field>
+    <field>
+        <type>header</type>
+        <label>Threats</label>
+    </field>
+    <field>
+        <id>firewallmap.general.threat_lists</id>
+        <label>Threat lists</label>
+        <type>select_multiple</type>
+        <style>selectpicker</style>
+        <help>Used to flag traffic on the map. With none selected: feed tables and the aliases your block rules use.</help>
+    </field>
+    <field>
+        <id>firewallmap.general.record_threats</id>
+        <label>Record in the background</label>
+        <type>checkbox</type>
+        <help>Keep recording threats while the map is closed, as long as the widget is on a dashboard.</help>
+    </field>
+    <field>
+        <id>firewallmap.general.abuseipdb_key</id>
+        <label>AbuseIPDB API key</label>
+        <type>password</type>
+        <help>Optional: enables abuse reports when investigating an address, and the AbuseIPDB blacklist. Leave empty to keep the stored key.</help>
+    </field>
+    <field>
+        <id>firewallmap.general.blocklist_aliases</id>
+        <label>Maintain blocklist aliases</label>
+        <type>checkbox</type>
+        <help>Keeps an FWMAP_* alias for each selected feed and for the AbuseIPDB blacklist, for use in your own rules. No rules are added.</help>
+    </field>
+</form>

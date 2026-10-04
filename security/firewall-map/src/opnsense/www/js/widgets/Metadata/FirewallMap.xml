@@ -3,7 +3,7 @@
         <filename>FirewallMap.js</filename>
         <link>/ui/firewallmap</link>
         <!-- what a viewer needs (the widget privilege). The camera's save (same privilege) and the
-             optional administrator calls are made outside ajaxCall; see FirewallMap.js. -->
+             optional administrator check are made outside ajaxCall; see FirewallMap.js. -->
         <endpoints>
             <endpoint>/api/firewallmap/flow/summary</endpoint>
         </endpoints>
@@ -19,6 +19,7 @@
             <max_arcs>Maximum links shown</max_arcs>
             <labels>City labels</labels>
             <labels_zoomed>When zoomed in</labels_zoomed>
+            <on>On</on>
             <labels_off>Off</labels_off>
             <none>None</none>
             <blocks>Show blocked traffic</blocks>
@@ -28,7 +29,7 @@
             <block_min>Show blocked sources after</block_min>
             <every_attempt>every attempt</every_attempt>
             <attempts>attempts in 10 minutes</attempts>
-            <hostnames>Lookup hostnames</hostnames>
+            <hostnames>Look up hostnames</hostnames>
             <asn>Show ASN</asn>
             <follow>Follow traffic: keep the map zoomed to the current arcs</follow>
             <snapshot_take>Take a snapshot: save the map as it is now, to review on the full-size map</snapshot_take>
@@ -36,27 +37,7 @@
             <snapshot_open>Open in full map</snapshot_open>
             <snapshot_failed>The snapshot could not be saved</snapshot_failed>
             <snapshot_too_soon>A snapshot was taken seconds ago: try again in a moment</snapshot_too_soon>
-            <provider_auto>Automatic (MaxMind with a key, otherwise DB-IP Lite)</provider_auto>
-            <provider_maxmind>MaxMind GeoLite2 (free)</provider_maxmind>
-            <provider_maxmind_paid>MaxMind GeoIP2 City (paid subscription)</provider_maxmind_paid>
-            <provider_dbip>DB-IP Lite (no key)</provider_dbip>
-            <geo_provider>Geolocation service</geo_provider>
-            <geo_key>MaxMind license key</geo_key>
-            <geo_update>Update frequency</geo_update>
-            <abuseipdb_key>AbuseIPDB API key</abuseipdb_key>
-            <blocklist_aliases>Maintain blocklist aliases</blocklist_aliases>
-            <blocklist_aliases_help>Keeps an FWMAP_* alias for each selected feed and for the AbuseIPDB blacklist, for use in your own rules. No rules are added.</blocklist_aliases_help>
-            <key_set_abuse>Key saved (enter a new one to replace it, "-" to remove it)</key_set_abuse>
-            <abuseipdb_none>Optional: enables abuse reports when investigating an address</abuseipdb_none>
-            <threat_lists>Threat lists</threat_lists>
-            <threat_lists_help>Used to flag traffic on the map. With none selected: feed tables and the aliases your block rules use.</threat_lists_help>
-            <display_heading>Display (your dashboard)</display_heading>
-            <firewall_heading>Firewall-wide (administrators)</firewall_heading>
-            <days>days</days>
-            <key_set>Key saved (enter a new one to replace it, "-" to use the GeoIP alias key)</key_set>
-            <key_from_alias>Using the key from the GeoIP alias (enter one to override)</key_from_alias>
-            <key_none>Required for MaxMind</key_none>
-            <key_missing>A MaxMind license key is needed: add it in this widget's settings or in the GeoIP alias settings, or choose DB-IP Lite</key_missing>
+            <key_missing>A MaxMind license key is needed: add it in the Firewall Map settings or in the GeoIP alias settings, or choose DB-IP Lite</key_missing>
             <database_failed>Geolocation database download failed</database_failed>
             <geo_downloading_title>Downloading the geolocation database</geo_downloading_title>
             <geo_preparing>Starting the download…</geo_preparing>
@@ -67,6 +48,7 @@
             <geo_retry_in>Trying again in {time}</geo_retry_in>
             <geo_retrying>Trying again…</geo_retrying>
             <geo_retry_now>Retry now</geo_retry_now>
+            <geo_settings>Settings</geo_settings>
             <geo_partial>Network names are unavailable</geo_partial>
             <geo_fallback>Using {provider} Lite while the MaxMind download fails</geo_fallback>
             <geo_stale>The geolocation database could not be updated</geo_stale>
@@ -80,7 +62,6 @@
             <geo_err_disk_full>The database could not be saved: the firewall's disk is full.</geo_err_disk_full>
             <geo_err_http>{provider} answered with an error.</geo_err_http>
             <geo_err_other>The download failed.</geo_err_other>
-            <settings_failed>Firewall-wide settings were not saved</settings_failed>
             <database_downloading>Downloading the geolocation database…</database_downloading>
             <carp_backup>CARP backup: traffic is passing through the master</carp_backup>
             <too_many_states>The state table is too large to map ({count} states). The map resumes below {limit}.</too_many_states>

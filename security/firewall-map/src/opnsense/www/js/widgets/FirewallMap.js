@@ -8,7 +8,7 @@ const AUTO_HEIGHT = 10000;
 // follow traffic is the map's own toggle, remembered per browser (as on the full-size map)
 // the renderer's content hash, written by tools/build-renderer.sh: a new renderer has a new
 // address, so a browser never runs an old cached copy with a newer widget
-const RENDERER_VERSION = '5b993b2fd495';
+const RENDERER_VERSION = '80c3d3a1d213';
 const FOLLOW_KEY = 'firewallmap.widget.follow';
 const CAMERA_ICON = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.6l1.6-2.4h6.6L16.9 7h2.6A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.8" r="3.4"/></svg>';
 const TARGET_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>';
@@ -30,8 +30,6 @@ function writeStorage(key, value) {
 }
 
 export default class FirewallMap extends BaseWidget {
-    static FIREWALL_WIDE = ['geo_provider', 'geo_key', 'geo_update_days', 'abuseipdb_key', 'threat_lists', 'blocklist_aliases'];
-
     constructor(config) {
         super(config);
         this.tickTimeout = 2;
@@ -43,191 +41,30 @@ export default class FirewallMap extends BaseWidget {
         this.renderer = null;
         this.loadingRenderer = null;
         this.configurable = true;
-        this.geoSettings = null;
+        // whether this user may change the plugin settings (Retry now): null until asked
+        this.admin = null;
         // set when the widget is removed: work still under way must not create anything after it
         this.closed = false;
         this.manualHeight = parseInt(config?.widget?.manual_height, 10) || null;
         this.heightManaged = false;
     }
 
-    _settingsError(message) {
-        BootstrapDialog.show({
-            type: BootstrapDialog.TYPE_DANGER,
-            title: this.translations.title,
-            message: $('<div></div>').text(`${this.translations.settings_failed}: ${message}`),
-            buttons: [{label: 'OK', action: (dialog) => dialog.close()}],
-        });
-    }
-
     /**
-     * The firewall-wide settings calls. They are optional: only administrators may make them, and
-     * the widget works without them. So they do not go through this.ajaxCall, whose endpoints (the
-     * Metadata list) decide who sees the widget at all: listing them would hide it from viewers.
-     * The server checks the settings privilege on every one of these requests.
+     * Whether this user may change the plugin settings, which decides if the geolocation card
+     * offers Retry now. Asked outside this.ajaxCall: its endpoints (the Metadata list) decide who
+     * sees the widget at all, and listing this one would hide the widget from viewers.
      */
-    _adminCall(url, data = {}, method = 'GET') {
-        return $.ajax({url, type: method, dataType: 'json', contentType: 'application/json', data, timeout: 15000});
-    }
-
-    async _loadGeoSettings() {
-        // only administrators may read (and change) the firewall-wide database settings
+    async _loadAdmin() {
         try {
-            const renderer = await this._loadRenderer();
-            this.geoSettings = renderer.host.pluginSettings(await this._adminCall('/api/firewallmap/settings/get'));
+            await $.ajax({url: '/api/firewallmap/settings/status', dataType: 'json', timeout: 15000});
+            this.admin = true;
         } catch (_) {
-            this.geoSettings = null;
-            return null;
+            this.admin = false;
         }
-        try {
-            this.threatTables = await this._adminCall('/api/firewallmap/settings/tables');
-        } catch (_) {
-            this.threatTables = {tables: [], automatic: []};
-        }
-        return this.geoSettings;
     }
 
-    _geoOptions(choices) {
-        const geo = this.geoSettings;
-        if (!geo?.provider) {
-            return {};
-        }
-        return {
-            geo_provider: {
-                id: `${this.id}-option-geo-provider`,
-                title: this.translations.geo_provider,
-                type: 'select',
-                options: choices([
-                    ['auto', this.translations.provider_auto],
-                    ['maxmind', this.translations.provider_maxmind],
-                    ['maxmind_paid', this.translations.provider_maxmind_paid],
-                    ['dbip', this.translations.provider_dbip],
-                ]),
-                default: geo.provider,
-            },
-            geo_key: {
-                id: `${this.id}-option-geo-key`,
-                title: this.translations.geo_key,
-                type: 'text',
-                default: '',
-            },
-            geo_update_days: {
-                id: `${this.id}-option-geo-update`,
-                title: this.translations.geo_update,
-                type: 'select',
-                options: choices([...new Set(['1', '3', '7', '14', '30', String(geo.update_days)])]
-                    .sort((a, b) => a - b).map((value) => [value, `${value} ${this.translations.days}`])),
-                default: geo.update_days,
-            },
-            abuseipdb_key: {
-                id: `${this.id}-option-abuseipdb-key`,
-                title: this.translations.abuseipdb_key,
-                type: 'text',
-                default: '',
-            },
-            threat_lists: {
-                id: `${this.id}-option-threat-lists`,
-                title: this.translations.threat_lists,
-                type: 'select_multiple',
-                // nothing selected means automatic (feed tables and URL aliases used by block rules)
-                options: choices((this.threatTables?.tables || []).map((table) => [table.name, table.label || table.name])),
-                default: (geo.threat_lists || '').split(',').filter(Boolean),
-            },
-            blocklist_aliases: {
-                id: `${this.id}-option-blocklist-aliases`,
-                title: this.translations.blocklist_aliases,
-                type: 'select',
-                options: choices([['0', this.translations.none], ['1', this.translations.blocklist_aliases]]),
-                default: geo.blocklist_aliases === '1' ? '1' : '0',
-            },
-        };
-    }
-
-    /** Help under the key fields, saying what is stored now (hints used to hide in placeholders). */
-    _keyHelp() {
-        const geo = this.geoSettings || {};
-        const source = geo.database?.key_source;
-        return {
-            'geo-key': source === 'plugin' ? this.translations.key_set
-                : source === 'alias' ? this.translations.key_from_alias : this.translations.key_none,
-            'abuseipdb-key': geo.abuseipdb_configured ? this.translations.key_set_abuse : this.translations.abuseipdb_none,
-            'threat-lists': this.translations.threat_lists_help,
-            'blocklist-aliases': this.translations.blocklist_aliases_help,
-        };
-    }
-
-    /**
-     * The dashboard's options dialog only renders selects and text inputs. Once it is on screen:
-     * yes/no options become checkboxes (backed by their selects), help text goes under the key
-     * fields, the per-user and firewall-wide options get their own headings, and the license key
-     * field shows only while a MaxMind provider is selected.
-     */
-    _enhanceOptionsDialog() {
-        if (this.enhancingDialog) {
-            return;
-        }
-        this.enhancingDialog = true;
-        const started = Date.now();
-        const poll = () => {
-            const $hostnames = $(`#${this.id}-option-hostnames`);
-            const ready = $hostnames.length && $hostnames.closest('.bootstrap-select').length;
-            if (!ready) {
-                if (Date.now() - started < 3000) {
-                    setTimeout(poll, 50);
-                } else {
-                    this.enhancingDialog = false;
-                }
-                return;
-            }
-            this.enhancingDialog = false;
-            const containerOf = (option) => $(`#${this.id}-option-${option}`).closest('.widget-option-container');
-            for (const [option, label] of [
-                ['blocks', this.translations.blocks],
-                ['hostnames', this.translations.hostnames],
-                ['asn', this.translations.asn],
-                ['blocklist-aliases', this.translations.blocklist_aliases],
-            ]) {
-                const $select = $(`#${this.id}-option-${option}`);
-                const $container = containerOf(option);
-                $container.css({marginTop: '8px', marginBottom: '2px'});
-                $container.find('.bootstrap-select').hide();
-                // flex keeps the box on the text's line whatever the theme's checkbox margins are
-                const $checkbox = $('<input type="checkbox" style="margin: 0 8px 0 0; flex: none; position: static;">')
-                    .prop('checked', $select.val() === '1')
-                    .on('change', (event) => $select.val(event.target.checked ? '1' : '0'));
-                $container.children('div').first().empty().append(
-                    $('<label style="display: flex; align-items: center; font-weight: bold; cursor: pointer; margin: 0; line-height: 20px;"></label>')
-                        .append($checkbox, document.createTextNode(label)),
-                );
-            }
-            const heading = (text) => $('<h4 style="margin: 14px 0 4px; font-size: 1.1em;"></h4>').text(text);
-            containerOf('heavy-top').before(heading(this.translations.display_heading));
-            containerOf('geo-provider').before(heading(this.translations.firewall_heading));
-            for (const [option, help] of Object.entries(this._keyHelp())) {
-                containerOf(option).append($('<div class="help-block" style="margin: 2px 0 0; font-size: .9em;"></div>').text(help));
-            }
-            const $provider = $(`#${this.id}-option-geo-provider`);
-            const $key = containerOf('geo-key');
-            const toggleKey = () => $key.toggle(($provider.val() || '') !== 'dbip');
-            $provider.on('change', toggleKey);
-            toggleKey();
-            // keys are secrets: masked while typed and kept out of the browser's form history
-            $(`#${this.id}-option-geo-key, #${this.id}-option-abuseipdb-key`)
-                .attr({type: 'password', autocomplete: 'new-password', spellcheck: 'false'});
-        };
-        poll();
-    }
-
-    /**
-     * Firewall-wide values belong to the plugin, not to this user's dashboard layout: drop any copy
-     * the dashboard saved with the layout, so the dialog always starts from the server's values.
-     * A height the user chose is kept with the widget's options (see _recordManualResize).
-     */
+    /** A height the user chose is kept with the widget's options (see _recordManualResize). */
     async getWidgetConfig() {
-        if (this.config?.widget) {
-            for (const key of FirewallMap.FIREWALL_WIDE) {
-                delete this.config.widget[key];
-            }
-        }
         const config = await super.getWidgetConfig();
         if (this.manualHeight) {
             config.manual_height = this.manualHeight;
@@ -240,12 +77,9 @@ export default class FirewallMap extends BaseWidget {
         super.setWidgetConfig(this.manualHeight ? {...rest, manual_height: this.manualHeight} : rest);
     }
 
+    /** How this widget draws the map. The plugin's own settings are at Reporting: Firewall Map: Settings. */
     async getWidgetOptions() {
         const choices = (values) => values.map(([value, label]) => ({value, label}));
-        if (this.geoSettings === null) {
-            await this._loadGeoSettings();
-        }
-        this._enhanceOptionsDialog();
         const defaults = window.FirewallMapRenderer?.DEFAULT_OPTIONS || {};
         return {
             heavy_top: {
@@ -283,7 +117,7 @@ export default class FirewallMap extends BaseWidget {
                 id: `${this.id}-option-blocks`,
                 title: this.translations.blocks,
                 type: 'select',
-                options: choices([['1', this.translations.blocks], ['0', this.translations.labels_off]]),
+                options: choices([['1', this.translations.on], ['0', this.translations.labels_off]]),
                 default: '1',
             },
             block_min: {
@@ -298,17 +132,16 @@ export default class FirewallMap extends BaseWidget {
                 id: `${this.id}-option-hostnames`,
                 title: this.translations.hostnames,
                 type: 'select',
-                options: choices([['0', this.translations.labels_off], ['1', this.translations.hostnames]]),
+                options: choices([['0', this.translations.labels_off], ['1', this.translations.on]]),
                 default: '0',
             },
             asn: {
                 id: `${this.id}-option-asn`,
                 title: this.translations.asn,
                 type: 'select',
-                options: choices([['1', this.translations.asn], ['0', this.translations.labels_off]]),
+                options: choices([['1', this.translations.on], ['0', this.translations.labels_off]]),
                 default: '1',
             },
-            ...this._geoOptions(choices),
         };
     }
 
@@ -373,57 +206,7 @@ export default class FirewallMap extends BaseWidget {
         }
     }
 
-    /** Send only what the administrator changed, so an unrelated save never overwrites another's choices. */
-    async _saveFirewallWide(values) {
-        const geo = this.geoSettings;
-        const update = {};
-        if (values.geo_provider !== geo.provider) {
-            update.provider = values.geo_provider;
-        }
-        if (String(values.geo_update_days) !== String(geo.update_days)) {
-            update.update_days = values.geo_update_days;
-        }
-        if ((values.geo_key || '').trim()) {
-            update.license_key = values.geo_key.trim();
-        }
-        if ((values.abuseipdb_key || '').trim()) {
-            update.abuseipdb_key = values.abuseipdb_key.trim();
-        }
-        if (String(values.blocklist_aliases) !== String(geo.blocklist_aliases === '1' ? '1' : '0')) {
-            update.blocklist_aliases = values.blocklist_aliases === '1' ? '1' : '0';
-        }
-        // curated feeds are downloaded by the plugin; their aliases follow "Maintain blocklist aliases"
-        const lists = (values.threat_lists || []).join(',');
-        // without the table list (lookup failed) the selection cannot be trusted
-        if ((this.threatTables?.tables || []).length && lists !== (geo.threat_lists || '')) {
-            update.threat_lists = lists;
-        }
-        if (!Object.keys(update).length) {
-            return;
-        }
-        try {
-            // OPNsense's standard settings shape; the server keeps a key that is left empty
-            const result = await this._adminCall('/api/firewallmap/settings/set', JSON.stringify({firewallmap: {general: update}}), 'POST');
-            if (result.result !== 'saved') {
-                console.error('Firewall Map+: settings not saved', result);
-                this._settingsError(Object.values(result.validations || {}).flat().join(' ') || result.result);
-            }
-        } catch (error) {
-            console.error('Firewall Map+: settings not saved', error);
-            this._settingsError(error?.statusText || String(error));
-        }
-        await this._loadGeoSettings();
-    }
-
-    async onWidgetOptionsChanged(values) {
-        if (this.geoSettings?.provider && values && 'geo_provider' in values) {
-            // firewall-wide values are saved to the plugin, never into this user's dashboard layout
-            const firewallWide = {...values};
-            for (const key of FirewallMap.FIREWALL_WIDE) {
-                delete values[key];
-            }
-            await this._saveFirewallWide(firewallWide);
-        }
+    async onWidgetOptionsChanged() {
         this.settings = await this._settings();
         this.renderer?.setSettings(this.settings);
     }
@@ -618,16 +401,15 @@ export default class FirewallMap extends BaseWidget {
 
     /**
      * The geolocation card over an empty map (downloading, failed, key missing), or the small note
-     * when only network names are missing. Retry now is for administrators: whether this user is
-     * one is learned once, from the plugin settings they can (or cannot) read.
+     * when only network names are missing. Retry now and Settings are for administrators: whether this user is
+     * one is learned once, from the plugin status they can (or cannot) read.
      */
     async _showGeo(summary) {
         const host = window.FirewallMapRenderer.host;
-        if (summary?.geodb?.state === 'failed' && this.geoSettings === null && !this.geoAsked) {
-            this.geoAsked = true;
-            await this._loadGeoSettings();
+        if (summary?.status === 'no_database' && this.admin === null) {
+            await this._loadAdmin();
         }
-        const admin = Boolean(this.geoSettings?.provider);
+        const admin = Boolean(this.admin);
         const html = host.geoCardHtml(summary, this._text(), {admin}) || host.geoNoteHtml(summary, this._text(), this.geoNoteDismissed);
         const slot = document.getElementById(`${this.id}-firewall-map-geo`);
         if (slot && slot.dataset.html !== html) {

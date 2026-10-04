@@ -43,7 +43,7 @@ and `/usr/local/etc/pkg/keys/dashboard-plus-repository.pub`.
 ## Firewall Map+
 
 The firewall's live traffic on a world map: a dashboard widget, and a full-size page opened with
-the expand link on the widget (`/ui/firewallmap`).
+the expand link on the widget or from **Reporting ▸ Firewall Map ▸ Map** (`/ui/firewallmap`).
 
 > [!IMPORTANT]
 > **Get two free keys for the best results.** Firewall Map+ works without them, but it is far more
@@ -53,15 +53,15 @@ the expand link on the widget (`/ui/firewallmap`).
 >   names. [Sign up for GeoLite2](https://www.maxmind.com/en/geolite2/signup), then create a key
 >   under **Manage license keys** in your MaxMind account. If the
 >   firewall already has a MaxMind GeoIP alias (**Firewall ▸ Aliases ▸ GeoIP settings**), Firewall
->   Map+ reads the key from there automatically; otherwise enter it in the widget settings. Without
+>   Map+ reads the key from there automatically; otherwise enter it in the plugin settings. Without
 >   a key the map falls back to the keyless DB-IP Lite databases, which are less precise.
 > - **AbuseIPDB API key** (free): the AbuseIPDB blacklist for flagging known-bad addresses, and
 >   reputation scores in *Investigate*. [Create an account](https://www.abuseipdb.com/register),
->   then create a key on the **API** page of your AbuseIPDB account and paste it into the widget
+>   then create a key on the **API** page of your AbuseIPDB account and paste it into the plugin
 >   settings.
 >
-> Keys are entered by an administrator in the widget's settings dialog (gear icon on the widget).
-> They are write-only: never displayed or logged.
+> Keys are entered by an administrator in **Reporting ▸ Firewall Map ▸ Settings**. They are
+> write-only: never displayed or logged.
 
 <img src="docs/screenshots/firewall-map-page.png" alt="Firewall Map+ full-size page with a connection selected">
 
@@ -78,8 +78,8 @@ States and Kill states actions.*
 <img src="docs/screenshots/firewall-map-widget.png" alt="Firewall Map+ dashboard widget" width="795">
 
 *The dashboard widget: the same live map in compact form, with a one-line summary of active flows
-and blocked sources. The link in the corner opens the full-size page; its settings dialog holds
-the display options and, for administrators, the firewall-wide settings described below.*
+and blocked sources. The link in the corner opens the full-size page; its settings dialog (gear
+icon) holds the widget's display options.*
 
 ### What you see
 
@@ -143,7 +143,7 @@ sample every 20 seconds) even with no map open; switch this off in the Threats f
 ### Threat lists
 
 Threat lists only **mark** traffic; no firewall rule is added or changed unless you use an alias in
-a rule yourself. Choose them in the widget settings (administrators):
+a rule yourself. Choose them in **Reporting ▸ Firewall Map ▸ Settings**:
 
 - Curated feeds, downloaded daily by Firewall Map+: Spamhaus DROP, abuse.ch Feodo Tracker,
   Emerging Threats compromised hosts, FireHOL level 1.
@@ -153,7 +153,7 @@ a rule yourself. Choose them in the widget settings (administrators):
   75% or more; a separate cache).
 - `FWMAP_Watchlist`, filled by *Mark as threat*.
 
-**Maintain blocklist aliases** (widget settings) keeps a `FWMAP_*` alias for each selected curated
+**Maintain blocklist aliases** (in the settings) keeps a `FWMAP_*` alias for each selected curated
 feed (a daily URL table) and, with a key, `FWMAP_AbuseIPDB` (filled from the downloaded blacklist,
 IPv4 and IPv6, after each download and at boot). Firewall Map+ adds no rules: use the aliases in
 your own block rules, on the interfaces you choose. The map itself works from its own daily copy of
@@ -178,12 +178,15 @@ instead.
 
 ### Settings
 
-Per-user display settings are in the widget's settings dialog: busiest-arc highlighting, maximum
-arcs, city labels, blocked traffic and its minimum hits, hostname lookups and network (ASN) names.
-Administrators also see the firewall-wide settings there: geolocation service (automatic, MaxMind
-GeoLite2, MaxMind GeoIP2 City, DB-IP Lite), MaxMind license key (taken from a MaxMind GeoIP alias
-when present), database update frequency, AbuseIPDB API key, threat lists and *Maintain blocklist
-aliases*. Keys are write-only and never displayed or logged.
+The plugin settings are in **Reporting ▸ Firewall Map ▸ Settings** (administrators); press
+**Apply** after saving: geolocation service (automatic, MaxMind GeoLite2, MaxMind GeoIP2 City,
+DB-IP Lite), MaxMind license key (taken from a MaxMind GeoIP alias when present), database update
+frequency, threat lists, background recording, AbuseIPDB API key and *Maintain blocklist aliases*.
+Keys are write-only and never displayed or logged: leave a key field empty to keep the stored key.
+
+Each widget's display options are in its own settings dialog (gear icon on the widget): busiest-arc
+highlighting, maximum arcs, city labels, blocked traffic and its minimum hits, hostname lookups and
+network (ASN) names.
 
 ### What leaves the firewall
 
@@ -193,7 +196,7 @@ aliases*. Keys are write-only and never displayed or logged.
 | Daily, with an AbuseIPDB key | AbuseIPDB | Your key, to download the blacklist. |
 | Threat-list aliases (daily, OPNsense's alias updater) | The list provider | The download request only. |
 | *Investigate* clicked | rdap.org, stat.ripe.net, AbuseIPDB | The one address being investigated. |
-| *Lookup hostnames* enabled | Your DNS resolver | Reverse lookups of remote addresses. |
+| *Look up hostnames* enabled | Your DNS resolver | Reverse lookups of remote addresses. |
 
 The collector runs while a map is open, or in the background while the widget is on a dashboard
 and background recording is on. It uses a few percent of one CPU core while a map is open.

@@ -173,6 +173,7 @@ const GEO_STYLES = `
 .fwmap-geo-card .fwmap-geo-sub { font-size: .9em; opacity: .7; }
 .fwmap-geo-card .fwmap-geo-details { font-size: .85em; opacity: .6; word-break: break-word; margin-bottom: 10px; }
 .fwmap-geo-card .fwmap-geo-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.fwmap-geo-card .fwmap-geo-buttons { display: flex; gap: 6px; margin-left: auto; }
 .fwmap-geo-countdown { font-variant-numeric: tabular-nums; }
 .fwmap-geo-note { position: absolute; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 5; max-width: calc(100% - 24px);
   display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 10px; border-radius: 8px; font-size: .85em;
@@ -263,10 +264,13 @@ export function geoCardHtml(summary, text, {admin = false} = {}) {
   if (geo.now) {
     skew = Date.now() / 1000 - geo.now;
   }
+  // the plugin settings page, for those who may change the settings
+  const settings = admin ? `<a class="btn btn-default btn-sm" href="/ui/firewallmap/settings">${escapeHtml(t.geo_settings)}</a>` : '';
   if (summary.reason === 'maxmind_key_missing') {
     // the status-line message starts with what the title already says ("…is needed: add it…")
     const advice = t.key_missing.includes(': ') ? t.key_missing.slice(t.key_missing.indexOf(': ') + 2) : t.key_missing;
-    return geoCard('key', 'fa-key', t.geo_key_title, `<p>${escapeHtml(advice.charAt(0).toUpperCase() + advice.slice(1))}.</p>`);
+    return geoCard('key', 'fa-key', t.geo_key_title, `<p>${escapeHtml(advice.charAt(0).toUpperCase() + advice.slice(1))}.</p>`
+      + (settings ? `<div class="fwmap-geo-actions"><span class="fwmap-geo-buttons">${settings}</span></div>` : ''));
   }
   if (geo.state === 'failed') {
     const retry = admin ? `<button type="button" class="btn btn-primary btn-sm fwmap-geo-retry" data-label="${escapeHtml(t.geo_retry_now)}"`
@@ -274,7 +278,7 @@ export function geoCardHtml(summary, text, {admin = false} = {}) {
     return geoCard('failed', 'fa-triangle-exclamation', t.geo_failed_title,
       explanations(geo, t).map((line) => `<p>${escapeHtml(line)}</p>`).join('')
       + `<div class="fwmap-geo-details">${(geo.errors || []).map((error) => escapeHtml(error.message || '')).join('<br>')}</div>`
-      + `<div class="fwmap-geo-actions"><span class="fwmap-geo-sub">${countdownHtml(geo, t)}</span>${retry}</div>`);
+      + `<div class="fwmap-geo-actions"><span class="fwmap-geo-sub">${countdownHtml(geo, t)}</span><span class="fwmap-geo-buttons">${settings}${retry}</span></div>`);
   }
   if (geo.state === 'downloading' && geo.total) {
     const percent = Math.min(100, Math.round((geo.done / geo.total) * 100));
@@ -318,23 +322,4 @@ export function geoNoteHtml(summary, text, dismissed = null) {
 /** Which failure a note is about: closing it hides that failure, not the next one. */
 export function geoNoteKey(summary) {
   return (summary?.geodb?.errors || []).map((error) => `${error.edition}:${error.code}`).join('|');
-}
-
-/**
- * The plugin's firewall-wide settings as the widget and the page use them, from the standard
- * settings API answer ({"firewallmap": {"general": {...}}, "status": {...}}): option fields come
- * as {value: {value: label, selected}} maps, the keys are never sent.
- */
-export function pluginSettings(answer) {
-  const general = answer?.firewallmap?.general || {};
-  const selected = (field) => (typeof field === 'object' && field !== null
-    ? Object.keys(field).find((key) => Number(field[key]?.selected)) || '' : String(field ?? ''));
-  return {
-    provider: selected(general.provider),
-    update_days: String(general.update_days ?? ''),
-    threat_lists: String(general.threat_lists ?? ''),
-    record_threats: String(general.record_threats ?? ''),
-    blocklist_aliases: String(general.blocklist_aliases ?? ''),
-    ...(answer?.status || {}),
-  };
 }

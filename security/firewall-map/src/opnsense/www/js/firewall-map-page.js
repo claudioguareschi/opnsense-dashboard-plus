@@ -131,9 +131,6 @@
 	//#endregion
 	//#region src/text.js
 	var DEFAULT_TEXT = {
-		geo_provider: "Geolocation service",
-		geo_key: "MaxMind license key",
-		geo_update: "Update frequency",
 		geo_downloading_title: "Downloading the geolocation database",
 		geo_preparing: "Starting the download…",
 		geo_progress: "{done} of {total}",
@@ -143,6 +140,7 @@
 		geo_retry_in: "Trying again in {time}",
 		geo_retrying: "Trying again…",
 		geo_retry_now: "Retry now",
+		geo_settings: "Settings",
 		geo_partial: "Network names are unavailable",
 		geo_fallback: "Using {provider} Lite while the MaxMind download fails",
 		geo_stale: "The geolocation database could not be updated",
@@ -259,7 +257,7 @@
 		},
 		tabBeforeSnapshots: null,
 		settings: null,
-		pluginSettings: null,
+		pluginStatus: null,
 		filters: {
 			traffic: "all",
 			service: "",
@@ -1603,10 +1601,10 @@
 		const result = await postJSON("/api/firewallmap/threats/set", payload);
 		if (result.result !== "saved") throw new Error(result.error || T.action_failed);
 	}
-	function blacklistStatus(settings) {
-		const status = settings.abuseipdb_blacklist || {};
+	function blacklistStatus(plugin) {
+		const status = plugin.abuseipdb_blacklist || {};
 		let text = T.blacklist_no_key;
-		if (settings.abuseipdb_configured) {
+		if (plugin.abuseipdb_configured) {
 			text = status.updated ? `${Number(status.count).toLocaleString()} ${T.blacklist_addresses}, ${T.updated} ${(/* @__PURE__ */ new Date(status.updated * 1e3)).toLocaleString([], {
 				dateStyle: "medium",
 				timeStyle: "short"
@@ -1627,13 +1625,17 @@
 			seq: 0
 		};
 		const $body = $("<div></div>");
-		const settings = state.pluginSettings || {};
+		const status = state.pluginStatus || {};
 		const $record = $(`<label class="fwmap-q-record" title="${escapeHtml(T.record_threats_hint)}"><input type="checkbox"> ${escapeHtml(T.record_threats)}</label>`);
-		$record.find("input").prop("checked", settings.record_threats !== "0").on("change", async function() {
+		$record.find("input").prop("checked", status.record_threats !== "0").on("change", async function() {
+			const value = this.checked ? "1" : "0";
 			try {
-				await postJSON("/api/firewallmap/settings/set", { record_threats: this.checked ? "1" : "0" });
-				if (state.pluginSettings) state.pluginSettings.record_threats = this.checked ? "1" : "0";
+				const saved = await postJSON("/api/firewallmap/settings/set", { firewallmap: { general: { record_threats: value } } });
+				if (saved.result !== "saved") throw new Error(Object.values(saved.validations || {}).flat().join(" ") || saved.result);
+				await postJSON("/api/firewallmap/settings/reconfigure", {});
+				if (state.pluginStatus) state.pluginStatus.record_threats = value;
 			} catch (error) {
+				this.checked = value !== "1";
 				notifyFailure(error);
 			}
 		});
@@ -1786,7 +1788,7 @@
 			event.preventDefault();
 			killStates(addressOf(this));
 		});
-		const $footer = $("<div class=\"fwmap-q-footer\"></div>").append($record).append(blacklistStatus(settings));
+		const $footer = $("<div class=\"fwmap-q-footer\"></div>").append($record).append(blacklistStatus(status));
 		BootstrapDialog.show({
 			title: `<div class="fwmap-q-titlebar">${ic("list-box", "fwmap-q-title-ic")}<div><div class="fwmap-q-title">${escapeHtml(T.review_queue)}</div><div class="fwmap-q-subtitle">${escapeHtml(T.review_intro)}</div></div><span class="fwmap-q-newcount"><b></b> ${escapeHtml(T.passed_attention)}</span></div>`,
 			size: BootstrapDialog.SIZE_WIDE,
@@ -2810,11 +2812,11 @@
 			colorMode: state.colorMode
 		};
 		try {
-			state.pluginSettings = host().pluginSettings(await getJSON("/api/firewallmap/settings/get"));
-			state.isAdmin = Boolean(state.pluginSettings.provider);
-			state.abuseConfigured = Boolean(state.pluginSettings.abuseipdb_configured);
+			state.pluginStatus = await getJSON("/api/firewallmap/settings/status");
+			state.isAdmin = true;
+			state.abuseConfigured = Boolean(state.pluginStatus.abuseipdb_configured);
 		} catch (_) {
-			state.pluginSettings = null;
+			state.pluginStatus = null;
 			state.isAdmin = false;
 		}
 	}

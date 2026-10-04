@@ -5,7 +5,7 @@
             <pattern>api/firewallmap/flow/summary</pattern>
             <pattern>api/firewallmap/snapshots/*</pattern>
             <pattern>ui/firewallmap</pattern>
-            <pattern>ui/firewallmap/*</pattern>
+            <pattern>ui/firewallmap/index</pattern>
         </patterns>
     </page-dashboard-widget-firewall-map>
     <page-firewall-map-settings>
@@ -15,6 +15,7 @@
         -->
         <name>Firewall Map+: settings, investigations and threats</name>
         <patterns>
+            <pattern>ui/firewallmap/settings</pattern>
             <pattern>api/firewallmap/settings/*</pattern>
             <pattern>api/firewallmap/investigate/*</pattern>
             <pattern>api/firewallmap/threats/*</pattern>

@@ -117,7 +117,10 @@ class AbuseBlacklistTest(unittest.TestCase):
                                  ["94.154.43.203", "204.76.203.231", "2001:4860:4860::8888"])
             self.assertEqual(ABUSEIPDB.update(key="k", fetch=fetch, now=2000.0)["reason"], "recent")
             self.assertEqual(ABUSEIPDB.update(force=True, key="k", fetch=fetch, now=2000.0)["result"], "ok")
-            self.assertEqual(len(calls), 2)
+            # a new key downloads at once, the same key again waits
+            self.assertEqual(ABUSEIPDB.update(key="other", fetch=fetch, now=3000.0)["result"], "ok")
+            self.assertEqual(ABUSEIPDB.update(key="other", fetch=fetch, now=4000.0)["reason"], "recent")
+            self.assertEqual(calls, ["k", "k", "other"])
 
     def test_errors_never_contain_the_key(self):
         with tempfile.TemporaryDirectory() as directory, \

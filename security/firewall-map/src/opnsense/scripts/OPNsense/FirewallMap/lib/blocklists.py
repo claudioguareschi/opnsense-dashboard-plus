@@ -129,7 +129,7 @@ def threat_list_candidates(config=CONFIG_XML, tables=None, aliases=None):
 
 
 def tables_report(config=CONFIG_XML):
-    """What the settings dialog lists: candidates and the automatic choice, from one pf and config read."""
+    """What the settings page lists: candidates and the automatic choice, from one pf and config read."""
     tables = pf_tables()
     aliases = config_aliases(config)
     return {"tables": threat_list_candidates(config, tables, aliases),
