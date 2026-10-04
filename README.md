@@ -275,7 +275,7 @@ order. Settings: which gateways and which metrics to show.*
 <img src="docs/screenshots/interfaces.png" alt="Interfaces+" width="795">
 
 *Link state, IPv4 and IPv6 addresses and media for the interfaces you choose, including IPsec VTI,
-WireGuard and OpenVPN tunnels; rows can be dragged into any order. Settings: which interfaces.*
+WireGuard and OpenVPN tunnels; rows can be dragged into any order. Settings: which interfaces and the refresh interval (10, 30 or 60 seconds).*
 
 ### Interface Statistics+
 
@@ -360,9 +360,9 @@ versions and signs the whole catalog.
   - System Metrics+, Thermal Sensors+ and System Information+ share one request per refresh
     instead of System Metrics+ alone making seven; slow-changing numbers (mbufs, swap, disks) are
     read once a minute. The Dashboard Plus privilege now covers these numbers.
-  - Interfaces+ refreshes every 30 seconds, Gateways+ loads its gateway list once and then only
-    the status, and Interface Statistics+ refreshes every 5, 10 (default) or 30 seconds (a saved
-    1 second becomes 5).
+  - Interfaces+ can refresh every 10 (default), 30 or 60 seconds, Gateways+ loads its gateway
+    list once and then only the status, and Interface Statistics+ refreshes every 5 (default), 10
+    or 30 seconds (a saved 1 second becomes 5).
   - Dashboard Plus widgets pause while their browser tab is hidden and refresh when it shows again.
 - **0.52** (both packages):
   - Users with only the map privilege now get live data (before, only administrators did).

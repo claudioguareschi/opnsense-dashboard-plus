@@ -112,7 +112,7 @@ export default class DashboardPlusInterfaceStatistics extends DashboardPlusWidge
     }
 
     async onWidgetTick() {
-        const refreshInterval = (parseInt(this.currentConfig.refresh_interval, 10) || 10) * 1000;
+        const refreshInterval = (parseInt(this.currentConfig.refresh_interval, 10) || 5) * 1000;
         // a second of slack, so a tick a little early does not wait a whole tick more
         if (this.lastRefresh && Date.now() - this.lastRefresh < refreshInterval - 1000) {
             return;
@@ -150,7 +150,7 @@ export default class DashboardPlusInterfaceStatistics extends DashboardPlusWidge
                     {value: '10', label: this.translations.seconds_10},
                     {value: '30', label: this.translations.seconds_30}
                 ],
-                default: '10'
+                default: '5'
             }
         };
     }

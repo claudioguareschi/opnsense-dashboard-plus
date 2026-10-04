@@ -196,6 +196,10 @@
             <openvpn_client>OpenVPN client</openvpn_client>
             <openvpn_server>OpenVPN server</openvpn_server>
             <openvpn>OpenVPN tunnel</openvpn>
+            <refresh_interval>Refresh interval</refresh_interval>
+            <seconds_10>10 seconds</seconds_10>
+            <seconds_30>30 seconds</seconds_30>
+            <seconds_60>60 seconds</seconds_60>
         </translations>
     </dashboardplusinterfaces>
     <dashboardplusfirewalllogs>

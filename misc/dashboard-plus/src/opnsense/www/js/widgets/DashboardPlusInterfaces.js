@@ -19,8 +19,9 @@ export default class DashboardPlusInterfaces extends DashboardPlusWidget(BaseWid
     constructor(config) {
         super(config);
         this.configurable = true;
-        // Every refresh runs two pluginctl processes on the firewall (0.8 s of CPU).
-        this.tickTimeout = 30;
+        // the shortest refresh interval; every refresh runs two pluginctl processes on the firewall
+        // (0.8 s of CPU), so slower choices are offered and onWidgetTick skips the ticks before them
+        this.tickTimeout = 10;
         this.cachedInterfaces = [];
         this.currentConfig = null;
     }
@@ -125,6 +126,12 @@ export default class DashboardPlusInterfaces extends DashboardPlusWidget(BaseWid
     }
 
     async onWidgetTick() {
+        const refreshInterval = (parseInt(this.currentConfig?.refresh_interval, 10) || 10) * 1000;
+        // a second of slack, so a tick a little early does not wait a whole tick more
+        if (this.lastRefresh && Date.now() - this.lastRefresh < refreshInterval - 1000) {
+            return;
+        }
+        this.lastRefresh = Date.now();
         const data = await this.ajaxCall('/api/interfaces/overview/interfaces_info');
         this.cachedInterfaces = this._availableInterfaces(data);
         this._render();
@@ -140,6 +147,17 @@ export default class DashboardPlusInterfaces extends DashboardPlusWidget(BaseWid
                 id: 'dashboard-plus-interfaces-selection',
                 options: interfaces.map(intf => ({value: intf.identifier, label: intf.description})),
                 default: interfaces.map(intf => intf.identifier)
+            },
+            refresh_interval: {
+                title: this.translations.refresh_interval,
+                type: 'select',
+                id: 'dashboard-plus-interfaces-refresh-interval',
+                options: [
+                    {value: '10', label: this.translations.seconds_10},
+                    {value: '30', label: this.translations.seconds_30},
+                    {value: '60', label: this.translations.seconds_60}
+                ],
+                default: '10'
             }
         };
     }
