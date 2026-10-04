@@ -1,8 +1,13 @@
 <acl>
     <page-dashboard-widget-dashboard-plus>
         <!--
-            Only the plugin's own endpoints. Native OPNsense data remains governed by
-            OPNsense's own privileges.
+            Only the plugin's own endpoints: the hardware information and the system metrics
+            (memory, load, CPU frequency, temperatures, pf states, mbufs, swap, filesystems)
+            that System Metrics+, Thermal Sensors+ and System Information+ read in one request.
+            The other data the widgets show from OPNsense itself (the firewall log, gateways,
+            interfaces, CPU usage) stays under OPNsense's own privileges: the dashboard shows a
+            widget only to users who may read every endpoint it lists, as for OPNsense's own
+            widgets.
         -->
         <name>Dashboard: Dashboard Plus widgets</name>
         <patterns>
