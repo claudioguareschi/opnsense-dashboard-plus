@@ -260,6 +260,25 @@ class InitiatorTest(unittest.TestCase):
             self.assertEqual(BLOCKLISTS.threat_lists_for("8.8.8.8", index, reputation), [])
 
 
+class StateRecordTest(unittest.TestCase):
+    OUTPUT = ("all tcp 198.51.100.7:40000 (10.0.0.5:51000) -> 203.0.113.9:443       ESTABLISHED:ESTABLISHED\n"
+              "   age 01:02:03, expires in 23:59:59, 10:20 pkts, 1000:2000 bytes, rule 7, rlabel abc\n"
+              "   id: 0000000000000001 creatorid: 12345678\n"
+              "   origif: igb0\n")
+
+    def test_records_read_like_dicts(self):
+        (record,) = PF.parse_states(self.OUTPUT)
+        self.assertEqual(record["src"], {"address": "198.51.100.7", "port": "40000"})
+        self.assertEqual(record["nat"]["address"], "10.0.0.5")
+        self.assertEqual((record["age"], record["bytes_out"], record.get("origif"), record["rule"]), (3723, 2000, "igb0", "abc"))
+        self.assertIsNone(record.get("missing"))
+        with self.assertRaises(KeyError):
+            record["missing"]
+
+    def test_lines_can_be_parsed_as_they_arrive(self):
+        self.assertEqual(PF.parse_states(iter(self.OUTPUT.splitlines(keepends=True))), PF.parse_states(self.OUTPUT))
+
+
 class StateGuardTest(unittest.TestCase):
     def test_a_huge_state_table_is_not_walked(self):
         walked = []

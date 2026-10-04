@@ -30,6 +30,8 @@ import functools
 import ipaddress
 import re
 import subprocess
+import sys
+import threading
 import xml.etree.ElementTree as ElementTree
 
 from .common import CONFIG_XML, PFCTL, RULES_DEBUG, config_root, host_port, normalize_ip, private_ip, public_ip
@@ -39,7 +41,76 @@ IFCONFIG = "/sbin/ifconfig"
 COUNTERS = re.compile(r"(?P<packets_in>\d+):(?P<packets_out>\d+) pkts,\s+(?P<bytes_in>\d+):(?P<bytes_out>\d+) bytes")
 AGE = re.compile(r"\bage (?:(?P<days>\d+)d)?(?P<h>\d+):(?P<m>\d+):(?P<s>\d+)")
 RLABEL = re.compile(r"\brlabel ([^,\s]+)")
+AGE_UNITS = (("days", 86400), ("h", 3600), ("m", 60), ("s", 1))
 STATE_ID = re.compile(r"\bid: (?P<id>[0-9a-f]+) creatorid: (?P<creator>[0-9a-f]+)")
+
+
+class _Record:
+    """A compact record (slots, not a dict: a state table holds up to MAX_SAMPLED_STATES of them)
+    that still reads like the dicts it replaced: record["src"]["address"], record.get("origif")."""
+    __slots__ = ()
+
+    def __getitem__(self, key):
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key) from None
+
+    def __setitem__(self, key, value):
+        setattr(self, key, value)
+
+    def get(self, key, default=None):
+        return getattr(self, key, default)
+
+    def keys(self):
+        return self.__slots__
+
+    def __iter__(self):
+        return iter(self.__slots__)
+
+    def __contains__(self, key):
+        return key in self.__slots__
+
+    def __eq__(self, other):
+        if isinstance(other, (_Record, dict)):
+            return dict(self) == dict(other)
+        return NotImplemented
+
+    def __repr__(self):
+        return f"{type(self).__name__}({', '.join(f'{key}={getattr(self, key)!r}' for key in self.__slots__)})"
+
+
+class Endpoint(_Record):
+    """One side of a state: address, and port as text (None for ICMP or when PF shows none)."""
+    __slots__ = ("address", "port")
+
+    def __init__(self, address, port):
+        self.address = address
+        self.port = port
+
+    def __hash__(self):
+        return hash((self.address, self.port))
+
+
+class PfState(_Record):
+    """One PF state as the map uses it.
+
+    interface, protocol, state     where it lives and its TCP/UDP state ("ESTABLISHED:ESTABLISHED")
+    direction                      "out" or "in", as PF created it
+    src, dst                       Endpoints in that direction; nat: the inside Endpoint behind NAT, or None
+    id                             "id/creatorid", unique per state; origif: the interface it was created on
+    age                            seconds since it was created (None when PF shows no age)
+    packets_in/out, bytes_in/out   counters
+    rule                           the label of the rule that created it (same as in the firewall log)
+    """
+    __slots__ = ("interface", "protocol", "state", "direction", "src", "dst", "nat", "id", "origif", "age",
+                 "packets_in", "packets_out", "bytes_in", "bytes_out", "rule")
+
+    def __init__(self, **fields):
+        for key in self.__slots__:
+            setattr(self, key, fields.get(key))
+
+    __hash__ = None
 
 
 def endpoint(value):
@@ -52,17 +123,15 @@ def endpoint(value):
     value = value.strip("()")
     if value.startswith("[") and "]" in value:
         address, _, rest = value[1:].partition("]")
-        return {"address": normalize_ip(address), "port": rest.lstrip(":") or None}
+        return Endpoint(normalize_ip(address), rest.lstrip(":") or None)
     if value.count(":") > 1:
         address, marker, rest = value.partition("[")
-        return {"address": normalize_ip(address), "port": rest.rstrip("]") or None} if marker else {
-            "address": normalize_ip(value), "port": None,
-        }
+        return Endpoint(normalize_ip(address), rest.rstrip("]") or None) if marker else Endpoint(normalize_ip(value), None)
     # IPv4 (the common case, kept free of parsing: this runs per state); pfctl prints it canonical
     address, _, port = value.partition(":")
     if address and (not port or port.isdigit()):
-        return {"address": address, "port": port or None}
-    return {"address": None, "port": None}
+        return Endpoint(address, port or None)
+    return Endpoint(None, None)
 
 
 def _state_header(line):
@@ -81,10 +150,11 @@ def _state_header(line):
     if not translated and not public_ip(left["address"]) and not public_ip(right["address"]):
         # LAN-internal state (or the LAN side of a NAT pair): never drawn, skip its details
         return None
+    # the same few interface, protocol and state names repeat across the whole table: one copy each
     return {
-        "interface": parts[0],
-        "protocol": parts[1],
-        "state": parts[-1],
+        "interface": sys.intern(parts[0]),
+        "protocol": sys.intern(parts[1]),
+        "state": sys.intern(parts[-1]),
         "direction": direction,
         "src": left if direction == "out" else right,
         "dst": right if direction == "out" else left,
@@ -98,25 +168,22 @@ def _counters_record(header, line):
     if not counters:
         return None
     age = AGE.search(line)
-    return {
+    return PfState(
         **header,
-        "id": None,
-        "origif": None,
-        "age": (
-            sum(int(age.group(unit) or 0) * seconds for unit, seconds in (("days", 86400), ("h", 3600), ("m", 60), ("s", 1)))
-        ) if age else None,
+        age=sum(int(age.group(unit) or 0) * seconds for unit, seconds in AGE_UNITS) if age else None,
         **{key: int(value) for key, value in counters.groupdict().items()},
         # the rule that created the state (same label as in the firewall log)
-        "rule": (RLABEL.search(line) or [None, None])[1] if "rlabel" in line else None,
-    }
+        rule=sys.intern((RLABEL.search(line) or [None, ""])[1]) or None if "rlabel" in line else None,
+    )
 
 
 def parse_states(output):
-    """Parse `pfctl -vv -s state` using the same endpoint fields as OPNsense's state API."""
+    """Parse `pfctl -vv -s state` (its text, or its lines as they arrive) using the same endpoint
+    fields as OPNsense's state API."""
     records = []
     header = None
     skipping = False
-    for line in output.splitlines():
+    for line in (output.splitlines() if isinstance(output, str) else output):
         if not line.startswith((" ", "\t")):
             header = _state_header(line)
             skipping = header is None
@@ -133,7 +200,7 @@ def parse_states(output):
         elif stripped.startswith("origif:"):
             if records and records[-1].get("origif") is None:
                 # the interface the state was created on: for NAT states, the egress (WAN, VPN, ...)
-                records[-1]["origif"] = stripped.split()[1]
+                records[-1]["origif"] = sys.intern(stripped.split()[1])
         elif header is not None and stripped.startswith("age "):
             record = _counters_record(header, line)
             if record:
@@ -492,6 +559,8 @@ STATE_MEMORY_SHARE = 0.05
 MIN_SAMPLED_STATES = 25000
 MAX_SAMPLED_STATES = 250000
 STATE_COUNT = re.compile(r"current entries\s+(\d+)")
+# a sample that takes longer is stopped (pfctl stuck, or a table far over the cap)
+SAMPLE_TIMEOUT = 10
 
 
 class TooManyStates(RuntimeError):
@@ -535,9 +604,16 @@ def sample_states(limit=None):
     count = state_count()
     if count is not None and count > limit:
         raise TooManyStates(count, limit)
-    result = subprocess.run(
-        [PFCTL, "-vv", "-s", "state"], capture_output=True, check=False, text=True, timeout=10,
-    )
-    if result.returncode != 0:
+    # parsed line by line as pfctl writes: the whole text (about 230 bytes per state) and its list of
+    # lines are never held next to the records
+    with subprocess.Popen([PFCTL, "-vv", "-s", "state"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                          text=True) as process:
+        watchdog = threading.Timer(SAMPLE_TIMEOUT, process.kill)
+        watchdog.start()
+        try:
+            records = parse_states(process.stdout)
+        finally:
+            watchdog.cancel()
+    if process.returncode != 0:
         raise RuntimeError("pfctl failed")
-    return parse_states(result.stdout)
+    return records
