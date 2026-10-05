@@ -279,6 +279,13 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
                 font-weight: 600;
                 font-variant-numeric: tabular-nums;
             }
+            .dashboard-plus-quickassist-metric-list {
+                overflow: visible;
+                text-overflow: clip;
+                white-space: normal;
+                font-size: 0.84em;
+                line-height: 1.45;
+            }
             .dashboard-plus-quickassist-metric-detail {
                 display: block;
                 min-height: 1.2em;
@@ -337,8 +344,8 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
                 <div class="dashboard-plus-quickassist-section-head"><div class="dashboard-plus-quickassist-section-title">${this.translations.device_information}</div></div>
                 <div class="dashboard-plus-quickassist-facts">
                     <div id="${this._id('engines-fact')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-cogs dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.acceleration_engines}</div><strong id="${this._id('engines')}" class="dashboard-plus-quickassist-metric-value"></strong><span id="${this._id('services')}" class="dashboard-plus-quickassist-metric-detail"></span></div></div>
-                    <div id="${this._id('capabilities-fact')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-shield dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.hardware_capabilities}</div><strong id="${this._id('capabilities')}" class="dashboard-plus-quickassist-metric-value"></strong></div></div>
-                    <div id="${this._id('algorithms-fact')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-lock dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.crypto_algorithms}</div><strong id="${this._id('algorithms')}" class="dashboard-plus-quickassist-metric-value"></strong></div></div>
+                    <div id="${this._id('capabilities-fact')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-shield dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.hardware_capabilities}</div><strong id="${this._id('capabilities')}" class="dashboard-plus-quickassist-metric-value dashboard-plus-quickassist-metric-list"></strong></div></div>
+                    <div id="${this._id('algorithms-fact')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-lock dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.crypto_algorithms}</div><strong id="${this._id('algorithms')}" class="dashboard-plus-quickassist-metric-value dashboard-plus-quickassist-metric-list"></strong></div></div>
                 </div>
             </section>
             <div id="${this._id('error')}" class="dashboard-plus-quickassist-error text-danger"></div>
