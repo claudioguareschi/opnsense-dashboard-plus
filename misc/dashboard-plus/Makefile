@@ -1,6 +1,6 @@
 PLUGIN_NAME=		dashboard-plus
 PLUGIN_VERSION=		0.57
-PLUGIN_COMMENT=		Ten extended dashboard widgets
+PLUGIN_COMMENT=		Eleven extended dashboard widgets
 PLUGIN_MAINTAINER=	cguareschimd@gmail.com
 PLUGIN_WWW=		https://github.com/claudioguareschi/opnsense-dashboard-plus
 PLUGIN_DEPENDS=		dmidecode
