@@ -2440,13 +2440,16 @@
 		const options = [`<option value="">${escapeHtml(allLabel)}</option>`].concat([...values].sort((a, b) => String(a.label).localeCompare(String(b.label))).map((item) => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`));
 		if (current && ![...values].some((item) => String(item.value) === current)) options.push(`<option value="${escapeHtml(current)}">${escapeHtml(current)}</option>`);
 		const html = options.join("");
-		if ($select.data("html") !== html && !$select.parent().hasClass("open")) {
+		const open = $select.parent().hasClass("open");
+		if ($select.data("html") !== html && !open) {
 			$select.html(html).data("html", html);
 			withIcons($select);
 			$select.selectpicker("refresh");
 		}
-		$select.val(current);
-		$select.selectpicker("val", current);
+		if (!open) {
+			$select.val(current);
+			$select.selectpicker("val", current);
+		}
 	}
 	/** The filter's icon on every option, so bootstrap-select shows it on the button. */
 	function withIcons($select) {
