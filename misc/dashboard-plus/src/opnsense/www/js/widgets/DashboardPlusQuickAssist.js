@@ -24,7 +24,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-const {escapeHtml, renderTitle, ensureStyle, fill, sharedRequest, DashboardPlusWidget} =
+const {renderTitle, ensureStyle, sharedRequest, DashboardPlusWidget} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
 const RECENT_FAILURE_MS = 60000;
@@ -45,6 +45,13 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
 
     _id(name) {
         return `${this.id}-${name}`;
+    }
+
+    _set(name, value) {
+        const element = document.getElementById(this._id(name));
+        if (element) {
+            element.textContent = value;
+        }
     }
 
     _compact(value) {
@@ -142,18 +149,23 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
         </div>`;
     }
 
+    getMarkup() {
+        ensureStyle();
+        return $(this._markup());
+    }
+
     _render(sample, rates, health, error = '') {
         const devices = Array.isArray(sample?.devices) ? sample.devices : [];
-        fill(this._id('model'), escapeHtml(devices[0]?.description || 'Intel QuickAssist'));
+        this._set('model', devices[0]?.description || 'Intel QuickAssist');
         const status = document.getElementById(this._id('status'));
         if (status) {
             status.textContent = this.translations[health.key];
             status.className = `qat-status text-${health.className}`;
         }
-        fill(this._id('rate'), this._compact(rates.completed));
-        fill(this._id('completed-rate'), this._compact(rates.completed));
-        fill(this._id('lag-rate'), this._compact(rates.lag));
-        fill(this._id('outstanding'), this._compact(rates.outstanding));
+        this._set('rate', this._compact(rates.completed));
+        this._set('completed-rate', this._compact(rates.completed));
+        this._set('lag-rate', this._compact(rates.lag));
+        this._set('outstanding', this._compact(rates.outstanding));
         const totalRate = rates.completed + rates.lag;
         const completed = totalRate ? (rates.completed / totalRate) * 100 : 100;
         const lag = totalRate ? 100 - completed : 0;
@@ -163,11 +175,11 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
         if (lagBar) lagBar.style.width = `${lag}%`;
         const engines = devices.reduce((total, device) => total + (Number(device.ae_count) || 0), 0);
         const counts = new Set(devices.map(device => Number(device.ae_count) || 0));
-        fill(this._id('devices'), String(devices.length));
-        fill(this._id('engines'), counts.size === 1 && devices.length ? `${engines} total (${engines / devices.length} / device)` : `${engines} total`);
-        fill(this._id('clock'), this._mhz(Math.max(...devices.map(device => Number(device.frequency_hz) || 0), 0)));
-        fill(this._id('services'), escapeHtml(this._serviceList(devices)));
-        fill(this._id('ocf'), sample?.ocf?.present ? (sample.ocf.enabled ? this.translations.enabled : this.translations.disabled) : '—');
+        this._set('devices', String(devices.length));
+        this._set('engines', counts.size === 1 && devices.length ? `${engines} total (${engines / devices.length} / device)` : `${engines} total`);
+        this._set('clock', this._mhz(Math.max(...devices.map(device => Number(device.frequency_hz) || 0), 0)));
+        this._set('services', this._serviceList(devices));
+        this._set('ocf', sample?.ocf?.present ? (sample.ocf.enabled ? this.translations.enabled : this.translations.disabled) : '—');
         const errorElement = document.getElementById(this._id('error'));
         if (errorElement) errorElement.textContent = error;
     }
@@ -192,9 +204,7 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
     }
 
     async onMarkupRendered() {
-        ensureStyle();
         renderTitle(this);
-        $(`#${this.id}-container`).html(this._markup());
         this._createChart();
         try {
             await this._sample();
