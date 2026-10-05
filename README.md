@@ -6,11 +6,13 @@ Dashboard plus for [OPNsense](https://opnsense.org) provides a set of informativ
 |---|---|
 | **os-dashboard-plus** | Enhanced dashboard widgets: System Information+, Traffic Graph+, System Metrics+, Thermal Sensors+, Interface Statistics+, Gateways+, Interfaces+, Firewall Logs+, Services+ and DNS Health+. |
 | **os-firewall-map** (Firewall Map+) | The firewall's live traffic (IPv4 and IPv6) on a world map, as a dashboard widget and a full-size page, with plain-language details, threat lists, Suricata alerts and a Threats panel. |
+| **os-vnstat-plus** (VNStat Plus) | A configurable VNStat traffic-history dashboard widget, with charts and tables for the interfaces collected by the official `os-vnstat` plugin. |
 
 These widgets are not an official OPNsense plugin or endorsed by OPNsense in any way. I created them for personal use and they fit what I need but they are available for whoever can find a use for them. I am still actively developing so there can be bugs or improvement that can be made. This is a work in progress and I welcome suggestions to make these widgets better or more useful.
 
 Most widgets are read-only visualizations of OPNsense collected data. Services+ additionally uses
-the OPNsense service API to start, stop or restart services after an explicit user action.
+the OPNsense service API to start, stop or restart services after an explicit user action. VNStat
+Plus requires the official `os-vnstat` plugin, which supplies its collected traffic data.
 
 I have been using them for a while and they are stable on my system. Your mileage may vary depending on your configuration. The only testbed I have is my firewall and they work well there.
 
@@ -20,7 +22,9 @@ I have been using them for a while and they are stable on my system. Your mileag
 
 ## Install
 
-This repo provides two installable packages: `os-dashboard-plus` and `os-firewall-map`. I decided to split in 2 packages to allow the firewall map to be installed separately from the rest of the more standard widgets.
+This repository provides three installable packages: `os-dashboard-plus`, `os-firewall-map` and
+`os-vnstat-plus`. Dashboard Plus and Firewall Map+ can be installed independently. VNStat Plus is
+a separate dashboard widget package and depends on the official `os-vnstat` plugin.
 
 As `root` on the OPNsense console or over SSH:
 
@@ -32,8 +36,13 @@ This adds the package repository (`/usr/local/etc/pkg/repos/dashboard-plus.conf`
 signing key. 
 
 Then install from **System ▸ Firmware ▸ Plugins** (`os-dashboard-plus`,
-`os-firewall-map`), or with `pkg install os-firewall-map` and/or `pkg install os-dashboard-plus`. 
-Updates arrive with normal firmware updates. The repository contains only these two packages.
+`os-firewall-map`, `os-vnstat-plus`), or with `pkg install os-firewall-map`,
+`pkg install os-dashboard-plus` and/or `pkg install os-vnstat-plus`. Updates arrive with normal
+firmware updates. The repository contains these three packages.
+
+VNStat Plus installs its `os-vnstat` dependency automatically when it is available from the
+OPNsense plugin repository. Configure VNStat and choose the interfaces it collects before adding
+the **VNStat Traffic+** widget; it shows only interfaces collected by `os-vnstat`.
 
 Firewall Map+ works best with a free MaxMind GeoLite2 key and a free AbuseIPDB key: see
 [Firewall Map+](#firewall-map) below for where to get them.
@@ -122,6 +131,24 @@ flagged traffic got through*, or *Blocked*), then one sentence per address, for 
   key, AbuseIPDB reputation), Whois, AbuseIPDB page, show or kill the address's states, add it to
   an alias, add its country to a GeoIP alias, and *Mark as threat* (adds it to the
   `FWMAP_Watchlist` host alias).
+
+### Snapshots
+
+A snapshot is a saved map document, not a screenshot. It preserves the flows the map was showing
+and, when the collector responds, the PF connection states behind every tracked flow.
+
+1. On the dashboard widget or full-size map, select the camera button. The confirmation toast has
+   an **Open in full map** link.
+2. On the full-size map, open **Snapshots** to browse saved captures, or use the timeline to move
+   between captures from a day. Select one to enter snapshot mode; use **Back to live** to return
+   to the current map.
+3. In snapshot mode, add or edit a note, download the saved document as JSON, or delete the
+   snapshot when it is no longer useful.
+
+Snapshots are retained newest first: up to 50 for 30 days, with a combined 100 MB limit. The
+camera is rate-limited to one capture every 10 seconds. If the collector is busy and cannot return
+the full capture in time, Firewall Map+ saves the current map summary instead and labels it
+**summary only**; that snapshot has no connection-state details.
 
 ### Threats
 
@@ -311,6 +338,14 @@ be selected in the widget settings, and start, stop and restart actions require 
 cache hit rate and DNSBL totals. When Unbound has forwarding entries, the configured AdGuard
 upstreams are listed by name and address. Settings: refresh interval.*
 
+## VNStat Plus
+
+**VNStat Traffic+** is a separate dashboard widget package for traffic history. It requires the
+official `os-vnstat` plugin and uses the interfaces selected there; `os-vnstat-plus` does not
+collect traffic on its own. Select an interface and hourly, daily, monthly or yearly history, then
+use the chart and table to compare download, upload and total traffic. Settings choose the visible
+sections, chart window and refresh interval.
+
 The screenshots come from a live firewall; host names, addresses, interface names and location
 were replaced with example values.
 
@@ -349,7 +384,7 @@ panel (add `?debug=1` to the map's address). It is kept in `security/firewall-ma
 
 ### Publishing (maintainer)
 
-Both packages share one version (`PLUGIN_VERSION` in each Makefile, no revision) and are released
+All packages share one version (`PLUGIN_VERSION` in each Makefile, no revision) and are released
 together: 0.50, 0.51, ...
 The signed feed lives in the `packages` branch, kept as a single commit. On the machine holding
 the signing key:
@@ -365,9 +400,13 @@ versions and signs the whole catalog.
 
 ## Changelog
 
-- **0.55** (all packages): Dashboard Plus adds DNS health, live DNS request-rate and Services+
-  widgets; Firewall Map+ recognizes primary-WAN double NAT while keeping state identities local,
-  with optional manual or discovered map anchoring; VNStat Plus is published for the first time.
+- **0.56** (all packages): documents Firewall Map+ snapshots and the three published packages.
+  Adds browser-level coverage for DNS Health+, Services+ and VNStat Traffic+ behavior.
+- **0.55** (all packages): Dashboard Plus adds DNS Health+, live DNS request-rate and Services+.
+  Firewall Map+ adds camera snapshots, a snapshot timeline and saved-state review; it also
+  recognizes primary-WAN double NAT while keeping state identities local, with optional manual or
+  discovered map anchoring. VNStat Plus is published for the first time and requires the official
+  `os-vnstat` plugin.
 - **0.53** (both packages): less CPU while a dashboard is open.
   - Firewall Map+: each collector sample costs about a third of the CPU it did, and the Status
     page shows how long the last sample took. Map polls are answered by a small shell script
