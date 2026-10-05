@@ -30,6 +30,7 @@ const COMMON_STUB = `
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[character]));
 const renderTitle = () => {};
 const ensureStyle = () => {};
+const sharedRequest = (widget, url) => widget.ajaxCall(url);
 const DashboardPlusWidget = Base => Base;
 `;
 

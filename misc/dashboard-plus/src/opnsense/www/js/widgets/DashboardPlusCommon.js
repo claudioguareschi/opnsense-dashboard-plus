@@ -175,27 +175,6 @@ const STYLE = `
     .dashboard-plus-metrics canvas { width: 100%; height: 90px; }
     .dashboard-plus-metrics-load { font-size: 0.9em; margin: 0.25em 0; }
 
-    /* QuickAssist+: compact read-only live accelerator summary. */
-    .dashboard-plus-quickassist { width: 95%; margin: 0 auto; }
-    .dashboard-plus-quickassist .qat-heading { display: flex; align-items: center; gap: 0.65em; margin-bottom: 0.75em; }
-    .dashboard-plus-quickassist .qat-chip { font-size: 2.1em; opacity: 0.75; }
-    .dashboard-plus-quickassist .qat-heading strong, .dashboard-plus-quickassist .qat-label { display: block; letter-spacing: 0.06em; font-weight: 700; }
-    .dashboard-plus-quickassist .qat-heading small { display: block; opacity: 0.7; font-size: 0.92em; }
-    .dashboard-plus-quickassist .qat-status { margin-left: auto; text-transform: uppercase; font-weight: 700; }
-    .dashboard-plus-quickassist .qat-panel { border: 1px solid rgba(127,127,127,0.25); border-radius: 0.5em; padding: 0.8em; margin-top: 0.7em; position: relative; }
-    .dashboard-plus-quickassist .qat-subtitle { opacity: 0.7; margin-top: 0.15em; }
-    .dashboard-plus-quickassist .qat-rate { position: absolute; right: 0.8em; top: 0.8em; font-size: 1em; }
-    .dashboard-plus-quickassist .qat-rate strong { font-size: 1.8em; }
-    .dashboard-plus-quickassist canvas { display: block; width: 100%; height: 170px; margin-top: 0.4em; }
-    .dashboard-plus-quickassist .qat-pipeline { display: flex; height: 1.6em; overflow: hidden; border-radius: 0.45em; background: rgba(127,127,127,0.25); margin-top: 0.6em; }
-    .dashboard-plus-quickassist .qat-completed { background: #4fc76a; transition: width 0.2s linear; }
-    .dashboard-plus-quickassist .qat-lag { background: var(--bs-warning, #f0ad4e); transition: width 0.2s linear; }
-    .dashboard-plus-quickassist .qat-pipeline-labels { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.45em 1em; margin-top: 0.55em; }
-    .dashboard-plus-quickassist .qat-info { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 0.8em; margin-top: 0.7em; }
-    .dashboard-plus-quickassist .qat-info small, .dashboard-plus-quickassist .qat-info b { display: block; }
-    .dashboard-plus-quickassist .qat-info small { opacity: 0.7; text-transform: uppercase; font-size: 0.78em; }
-    .dashboard-plus-quickassist .qat-info b { margin-top: 0.15em; overflow-wrap: anywhere; }
-    .dashboard-plus-quickassist .qat-error { margin-top: 0.5em; }
     .dashboard-plus-gauges { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5em; }
     .dashboard-plus-gauge { text-align: center; min-width: 0; }
     .dashboard-plus-gauge svg { width: 100%; max-width: 96px; display: block; margin: 0 auto; }

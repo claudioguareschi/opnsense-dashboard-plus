@@ -88,3 +88,25 @@ test('QuickAssist+ shows a per-device AE figure only when all device counts matc
     assert.equal(widget._serviceList([{services: 'sym;dc'}, {services: 'dc;asym'}]), 'sym + dc + asym');
     assert.equal(widget._mhz(685000000), '685 MHz');
 });
+
+test('QuickAssist+ retains only the current minute of Chart.js samples', () => {
+    const widget = new QuickAssist({translations});
+    widget._recordRate({completed: 1}, 1000);
+    widget._recordRate({completed: 2}, 61000);
+    assert.deepEqual(widget.rateSamples, [{x: 1000, y: 1}, {x: 61000, y: 2}]);
+    widget._recordRate({completed: 3}, 61001);
+    assert.deepEqual(widget.rateSamples, [{x: 61000, y: 2}, {x: 61001, y: 3}]);
+});
+
+test('QuickAssist+ requests its live sample through the widget request context', async () => {
+    const widget = new QuickAssist({translations});
+    let requested = null;
+    widget.ajaxCall = async url => {
+        requested = url;
+        return sample(1000, [device(0, 10, 10)]);
+    };
+    widget._render = () => {};
+    widget._renderChart = () => {};
+    await widget._sample();
+    assert.equal(requested, '/api/dashboardplus/system/qat');
+});
