@@ -60,16 +60,22 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
         return new Intl.NumberFormat(undefined, {notation: 'compact', maximumSignificantDigits: 3}).format(value || 0);
     }
 
-    _serviceList(devices) {
+    _serviceInfo(devices) {
         const services = new Set();
-        const labels = {sym: 'Symmetric cryptography', asym: 'Asymmetric cryptography', dc: 'Data compression'};
+        const descriptions = {sym: 'Symmetric crypto', asym: 'Asymmetric crypto', dc: 'compression'};
         devices.forEach(device => String(device.services || '').split(/[;,]/).forEach(service => {
             const key = service.trim().toLowerCase();
-            if (labels[key]) {
-                services.add(labels[key]);
+            if (descriptions[key]) {
+                services.add(key);
             }
         }));
-        return [...services].join(' · ');
+        const values = [...services];
+        const detail = values.length === 2 && values.includes('sym') && values.includes('dc') ?
+            'Symmetric crypto and compression' : values.map(value => descriptions[value]).join(' · ');
+        return {
+            label: values.join(' + '),
+            detail,
+        };
     }
 
     _mhz(hz) {
@@ -265,30 +271,41 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
             .dashboard-plus-quickassist-fact {
                 display: grid;
                 grid-template-columns: 1.4em minmax(0, 1fr);
-                align-items: center;
+                align-items: start;
                 gap: 0.45em;
                 min-width: 0;
-                min-height: 4.6em;
+                min-height: 4.35em;
                 padding: 0.6em;
                 border-radius: 3px;
                 background: rgba(127, 127, 127, 0.06);
+                text-align: left;
             }
-            .dashboard-plus-quickassist-fact-icon { opacity: 0.68; text-align: center; }
+            .dashboard-plus-quickassist-fact-icon { padding-top: 0.15em; opacity: 0.68; text-align: center; }
+            .dashboard-plus-quickassist-fact > div { min-width: 0; text-align: left; }
+            .dashboard-plus-quickassist-fact .dashboard-plus-quickassist-metric-label,
+            .dashboard-plus-quickassist-algorithms-title {
+                line-height: 1.2;
+                font-size: 0.64em;
+                font-weight: 700;
+                letter-spacing: 0.01em;
+                text-transform: uppercase;
+            }
             .dashboard-plus-quickassist-metric-value {
                 display: block;
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
-                font-size: 1em;
+                font-size: 1.06em;
                 font-weight: 600;
+                line-height: 1.22;
                 font-variant-numeric: tabular-nums;
             }
             .dashboard-plus-quickassist-metric-list {
                 overflow: visible;
                 text-overflow: clip;
                 white-space: normal;
-                font-size: 0.84em;
-                line-height: 1.45;
+                font-size: 0.88em;
+                line-height: 1.25;
             }
             .dashboard-plus-quickassist-metric-detail {
                 display: block;
@@ -296,20 +313,31 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
                 text-overflow: ellipsis;
                 white-space: nowrap;
                 opacity: 0.64;
-                font-size: 0.76em;
+                font-size: 0.72em;
+                line-height: 1.32;
             }
             .dashboard-plus-quickassist-algorithms {
                 grid-column: 1 / -1;
+                padding-top: 0.55em;
+                border-top: 1px solid rgba(127, 127, 127, 0.18);
+                text-align: left;
+            }
+            .dashboard-plus-quickassist-algorithms-title { margin-bottom: 0.35em; }
+            .dashboard-plus-quickassist-algorithms-content {
                 display: grid;
                 grid-template-columns: 1.4em minmax(0, 1fr);
                 gap: 0.45em;
-                padding-top: 0.55em;
-                border-top: 1px solid rgba(127, 127, 127, 0.18);
+                align-items: center;
+                min-height: 2.6em;
+                padding: 0.45em 0.6em;
+                border-radius: 3px;
+                background: rgba(127, 127, 127, 0.06);
             }
             .dashboard-plus-quickassist-algorithms-value {
                 display: block;
-                line-height: 1.45;
-                font-size: 0.78em;
+                font-size: 0.74em;
+                font-weight: 400;
+                line-height: 1.35;
             }
             .dashboard-plus-quickassist-error {
                 padding: 0.55em 0.4em 0.05em;
@@ -352,12 +380,12 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
             <section id="${this._id('device-information')}" class="dashboard-plus-quickassist-section" style="display: none;">
                 <div class="dashboard-plus-quickassist-section-head"><div class="dashboard-plus-quickassist-section-title">${this.translations.device_capabilities}</div></div>
                 <div id="${this._id('facts')}" class="dashboard-plus-quickassist-facts">
-                    <div id="${this._id('devices-card')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-server dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.qat_devices}</div><strong id="${this._id('devices')}" class="dashboard-plus-quickassist-metric-value"></strong></div></div>
+                    <div id="${this._id('devices-card')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-hdd-o dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.qat_devices}</div><strong id="${this._id('devices')}" class="dashboard-plus-quickassist-metric-value"></strong></div></div>
                     <div id="${this._id('engines-card')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-cogs dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.acceleration_engines}</div><strong id="${this._id('engines')}" class="dashboard-plus-quickassist-metric-value"></strong><span id="${this._id('engines-detail')}" class="dashboard-plus-quickassist-metric-detail"></span></div></div>
                     <div id="${this._id('clock-card')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-tachometer dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.clock}</div><strong id="${this._id('clock')}" class="dashboard-plus-quickassist-metric-value"></strong></div></div>
-                    <div id="${this._id('services-card')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-list dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.services}</div><strong id="${this._id('services')}" class="dashboard-plus-quickassist-metric-value dashboard-plus-quickassist-metric-list"></strong></div></div>
-                    <div id="${this._id('crypto-card')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-shield dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.kernel_cryptography}</div><strong><span id="${this._id('crypto-dot')}" class="dashboard-plus-dot text-success" aria-hidden="true"></span> <span id="${this._id('crypto-state')}" class="dashboard-plus-quickassist-metric-value" style="display: inline;"></span></strong><span id="${this._id('crypto-detail')}" class="dashboard-plus-quickassist-metric-detail"></span></div></div>
-                    <div id="${this._id('algorithms-card')}" class="dashboard-plus-quickassist-algorithms"><i class="fa fa-fw fa-lock dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.cryptographic_algorithms}</div><strong id="${this._id('algorithms')}" class="dashboard-plus-quickassist-algorithms-value"></strong></div></div>
+                    <div id="${this._id('services-card')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-stack dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.services}</div><strong id="${this._id('services')}" class="dashboard-plus-quickassist-metric-value dashboard-plus-quickassist-metric-list"></strong><span id="${this._id('services-detail')}" class="dashboard-plus-quickassist-metric-detail"></span></div></div>
+                    <div id="${this._id('crypto-card')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-shield dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.ocf}</div><strong><span id="${this._id('crypto-dot')}" class="dashboard-plus-dot text-success" aria-hidden="true"></span> <span id="${this._id('crypto-state')}" class="dashboard-plus-quickassist-metric-value" style="display: inline;"></span></strong><span id="${this._id('crypto-detail')}" class="dashboard-plus-quickassist-metric-detail"></span></div></div>
+                    <div id="${this._id('algorithms-card')}" class="dashboard-plus-quickassist-algorithms"><div class="dashboard-plus-quickassist-algorithms-title">${this.translations.cryptographic_algorithms}</div><div class="dashboard-plus-quickassist-algorithms-content"><i class="fa fa-fw fa-lock dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><strong id="${this._id('algorithms')}" class="dashboard-plus-quickassist-algorithms-value"></strong></div></div>
                 </div>
             </section>
             <div id="${this._id('error')}" class="dashboard-plus-quickassist-error text-danger"></div>
@@ -400,14 +428,14 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
         if (lagBar) lagBar.style.width = `${lag}%`;
         const engines = devices.reduce((total, device) => total + (Number(device.ae_count) || 0), 0);
         const algorithms = sample?.ocf?.enabled ? (sample.ocf.algorithms || []) : [];
-        const services = this._serviceList(devices);
+        const services = this._serviceInfo(devices);
         const frequency = Math.max(...devices.map(device => Number(device.frequency_hz) || 0), 0);
         const facts = document.getElementById(this._id('facts'));
         this._show('device-information', Boolean(devices.length));
         this._show('devices-card', Boolean(devices.length));
         this._show('engines-card', engines > 0);
         this._show('clock-card', frequency > 0);
-        this._show('services-card', Boolean(services));
+        this._show('services-card', Boolean(services.label));
         this._show('crypto-card', Boolean(sample?.ocf?.present));
         this._show('algorithms-card', Boolean(algorithms.length));
         facts?.classList.toggle('has-clock', frequency > 0);
@@ -415,7 +443,8 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
         this._set('engines', engines ? `${engines} total` : '');
         this._set('engines-detail', engines && devices.length && engines % devices.length === 0 ? `${engines / devices.length} per device` : '');
         this._set('clock', this._mhz(frequency));
-        this._set('services', services);
+        this._set('services', services.label);
+        this._set('services-detail', services.detail);
         this._set('crypto-state', sample?.ocf?.enabled ? this.translations.enabled : this.translations.disabled);
         this._set('crypto-detail', sample?.ocf?.enabled ? this.translations.kernel_crypto_active : '');
         this._set('algorithms', algorithms.join(' · '));

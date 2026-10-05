@@ -85,8 +85,9 @@ test('QuickAssist+ reports state and OCF problems without requiring System Infor
 
 test('QuickAssist+ shows a per-device AE figure only when all device counts match', () => {
     const widget = new QuickAssist({translations});
-    assert.equal(widget._serviceList([{services: 'sym;dc'}, {services: 'dc;asym'}]),
-        'Symmetric cryptography · Data compression · Asymmetric cryptography');
+    assert.deepEqual(widget._serviceInfo([{services: 'sym;dc'}, {services: 'dc;asym'}]), {
+        label: 'sym + dc + asym', detail: 'Symmetric crypto · compression · Asymmetric crypto'
+    });
     assert.equal(widget._mhz(685000000), '685 MHz');
     assert.equal(widget._mhz(0), '');
 });
