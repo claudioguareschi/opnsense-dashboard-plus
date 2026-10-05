@@ -27,6 +27,9 @@
 import base64
 import json
 import os
+from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -40,6 +43,50 @@ from support import COMMON, SNAPSHOTS  # noqa: E402
 SUMMARY = {"status": "ok", "flows": [{"dest": "192.0.2.1", "threat": True}, {"dest": "192.0.2.2"}],
            "blocks": [{"source": "198.51.100.1", "hits": 1, "lists": []}, {"source": "198.51.100.2", "hits": 9, "lists": ["x"]}],
            "locations": []}
+SNAPSHOTS_CONTROLLER = Path(__file__).resolve().parents[1] / "src/opnsense/mvc/app/controllers/OPNsense/FirewallMap/Api/SnapshotsController.php"
+MAP_PAGE = Path(__file__).resolve().parents[1] / "src/opnsense/www/js/firewall-map-page.js"
+
+
+def controller_get(may_show_states):
+    """Run getAction with the smallest OPNsense stubs needed to exercise its ACL boundary."""
+    code = r'''
+namespace OPNsense\Base {
+    class ApiControllerBase { public $request; public function getUserName() { return "map-user"; } }
+}
+namespace OPNsense\Core {
+    class Backend {
+        public static $response;
+        public function configdpRun($action, $parameters) { return json_encode(self::$response); }
+    }
+    class ACL {
+        public static $mayShowStates;
+        public function isPageAccessible($user, $path) { return self::$mayShowStates; }
+    }
+}
+namespace OPNsense\FirewallMap {
+    class AuditLog { public static function record($user, $message) {} }
+    class ConfigdArgument {
+        public static function isSnapshotId($id) { return is_string($id) && preg_match('/^\\d{8}T\\d{6}Z-[0-9a-f]{4}$/', $id); }
+        public static function text($value, $length) { return $value; }
+    }
+}
+namespace {
+    require $argv[1];
+    \OPNsense\Core\ACL::$mayShowStates = $argv[2] === "1";
+    \OPNsense\Core\Backend::$response = [
+        "result" => "ok", "snapshot" => ["id" => "20261005T010203Z-1a2b"],
+        "data" => ["flows" => [["dest" => "192.0.2.44"]], "states" => ["192.0.2.44" => [["src_addr" => "10.0.0.5"]]]]
+    ];
+    $controller = new \OPNsense\FirewallMap\Api\SnapshotsController();
+    $controller->request = new class { public function get($key) { return 1; } };
+    echo json_encode($controller->getAction("20261005T010203Z-1a2b"));
+}
+'''
+    result = subprocess.run(
+        ["php", "-r", code, str(SNAPSHOTS_CONTROLLER), "1" if may_show_states else "0"],
+        capture_output=True, text=True, check=True,
+    )
+    return json.loads(result.stdout)
 
 
 class SnapshotTest(unittest.TestCase):
@@ -156,6 +203,18 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(SNAPSHOTS.decode_text(base64.urlsafe_b64encode("rené".encode()).decode().rstrip("="), 64), "rené")
         self.assertEqual(SNAPSHOTS.decode_text("-", 64), "")
         self.assertEqual(SNAPSHOTS.decode_text("!!!", 64), "")
+
+    @unittest.skipUnless(shutil.which("php"), "needs the PHP command line")
+    def test_snapshot_get_redacts_states_without_native_show_states_privilege(self):
+        viewer = controller_get(False)
+        operator = controller_get(True)
+        self.assertNotIn("states", viewer["data"])
+        self.assertEqual(operator["data"]["states"]["192.0.2.44"][0]["src_addr"], "10.0.0.5")
+
+    def test_snapshot_page_never_offers_saved_states_without_the_capability(self):
+        page = MAP_PAGE.read_text()
+        self.assertNotIn('state.can.states || state.mode === "snapshot"', page)
+        self.assertIn('state.mode === "snapshot" && state.can.states', page)
 
 
 if __name__ == "__main__":

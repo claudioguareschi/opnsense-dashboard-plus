@@ -27,6 +27,7 @@
 namespace OPNsense\FirewallMap\Api;
 
 use OPNsense\Base\ApiControllerBase;
+use OPNsense\Core\ACL;
 use OPNsense\Core\Backend;
 use OPNsense\FirewallMap\AuditLog;
 use OPNsense\FirewallMap\ConfigdArgument;
@@ -37,6 +38,12 @@ use OPNsense\FirewallMap\ConfigdArgument;
  */
 class SnapshotsController extends ApiControllerBase
 {
+    /** PF state rows are disclosed only through OPNsense's native Show States privilege. */
+    private function mayShowStates()
+    {
+        return (new ACL())->isPageAccessible($this->getUserName(), '/api/diagnostics/firewall/query_states');
+    }
+
     private function run($action, $parameters = [])
     {
         $result = json_decode((new Backend())->configdpRun("firewallmap snapshot {$action}", $parameters) ?? '', true);
@@ -67,7 +74,13 @@ class SnapshotsController extends ApiControllerBase
             return ['result' => 'failed', 'error' => 'unknown snapshot'];
         }
         $minimum = max(1, min(100, (int)($this->request->get('blocks_min') ?? 1)));
-        return $this->run('get', [(string)$id, (string)$minimum]);
+        $result = $this->run('get', [(string)$id, (string)$minimum]);
+        /* Snapshots are shared incident records. Keep complete captures on disk, but never disclose
+         * their embedded PF states to a user who cannot use Diagnostics: Show States. */
+        if (!$this->mayShowStates() && isset($result['data']) && is_array($result['data'])) {
+            unset($result['data']['states']);
+        }
+        return $result;
     }
 
     public function noteAction($id = null)

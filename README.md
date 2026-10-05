@@ -409,6 +409,8 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.59** (all packages): Firewall Map+ keeps complete shared incident snapshots while disclosing
+  captured PF connection states only to users with OPNsense's native Diagnostics: Show States privilege.
 - **0.58** (all packages): refines Dashboard Plus QuickAssist+ with a Chart.js activity graph,
   stable shared-sample rates, device-capability tiles that adapt when clock information is absent,
   and QAT capability and kernel cryptographic-algorithm details.

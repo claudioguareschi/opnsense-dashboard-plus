@@ -1026,7 +1026,7 @@
 		}
 		const button = (cls, icon, label, color = "default") => `<button type="button" class="btn btn-${color} ${cls}" data-address="${escapeHtml(address)}">${ic(icon)} ${escapeHtml(label)}</button>`;
 		const investigate = state.can.manage ? `<div class="btn-group btn-group-sm">${button("fwmap-investigate", "magnifying-glass", T.investigate, "primary")}</div>` : "";
-		const states = state.mode === "snapshot" ? [button("fwmap-states", "list", `${T.states_at} ${capturedTime()}`), state.can.states ? button("fwmap-states-now", "clock", T.current_states) : ""] : [state.can.states ? button("fwmap-states", "list", T.show_states) : "", state.can.kill ? button("fwmap-kill", "trash-can", T.kill_states) : ""];
+		const states = state.mode === "snapshot" && state.can.states ? [button("fwmap-states", "list", `${T.states_at} ${capturedTime()}`), button("fwmap-states-now", "clock", T.current_states)] : state.mode === "snapshot" ? [] : [state.can.states ? button("fwmap-states", "list", T.show_states) : "", state.can.kill ? button("fwmap-kill", "trash-can", T.kill_states) : ""];
 		return `<div class="btn-toolbar fwmap-actions">${investigate}${states.filter(Boolean).length ? `<div class="btn-group btn-group-sm">${states.join("")}</div>` : ""}
     <div class="btn-group btn-group-sm dropup pull-right"><button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true">${escapeHtml(T.more)} <span class="caret"></span></button>
     <ul class="dropdown-menu dropdown-menu-right">${more.join("")}</ul></div></div>`;
@@ -1080,7 +1080,7 @@
       ${picker}
       ${diagramHtml(model.diagram)}
       <div class="fwmap-cards">
-        ${card("chart-column", T.sec_connection, model.connection, state.can.states || state.mode === "snapshot" ? {
+		${card("chart-column", T.sec_connection, model.connection, state.can.states ? {
 			cls: "fwmap-states",
 			address,
 			title: T.show_states
@@ -2165,6 +2165,7 @@
 	}
 	/** The States dialog for a saved snapshot: the PF states as they were when it was taken. */
 	function showSavedStates(address) {
+		if (!state.can.states) return;
 		const body = (state.frozen?.data?.states?.[address] || []).map((row) => `<tr><td>${escapeHtml(row.interface || "")}</td><td>${escapeHtml(row.proto || "")}</td><td>${escapeHtml(hostPort(row.src_addr, row.src_port))}</td><td>${escapeHtml(hostPort(row.dst_addr, row.dst_port))}</td><td>${escapeHtml(row.nat || "")}</td><td>${escapeHtml(row.state || "")}</td><td>${escapeHtml(formatBytes(row.bytes || 0))}</td></tr>`).join("");
 		BootstrapDialog.show({
 			title: escapeHtml(`${T.states_for} ${address} · ${takenText(state.frozen?.meta)}`),
@@ -2769,7 +2770,10 @@
 			renderDetails();
 		});
 		on(".fwmap-copy", ($element) => navigator.clipboard?.writeText(address($element)));
-		on(".fwmap-states", ($element) => state.mode === "snapshot" ? showSavedStates(address($element)) : showStates(address($element)));
+		on(".fwmap-states", ($element) => {
+			if (!state.can.states) return;
+			state.mode === "snapshot" ? showSavedStates(address($element)) : showStates(address($element));
+		});
 		on(".fwmap-states-now", ($element) => showStates(address($element)));
 		on(".fwmap-kill", ($element) => killStates(address($element)));
 		on(".fwmap-alias", ($element) => addToAlias(address($element)));
