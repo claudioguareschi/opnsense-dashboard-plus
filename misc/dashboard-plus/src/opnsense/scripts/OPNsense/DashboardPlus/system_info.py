@@ -592,7 +592,7 @@ def qat_oid_names(units):
     for unit in units.get("devices", []):
         prefix = f"dev.qat.{unit}"
         names.extend((
-            f"{prefix}.%desc", f"{prefix}.frequency", f"{prefix}.cfg_services",
+            f"{prefix}.%desc", f"{prefix}.frequency", f"{prefix}.cfg_services", f"{prefix}.dev_cfg",
             f"{prefix}.state", f"{prefix}.heartbeat", f"{prefix}.heartbeat_failed",
             f"{prefix}.fw_counters",
         ))
@@ -611,7 +611,8 @@ def collect_qat_live(now=None, cache_path=QAT_CACHE, discover=None, sysctls=None
     units = qat_discovery(now, cache_path, discover)
     names = qat_oid_names(units)
     if not names:
-        return {"available": False, "sampled_at": now, "devices": [], "ocf": {"present": False, "enabled": False}}
+        return {"available": False, "sampled_at": now, "devices": [],
+                "ocf": {"present": False, "enabled": False, "algorithms": ()}}
     sysctls = sysctls or (lambda requested: run_output([SYSCTL, "-i", "-e", *requested]))
     values = parse_qat_sysctl_values(sysctls(names))
     devices = []
@@ -626,6 +627,7 @@ def collect_qat_live(now=None, cache_path=QAT_CACHE, discover=None, sysctls=None
             "description": values.get(f"{prefix}.%desc", "")[:200],
             "frequency_hz": int_value(values.get(f"{prefix}.frequency")) or 0,
             "services": values.get(f"{prefix}.cfg_services", "")[:100],
+            "capabilities": qat_config_capabilities(values.get(f"{prefix}.dev_cfg", "")),
             "state": values.get(f"{prefix}.state", "")[:100],
             "heartbeat": int_value(values.get(f"{prefix}.heartbeat")),
             "heartbeat_failed": int_value(values.get(f"{prefix}.heartbeat_failed")) or 0,
@@ -634,11 +636,16 @@ def collect_qat_live(now=None, cache_path=QAT_CACHE, discover=None, sysctls=None
             **totals,
         })
     ocf_values = [int_value(values.get(f"dev.qat_ocf.{unit}.enable")) for unit in units.get("ocf", [])]
+    ocf_enabled = any(value == 1 for value in ocf_values)
+    algorithms = QAT_OCF_ALGORITHMS if ocf_enabled and any(
+        device["state"].lower() == "up" and "sym" in device["services"].lower().split(";")
+        for device in devices
+    ) else ()
     return {
         "available": bool(devices),
         "sampled_at": now,
         "devices": devices,
-        "ocf": {"present": bool(ocf_values), "enabled": any(value == 1 for value in ocf_values)},
+        "ocf": {"present": bool(ocf_values), "enabled": ocf_enabled, "algorithms": algorithms},
     }
 
 
@@ -706,6 +713,15 @@ def qat_hardware_capabilities(sysctl_output, unit):
     if not mask_match:
         return []
     mask = int(mask_match.group(1), 0)
+    return [label for bit, label in QAT_CAPABILITY_BITS if mask & (1 << bit)]
+
+
+def qat_config_capabilities(config):
+    """Decode the capability mask returned by one ``dev_cfg`` sysctl."""
+    match = re.search(r"^Device_Capabilities_Mask\s*=\s*(0x[0-9a-fA-F]+|\d+)", config or "", re.MULTILINE)
+    if not match:
+        return []
+    mask = int(match.group(1), 0)
     return [label for bit, label in QAT_CAPABILITY_BITS if mask & (1 << bit)]
 
 

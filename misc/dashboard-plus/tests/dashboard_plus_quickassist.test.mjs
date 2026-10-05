@@ -85,7 +85,8 @@ test('QuickAssist+ reports state and OCF problems without requiring System Infor
 
 test('QuickAssist+ shows a per-device AE figure only when all device counts match', () => {
     const widget = new QuickAssist({translations});
-    assert.equal(widget._serviceList([{services: 'sym;dc'}, {services: 'dc;asym'}]), 'sym + dc + asym');
+    assert.equal(widget._serviceList([{services: 'sym;dc'}, {services: 'dc;asym'}]),
+        'Symmetric cryptography · Data compression · Asymmetric cryptography');
     assert.equal(widget._mhz(685000000), '685 MHz');
 });
 
@@ -109,4 +110,16 @@ test('QuickAssist+ requests its live sample through the widget request context',
     widget._renderChart = () => {};
     await widget._sample();
     assert.equal(requested, '/api/dashboardplus/system/qat');
+});
+
+test('QuickAssist+ ignores a repeated shared sample instead of rendering a zero rate', async () => {
+    const widget = new QuickAssist({translations});
+    const live = sample(1000, [device(0, 10, 10)]);
+    let renders = 0;
+    widget.ajaxCall = async () => live;
+    widget._render = () => { renders += 1; };
+    widget._renderChart = () => {};
+    await widget._sample();
+    await widget._sample();
+    assert.equal(renders, 1);
 });

@@ -81,7 +81,7 @@ class QuickAssistTest(unittest.TestCase):
         ))
         sample = "\n".join((
             "dev.qat.1.%desc=Intel C6xx", "dev.qat.1.frequency=685000000",
-            "dev.qat.1.cfg_services=sym;dc", "dev.qat.1.state=up",
+            "dev.qat.1.cfg_services=sym;dc", "dev.qat.1.dev_cfg=Device_Capabilities_Mask = 0x23", "dev.qat.1.state=up",
             "dev.qat.1.heartbeat=1", "dev.qat.1.heartbeat_failed=4",
             "dev.qat.1.fw_counters=" + counters([(0, 10, 11), (1, 20, 22)]),
             "dev.qat.4.%desc=Intel C6xx", "dev.qat.4.frequency=700000000",
@@ -100,7 +100,10 @@ class QuickAssistTest(unittest.TestCase):
         self.assertEqual([device["ae_count"] for device in result["devices"]], [2, 1])
         self.assertEqual(result["devices"][0]["responses"], 30)
         self.assertEqual(result["devices"][1]["requests"], 31)
-        self.assertEqual(result["ocf"], {"present": True, "enabled": True})
+        self.assertEqual(result["devices"][0]["capabilities"], [
+            "symmetric cryptography", "asymmetric cryptography", "compression",
+        ])
+        self.assertEqual(result["ocf"], {"present": True, "enabled": True, "algorithms": SYSTEM_INFO.QAT_OCF_ALGORITHMS})
 
     def test_missing_optional_sysctls_and_disappeared_device_are_safe(self):
         discovery = "dev.qat.0.state=up\ndev.qat.3.state=up\ndev.qat_ocf.0.enable=0\n"
@@ -116,7 +119,7 @@ class QuickAssistTest(unittest.TestCase):
         self.assertEqual(len(result["devices"]), 1)
         self.assertEqual(result["devices"][0]["frequency_hz"], 0)
         self.assertEqual(result["devices"][0]["ae_count"], 1)
-        self.assertFalse(result["ocf"]["enabled"])
+        self.assertEqual(result["ocf"], {"present": True, "enabled": False, "algorithms": ()})
 
     def test_empty_discovery_reports_no_hardware(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -125,5 +128,5 @@ class QuickAssistTest(unittest.TestCase):
             )
         self.assertEqual(result, {
             "available": False, "sampled_at": 100, "devices": [],
-            "ocf": {"present": False, "enabled": False},
+            "ocf": {"present": False, "enabled": False, "algorithms": ()},
         })
