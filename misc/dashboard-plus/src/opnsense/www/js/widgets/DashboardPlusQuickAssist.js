@@ -60,10 +60,6 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
         return new Intl.NumberFormat(undefined, {notation: 'compact', maximumSignificantDigits: 3}).format(value || 0);
     }
 
-    _mhz(hz) {
-        return hz > 0 ? `${Math.round(hz / 1000000)} MHz` : '—';
-    }
-
     _serviceList(devices) {
         const services = new Set();
         const labels = {sym: 'Symmetric cryptography', asym: 'Asymmetric cryptography', dc: 'Data compression'};
@@ -295,15 +291,6 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
                 opacity: 0.64;
                 font-size: 0.76em;
             }
-            .dashboard-plus-quickassist-ocf-dot {
-                display: inline-block;
-                width: 0.62em;
-                height: 0.62em;
-                margin-right: 0.35em;
-                border-radius: 50%;
-                background: currentColor;
-                vertical-align: 0.03em;
-            }
             .dashboard-plus-quickassist-error {
                 padding: 0.55em 0.4em 0.05em;
                 font-size: 0.8em;
@@ -332,13 +319,13 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
                 <div id="${this._id('status')}" class="dashboard-plus-quickassist-status"><span id="${this._id('status-dot')}" class="dashboard-plus-dot dashboard-plus-quickassist-status-dot text-muted" aria-hidden="true"></span><span></span></div>
             </div>
             <section class="dashboard-plus-quickassist-section">
-                <div class="dashboard-plus-quickassist-section-head"><div><div class="dashboard-plus-quickassist-section-title">${this.translations.qat_activity}</div><div class="dashboard-plus-quickassist-subtitle">${this.translations.requests_per_second}</div></div><div class="dashboard-plus-quickassist-rate"><strong id="${this._id('rate')}">—</strong> req/s</div></div>
+                <div class="dashboard-plus-quickassist-section-head"><div><div class="dashboard-plus-quickassist-section-title">${this.translations.qat_activity}</div><div class="dashboard-plus-quickassist-subtitle">${this.translations.requests_per_second}</div></div><div class="dashboard-plus-quickassist-rate"><strong id="${this._id('rate')}">0</strong> req/s</div></div>
                 <div class="dashboard-plus-quickassist-chart"><canvas id="${this._id('chart')}"></canvas></div>
             </section>
             <section class="dashboard-plus-quickassist-section">
                 <div class="dashboard-plus-quickassist-section-head"><div class="dashboard-plus-quickassist-section-title">${this.translations.qat_pipeline} <i class="fa fa-fw fa-info-circle text-muted" title="${this.translations.requests_per_second}" aria-hidden="true"></i></div></div>
                 <div class="progress dashboard-plus-quickassist-progress"><div id="${this._id('completed')}" class="progress-bar progress-bar-success"></div><div id="${this._id('lag')}" class="progress-bar progress-bar-warning"></div></div>
-                <div class="dashboard-plus-quickassist-pipeline-values"><span><strong id="${this._id('completed-rate')}">—</strong> ${this.translations.completed_requests}</span><span><strong id="${this._id('lag-rate')}">—</strong> ${this.translations.lag_requests}</span><span>${this.translations.outstanding} <strong id="${this._id('outstanding')}">—</strong></span></div>
+                <div class="dashboard-plus-quickassist-pipeline-values"><span><strong id="${this._id('completed-rate')}">0</strong> ${this.translations.completed_requests}</span><span><strong id="${this._id('lag-rate')}">0</strong> ${this.translations.lag_requests}</span><span>${this.translations.outstanding} <strong id="${this._id('outstanding')}">0</strong></span></div>
             </section>
             <section id="${this._id('device-information')}" class="dashboard-plus-quickassist-section" style="display: none;">
                 <div class="dashboard-plus-quickassist-section-head"><div class="dashboard-plus-quickassist-section-title">${this.translations.device_information}</div></div>
