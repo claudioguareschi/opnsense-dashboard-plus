@@ -340,10 +340,12 @@ upstreams are listed by name and address. Settings: refresh interval.*
 
 ### QuickAssist+
 
-*A read-only live view of Intel QuickAssist devices: completed firmware requests per second,
-request/response pipeline lag and outstanding work, device and acceleration-engine counts, clock,
-services and OpenCrypto Framework state. It discovers the loaded QAT driver dynamically and
-shows unavailable or degraded states without changing driver, OCF or firewall configuration.*
+*A read-only live view of Intel QuickAssist devices: a Chart.js activity graph for completed
+firmware requests, request/response pipeline lag and outstanding work, plus a Device
+Capabilities panel with device and acceleration-engine counts, configured services, OpenCrypto
+Framework state and supported kernel cryptographic algorithms. Clock information is shown only
+when the running QAT driver exposes it. It discovers the loaded QAT driver dynamically and shows
+unavailable or degraded states without changing driver, OCF or firewall configuration.*
 
 ## VNStat Plus
 
@@ -407,6 +409,9 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.58** (all packages): refines Dashboard Plus QuickAssist+ with a Chart.js activity graph,
+  stable shared-sample rates, device-capability tiles that adapt when clock information is absent,
+  and QAT capability and kernel cryptographic-algorithm details.
 - **0.57** (all packages): Dashboard Plus adds QuickAssist+, a read-only live monitor for Intel
   QAT devices. Firewall Map+ resolves unnamed inside hosts through the existing hostname-lookup
   option when DHCP is external; DHCP names remain authoritative and private PTR results expire
