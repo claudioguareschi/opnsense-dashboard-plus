@@ -87,6 +87,8 @@ test('QuickAssist+ shows a per-device AE figure only when all device counts matc
     const widget = new QuickAssist({translations});
     assert.equal(widget._serviceList([{services: 'sym;dc'}, {services: 'dc;asym'}]),
         'Symmetric cryptography · Data compression · Asymmetric cryptography');
+    assert.equal(widget._mhz(685000000), '685 MHz');
+    assert.equal(widget._mhz(0), '');
 });
 
 test('QuickAssist+ retains only the current minute of Chart.js samples', () => {

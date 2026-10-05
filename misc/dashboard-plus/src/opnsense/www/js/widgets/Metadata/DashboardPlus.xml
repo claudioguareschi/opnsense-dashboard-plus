@@ -335,10 +335,12 @@
             <outstanding>Outstanding</outstanding>
             <qat_pipeline>QAT Pipeline</qat_pipeline>
             <device_information>Device Information</device_information>
+            <device_capabilities>Device Capabilities</device_capabilities>
             <qat_devices>QAT devices</qat_devices>
             <acceleration_engines>Acceleration engines</acceleration_engines>
-            <hardware_capabilities>Hardware capabilities</hardware_capabilities>
-            <crypto_algorithms>Kernel cryptography</crypto_algorithms>
+            <kernel_cryptography>Kernel cryptography</kernel_cryptography>
+            <kernel_crypto_active>OpenCrypto framework is active</kernel_crypto_active>
+            <cryptographic_algorithms>Cryptographic algorithms</cryptographic_algorithms>
             <clock>Clock</clock>
             <services>Services</services>
             <ocf>OCF</ocf>

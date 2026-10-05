@@ -72,6 +72,10 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
         return [...services].join(' · ');
     }
 
+    _mhz(hz) {
+        return hz > 0 ? `${Math.round(hz / 1000000)} MHz` : '';
+    }
+
     _snapshot(sample) {
         const devices = Array.isArray(sample?.devices) ? sample.devices : [];
         return {
@@ -253,18 +257,22 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
             .dashboard-plus-quickassist-pipeline-values strong { font-variant-numeric: tabular-nums; }
             .dashboard-plus-quickassist-facts {
                 display: grid;
-                gap: 0.2em;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 0.4em;
                 padding: 0 0.7em 0.7em;
             }
+            .dashboard-plus-quickassist-facts.has-clock { grid-template-columns: repeat(3, minmax(0, 1fr)); }
             .dashboard-plus-quickassist-fact {
                 display: grid;
                 grid-template-columns: 1.4em minmax(0, 1fr);
-                align-items: start;
+                align-items: center;
                 gap: 0.45em;
                 min-width: 0;
-                padding: 0.3em 0;
+                min-height: 4.6em;
+                padding: 0.6em;
+                border-radius: 3px;
+                background: rgba(127, 127, 127, 0.06);
             }
-            .dashboard-plus-quickassist-fact + .dashboard-plus-quickassist-fact { border-top: 1px solid rgba(127, 127, 127, 0.15); }
             .dashboard-plus-quickassist-fact-icon { opacity: 0.68; text-align: center; }
             .dashboard-plus-quickassist-metric-value {
                 display: block;
@@ -284,12 +292,24 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
             }
             .dashboard-plus-quickassist-metric-detail {
                 display: block;
-                min-height: 1.2em;
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
                 opacity: 0.64;
                 font-size: 0.76em;
+            }
+            .dashboard-plus-quickassist-algorithms {
+                grid-column: 1 / -1;
+                display: grid;
+                grid-template-columns: 1.4em minmax(0, 1fr);
+                gap: 0.45em;
+                padding-top: 0.55em;
+                border-top: 1px solid rgba(127, 127, 127, 0.18);
+            }
+            .dashboard-plus-quickassist-algorithms-value {
+                display: block;
+                line-height: 1.45;
+                font-size: 0.78em;
             }
             .dashboard-plus-quickassist-error {
                 padding: 0.55em 0.4em 0.05em;
@@ -299,6 +319,8 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
                 .dashboard-plus-quickassist-pipeline-values { grid-template-columns: 1fr; }
                 .dashboard-plus-quickassist-pipeline-values > :nth-child(2),
                 .dashboard-plus-quickassist-pipeline-values > :last-child { text-align: left; }
+                .dashboard-plus-quickassist-facts,
+                .dashboard-plus-quickassist-facts.has-clock { grid-template-columns: 1fr; }
             }
         `;
         const existing = document.getElementById(STYLE_ID);
@@ -328,11 +350,14 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
                 <div class="dashboard-plus-quickassist-pipeline-values"><span><strong id="${this._id('completed-rate')}">0</strong> ${this.translations.completed_requests}</span><span><strong id="${this._id('lag-rate')}">0</strong> ${this.translations.lag_requests}</span><span>${this.translations.outstanding} <strong id="${this._id('outstanding')}">0</strong></span></div>
             </section>
             <section id="${this._id('device-information')}" class="dashboard-plus-quickassist-section" style="display: none;">
-                <div class="dashboard-plus-quickassist-section-head"><div class="dashboard-plus-quickassist-section-title">${this.translations.device_information}</div></div>
-                <div class="dashboard-plus-quickassist-facts">
-                    <div id="${this._id('engines-fact')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-cogs dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.acceleration_engines}</div><strong id="${this._id('engines')}" class="dashboard-plus-quickassist-metric-value"></strong><span id="${this._id('services')}" class="dashboard-plus-quickassist-metric-detail"></span></div></div>
-                    <div id="${this._id('capabilities-fact')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-shield dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.hardware_capabilities}</div><strong id="${this._id('capabilities')}" class="dashboard-plus-quickassist-metric-value dashboard-plus-quickassist-metric-list"></strong></div></div>
-                    <div id="${this._id('algorithms-fact')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-lock dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.crypto_algorithms}</div><strong id="${this._id('algorithms')}" class="dashboard-plus-quickassist-metric-value dashboard-plus-quickassist-metric-list"></strong></div></div>
+                <div class="dashboard-plus-quickassist-section-head"><div class="dashboard-plus-quickassist-section-title">${this.translations.device_capabilities}</div></div>
+                <div id="${this._id('facts')}" class="dashboard-plus-quickassist-facts">
+                    <div id="${this._id('devices-card')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-server dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.qat_devices}</div><strong id="${this._id('devices')}" class="dashboard-plus-quickassist-metric-value"></strong></div></div>
+                    <div id="${this._id('engines-card')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-cogs dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.acceleration_engines}</div><strong id="${this._id('engines')}" class="dashboard-plus-quickassist-metric-value"></strong><span id="${this._id('engines-detail')}" class="dashboard-plus-quickassist-metric-detail"></span></div></div>
+                    <div id="${this._id('clock-card')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-tachometer dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.clock}</div><strong id="${this._id('clock')}" class="dashboard-plus-quickassist-metric-value"></strong></div></div>
+                    <div id="${this._id('services-card')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-list dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.services}</div><strong id="${this._id('services')}" class="dashboard-plus-quickassist-metric-value dashboard-plus-quickassist-metric-list"></strong></div></div>
+                    <div id="${this._id('crypto-card')}" class="dashboard-plus-quickassist-fact"><i class="fa fa-fw fa-shield dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.kernel_cryptography}</div><strong><span id="${this._id('crypto-dot')}" class="dashboard-plus-dot text-success" aria-hidden="true"></span> <span id="${this._id('crypto-state')}" class="dashboard-plus-quickassist-metric-value" style="display: inline;"></span></strong><span id="${this._id('crypto-detail')}" class="dashboard-plus-quickassist-metric-detail"></span></div></div>
+                    <div id="${this._id('algorithms-card')}" class="dashboard-plus-quickassist-algorithms"><i class="fa fa-fw fa-lock dashboard-plus-quickassist-fact-icon" aria-hidden="true"></i><div><div class="dashboard-plus-quickassist-metric-label">${this.translations.cryptographic_algorithms}</div><strong id="${this._id('algorithms')}" class="dashboard-plus-quickassist-algorithms-value"></strong></div></div>
                 </div>
             </section>
             <div id="${this._id('error')}" class="dashboard-plus-quickassist-error text-danger"></div>
@@ -374,17 +399,30 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
         if (completedBar) completedBar.style.width = `${completed}%`;
         if (lagBar) lagBar.style.width = `${lag}%`;
         const engines = devices.reduce((total, device) => total + (Number(device.ae_count) || 0), 0);
-        const capabilities = [...new Set(devices.flatMap(device => device.capabilities || []))];
         const algorithms = sample?.ocf?.enabled ? (sample.ocf.algorithms || []) : [];
         const services = this._serviceList(devices);
+        const frequency = Math.max(...devices.map(device => Number(device.frequency_hz) || 0), 0);
+        const facts = document.getElementById(this._id('facts'));
         this._show('device-information', Boolean(devices.length));
-        this._show('engines-fact', engines > 0);
-        this._show('capabilities-fact', Boolean(capabilities.length));
-        this._show('algorithms-fact', Boolean(algorithms.length));
-        this._set('engines', engines ? String(engines) : '');
+        this._show('devices-card', Boolean(devices.length));
+        this._show('engines-card', engines > 0);
+        this._show('clock-card', frequency > 0);
+        this._show('services-card', Boolean(services));
+        this._show('crypto-card', Boolean(sample?.ocf?.present));
+        this._show('algorithms-card', Boolean(algorithms.length));
+        facts?.classList.toggle('has-clock', frequency > 0);
+        this._set('devices', String(devices.length));
+        this._set('engines', engines ? `${engines} total` : '');
+        this._set('engines-detail', engines && devices.length && engines % devices.length === 0 ? `${engines / devices.length} per device` : '');
+        this._set('clock', this._mhz(frequency));
         this._set('services', services);
-        this._set('capabilities', capabilities.join(' · '));
+        this._set('crypto-state', sample?.ocf?.enabled ? this.translations.enabled : this.translations.disabled);
+        this._set('crypto-detail', sample?.ocf?.enabled ? this.translations.kernel_crypto_active : '');
         this._set('algorithms', algorithms.join(' · '));
+        const cryptoDot = document.getElementById(this._id('crypto-dot'));
+        if (cryptoDot) {
+            cryptoDot.className = `dashboard-plus-dot text-${sample?.ocf?.enabled ? 'success' : 'muted'}`;
+        }
         const errorElement = document.getElementById(this._id('error'));
         if (errorElement) errorElement.textContent = error;
     }
