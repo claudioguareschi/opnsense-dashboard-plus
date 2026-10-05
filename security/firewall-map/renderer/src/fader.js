@@ -83,6 +83,11 @@ export class Fader {
     return result;
   }
 
+  /** Drop transition history when a filter changes the meaning of the current data set. */
+  clear() {
+    this.entries.clear();
+  }
+
   opacity(item, now) {
     return item.fade ? this.opacityOf(item.fade, now) : 1;
   }

@@ -1140,6 +1140,18 @@
 	function flowService(flow) {
 		return serviceCategory((flow.services || [])[0]);
 	}
+	/** Match both regular flow host objects and IDS host:port strings. */
+	function insideHostMatches(inside, host) {
+		if (!host) return true;
+		if (typeof inside === "string") {
+			if (inside.startsWith("[")) {
+				const end = inside.indexOf("]");
+				return end > 0 && inside.slice(1, end) === host;
+			}
+			return inside === host || inside.startsWith(`${host}:`);
+		}
+		return inside?.ip === host;
+	}
 	function flowMatches(flow, locations) {
 		const f = state.filters;
 		const dest = locations.get(flow.dest) || {};
@@ -1149,7 +1161,7 @@
 		if (f.traffic === "ids_flows" || f.traffic === "ids_addresses" && !flow.ids) return false;
 		if (f.service && flowService(flow) !== f.service) return false;
 		if (f.iface && !(flow.inside || []).some((inside) => inside.interface === f.iface)) return false;
-		if (f.host && !(flow.inside || []).some((inside) => inside.ip === f.host)) return false;
+		if (f.host && !(flow.inside || []).some((inside) => insideHostMatches(inside, f.host))) return false;
 		if (f.country && dest.country !== f.country) return false;
 		if (f.asn && String(dest.asn || "") !== f.asn) return false;
 		return true;
@@ -1168,7 +1180,7 @@
 	function idsFlowMatches(flow) {
 		const f = state.filters;
 		if (f.traffic === "blocked" || f.traffic === "threats" && flow.severity > 2 && !(flow.lists || []).length) return false;
-		if (f.host && !(flow.inside || "").startsWith(`${f.host}:`) && flow.inside !== f.host) return false;
+		if (f.host && !insideHostMatches(flow.inside, f.host)) return false;
 		if (f.service || f.iface) return false;
 		if (f.country && flow.country !== f.country) return false;
 		return !(f.asn && String(flow.asn || "") !== f.asn);
@@ -2428,12 +2440,16 @@
 		const options = [`<option value="">${escapeHtml(allLabel)}</option>`].concat([...values].sort((a, b) => String(a.label).localeCompare(String(b.label))).map((item) => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`));
 		if (current && ![...values].some((item) => String(item.value) === current)) options.push(`<option value="${escapeHtml(current)}">${escapeHtml(current)}</option>`);
 		const html = options.join("");
-		if ($select.data("html") !== html && !$select.parent().hasClass("open")) {
+		const open = $select.parent().hasClass("open");
+		if ($select.data("html") !== html && !open) {
 			$select.html(html).data("html", html);
 			withIcons($select);
 			$select.selectpicker("refresh");
 		}
-		$select.val(current);
+		if (!open) {
+			$select.val(current);
+			$select.selectpicker("val", current);
+		}
 	}
 	/** The filter's icon on every option, so bootstrap-select shows it on the button. */
 	function withIcons($select) {
@@ -2591,9 +2607,10 @@
 		const seconds = Math.max(0, Math.round((Date.now() - state.updatedAt) / 1e3));
 		$("#fwmap-updated").html(`${escapeHtml(fill(T.last_updated_ago, { time: fill(TEXT.map_seconds, { count: seconds }) }))} <i class="fwmap-live${seconds > 10 ? " stale" : ""}"></i>`);
 	}
-	function refresh() {
+	function refresh(filterChanged = false) {
 		const summary = state.data;
 		if (!summary || summary.status !== "ok") return;
+		if (filterChanged) state.renderer.resetTransitions();
 		const shown = filtered(summary);
 		state.renderer.render(shown);
 		updateToolbar(summary);
@@ -2678,13 +2695,13 @@
 		} else if (row?.filter) {
 			const active = talkerActive(row);
 			for (const [key, value] of Object.entries(row.filter)) state.filters[key] = active ? "" : value;
-			refresh();
+			refresh(true);
 		}
 	}
 	function bindFilters() {
 		const bind = (selector, key) => $(selector).on("change", function() {
 			state.filters[key] = $(this).val();
-			refresh();
+			refresh(true);
 			state.renderer.refit();
 		});
 		bind("#fwmap-filter-traffic", "traffic");
@@ -2696,7 +2713,7 @@
 		$("#fwmap-filter-asn a").on("click", (event) => {
 			event.preventDefault();
 			state.filters.asn = "";
-			refresh();
+			refresh(true);
 			syncChips();
 		});
 		$("#fwmap-color").on("change", function() {
@@ -2711,7 +2728,7 @@
 		$("#fwmap-reset").on("click", () => {
 			resetFilters();
 			$("#fwmap-filter-traffic").val("all");
-			refresh();
+			refresh(true);
 			syncChips();
 		});
 		$("#fwmap-status").on("click", ".fwmap-status-ids", function(event) {

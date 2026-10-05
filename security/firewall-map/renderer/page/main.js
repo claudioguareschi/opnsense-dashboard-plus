@@ -87,10 +87,13 @@ function updatedLine() {
     + `<i class="fwmap-live${seconds > 10 ? ' stale' : ''}"></i>`);
 }
 
-function refresh() {
+function refresh(filterChanged = false) {
   const summary = state.data;
   if (!summary || summary.status !== 'ok') {
     return;
+  }
+  if (filterChanged) {
+    state.renderer.resetTransitions();
   }
   const shown = filtered(summary);
   state.renderer.render(shown);
@@ -199,14 +202,14 @@ function selectTalker(row) {
     for (const [key, value] of Object.entries(row.filter)) {
       state.filters[key] = active ? '' : value;
     }
-    refresh();
+    refresh(true);
   }
 }
 
 function bindFilters() {
   const bind = (selector, key) => $(selector).on('change', function () {
     state.filters[key] = $(this).val();
-    refresh();
+    refresh(true);
     // a new filter is a new question: frame its answer straight away when following
     state.renderer.refit();
   });
@@ -219,7 +222,7 @@ function bindFilters() {
   $('#fwmap-filter-asn a').on('click', (event) => {
     event.preventDefault();
     state.filters.asn = '';
-    refresh();
+    refresh(true);
     syncChips();
   });
   $('#fwmap-color').on('change', function () {
@@ -230,7 +233,7 @@ function bindFilters() {
   $('#fwmap-reset').on('click', () => {
     resetFilters();
     $('#fwmap-filter-traffic').val('all');
-    refresh();
+    refresh(true);
     syncChips();
   });
   // the IDS counters in the status line filter the map; a second click shows everything again

@@ -40,12 +40,18 @@ function fillSelect($select, values, current, allLabel) {
     options.push(`<option value="${escapeHtml(current)}">${escapeHtml(current)}</option>`);
   }
   const html = options.join('');
-  if ($select.data('html') !== html && !$select.parent().hasClass('open')) {
+  const open = $select.parent().hasClass('open');
+  if ($select.data('html') !== html && !open) {
     $select.html(html).data('html', html);
     withIcons($select);
     $select.selectpicker('refresh');
   }
-  $select.val(current);
+  // The native value and Bootstrap Select's button are separate states.  Polling can rebuild the
+  // option list while a host is selected, so restore both once its menu is closed.
+  if (!open) {
+    $select.val(current);
+    $select.selectpicker('val', current);
+  }
 }
 
 /** The filter's icon on every option, so bootstrap-select shows it on the button. */
