@@ -4,7 +4,7 @@ Dashboard plus for [OPNsense](https://opnsense.org) provides a set of informativ
 
 | Package | What it adds |
 |---|---|
-| **os-dashboard-plus** | Enhanced dashboard widgets: System Information+, Traffic Graph+, System Metrics+, Thermal Sensors+, Interface Statistics+, Gateways+, Interfaces+, Firewall Logs+, Services+ and DNS Health+. |
+| **os-dashboard-plus** | Enhanced dashboard widgets: System Information+, Traffic Graph+, System Metrics+, Thermal Sensors+, Interface Statistics+, Gateways+, Interfaces+, Firewall Logs+, Services+, DNS Health+ and QuickAssist+. |
 | **os-firewall-map** (Firewall Map+) | The firewall's live traffic (IPv4 and IPv6) on a world map, as a dashboard widget and a full-size page, with plain-language details, threat lists, Suricata alerts and a Threats panel. |
 | **os-vnstat-plus** (VNStat Plus) | A configurable VNStat traffic-history dashboard widget, with charts and tables for the interfaces collected by the official `os-vnstat` plugin. |
 
@@ -240,14 +240,14 @@ network (ASN) names.
 | Daily, with an AbuseIPDB key | AbuseIPDB | Your key, to download the blacklist. |
 | Threat-list aliases (daily, OPNsense's alias updater) | The list provider | The download request only. |
 | *Investigate* clicked | rdap.org, stat.ripe.net, AbuseIPDB | The one address being investigated. |
-| *Look up hostnames* enabled | Your DNS resolver | Reverse lookups of remote addresses. |
+| *Look up hostnames* enabled | Your DNS resolver | Reverse lookups of remote and unnamed inside addresses. |
 
 The collector runs while a map is open, or in the background while the widget is on a dashboard
 and background recording is on. It uses a few percent of one CPU core while a map is open.
 
 ## Dashboard Plus
 
-Ten widgets that sit next to OPNsense's built-in ones in **Add widget**. Everything is read
+Eleven widgets that sit next to OPNsense's built-in ones in **Add widget**. Everything is read
 locally from the firewall's own API. Each widget's options are in its settings dialog (gear icon
 on the widget).
 
@@ -338,6 +338,13 @@ be selected in the widget settings, and start, stop and restart actions require 
 cache hit rate and DNSBL totals. When Unbound has forwarding entries, the configured AdGuard
 upstreams are listed by name and address. Settings: refresh interval.*
 
+### QuickAssist+
+
+*A read-only live view of Intel QuickAssist devices: completed firmware requests per second,
+request/response pipeline lag and outstanding work, device and acceleration-engine counts, clock,
+services and OpenCrypto Framework state. It discovers the loaded QAT driver dynamically and
+shows unavailable or degraded states without changing driver, OCF or firewall configuration.*
+
 ## VNStat Plus
 
 **VNStat Traffic+** is a separate dashboard widget package for traffic history. It requires the
@@ -400,6 +407,10 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.57** (all packages): Dashboard Plus adds QuickAssist+, a read-only live monitor for Intel
+  QAT devices. Firewall Map+ resolves unnamed inside hosts through the existing hostname-lookup
+  option when DHCP is external; DHCP names remain authoritative and private PTR results expire
+  quickly after an address reassignment.
 - **0.56** (all packages): documents Firewall Map+ snapshots and the three published packages.
   Adds browser-level coverage for DNS Health+, Services+ and VNStat Traffic+ behavior.
 - **0.55** (all packages): Dashboard Plus adds DNS Health+, live DNS request-rate and Services+.

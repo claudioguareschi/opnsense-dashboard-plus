@@ -316,4 +316,34 @@
             <action_failed>Service action failed</action_failed>
         </translations>
     </dashboardplusservices>
+    <dashboardplusquickassist>
+        <filename>DashboardPlusQuickAssist.js</filename>
+        <endpoints>
+            <endpoint>/api/dashboardplus/system/qat</endpoint>
+        </endpoints>
+        <translations>
+            <title>QuickAssist+</title>
+            <dashboard_title>QuickAssist</dashboard_title>
+            <active>Active</active>
+            <degraded>Degraded</degraded>
+            <fault>Fault</fault>
+            <unavailable>Unavailable</unavailable>
+            <qat_activity>QAT Activity</qat_activity>
+            <requests_per_second>Completed requests per second</requests_per_second>
+            <completed_requests>completed req/s</completed_requests>
+            <lag_requests>lag req/s</lag_requests>
+            <outstanding>Outstanding</outstanding>
+            <qat_pipeline>QAT Pipeline</qat_pipeline>
+            <device_information>Device Information</device_information>
+            <qat_devices>QAT devices</qat_devices>
+            <acceleration_engines>Acceleration engines</acceleration_engines>
+            <clock>Clock</clock>
+            <services>Services</services>
+            <ocf>OCF</ocf>
+            <enabled>Enabled</enabled>
+            <disabled>Disabled</disabled>
+            <not_available>No QuickAssist devices are available</not_available>
+            <fetch_failed>Unable to read QuickAssist data</fetch_failed>
+        </translations>
+    </dashboardplusquickassist>
 </metadata>

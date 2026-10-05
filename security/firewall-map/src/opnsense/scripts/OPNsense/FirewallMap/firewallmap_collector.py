@@ -79,7 +79,10 @@ from lib.ids import (
     ALERT_BACKLOG_BYTES, EVE_LOG, AlertTracker, Correlator, alert_summary, connection_keys, connection_summary, firewall_blocks,
     ips_drops,
 )
-from lib.leases import HostnameResolver, describe_inside, describe_target, lease_names
+from lib.leases import (
+    INSIDE_HOSTNAME_TTL, INSIDE_NEGATIVE_TTL, HostnameResolver, describe_inside, describe_target, host_names,
+    lease_names,
+)
 from firewallmap_snapshots import valid_id as snapshot_valid_id
 from lib.pf import (
     StateFacts, TooManyStates, flow_endpoints, host_info, port_forwards, rule_descriptions, sample_states,
@@ -367,8 +370,20 @@ def summarize_flows(tracker, geo, local_addresses, role, now, wall_time, hostnam
     resolved = {}
     if hostnames is not None:
         remotes = [flow["dest"] for flow in flows]
-        hostnames.update(remotes, now)
-        resolved = {address: hostnames.get(address) for address in remotes if hostnames.get(address)}
+        known = context.get("names", {})
+        inside = []
+        for flow in flows:
+            inside.extend(item["ip"] for item in flow["inside"] if not item.get("name"))
+            inside.extend(item["ip"] for item in flow["targets"]
+                          if not item.get("firewall") and not item.get("name"))
+        # The existing opt-in covers every host name visible in a flow.  The resolver's one
+        # shared budget prevents internal PTRs from adding unbounded DNS work.
+        hostnames.update(
+            [(address, INSIDE_HOSTNAME_TTL, INSIDE_NEGATIVE_TTL) for address in inside if address not in known] + remotes,
+            now,
+        )
+        addresses = set(remotes) | set(inside)
+        resolved = {address: hostnames.get(address) for address in addresses if hostnames.get(address)}
     return {
         "status": "ok",
         "sampled_at": datetime.fromtimestamp(wall_time, timezone.utc).isoformat(),
@@ -435,7 +450,7 @@ class ThreatRecorder:
             for address, entry in seen.items():
                 entry["remote"] = self._identity(address, collector)
                 entry["ids"] = collector.alerts.summary(address)
-                entry["connections"] = connection_summary(address, correlator, collector.leases, collector.interfaces,
+                entry["connections"] = connection_summary(address, correlator, collector.host_names(), collector.interfaces,
                                                           index=index)
             self.last_wall = time.time()
             threats.record(self.db, seen)
@@ -695,12 +710,16 @@ class Collector:
         location = self.geo.get(self.external_ip)
         return {"lat": location["lat"], "lon": location["lon"], "name": "Firewall"} if location else None
 
+    def host_names(self):
+        """Configured DHCP names override the short-lived PTR fallback."""
+        return host_names(self.leases, self.store)
+
     def build_payload(self, now, limit=MAX_FLOWS):
         """The map document: flows (the strongest `limit`, None for all), blocked sources, alerts."""
         resolver = self.hostnames if requested(HOSTNAME_MARKER, HOSTNAME_REQUEST_SECONDS) else None
         geo = self.geo
         context = {
-            "names": self.leases, "networks": self.networks, "interfaces": self.interfaces,
+            "names": self.host_names(), "networks": self.networks, "interfaces": self.interfaces,
             "blocklists": self.blocklists, "reputation": self.reputation, "alerts": self.alerts,
             "descriptions": self.descriptions,
         }
@@ -716,7 +735,7 @@ class Collector:
         )
         shown = {flow["dest"] for flow in payload["flows"]} | {block["source"] for block in payload["blocks"]}
         payload["alerts"] = alert_summary(self.alerts, geo, origin, shown, self.blocklists, self.reputation)
-        payload["ids_flows"] = self.correlator.summary(geo, origin, self.leases, self.networks, self.interfaces,
+        payload["ids_flows"] = self.correlator.summary(geo, origin, self.host_names(), self.networks, self.interfaces,
                                                        self.blocklists, self.reputation)
         # which lists are consulted, so the details can show "not listed" per list
         # every configured interface, so the interface filter lists the quiet ones too

@@ -45,7 +45,7 @@ import sys
 import time
 
 from lib.common import CACHE_DB, THREATS_DB, is_icmp, log_error, secure_umask, service_name
-from lib.leases import lease_names
+from lib.leases import host_names
 from lib.pf import StateFacts
 
 DATABASE = THREATS_DB
@@ -286,9 +286,9 @@ def prune(db, now=None):
 
 
 def inside_names():
-    """DHCP names of inside hosts, so entries read "mail" rather than 192.168.1.2."""
+    """DHCP names, then still-fresh PTR fallbacks, for inside-host display."""
     try:
-        return lease_names()
+        return host_names()
     except Exception:  # names are a nicety; the queue works without them
         return {}
 

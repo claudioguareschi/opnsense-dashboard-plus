@@ -53,9 +53,12 @@ UNBOUND_INCLUDES = "/var/unbound/etc/*.conf"
 CACHE_DIRECTORY = "/var/run/dashboardplus"
 SENSORS_CACHE = CACHE_DIRECTORY + "/sensors.json"
 SLOW_METRICS_CACHE = CACHE_DIRECTORY + "/metrics.json"
+QAT_CACHE = CACHE_DIRECTORY + "/qat.json"
 # Mbufs, swap and filesystems change slowly and cost the most to read (netstat -m alone
 # takes 0.1 s of CPU): they are read again at most once a minute, the rest on every refresh.
 SLOW_METRICS_TTL = 60
+QAT_DISCOVERY_TTL = 300
+QAT_EMPTY_DISCOVERY_TTL = 60
 # The filesystems System Metrics+ shows.
 FILESYSTEMS = ("/", "/tmp", "/var/log")
 # Everything a refresh reads from sysctl, in one call: memory as OPNsense's own System
@@ -513,6 +516,132 @@ def parse_sysctls(output):
     return values
 
 
+def parse_qat_sysctl_values(output):
+    """Parse ``sysctl -e`` output whose firmware-counter value spans lines.
+
+    The QAT driver formats ``fw_counters`` as a small report rather than a single
+    scalar.  Preserve every line after its ``name=value`` header until the next
+    QAT or qat_ocf OID, including harmless NULs which some driver versions print.
+    """
+    values = {}
+    current = None
+    header = re.compile(r"^(dev\.(?:qat|qat_ocf)\.\d+\.[^=\s]+)=(.*)$")
+    for line in (output or "").replace("\x00", "").splitlines():
+        match = header.match(line)
+        if match:
+            current = match.group(1)
+            values[current] = match.group(2).strip()
+        elif current:
+            values[current] += "\n" + line
+    return values
+
+
+def discover_qat_units(output):
+    """Return non-contiguous QAT and QAT OCF units named by the sysctl tree."""
+    values = parse_qat_sysctl_values(output)
+    devices = sorted({match.group(1) for key in values
+                      if (match := re.match(r"^dev\.qat\.(\d+)\.", key))}, key=int)
+    ocf = sorted({match.group(1) for key in values
+                  if (match := re.match(r"^dev\.qat_ocf\.(\d+)\.", key))}, key=int)
+    return {"devices": devices, "ocf": ocf}
+
+
+def parse_qat_fw_counters(output):
+    """Read complete AE request/response records from a driver's counter report."""
+    counters = []
+    text = (output or "").replace("\x00", "")
+    records = list(re.finditer(r"(?im)^\s*AE\s+(\d+)\b", text))
+    for index, record in enumerate(records):
+        body = text[record.end():records[index + 1].start() if index + 1 < len(records) else None]
+        responses = re.search(r"(?im)^\s*Firmware\s+Responses\s*:\s*(\d+)\s*$", body)
+        requests = re.search(r"(?im)^\s*Firmware\s+Requests\s*:\s*(\d+)\s*$", body)
+        if responses and requests:
+            counters.append({
+                "ae": int(record.group(1)),
+                "responses": int(responses.group(1)),
+                "requests": int(requests.group(1)),
+            })
+    return counters
+
+
+def qat_totals(counters):
+    """Sum the valid firmware counters without inventing values for partial records."""
+    return {
+        "requests": sum(counter["requests"] for counter in counters),
+        "responses": sum(counter["responses"] for counter in counters),
+    }
+
+
+def qat_discovery(now, cache_path=QAT_CACHE, discover=None):
+    """Use a small cache so a QAT refresh never walks the full sysctl tree normally."""
+    discover = discover or (lambda: run_output([SYSCTL, "-e", "-a"]))
+    cache = read_json(cache_path) or {}
+    taken = cache.get("time")
+    units = cache.get("units")
+    ttl = QAT_DISCOVERY_TTL if isinstance(units, dict) and units.get("devices") else QAT_EMPTY_DISCOVERY_TTL
+    if isinstance(taken, (int, float)) and isinstance(units, dict) and 0 <= now - taken < ttl:
+        return units
+    units = discover_qat_units(discover())
+    write_json(cache_path, {"time": now, "units": units})
+    return units
+
+
+def qat_oid_names(units):
+    """The known, fixed OIDs read in one process after discovery."""
+    names = []
+    for unit in units.get("devices", []):
+        prefix = f"dev.qat.{unit}"
+        names.extend((
+            f"{prefix}.%desc", f"{prefix}.frequency", f"{prefix}.cfg_services",
+            f"{prefix}.state", f"{prefix}.heartbeat", f"{prefix}.heartbeat_failed",
+            f"{prefix}.fw_counters",
+        ))
+    names.extend(f"dev.qat_ocf.{unit}.enable" for unit in units.get("ocf", []))
+    return names
+
+
+def collect_qat_live(now=None, cache_path=QAT_CACHE, discover=None, sysctls=None):
+    """Collect read-only QAT topology, health inputs and firmware counters.
+
+    Discovery is deliberately separate from the fast sample.  A device removed
+    after discovery simply vanishes from the next response, which lets the UI
+    report that transition without probing arbitrary OIDs.
+    """
+    now = time.time() if now is None else now
+    units = qat_discovery(now, cache_path, discover)
+    names = qat_oid_names(units)
+    if not names:
+        return {"available": False, "sampled_at": now, "devices": [], "ocf": {"present": False, "enabled": False}}
+    sysctls = sysctls or (lambda requested: run_output([SYSCTL, "-i", "-e", *requested]))
+    values = parse_qat_sysctl_values(sysctls(names))
+    devices = []
+    for unit in units.get("devices", []):
+        prefix = f"dev.qat.{unit}"
+        if not any(key.startswith(prefix + ".") for key in values):
+            continue
+        counters = parse_qat_fw_counters(values.get(f"{prefix}.fw_counters", ""))
+        totals = qat_totals(counters)
+        devices.append({
+            "unit": unit,
+            "description": values.get(f"{prefix}.%desc", "")[:200],
+            "frequency_hz": int_value(values.get(f"{prefix}.frequency")) or 0,
+            "services": values.get(f"{prefix}.cfg_services", "")[:100],
+            "state": values.get(f"{prefix}.state", "")[:100],
+            "heartbeat": int_value(values.get(f"{prefix}.heartbeat")),
+            "heartbeat_failed": int_value(values.get(f"{prefix}.heartbeat_failed")) or 0,
+            "ae_count": len(counters),
+            "counters_available": f"{prefix}.fw_counters" in values,
+            **totals,
+        })
+    ocf_values = [int_value(values.get(f"dev.qat_ocf.{unit}.enable")) for unit in units.get("ocf", [])]
+    return {
+        "available": bool(devices),
+        "sampled_at": now,
+        "devices": devices,
+        "ocf": {"present": bool(ocf_values), "enabled": any(value == 1 for value in ocf_values)},
+    }
+
+
 def parse_pciconf(output):
     devices = []
     current = None
@@ -933,5 +1062,7 @@ def collect():
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "metrics":
         print(json.dumps(collect_metrics(), sort_keys=True))
+    elif len(sys.argv) > 1 and sys.argv[1] == "qat":
+        print(json.dumps(collect_qat_live(), sort_keys=True))
     else:
         print(json.dumps(collect(), sort_keys=True))

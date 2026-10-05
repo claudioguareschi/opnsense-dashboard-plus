@@ -13,6 +13,7 @@
         <patterns>
             <pattern>api/dashboardplus/system/info</pattern>
             <pattern>api/dashboardplus/system/metrics</pattern>
+            <pattern>api/dashboardplus/system/qat</pattern>
         </patterns>
     </page-dashboard-widget-dashboard-plus>
 

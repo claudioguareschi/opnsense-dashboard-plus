@@ -88,6 +88,41 @@ class HostnameResolverTest(unittest.TestCase):
             again = self.resolver(CACHE.CacheStore(path), ttl=3600)
             self.assertEqual(again.get("8.8.8.8"), "dns.google")
 
+    def test_inside_names_have_a_short_positive_and_negative_lifetime(self):
+        calls = []
+
+        def reverse(address):
+            calls.append(address)
+            return "pi-hole.example" if address == "192.168.1.2" else None
+
+        with mock.patch.object(LEASES.HostnameResolver, "_reverse", staticmethod(reverse)):
+            resolver = self.resolver(per_sample=8, ttl=3600)
+            inside = ("192.168.1.2", LEASES.INSIDE_HOSTNAME_TTL, LEASES.INSIDE_NEGATIVE_TTL)
+            missing = ("192.168.1.3", LEASES.INSIDE_HOSTNAME_TTL, LEASES.INSIDE_NEGATIVE_TTL)
+            resolver.update([inside, missing], now=0)
+            resolver.update([], now=1)
+            self.assertEqual(resolver.get("192.168.1.2"), "pi-hole.example")
+            # The successful name remains fresh for ten minutes, a failed PTR for two.
+            resolver.update([inside, missing], now=119)
+            self.assertEqual(calls, ["192.168.1.2", "192.168.1.3"])
+            resolver.update([inside, missing], now=121)
+            self.assertEqual(calls, ["192.168.1.2", "192.168.1.3", "192.168.1.3"])
+            resolver.update([inside], now=601)
+            self.assertEqual(calls[-1], "192.168.1.2")
+
+    def test_cached_ptr_names_expire_and_never_override_dhcp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = CACHE.CacheStore(os.path.join(directory, "cache.db"))
+            store.put_many("hostname", [
+                ("192.168.1.2", ("old-pi", 0, LEASES.INSIDE_HOSTNAME_TTL)),
+                ("192.168.1.3", ("fresh-pi", 500, LEASES.INSIDE_HOSTNAME_TTL)),
+            ], now=0)
+            cached = LEASES.cached_hostname_names(store, now=600)
+            self.assertNotIn("192.168.1.2", cached)
+            self.assertEqual(cached["192.168.1.3"], "fresh-pi")
+            names = LEASES.host_names({"192.168.1.3": "dhcp-pi"}, store, now=600)
+            self.assertEqual(names["192.168.1.3"], "dhcp-pi")
+
 
 class DescribeInsideTest(unittest.TestCase):
     def test_new_interface_networks_are_used(self):

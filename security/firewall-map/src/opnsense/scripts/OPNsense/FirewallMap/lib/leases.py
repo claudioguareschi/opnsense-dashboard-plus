@@ -32,10 +32,13 @@ import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+from .cache import CacheStore
 from .common import ip_object, service_name
 
 
 HOSTNAME_TTL = 6 * 3600
+INSIDE_HOSTNAME_TTL = 10 * 60
+INSIDE_NEGATIVE_TTL = 2 * 60
 HOSTNAME_LOOKUPS_PER_SAMPLE = 8
 MAX_HOSTNAMES = 5000
 KEA_LEASES = "/var/db/kea/kea-leases4.csv"
@@ -110,6 +113,37 @@ def lease_names(kea=KEA_LEASES, dnsmasq=DNSMASQ_LEASES, kea_configs=KEA_CONFIGS,
     return leases
 
 
+def cached_hostname_names(store=None, now=None):
+    """Positive reverse names still fresh in the shared cache, keyed by address.
+
+    Cache entries written before private-name TTLs were introduced carry two fields and retain
+    the historic six-hour lifetime.  A cached PTR value is intentionally only a fallback: callers
+    merge DHCP names over this result.
+    """
+    now = time.time() if now is None else now
+    store = store if store is not None else CacheStore()
+    names = {}
+    for address, value in store.get_all("hostname", max_age=HOSTNAME_TTL, now=now).items():
+        if not isinstance(value, (list, tuple)) or len(value) < 2:
+            continue
+        name, stored = value[:2]
+        ttl = value[2] if len(value) >= 3 else HOSTNAME_TTL
+        try:
+            fresh = now - float(stored) < max(1, int(ttl))
+        except (TypeError, ValueError):
+            continue
+        if fresh and isinstance(name, str) and name:
+            names[address] = name
+    return names
+
+
+def host_names(leases=None, store=None, now=None):
+    """DHCP names first; cached PTR names only fill addresses DHCP does not name."""
+    names = cached_hostname_names(store, now)
+    names.update(lease_names() if leases is None else leases)
+    return names
+
+
 # (networks, {address: device}): the same inside hosts are described on every sample
 _devices = (None, {})
 
@@ -140,16 +174,32 @@ class HostnameResolver:
         self.ttl = ttl
         self.per_sample = per_sample
         self.store = store
-        # (name, monotonic time looked up); names cached in the store survive restarts
+        # (name, monotonic time looked up, lifetime); names cached in the store survive restarts
         now = time.monotonic()
         wall = time.time()
         self.names = {}
         if store is not None:
             store.prune("hostname", max_age=ttl, keep=MAX_HOSTNAMES)
-            for address, (name, stamp) in store.get_all("hostname", max_age=ttl).items():
-                self.names[address] = (name, now - (wall - stamp))
+            for address, value in store.get_all("hostname", max_age=ttl).items():
+                if not isinstance(value, (list, tuple)) or len(value) < 2:
+                    continue
+                name, stamp = value[:2]
+                try:
+                    lifetime = max(1, int(value[2])) if len(value) >= 3 else ttl
+                    self.names[address] = (name, now - (wall - float(stamp)), lifetime)
+                except (TypeError, ValueError):
+                    continue
         self.pending = {}
         self.pool = ThreadPoolExecutor(max_workers=4)
+
+    def _entry(self, address):
+        """Accept the old two-item in-memory shape while the collector is upgraded."""
+        cached = self.names.get(address)
+        if not cached:
+            return None
+        if len(cached) == 2:
+            return cached[0], cached[1], self.ttl
+        return cached
 
     @staticmethod
     def _reverse(address):
@@ -159,31 +209,44 @@ class HostnameResolver:
             return None
 
     def update(self, addresses, now):
+        """Start a bounded set of PTR lookups.
+
+        An item may be an address (the normal remote-host lifetime) or
+        ``(address, ttl, negative_ttl)`` for an inside host.  This keeps both categories under
+        the same lookup budget while giving DHCP-reassigned private addresses a short lifetime.
+        """
         resolved = []
-        for address, future in list(self.pending.items()):
+        for address, (future, ttl, negative_ttl) in list(self.pending.items()):
             if future.done():
-                self.names[address] = (future.result(), now)
-                resolved.append((address, (future.result(), time.time())))
+                name = future.result()
+                lifetime = ttl if name else negative_ttl
+                self.names[address] = (name, now, lifetime)
+                resolved.append((address, (name, time.time(), lifetime)))
                 del self.pending[address]
         if resolved and self.store is not None:
             self.store.put_many("hostname", resolved)
             self.store.prune("hostname", max_age=self.ttl, keep=MAX_HOSTNAMES)
-        for address in [address for address, (_, stamp) in self.names.items() if now - stamp >= self.ttl]:
+        for address in [address for address in self.names
+                        if now - self._entry(address)[1] >= self._entry(address)[2]]:
             del self.names[address]
         while len(self.names) > MAX_HOSTNAMES:
-            del self.names[min(self.names, key=lambda address: self.names[address][1])]
+            del self.names[min(self.names, key=lambda address: self._entry(address)[1])]
         budget = self.per_sample - len(self.pending)
-        for address in addresses:
+        for item in addresses:
             if budget <= 0:
                 break
-            cached = self.names.get(address)
-            if address in self.pending or (cached and now - cached[1] < self.ttl):
+            if isinstance(item, (list, tuple)):
+                address, ttl, negative_ttl = item
+            else:
+                address, ttl, negative_ttl = item, self.ttl, self.ttl
+            cached = self._entry(address)
+            if address in self.pending or (cached and now - cached[1] < cached[2]):
                 continue
-            self.pending[address] = self.pool.submit(self._reverse, address)
+            self.pending[address] = (self.pool.submit(self._reverse, address), ttl, negative_ttl)
             budget -= 1
 
     def get(self, address):
-        cached = self.names.get(address)
+        cached = self._entry(address)
         return cached[0] if cached else None
 
 

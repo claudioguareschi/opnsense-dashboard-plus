@@ -70,4 +70,18 @@ class SystemController extends ApiControllerBase
 
         return $result;
     }
+
+    /** Read-only QuickAssist topology, health and firmware-counter sample. */
+    public function qatAction()
+    {
+        $backend = new Backend();
+        $result = json_decode($backend->configdRun('dashboardplus system qat'), true);
+
+        if (!is_array($result)) {
+            return ['status' => 'failed'];
+        }
+
+        $result['status'] = 'ok';
+        return $result;
+    }
 }

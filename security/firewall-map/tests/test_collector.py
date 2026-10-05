@@ -116,6 +116,41 @@ class TrackerTest(unittest.TestCase):
         origin = next(location for location in anchored["locations"] if location["id"] == pair[0])
         self.assertEqual((origin["lat"], origin["lon"], origin["local"]), (40.7, -74.0, True))
 
+    def test_hostname_lookup_includes_unnamed_inside_hosts_under_the_existing_opt_in(self):
+        tracker = COLLECTOR.FlowTracker(smoothing=1.0)
+        pair = ("1.2.3.163", "45.56.79.53")
+        tracker.flows[pair] = {
+            "rate": 1.0, "rate_in": 0.0, "rate_out": 1.0, "packet_rate": 1.0, "last_active": 0.0,
+            "first_seen": 0.0, "states": 1, "protocols": ["tcp"], "services": ["HTTPS"],
+            "service_ports": {"HTTPS": "443/tcp"}, "inside": ["192.168.1.2"], "egress": "igb1",
+            "initiated": "local", "targets": ["tcp|192.168.1.3|443"], "age": 1,
+            "transferred": (1, 1), "rule": None,
+        }
+
+        class Resolver:
+            def __init__(self):
+                self.calls = []
+                self.names = {}
+
+            def update(self, addresses, now):
+                self.calls.append(list(addresses))
+
+            def get(self, address):
+                return self.names.get(address)
+
+        resolver = Resolver()
+        COLLECTOR.summarize_flows(tracker, Geo(), set(), None, 0.0, 0.0, resolver, {"names": {}})
+        self.assertEqual(resolver.calls[0][:2], [
+            ("192.168.1.2", 600, 120), ("192.168.1.3", 600, 120),
+        ])
+        self.assertEqual(resolver.calls[0][2:], [pair[1]])
+        resolver.names = {"192.168.1.2": "pi-hole", "192.168.1.3": "server"}
+        payload = COLLECTOR.summarize_flows(
+            tracker, Geo(), set(), None, 1.0, 1.0, resolver, {"names": dict(resolver.names)}
+        )
+        self.assertEqual(payload["flows"][0]["inside"][0]["name"], "pi-hole")
+        self.assertEqual(payload["flows"][0]["targets"][0]["name"], "server")
+
     def test_external_ip_discovery_validates_a_public_ipv4(self):
         self.assertEqual(COLLECTOR.discover_external_ipv4(lambda: b"73.1.2.3\n"), "73.1.2.3")
         self.assertIsNone(COLLECTOR.discover_external_ipv4(lambda: b"192.168.0.2"))
