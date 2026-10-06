@@ -49,7 +49,10 @@ export default class DashboardPlusTraffic extends DashboardPlusWidget(BaseWidget
                         },
                         realtime: {duration: this.windowDuration, delay: 2000},
                     },
-                    y: {ticks: {callback: value => formatBitRate(value)}}
+                    // Keep an idle interface on a conventional baseline. Without this, Chart.js
+                    // expands an all-zero series above and below zero, putting the flat line in
+                    // the middle of the graph.
+                    y: {beginAtZero: true, ticks: {callback: value => formatBitRate(value)}}
                 },
                 plugins: {
                     legend: {display: false},

@@ -389,7 +389,9 @@ export function formatBitRate(value) {
         return '0 b/s';
     }
     const units = ['b/s', 'Kb/s', 'Mb/s', 'Gb/s', 'Tb/s'];
-    const index = Math.min(Math.floor(Math.log(number) / Math.log(1000)), units.length - 1);
+    // Chart.js can generate fractional tick values for an idle graph. Do not index before
+    // the first unit (which used to render values such as 0.5 as "500 undefined").
+    const index = Math.max(0, Math.min(Math.floor(Math.log(number) / Math.log(1000)), units.length - 1));
     const scaled = number / Math.pow(1000, index);
-    return `${scaled.toFixed(scaled < 10 && index > 0 ? 1 : 0).replace(/\.0$/, '')} ${units[index]}`;
+    return `${scaled.toFixed(scaled < 10 ? 1 : 0).replace(/\.0$/, '')} ${units[index]}`;
 }
