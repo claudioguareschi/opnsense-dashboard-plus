@@ -30,6 +30,8 @@ import json
 import time
 from collections import deque
 from datetime import datetime
+from heapq import nsmallest
+from itertools import islice
 
 from .blocklists import IDS_LIST, threat_fields, threat_lists_for
 from .blocks import MAX_BLOCK_SOURCES
@@ -194,8 +196,11 @@ class Correlator:
                     break
             for key in expired:
                 del store[key]
-            while len(store) > MAX_CORRELATION_KEYS:
-                del store[next(iter(store))]
+            # One traversal of the oldest keys: restarting a dict iterator after every
+            # deletion repeatedly scans the growing deleted prefix of a large sample.
+            excess = max(0, len(store) - MAX_CORRELATION_KEYS)
+            for key in list(islice(store, excess)):
+                del store[key]
         for key in [key for key, flow in self.flows.items() if now - flow["last"] > ALERT_WINDOW_SECONDS]:
             del self.flows[key]
         while len(self.flows) > MAX_IDS_FLOWS:
@@ -528,43 +533,46 @@ def connection_summary(address, correlator, names, interfaces, wall=None, index=
     """
     wall = time.time() if wall is None else wall
     keys = (index if index is not None else connection_keys(correlator)).get(address, [])
-    result = []
-    for key in keys:
-        connection = correlator.current.get(key) or (correlator.flows.get(key) or {}).get("connection") \
-            or correlator.blocked[key]
-        flow = correlator.flows.get(key)
-        inside_ip = split_host_port(connection.get("inside") or "")[0] if connection.get("inside") else ""
-        signatures = []
-        if flow:
-            for group in flow["alerts"].values():
-                for item in group.values():
-                    signatures.append({field: item.get(field) for field in ("sid", "signature", "severity", "count", "action", "query")})
-        age = connection.get("age")
-        result.append({
-            "key": "|".join(key),
-            "open": key in correlator.current,
-            "protocol": key[0],
-            "inside": connection.get("inside"),
-            "inside_name": names.get(inside_ip) if inside_ip else None,
-            "public": connection.get("public"),
-            "remote": connection.get("remote"),
-            "remote_started": connection.get("remote_started"),
-            "rule": connection.get("rule_description") or connection.get("rule"),
-            "interface": interfaces.get(connection.get("interface"), connection.get("interface")),
-            "bytes_in": connection.get("bytes_in"),
-            "bytes_out": connection.get("bytes_out"),
-            "started": round(wall - age) if age is not None else None,
-            "seen": round(wall),
-            "kind": flow["kind"] if flow else ("current" if key in correlator.current else "blocked"),
-            # the firewall's decision and Suricata's are separate facts
-            "decision": connection.get("decision"),
-            "ips_dropped": any(item.get("action") == "blocked" for item in signatures),
-            "source": connection.get("source"),
-            "ids": sorted(signatures, key=lambda item: (item["severity"], -item["count"]))[:3],
-        })
+
+    def entries():
+        for key in keys:
+            connection = correlator.current.get(key) or (correlator.flows.get(key) or {}).get("connection") \
+                or correlator.blocked[key]
+            flow = correlator.flows.get(key)
+            inside_ip = split_host_port(connection.get("inside") or "")[0] if connection.get("inside") else ""
+            signatures = []
+            if flow:
+                for group in flow["alerts"].values():
+                    for item in group.values():
+                        signatures.append({field: item.get(field) for field in ("sid", "signature", "severity", "count", "action", "query")})
+            age = connection.get("age")
+            yield {
+                "key": "|".join(key),
+                "open": key in correlator.current,
+                "protocol": key[0],
+                "inside": connection.get("inside"),
+                "inside_name": names.get(inside_ip) if inside_ip else None,
+                "public": connection.get("public"),
+                "remote": connection.get("remote"),
+                "remote_started": connection.get("remote_started"),
+                "rule": connection.get("rule_description") or connection.get("rule"),
+                "interface": interfaces.get(connection.get("interface"), connection.get("interface")),
+                "bytes_in": connection.get("bytes_in"),
+                "bytes_out": connection.get("bytes_out"),
+                "started": round(wall - age) if age is not None else None,
+                "seen": round(wall),
+                "kind": flow["kind"] if flow else ("current" if key in correlator.current else "blocked"),
+                # the firewall's decision and Suricata's are separate facts
+                "decision": connection.get("decision"),
+                "ips_dropped": any(item.get("action") == "blocked" for item in signatures),
+                "source": connection.get("source"),
+                "ids": sorted(signatures, key=lambda item: (item["severity"], -item["count"]))[:3],
+            }
     # the busiest first, IDS-linked ones always kept
-    result.sort(key=lambda item: (not item["ids"], -((item["bytes_in"] or 0) + (item["bytes_out"] or 0))))
-    return result[:MAX_SNAPSHOT_CONNECTIONS]
+    # nsmallest preserves the input order of ties, just like the previous stable sort,
+    # while retaining only the selected rows instead of every matching connection.
+    return nsmallest(MAX_SNAPSHOT_CONNECTIONS, entries(),
+                     key=lambda item: (not item["ids"], -((item["bytes_in"] or 0) + (item["bytes_out"] or 0))))
 
 
 def firewall_blocks(correlator, seen, since, blocklists=None, reputation=None):

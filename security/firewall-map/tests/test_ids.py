@@ -312,6 +312,65 @@ class CorrelationExpiryTest(unittest.TestCase):
         correlator.observe_states(self.states("94.154.43.3"), self.LOCAL, 1000.0 + IDS.CORRELATION_SECONDS + 1)
         self.assertEqual(self.remotes(correlator), ["94.154.43.1", "94.154.43.3"])
 
+    def test_eviction_preserves_oldest_first_order_and_values(self):
+        for size in (0, 2, 5, 20):
+            with self.subTest(size=size), mock.patch.object(IDS, "MAX_CORRELATION_KEYS", 5):
+                correlator = IDS.Correlator()
+                for store in (correlator.recent, correlator.blocked):
+                    store.update((key, {"seen": 1000.0}) for key in range(size))
+                    if size:
+                        store[0] = store.pop(0)  # a refreshed entry moves to the end
+                expected = list(correlator.recent.items())[-5:]
+                correlator._expire(1000.0)
+                self.assertEqual(list(correlator.recent.items()), expected)
+                self.assertEqual(list(correlator.blocked.items()), expected)
+                self.assertLessEqual(len(correlator.recent), 5)
+
+    def test_large_eviction_traverses_each_store_only_once(self):
+        class CountedDict(dict):
+            iterations = 0
+
+            def __iter__(self):
+                self.iterations += 1
+                return super().__iter__()
+
+        correlator = IDS.Correlator()
+        size = IDS.MAX_CORRELATION_KEYS + 50000
+        correlator.recent = CountedDict((key, {"seen": 1000.0}) for key in range(size))
+        correlator._expire(1000.0)
+        self.assertLessEqual(correlator.recent.iterations, 1)
+        self.assertEqual(list(correlator.recent), list(range(50000, size)))
+
+
+class ConnectionSelectionTest(unittest.TestCase):
+    def test_bounded_selection_matches_stable_full_ranking(self):
+        for size in (0, 3, 6, 100):
+            with self.subTest(size=size):
+                correlator = IDS.Correlator()
+                for number in range(size):
+                    key = ("tcp", "1.2.3.163", str(number), "34.1.1.1", "443")
+                    connection = IDS.make_connection(key, bytes_in=(number % 4) * 100,
+                                                     bytes_out=None, age=10)
+                    # Include current, historical IDS, and blocked connections, and tied rates.
+                    if number % 3 == 0:
+                        correlator.current[key] = connection
+                    elif number % 3 == 1:
+                        correlator.flows[key] = {"kind": "recent", "connection": connection, "alerts": {}}
+                    else:
+                        correlator.blocked[key] = connection
+                    if number % 5 == 0:
+                        correlator.flows[key] = {"kind": "current", "connection": connection, "alerts": {
+                            "1": {"1": {"sid": 1, "signature": "test", "severity": 2, "count": 1,
+                                        "action": "allowed", "query": None}}}}
+                # Asking for every row gives the stable sorted reference, including all fields.
+                with mock.patch.object(IDS, "MAX_SNAPSHOT_CONNECTIONS", max(1, size)):
+                    complete = IDS.connection_summary("34.1.1.1", correlator, {}, {}, wall=1000.0)
+                order = IDS.connection_keys(correlator).get("34.1.1.1", [])
+                ranked = sorted(order, key=lambda key: (int(key[2]) % 5 != 0, -(int(key[2]) % 4) * 100))
+                self.assertEqual([item["key"] for item in complete], ["|".join(key) for key in ranked])
+                actual = IDS.connection_summary("34.1.1.1", correlator, {}, {}, wall=1000.0)
+                self.assertEqual(actual, complete[:6])
+
 
 if __name__ == "__main__":
     unittest.main()

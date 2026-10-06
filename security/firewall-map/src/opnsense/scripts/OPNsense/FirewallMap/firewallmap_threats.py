@@ -156,7 +156,7 @@ def observe(records, lists_for, local_addresses, networks=None, sample=None):
         if not lists:
             continue
         entry = seen.setdefault(remote, {
-            "lists": lists, "inbound": 0, "outbound": 0, "targets": [], "inside": [], "services": [], "bytes": 0,
+            "lists": lists, "inbound": 0, "outbound": 0, "targets": {}, "inside": {}, "services": {}, "bytes": 0,
             "youngest": None, "service_ports": {},
         })
         if record.age is not None:
@@ -165,17 +165,22 @@ def observe(records, lists_for, local_addresses, networks=None, sample=None):
         if facts.remote_started:
             entry["inbound"] += 1
             if facts.target not in entry["targets"]:
-                entry["targets"].append(facts.target)
+                entry["targets"][facts.target] = None
         else:
             entry["outbound"] += 1
         if inside and inside.address not in entry["inside"]:
-            entry["inside"].append(inside.address)
+            entry["inside"][inside.address] = None
         service = facts.service
         if service not in entry["services"]:
-            entry["services"].append(service)
+            entry["services"][service] = None
             if not is_icmp(record.protocol) and service_port:
                 entry["service_ports"][service] = f"{service_port}/{record.protocol}"
         entry["bytes"] += record.bytes_in + record.bytes_out
+    # Dict membership is constant-time; convert the first-seen ordering back to the
+    # existing list-shaped document only once, after the complete sample.
+    for entry in seen.values():
+        for field in ("targets", "inside", "services"):
+            entry[field] = list(entry[field])
     return seen
 
 

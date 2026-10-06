@@ -447,10 +447,11 @@ class ThreatRecorder:
             if collector.geo is not None and seen:
                 collector.geo.resolve(list(seen))
             index = connection_keys(correlator) if seen else None
+            names = collector.host_names() if seen else {}
             for address, entry in seen.items():
                 entry["remote"] = self._identity(address, collector)
                 entry["ids"] = collector.alerts.summary(address)
-                entry["connections"] = connection_summary(address, correlator, collector.host_names(), collector.interfaces,
+                entry["connections"] = connection_summary(address, correlator, names, collector.interfaces,
                                                           index=index)
             self.last_wall = time.time()
             threats.record(self.db, seen)

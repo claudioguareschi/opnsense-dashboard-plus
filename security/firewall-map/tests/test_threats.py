@@ -32,6 +32,7 @@ import tempfile
 import time
 import unittest
 from datetime import datetime
+from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -47,6 +48,50 @@ class ThreatQueueTest(unittest.TestCase):
     def observe(self, states):
         lists = {"108.188.77.155": ["AbuseIPDB blacklist"]}
         return THREATS.observe(PF.parse_states(states), lambda address: lists.get(address, []), {"1.2.3.163"})
+
+    def test_attribution_matches_ordered_list_accumulation(self):
+        views = []
+        expected = {"targets": [], "inside": [], "services": [], "service_ports": {}}
+        for number in (4, 1, 4, 8, 1, 2, 9, 8, 3, 0, 7, 6, 5):
+            host, service = f"192.168.1.{number}", f"TCP/{number}"
+            target = f"tcp|{host}|{number}"
+            facts = SimpleNamespace(pair=("1.2.3.163", "34.1.1.1"), remote_started=True,
+                                    target=target, inside=SimpleNamespace(address=host),
+                                    service=service, service_port=str(number))
+            views.append((SimpleNamespace(age=1, protocol="tcp", bytes_in=1, bytes_out=2), facts))
+            for field, value in (("targets", target), ("inside", host), ("services", service)):
+                if value not in expected[field]:
+                    expected[field].append(value)
+            expected["service_ports"].setdefault(service, f"{number}/tcp")
+        lists_for = mock.Mock(return_value=["Test list"])
+        entry = THREATS.observe([], lists_for, {"1.2.3.163"}, sample=(views, {}))["34.1.1.1"]
+        for field, value in expected.items():
+            self.assertEqual(entry[field], value)
+        self.assertEqual((entry["inbound"], entry["outbound"], entry["bytes"]), (len(views), 0, len(views) * 3))
+        self.assertEqual(json.loads(json.dumps(entry))["inside"], expected["inside"])
+        lists_for.assert_called_once_with("34.1.1.1")
+        # Existing accumulation is not capped at MAX_ITEMS; preserve that behavior.
+        self.assertGreater(len(entry["inside"]), THREATS.MAX_ITEMS)
+
+    def test_distinct_attributions_use_indexed_membership(self):
+        class CountedText(str):
+            comparisons = 0
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                type(self).comparisons += 1
+                return super().__eq__(other)
+
+        views = []
+        for number in range(500):
+            facts = SimpleNamespace(pair=("1.2.3.163", "34.1.1.1"), remote_started=True,
+                                    target=CountedText(f"tcp|192.168.1.2|{number}"),
+                                    inside=SimpleNamespace(address=CountedText(f"10.0.{number // 256}.{number % 256}")),
+                                    service=CountedText(f"TCP/{number}"), service_port=str(number))
+            views.append((SimpleNamespace(age=1, protocol="tcp", bytes_in=1, bytes_out=2), facts))
+        entry = THREATS.observe([], lambda address: ["Test list"], {}, sample=(views, {}))["34.1.1.1"]
+        self.assertLess(CountedText.comparisons, len(views) * 10)
+        self.assertEqual(len(entry["inside"]), len(views))
 
     def test_records_only_flagged_addresses_with_target(self):
         seen = self.observe(self.INBOUND + self.OUTBOUND)

@@ -24,6 +24,7 @@
 
 """Unit tests for the collector loop and flow tracker."""
 
+import importlib.util
 import json
 import os
 import sys
@@ -369,6 +370,38 @@ class CollectorStateGuardTest(CollectorLoopTest):
 
 
 class ThreatRecorderTest(unittest.TestCase):
+    def test_hostnames_are_loaded_once_per_recording(self):
+        recorder = COLLECTOR.ThreatRecorder(":memory:")
+        collector = mock.Mock()
+        collector.local_addresses, collector.networks, collector.interfaces = {"1.2.3.163"}, [], {}
+        collector.geo, collector.hostnames = None, None
+        collector.alerts.summary.return_value = None
+        collector.correlator = COLLECTOR.Correlator()
+        names = {"192.168.1.2": "mail"}
+        collector.host_names.return_value = names
+        records = PF.parse_states(nat_state(100, 100) + nat_state(100, 100).replace("45.56.79.53", "34.1.1.1"))
+        with mock.patch.object(COLLECTOR, "threat_lists_for", return_value=["Test list"]), \
+                mock.patch.object(COLLECTOR, "connection_summary", return_value=[]) as connections:
+            recorder.update(records, collector, now=0.0)
+            collector.host_names.assert_called_once_with()
+            self.assertEqual(connections.call_count, 2)
+            self.assertTrue(all(call.args[2] is names for call in connections.call_args_list))
+            recorder.update(records, collector, now=1.0)
+            collector.host_names.assert_called_once_with()
+            recorder.update(records, collector, now=COLLECTOR.THREAT_RECORD_SECONDS)
+            self.assertEqual(collector.host_names.call_count, 2)
+        recorder.db.close()
+
+    def test_no_flagged_addresses_do_not_load_hostnames(self):
+        recorder = COLLECTOR.ThreatRecorder(":memory:")
+        collector = mock.Mock()
+        collector.local_addresses, collector.networks = {"1.2.3.163"}, []
+        collector.correlator = COLLECTOR.Correlator()
+        with mock.patch.object(COLLECTOR, "threat_lists_for", return_value=[]):
+            recorder.update(PF.parse_states(nat_state(100, 100)), collector, now=0.0)
+        collector.host_names.assert_not_called()
+        recorder.db.close()
+
     def test_records_flagged_addresses_with_identity_and_connections(self):
         with tempfile.TemporaryDirectory() as directory:
             recorder = COLLECTOR.ThreatRecorder(os.path.join(directory, "queue.db"))
@@ -388,6 +421,18 @@ class ThreatRecorderTest(unittest.TestCase):
             self.assertEqual((row["address"], row["samples"], row["lists"]), ("45.56.79.53", 1, ["Test list"]))
             self.assertEqual(row["remote"]["hostname"], "scanner.example")
             self.assertEqual(row["remote"]["org"], "Example")
+
+
+class BenchmarkHarnessTest(unittest.TestCase):
+    def test_table_construction_does_not_recount_all_connections(self):
+        path = os.path.join(os.path.dirname(__file__), "..", "devel", "collector_benchmark.py")
+        spec = importlib.util.spec_from_file_location("collector_benchmark", path)
+        benchmark = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(benchmark)
+        with mock.patch.object(benchmark.StateTable, "_states", side_effect=AssertionError("full recount")):
+            table = benchmark.StateTable(1000, seed=7)
+        self.assertGreaterEqual(table._states(), 1000)
+        self.assertLess(table._states(), 1002)
 
 
 class SampleTimingTest(CollectorLoopTest):

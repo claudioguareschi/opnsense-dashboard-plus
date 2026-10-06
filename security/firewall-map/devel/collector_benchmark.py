@@ -97,8 +97,11 @@ class StateTable:
         self.scanners = [self._address(("45.0.0.0/8", "185.0.0.0/8", "193.0.0.0/8")) for _ in range(200)]
         self.listed = set(self.random.sample(self.remotes4, len(self.remotes4) // 20)) | set(self.scanners[:50])
         self.connections = []
-        while self._states() < size:
-            self.connections.append(self._connection())
+        count = 0
+        while count < size:
+            connection = self._connection()
+            self.connections.append(connection)
+            count += len(connection["states"])
 
     def _address(self, ranges):
         network = ipaddress.ip_network(self.random.choice(ranges))
@@ -313,7 +316,9 @@ def run(arguments):
         mock.patch.object(collector_module, "COLLECTOR_TIMINGS", os.path.join(work, "timings.json"), create=True),
         mock.patch.object(collector_module, "SNAPSHOT_REQUEST_DIR", os.path.join(work, "requests")),
         mock.patch.object(collector_module, "sample_states", lambda: pf.parse_states(io.StringIO(sample[0]))),
-        mock.patch.object(collector_module, "host_info", lambda: ({LOCAL4, LOCAL6}, None, networks)),
+        mock.patch.object(collector_module, "host_info", lambda: (
+            {LOCAL4, LOCAL6}, None, networks,
+            {"igb0": {"192.168.1.1", "2a01:4f8:1:3::1"}, "igb1": {LOCAL4, LOCAL6}})),
         mock.patch.object(collector_module, "recording_wanted", lambda values=None: True),
         mock.patch.object(collector_module, "database_state", lambda values: ("city.mmdb", "asn.mmdb", None)),
         mock.patch.object(collector_module, "rule_descriptions", lambda: {
@@ -321,6 +326,8 @@ def run(arguments):
         mock.patch.object(collector_module, "interface_names", lambda: {"igb0": "LAN", "igb1": "WAN"}),
         mock.patch.object(collector_module, "lease_names", lambda: {"192.168.1.10": "web"}),
         mock.patch.object(collector_module, "port_forwards", list),
+        mock.patch.object(collector_module, "topology", lambda: {
+            "primary_wan_device": "igb1", "latitude": None, "longitude": None, "discover_external_ip": False}),
         mock.patch.object(collector_module, "chosen_threat_lists", lambda setting: set()),
         mock.patch.object(collector_module, "idle", lambda started: False),
         mock.patch.object(collector_module, "requested", lambda marker, seconds: False),
@@ -380,7 +387,7 @@ def run(arguments):
     print(f"{arguments.states} states ({len(collector.tracker.counters)} drawn), {len(costs)} samples: "
           f"CPU per sample median {1000 * costs[len(costs) // 2]:.1f} ms, mean {1000 * sum(costs) / len(costs):.1f} ms, "
           f"max {1000 * costs[-1]:.1f} ms; wall median {1000 * walls[len(walls) // 2]:.1f} ms; "
-          f"peak RSS {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024} MB")
+          f"peak RSS {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024 if sys.platform == 'darwin' else 1024):.1f} MiB")
     timings = getattr(collector, "timings", None)
     if timings:
         print("last sample:", ", ".join(f"{name} {1000 * value:.1f} ms" for name, value in timings["phases"].items()))
