@@ -31,6 +31,28 @@ import {test} from 'node:test';
 globalThis.window = globalThis.window || {};
 const {state, resetFilters} = await import('../page/context.js');
 const {filtered, insideHostMatches} = await import('../page/filters.js');
+const {T} = await import('../page/context.js');
+const {captureText} = await import('../page/snapshots.js');
+
+test('snapshot coverage distinguishes legacy, fallback, complete and truncated detail', () => {
+  Object.assign(T, {
+    snapshot_unknown: 'Detail completeness unknown', snapshot_complete: 'Complete detail within capture scope',
+    snapshot_truncated: 'Truncated detail', snapshot_captured_flows: '{captured} flows captured of {available} available',
+    snapshot_omitted_geo: '{count} additional flows without geographic data',
+    snapshot_captured_states: '{captured} of {available} matching PF rows saved across captured remotes',
+  });
+  assert.equal(captureText({full: true}), T.snapshot_unknown);
+  assert.equal(captureText({capture: {version: 1, detail_status: 'unknown'}}), T.snapshot_unknown);
+  assert.equal(captureText({capture: {version: 2}}), T.snapshot_unknown);
+  assert.equal(captureText({capture: {version: 1}}), T.snapshot_unknown);
+  assert.equal(captureText({capture: {version: 1, detail_status: 'complete', flows: {captured: 5, available: 5}}}),
+    'Complete detail within capture scope · 5 flows captured of 5 available');
+  assert.equal(captureText({capture: {version: 1, detail_status: 'truncated',
+    flows: {captured: 5000, available: 200000, omitted_geo: 7},
+    states: {captured: 5000, available: 50000, truncated: true}}}),
+  'Truncated detail · 5000 flows captured of 200000 available · 7 additional flows without geographic data'
+    + ' · 5000 of 50000 matching PF rows saved across captured remotes');
+});
 
 const summary = {
   status: 'ok',

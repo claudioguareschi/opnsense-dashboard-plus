@@ -57,7 +57,29 @@ export function takenText(meta, withDate = true) {
 
 function countsText(meta) {
   const flows = escapeHtml(plural(T, 'snapshot_flows', meta.flows || 0));
-  return meta.flagged ? `${flows} · ${pill('danger', plural(T, 'snapshot_flagged', meta.flagged))}` : flows;
+  const flagged = meta.flagged ? ` · ${pill('danger', plural(T, 'snapshot_flagged', meta.flagged))}` : '';
+  return `${flows}${flagged} · <span class="text-muted">${escapeHtml(captureText(meta))}</span>`;
+}
+
+/** Coverage is separate from legacy full/partial: old captures have unknown completeness. */
+export function captureText(meta) {
+  const capture = meta.capture;
+  if (!capture || capture.version !== 1 || !['complete', 'truncated'].includes(capture.detail_status)) {
+    return T.snapshot_unknown;
+  }
+  const parts = [capture.detail_status === 'truncated' ? T.snapshot_truncated : T.snapshot_complete];
+  const flows = capture.flows || {};
+  if (flows.available != null) {
+    parts.push(fill(T.snapshot_captured_flows, {captured: flows.captured, available: flows.available}));
+  }
+  if (flows.omitted_geo) {
+    parts.push(fill(T.snapshot_omitted_geo, {count: flows.omitted_geo}));
+  }
+  const states = capture.states || {};
+  if (states.truncated) {
+    parts.push(fill(T.snapshot_captured_states, {captured: states.captured, available: states.available}));
+  }
+  return parts.join(' · ');
 }
 
 async function loadSnapshots() {
@@ -440,17 +462,18 @@ function renderChrome() {
 
 /** The States dialog for a saved snapshot: the PF states as they were when it was taken. */
 export function showSavedStates(address) {
+  if (!state.can.states) return;
   const rows = state.frozen?.data?.states?.[address] || [];
   const body = rows.map((row) => `<tr><td>${escapeHtml(row.interface || '')}</td><td>${escapeHtml(row.proto || '')}</td>`
     + `<td>${escapeHtml(hostPort(row.src_addr, row.src_port))}</td><td>${escapeHtml(hostPort(row.dst_addr, row.dst_port))}</td>`
     + `<td>${escapeHtml(row.nat || '')}</td><td>${escapeHtml(row.state || '')}</td><td>${escapeHtml(formatBytes(row.bytes || 0))}</td></tr>`).join('');
   BootstrapDialog.show({
     title: escapeHtml(`${T.states_for} ${address} · ${takenText(state.frozen?.meta)}`), size: BootstrapDialog.SIZE_WIDE,
-    message: body
+    message: `${state.frozen?.data?.capture?.states?.truncated ? `<div class="alert alert-warning">${escapeHtml(captureText(state.frozen.meta))}</div>` : ''}` + (body
       ? `<table class="table table-condensed table-striped"><thead><tr><th>${escapeHtml(T.interface)}</th><th>${escapeHtml(T.protocol)}</th>`
         + `<th>${escapeHtml(T.source)}</th><th>${escapeHtml(T.destination)}</th><th>NAT</th><th>${escapeHtml(T.state)}</th><th>${escapeHtml(T.bytes)}</th></tr></thead>`
         + `<tbody>${body}</tbody></table>`
-      : escapeHtml(state.frozen?.data?.full ? T.no_states : T.snapshot_no_states),
+      : escapeHtml(state.frozen?.data?.full ? T.no_states : T.snapshot_no_states)),
     buttons: [{label: T.close, action: (dialog) => dialog.close()}],
   });
 }
@@ -516,4 +539,3 @@ export function bindSnapshots(pageHooks) {
     }
   });
 }
-

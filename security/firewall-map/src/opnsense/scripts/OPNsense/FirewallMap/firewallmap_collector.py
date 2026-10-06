@@ -44,7 +44,7 @@ Suricata correlation live in the lib/ modules next to it.
     firewallmap_collector.py reload    ask a running collector to re-read its settings
 
 A map snapshot (the camera button) is a request file in SNAPSHOT_REQUEST_DIR: the next sample
-writes every tracked flow, not just the capped summary, plus the PF states behind them.
+writes bounded incident detail beyond the live summary, plus PF rows and capture coverage.
 """
 
 import json
@@ -60,6 +60,7 @@ import traceback
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from heapq import nsmallest
 
 import firewallmap_geodb as geodb
 import firewallmap_threats as threats
@@ -83,7 +84,9 @@ from lib.leases import (
     INSIDE_HOSTNAME_TTL, INSIDE_NEGATIVE_TTL, HostnameResolver, describe_inside, describe_target, host_names,
     lease_names,
 )
-from firewallmap_snapshots import valid_id as snapshot_valid_id
+from firewallmap_snapshots import (
+    MAX_DOCUMENT_BYTES, DocumentBudget, SnapshotTooLarge, json_size, valid_id as snapshot_valid_id,
+)
 from lib.pf import (
     StateFacts, TooManyStates, flow_endpoints, host_info, port_forwards, rule_descriptions, sample_states,
 )
@@ -143,6 +146,9 @@ MAX_INSIDE = 3
 # PF states kept with a saved snapshot, per remote address and in all
 SNAPSHOT_STATES_PER_ADDRESS = 50
 SNAPSHOT_STATES_TOTAL = 5000
+# Snapshot-specific budgets: neither live visualization nor PF admission limits.
+SNAPSHOT_FLOWS = 5000
+SNAPSHOT_BYTES = MAX_DOCUMENT_BYTES
 
 
 def _ranked(counts, limit=None):
@@ -351,10 +357,13 @@ def _location_entry(address, location, local_addresses):
 
 
 def summarize_flows(tracker, geo, local_addresses, role, now, wall_time, hostnames=None, context=None, limit=MAX_FLOWS,
-                    anchor=None):
+                    anchor=None, visible=None):
     context = context or {}
-    visible = tracker.visible(now, limit)
-    geo.resolve([address for _, local, remote, _, _ in visible for address in (remote, local) if public_ip(address)])
+    if visible is None:
+        visible = tracker.visible(now, limit)
+        geo.resolve([address for _, local, remote, _, _ in visible for address in (remote, local) if public_ip(address)])
+    # Explicit candidates are already resolved by snapshot selection. Do not trigger a cache
+    # eviction between counting their geographic availability and serializing those flows.
     flows = []
     locations = {}
     for _, local, remote, flow, activity in visible:
@@ -717,7 +726,7 @@ class Collector:
         """Configured DHCP names override the short-lived PTR fallback."""
         return host_names(self.leases, self.store)
 
-    def build_payload(self, now, limit=MAX_FLOWS):
+    def build_payload(self, now, limit=MAX_FLOWS, visible=None, snapshot=False):
         """The map document: flows (the strongest `limit`, None for all), blocked sources, alerts."""
         resolver = self.hostnames if requested(HOSTNAME_MARKER, HOSTNAME_REQUEST_SECONDS) else None
         geo = self.geo
@@ -727,7 +736,7 @@ class Collector:
             "descriptions": self.descriptions,
         }
         payload = summarize_flows(self.tracker, geo, self.local_addresses, self.role, now, time.time(), resolver, context,
-                                  limit, self.map_anchor(now))
+                                  limit, self.map_anchor(now), visible)
         origin = next((location["id"] for location in payload["locations"] if location["local"]), None)
         if origin is None and self.local_addresses:
             origin = sorted(self.local_addresses)[0]
@@ -737,6 +746,9 @@ class Collector:
             self.blocklists, self.reputation, self.alerts,
         )
         shown = {flow["dest"] for flow in payload["flows"]} | {block["source"] for block in payload["blocks"]}
+        if snapshot:
+            # Keep address-alert evidence independently of ordinary flow byte selection.
+            shown = {block["source"] for block in payload["blocks"]}
         payload["alerts"] = alert_summary(self.alerts, geo, origin, shown, self.blocklists, self.reputation)
         payload["ids_flows"] = self.correlator.summary(geo, origin, self.host_names(), self.networks, self.interfaces,
                                                        self.blocklists, self.reputation)
@@ -772,21 +784,23 @@ class Collector:
             except OSError:
                 pass
 
-    def state_rows(self, records, remotes):
+    def state_rows(self, records, remotes, coverage=None, budget=None):
         """The PF states behind the given remote addresses, as the map page's States dialog lists them."""
         rows, total = {}, 0
         for record in records:
-            if total >= SNAPSHOT_STATES_TOTAL:
+            if total >= SNAPSHOT_STATES_TOTAL and coverage is None:
                 break
             pair = flow_endpoints(record, self.local_addresses, self.networks, self.interface_addresses,
                                   self.primary_wan_device)
             if pair is None or pair[1] not in remotes:
                 continue
-            listed = rows.setdefault(pair[1], [])
-            if len(listed) >= SNAPSHOT_STATES_PER_ADDRESS:
+            if coverage is not None:
+                coverage["available"] += 1
+            listed = rows.get(pair[1], [])
+            if total >= SNAPSHOT_STATES_TOTAL or len(listed) >= SNAPSHOT_STATES_PER_ADDRESS:
                 continue
             nat = record.get("nat")
-            listed.append({
+            row = {
                 "interface": self.interfaces.get(record.get("interface"), record.get("interface")),
                 "proto": record.get("protocol"),
                 "src_addr": record["src"]["address"], "src_port": record["src"]["port"],
@@ -795,9 +809,82 @@ class Collector:
                 "state": record.get("state"),
                 "bytes": (record.get("bytes_in") or 0) + (record.get("bytes_out") or 0),
                 "age": record.get("age"),
-            })
+            }
+            if budget is not None and not budget.take({pair[1]: [row]}):
+                coverage["omitted_bytes"] += 1
+                continue
+            rows.setdefault(pair[1], []).append(row)
             total += 1
+        if coverage is not None:
+            coverage["captured"] = total
+            coverage["truncated"] = total < coverage["available"]
         return rows
+
+    def build_snapshot_payload(self, records, now):
+        """Bounded incident-first detail. Scan candidates, but never build an uncapped document."""
+        # Resolve through the existing per-sample lookup budget, without an O(F) address list.
+        self.geo.resolve(address for (local, remote), flow in self.tracker.flows.items()
+                         if self.tracker.activity(flow, now) > 0
+                         for address in (remote, local) if public_ip(address))
+        evidence = set(self.alerts.sources) | {key[3] for key in self.correlator.flows}
+        coverage = {"candidates": 0, "available": 0, "captured": 0, "limit": SNAPSHOT_FLOWS,
+                    "selection": "incident_then_traffic_v1", "omitted_limit": 0, "omitted_bytes": 0, "omitted_geo": 0}
+
+        def candidates():
+            for (local, remote), flow in self.tracker.flows.items():
+                activity = self.tracker.activity(flow, now)
+                if activity <= 0:
+                    continue
+                coverage["candidates"] += 1
+                if self.geo.get(remote) is None:
+                    coverage["omitted_geo"] += 1
+                    continue
+                coverage["available"] += 1
+                incident = remote in evidence or bool(threat_lists_for(remote, self.blocklists, self.reputation))
+                rank = max(flow["rate"], 1.0) * activity
+                yield incident, rank, local, remote, flow, activity
+
+        selected = nsmallest(SNAPSHOT_FLOWS, candidates(), key=lambda item: (not item[0], -item[1]))
+        coverage["omitted_limit"] = coverage["available"] - len(selected)
+        visible = [item[1:] for item in selected]
+        payload = self.build_payload(now, visible=visible, snapshot=True)
+        flows, locations, names = payload["flows"], payload["locations"], payload["hostnames"]
+        payload["flows"] = []
+        payload["locations"] = [location for location in locations if location["local"]]
+        payload["hostnames"] = {}
+        payload["states"], payload["full"] = {}, True
+        states = {"scope": "captured_flow_block_and_ids_remotes", "available": 0, "captured": 0,
+                  "per_remote_limit": SNAPSHOT_STATES_PER_ADDRESS, "total_limit": SNAPSHOT_STATES_TOTAL,
+                  "omitted_bytes": 0, "truncated": False}
+        payload["capture"] = {"version": 1, "source": "collector", "detail_status": "complete",
+                              "encoded_limit": SNAPSHOT_BYTES, "flows": coverage, "states": states}
+        budget = DocumentBudget(payload, SNAPSHOT_BYTES)
+        locations = {location["id"]: location for location in locations}
+        kept_locations = {location["id"] for location in payload["locations"]}
+        for flow in flows:
+            places = [locations[address] for address in dict.fromkeys((flow["origin"], flow["dest"]))
+                      if address in locations and address not in kept_locations]
+            addresses = {flow["dest"]} | {item["ip"] for field in ("inside", "targets") for item in flow[field]}
+            hostnames = {address: names[address] for address in sorted(addresses)
+                         if address in names and address not in payload["hostnames"]}
+            # The wrapper overhead is conservative; no full document is encoded to test a fit.
+            if not budget.take({"flow": flow, "locations": places, "hostnames": hostnames}):
+                coverage["omitted_bytes"] += 1
+                continue
+            payload["flows"].append(flow)
+            payload["locations"].extend(places)
+            kept_locations.update(place["id"] for place in places)
+            payload["hostnames"].update(hostnames)
+        payload["locations"].sort(key=lambda location: location["id"])
+        coverage["captured"] = len(payload["flows"])
+        remotes = {flow["dest"] for flow in payload["flows"]} | {block["source"] for block in payload["blocks"]}
+        remotes.update(flow["dest"] for flow in payload["ids_flows"])
+        payload["states"] = self.state_rows(records, remotes, states, budget)
+        if coverage["captured"] < coverage["candidates"] or states["truncated"]:
+            payload["capture"]["detail_status"] = "truncated"
+        if json_size(payload, SNAPSHOT_BYTES) > SNAPSHOT_BYTES:
+            raise SnapshotTooLarge("snapshot exceeds byte limit")
+        return payload
 
     def save_requested_snapshots(self, records, now):
         """Write a full snapshot for each camera request waiting in SNAPSHOT_REQUEST_DIR."""
@@ -808,10 +895,10 @@ class Collector:
         requests = [name[:-len(".request")] for name in names if name.endswith(".request")]
         if not requests:
             return
-        payload = self.build_payload(now, limit=None)
-        remotes = {flow["dest"] for flow in payload["flows"]} | {block["source"] for block in payload["blocks"]}
-        payload["states"] = self.state_rows(records, remotes)
-        payload["full"] = True
+        try:
+            payload = self.build_snapshot_payload(records, now)
+        except SnapshotTooLarge as error:
+            payload = {"status": "snapshot_too_large", "error": str(error)}
         for snapshot_id in requests:
             if snapshot_valid_id(snapshot_id):
                 write_json(f"{SNAPSHOT_DIR}/{snapshot_id}.json", payload)

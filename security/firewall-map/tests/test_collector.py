@@ -345,6 +345,131 @@ class CollectorLoopTest(unittest.TestCase):
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [2.0, 0.01])
 
 
+class SnapshotSafetyTest(CollectorLoopTest):
+    def snapshot_fixture(self, count=6):
+        self.collector.step()
+        self.bytes = 5000
+        self.collector.step()
+        now = time.monotonic()
+        original = next(iter(self.collector.tracker.flows.values()))
+        self.collector.tracker.flows = {
+            ("1.2.3.163", f"34.1.{1 + number // 256}.{number % 256}"):
+                {**original, "rate": 1000 - number, "last_active": now}
+            for number in range(count)
+        }
+        return now
+
+    def test_snapshot_is_bounded_and_incident_flows_come_first(self):
+        now = self.snapshot_fixture()
+        self.collector.blocklists.index = COLLECTOR.BlocklistIndex.build({"Test list": ["34.1.1.5"]})
+        with mock.patch.object(COLLECTOR, "SNAPSHOT_FLOWS", 3):
+            payload = self.collector.build_snapshot_payload([], now)
+        self.assertEqual([flow["dest"] for flow in payload["flows"]], ["34.1.1.5", "34.1.1.0", "34.1.1.1"])
+        coverage = payload["capture"]["flows"]
+        self.assertEqual((coverage["available"], coverage["captured"], coverage["omitted_limit"]), (6, 3, 3))
+        self.assertEqual(payload["capture"]["detail_status"], "truncated")
+        self.assertTrue(payload["full"])
+
+    def test_snapshot_priority_includes_alerts_and_reputation_with_stable_ties(self):
+        now = self.snapshot_fixture()
+        self.collector.reputation.flagged = {"34.1.1.5"}
+        self.collector.alerts.sources["34.1.1.4"] = {}
+        self.collector.correlator.flows[("tcp", "1.2.3.163", "123", "34.1.1.3", "443")] = {}
+        for flow in self.collector.tracker.flows.values():
+            flow["rate"] = 1
+        with mock.patch.object(COLLECTOR, "SNAPSHOT_FLOWS", 4), \
+                mock.patch.object(self.collector.alerts, "summary", return_value=None), \
+                mock.patch.object(self.collector.correlator, "summary", return_value=[]):
+            payload = self.collector.build_snapshot_payload([], now)
+        self.assertEqual([flow["dest"] for flow in payload["flows"]], ["34.1.1.3", "34.1.1.4", "34.1.1.5", "34.1.1.0"])
+
+    def test_default_snapshot_ceiling_does_not_use_unlimited_visible_selection(self):
+        now = self.snapshot_fixture(5002)
+        with mock.patch.object(self.collector.tracker, "visible", side_effect=AssertionError("unbounded ranking")):
+            payload = self.collector.build_snapshot_payload([], now)
+        self.assertEqual(len(payload["flows"]), 5000)
+        self.assertEqual(payload["capture"]["flows"]["omitted_limit"], 2)
+        self.assertEqual(len(self.collector.build_payload(now)["flows"]), 150)
+
+    def test_required_evidence_cannot_be_silently_dropped_for_the_byte_budget(self):
+        now = self.snapshot_fixture(1)
+        with mock.patch.object(COLLECTOR, "SNAPSHOT_BYTES", 12000), \
+                mock.patch.object(self.collector.correlator, "summary", return_value=[{"dest": self.REMOTE, "signature": "x" * 20000}]):
+            with self.assertRaises(COLLECTOR.SnapshotTooLarge):
+                self.collector.build_snapshot_payload([], now)
+
+    def test_pf_byte_omissions_are_reported(self):
+        now = self.snapshot_fixture(1)
+        records = PF.parse_states(nat_state(1, 1).replace(self.REMOTE, "34.1.1.0"))
+        records[0].state = "x" * 20000
+        with mock.patch.object(COLLECTOR, "SNAPSHOT_BYTES", 12000):
+            payload = self.collector.build_snapshot_payload(records, now)
+        self.assertEqual(payload["states"], {})
+        self.assertEqual(payload["capture"]["states"]["omitted_bytes"], 1)
+        self.assertTrue(payload["capture"]["states"]["truncated"])
+
+    def test_geographic_omissions_are_distinct_from_the_flow_limit(self):
+        now = self.snapshot_fixture()
+        get = self.collector.geo.get
+        with mock.patch.object(self.collector.geo, "get", side_effect=lambda ip: None if ip == "34.1.1.0" else get(ip)), \
+                mock.patch.object(COLLECTOR, "SNAPSHOT_FLOWS", 3):
+            payload = self.collector.build_snapshot_payload([], now)
+        coverage = payload["capture"]["flows"]
+        self.assertEqual((coverage["candidates"], coverage["available"], coverage["omitted_geo"], coverage["omitted_limit"]),
+                         (6, 5, 1, 2))
+        self.assertEqual(len(payload["flows"]), 3)
+
+    def test_selected_flow_locations_are_not_resolved_again_after_coverage_counting(self):
+        now = self.snapshot_fixture(1)
+
+        def resolve(addresses):
+            self.assertFalse(isinstance(addresses, list) and "34.1.1.0" in addresses)
+            list(addresses)  # consume the initial generator, just like GeoCache
+
+        with mock.patch.object(self.collector.geo, "resolve", side_effect=resolve):
+            payload = self.collector.build_snapshot_payload([], now)
+        self.assertEqual(payload["capture"]["flows"]["captured"], 1)
+
+    def test_snapshot_byte_budget_skips_large_flows_and_keeps_smaller_ones(self):
+        now = self.snapshot_fixture()
+        for flow in self.collector.tracker.flows.values():
+            flow["rule"] = "huge"
+        self.collector.descriptions["huge"] = "x" * 20000
+        self.collector.tracker.flows[("1.2.3.163", "34.1.1.5")]["rule"] = ""
+        with mock.patch.object(COLLECTOR, "SNAPSHOT_BYTES", 12000):
+            payload = self.collector.build_snapshot_payload([], now)
+        self.assertEqual([flow["dest"] for flow in payload["flows"]], ["34.1.1.5"])
+        self.assertEqual(payload["capture"]["flows"]["omitted_bytes"], 5)
+        self.assertLessEqual(len(json.dumps(payload, separators=(",", ":")).encode()), 12000)
+        self.assertEqual({location["id"] for location in payload["locations"]}, {"1.2.3.163", "34.1.1.5"})
+
+    def test_pf_row_coverage_counts_rows_beyond_both_caps(self):
+        now = self.snapshot_fixture(1)
+        records = PF.parse_states(nat_state(1, 1).replace(self.REMOTE, "34.1.1.0") * 7)
+        with mock.patch.object(COLLECTOR, "SNAPSHOT_STATES_PER_ADDRESS", 2):
+            payload = self.collector.build_snapshot_payload(records, now)
+        self.assertEqual(len(payload["states"]["34.1.1.0"]), 2)
+        self.assertEqual((payload["capture"]["states"]["available"], payload["capture"]["states"]["captured"]), (7, 2))
+        self.assertTrue(payload["capture"]["states"]["truncated"])
+        with mock.patch.object(COLLECTOR, "SNAPSHOT_STATES_TOTAL", 1):
+            payload = self.collector.build_snapshot_payload(records, now)
+        self.assertEqual((payload["capture"]["states"]["available"], payload["capture"]["states"]["captured"]), (7, 1))
+
+    def test_saved_ids_remotes_are_eligible_for_pf_rows_without_an_ordinary_flow(self):
+        now = self.snapshot_fixture(0)
+        records = PF.parse_states(nat_state(1, 1))
+        with mock.patch.object(self.collector.correlator, "summary", return_value=[{"dest": self.REMOTE}]):
+            payload = self.collector.build_snapshot_payload(records, now)
+        self.assertEqual(len(payload["states"][self.REMOTE]), 1)
+
+    def test_small_snapshot_is_complete_and_live_output_has_no_capture_policy(self):
+        now = self.snapshot_fixture(1)
+        payload = self.collector.build_snapshot_payload([], now)
+        self.assertEqual(payload["capture"]["detail_status"], "complete")
+        self.assertNotIn("capture", self.collector.build_payload(now))
+        self.assertEqual(COLLECTOR.MAX_FLOWS, 150)
+
+
 class CollectorStateGuardTest(CollectorLoopTest):
     def test_large_state_status_is_refreshed_before_the_summary_expires(self):
         # flow_summary.sh's fast path accepts its document for nine seconds; a longer pause

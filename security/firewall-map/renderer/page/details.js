@@ -278,11 +278,12 @@ function actionBar(address, countryCode) {
   const button = (cls, icon, label, color = 'default') =>
     `<button type="button" class="btn btn-${color} ${cls}" data-address="${escapeHtml(address)}">${ic(icon)} ${escapeHtml(label)}</button>`;
   const investigate = state.can.manage ? `<div class="btn-group btn-group-sm">${button('fwmap-investigate', 'magnifying-glass', T.investigate, 'primary')}</div>` : '';
-  // a snapshot shows the states saved with it (to everyone who may see the snapshot) and the
+  // a snapshot shows saved states only with the native Show States capability, and the
   // current ones; killing states belongs to the live map
-  const states = state.mode === 'snapshot'
-    ? [button('fwmap-states', 'list', `${T.states_at} ${capturedTime()}`), state.can.states ? button('fwmap-states-now', 'clock', T.current_states) : '']
-    : [state.can.states ? button('fwmap-states', 'list', T.show_states) : '', state.can.kill ? button('fwmap-kill', 'trash-can', T.kill_states) : ''];
+  const states = state.mode === 'snapshot' && state.can.states
+    ? [button('fwmap-states', 'list', `${T.states_at} ${capturedTime()}`), button('fwmap-states-now', 'clock', T.current_states)]
+    : state.mode === 'snapshot' ? []
+      : [state.can.states ? button('fwmap-states', 'list', T.show_states) : '', state.can.kill ? button('fwmap-kill', 'trash-can', T.kill_states) : ''];
   const group = states.filter(Boolean).length ? `<div class="btn-group btn-group-sm">${states.join('')}</div>` : '';
   return `<div class="btn-toolbar fwmap-actions">${investigate}${group}
     <div class="btn-group btn-group-sm dropup pull-right"><button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true">${escapeHtml(T.more)} <span class="caret"></span></button>
@@ -346,7 +347,7 @@ export function renderDetails() {
       ${picker}
       ${diagramHtml(model.diagram)}
       <div class="fwmap-cards">
-        ${card('chart-column', T.sec_connection, model.connection, state.can.states || state.mode === 'snapshot' ? {cls: 'fwmap-states', address, title: T.show_states} : null)}
+        ${card('chart-column', T.sec_connection, model.connection, state.can.states ? {cls: 'fwmap-states', address, title: T.show_states} : null)}
         ${card('shield-halved', T.sec_firewall, model.firewall, {href: '/ui/diagnostics/firewall/log', title: T.open_log})}
         ${model.ids}
         ${model.reputation}

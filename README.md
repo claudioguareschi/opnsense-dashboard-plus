@@ -134,8 +134,20 @@ flagged traffic got through*, or *Blocked*), then one sentence per address, for 
 
 ### Snapshots
 
-A snapshot is a saved map document, not a screenshot. It preserves the flows the map was showing
-and, when the collector responds, the PF connection states behind every tracked flow.
+A snapshot is a saved map document, not a screenshot. When the collector responds, it captures
+up to 5,000 active or fading flows, prioritizing IDS/alerting and threat-listed destinations,
+then the strongest traffic. The compact document is limited to 10 MiB; unusually large flow
+details can be omitted so smaller entries still fit. Independently bounded blocked-source,
+alert and correlated-IDS evidence is preserved; if that required evidence cannot fit, capture
+fails explicitly instead of silently replacing it with a summary.
+
+PF detail covers captured flow destinations, blocked sources and captured IDS connection
+remotes, with up to 50 rows per remote and 5,000 rows in total, also subject to the byte budget.
+The snapshot list, banner and JSON report captured versus available flows, geographic omissions
+and PF-row truncation. **Complete detail** means complete within this capture scope, not a full
+PF archive: the existing IDS/log evidence limits still apply. Hosts, Countries, Networks and
+Top Talkers describe captured flows, not the entire state table. Older snapshots remain readable
+but their completeness is unknown.
 
 1. On the dashboard widget or full-size map, select the camera button. The confirmation toast has
    an **Open in full map** link.

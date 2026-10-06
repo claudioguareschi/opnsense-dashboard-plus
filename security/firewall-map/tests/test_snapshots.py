@@ -142,6 +142,31 @@ class SnapshotTest(unittest.TestCase):
         self.assertTrue(result["snapshot"]["partial"])
         self.assertFalse([name for name in os.listdir(self.requests) if name.endswith(".request")])
 
+    def test_capture_metadata_is_preserved_in_document_and_sidecar(self):
+        capture = {"version": 1, "detail_status": "truncated", "flows": {"captured": 2, "available": 6000}}
+        result = self.save(self.answer({**SUMMARY, "full": True, "capture": capture}))
+        self.assertEqual(result["snapshot"]["capture"], capture)
+        self.assertFalse(result["snapshot"]["partial"])
+        saved = SNAPSHOTS.get(result["snapshot"]["id"], directory=self.snapshots)
+        self.assertEqual(saved["data"]["capture"], capture)
+
+    def test_summary_fallback_has_unknown_completeness(self):
+        COMMON.write_json(self.summary, SUMMARY)
+        result = self.save()
+        capture = result["snapshot"]["capture"]
+        self.assertEqual((capture["source"], capture["detail_status"]), ("live_summary", "unknown"))
+
+    def test_oversized_evidence_is_an_explicit_failure_not_a_summary_fallback(self):
+        result = self.save(self.answer({"status": "snapshot_too_large", "error": "snapshot exceeds byte limit"}))
+        self.assertEqual((result["result"], result["error"]), ("failed", "snapshot exceeds byte limit"))
+        self.assertEqual(SNAPSHOTS.metas(self.snapshots), [])
+
+    def test_document_budget_counts_escaped_unicode_without_a_full_encoding(self):
+        value = {"text": "é" * 1000}
+        size = len(json.dumps(value, separators=(",", ":")).encode())
+        self.assertEqual(SNAPSHOTS.json_size(value, size), size)
+        self.assertGreater(SNAPSHOTS.json_size(value, 100), 100)
+
     def test_without_current_data_nothing_is_saved(self):
         result = self.save()
         self.assertEqual(result["result"], "failed")

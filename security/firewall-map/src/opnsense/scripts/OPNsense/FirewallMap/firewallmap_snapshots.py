@@ -32,9 +32,10 @@
     firewallmap_snapshots.py note <id> <note>        set the note (base64url, "-" clears it)
     firewallmap_snapshots.py delete <id>
 
-Taking a snapshot leaves a request for the running collector, which writes every tracked flow
-(not just the capped summary the map polls) plus the PF states behind them. When the collector
-does not answer in time, the current summary is saved instead and marked partial.
+Taking a snapshot leaves a request for the running collector, which writes bounded incident
+detail beyond the live summary, plus the PF states behind it. Capture metadata discloses
+omitted detail. When the collector does not answer in time, the current summary is saved
+instead and marked partial.
 Each snapshot is two files in SNAPSHOT_DIR: the document and a small metadata file, so the list
 and note edits never read or rewrite the large one.
 """
@@ -68,6 +69,51 @@ FRESH_SECONDS = 10
 # one snapshot per this many seconds, from anyone: each is a full capture, and only KEEP_SNAPSHOTS
 # are kept, so a held-down camera button must not push everyone else's out
 MIN_INTERVAL_SECONDS = 10
+MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+
+
+class SnapshotTooLarge(ValueError):
+    """Required snapshot evidence cannot fit; never silently replace it with a summary."""
+
+
+def json_size(value, limit):
+    """Compact ASCII JSON size, stopping at the budget without joining the encoded document."""
+    # Reject very large strings before the encoder copies/escapes them. References shared
+    # in memory are counted each time they would appear on the wire.
+    pending, minimum = [value], 0
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            minimum += len(item) + 2
+        elif isinstance(item, dict):
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, (list, tuple)):
+            pending.extend(item)
+        if minimum > limit:
+            return limit + 1
+    size = 0
+    for chunk in json.JSONEncoder(separators=(",", ":")).iterencode(value):
+        size += len(chunk)  # ensure_ascii=True: characters and encoded bytes have equal size
+        if size > limit:
+            return limit + 1
+    return size
+
+
+class DocumentBudget:
+    """Conservative assembly budget; reserve space for final coverage counts and separators."""
+
+    def __init__(self, payload, limit):
+        self.remaining = limit - 4096 - json_size(payload, limit)
+        if self.remaining < 0:
+            raise SnapshotTooLarge("snapshot exceeds byte limit")
+
+    def take(self, value):
+        size = json_size(value, self.remaining)
+        if size > self.remaining:
+            return False
+        self.remaining -= size
+        return True
 
 
 def valid_id(snapshot_id):
@@ -151,11 +197,22 @@ def save(user, now=None, wait=WAIT_SECONDS, directory=SNAPSHOT_DIR, requests=SNA
             # nothing was saved: the next try must not be told a snapshot was just taken
             release(now, previous, requests)
             return {"result": "failed", "error": "no current map data"}
+        payload["capture"] = {"version": 1, "source": "live_summary", "detail_status": "unknown",
+                              "flows": {"captured": len(payload.get("flows") or [])}}
+        if json_size(payload, MAX_DOCUMENT_BYTES) > MAX_DOCUMENT_BYTES:
+            release(now, previous, requests)
+            return {"result": "failed", "error": "snapshot exceeds byte limit"}
         write_json(document_path(snapshot_id, directory), payload)
         partial = True
     payload = read_json(document_path(snapshot_id, directory))
+    if payload.get("status") != "ok":
+        remove(snapshot_id, directory)
+        release(now, previous, requests)
+        return {"result": "failed", "error": payload.get("error") or "snapshot capture failed"}
     meta = {"id": snapshot_id, "taken": now, "user": user, "note": "", "partial": partial, **summarize(payload),
             "size": os.path.getsize(document_path(snapshot_id, directory))}
+    if "capture" in payload:
+        meta["capture"] = payload["capture"]
     write_json(meta_path(snapshot_id, directory), meta)
     prune(directory=directory)
     return {"result": "saved", "snapshot": meta}

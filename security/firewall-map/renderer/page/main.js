@@ -282,7 +282,10 @@ function bindDetails() {
   });
   on('.fwmap-copy', ($element) => navigator.clipboard?.writeText(address($element)));
   // in snapshot mode "States" are the ones saved with it; "Current states" asks the firewall now
-  on('.fwmap-states', ($element) => (state.mode === 'snapshot' ? showSavedStates(address($element)) : showStates(address($element))));
+  on('.fwmap-states', ($element) => {
+    if (!state.can.states) return;
+    state.mode === 'snapshot' ? showSavedStates(address($element)) : showStates(address($element));
+  });
   on('.fwmap-states-now', ($element) => showStates(address($element)));
   on('.fwmap-kill', ($element) => killStates(address($element)));
   on('.fwmap-alias', ($element) => addToAlias(address($element)));

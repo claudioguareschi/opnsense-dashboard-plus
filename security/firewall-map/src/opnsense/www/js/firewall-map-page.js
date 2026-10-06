@@ -1080,7 +1080,7 @@
       ${picker}
       ${diagramHtml(model.diagram)}
       <div class="fwmap-cards">
-		${card("chart-column", T.sec_connection, model.connection, state.can.states ? {
+        ${card("chart-column", T.sec_connection, model.connection, state.can.states ? {
 			cls: "fwmap-states",
 			address,
 			title: T.show_states
@@ -1822,8 +1822,25 @@
 		})}, ${time}`;
 	}
 	function countsText(meta) {
-		const flows = escapeHtml(plural(T, "snapshot_flows", meta.flows || 0));
-		return meta.flagged ? `${flows} · ${pill("danger", plural(T, "snapshot_flagged", meta.flagged))}` : flows;
+		return `${escapeHtml(plural(T, "snapshot_flows", meta.flows || 0))}${meta.flagged ? ` · ${pill("danger", plural(T, "snapshot_flagged", meta.flagged))}` : ""} · <span class="text-muted">${escapeHtml(captureText(meta))}</span>`;
+	}
+	/** Coverage is separate from legacy full/partial: old captures have unknown completeness. */
+	function captureText(meta) {
+		const capture = meta.capture;
+		if (!capture || capture.version !== 1 || !["complete", "truncated"].includes(capture.detail_status)) return T.snapshot_unknown;
+		const parts = [capture.detail_status === "truncated" ? T.snapshot_truncated : T.snapshot_complete];
+		const flows = capture.flows || {};
+		if (flows.available != null) parts.push(fill(T.snapshot_captured_flows, {
+			captured: flows.captured,
+			available: flows.available
+		}));
+		if (flows.omitted_geo) parts.push(fill(T.snapshot_omitted_geo, { count: flows.omitted_geo }));
+		const states = capture.states || {};
+		if (states.truncated) parts.push(fill(T.snapshot_captured_states, {
+			captured: states.captured,
+			available: states.available
+		}));
+		return parts.join(" · ");
 	}
 	async function loadSnapshots() {
 		try {
@@ -2170,7 +2187,7 @@
 		BootstrapDialog.show({
 			title: escapeHtml(`${T.states_for} ${address} · ${takenText(state.frozen?.meta)}`),
 			size: BootstrapDialog.SIZE_WIDE,
-			message: body ? `<table class="table table-condensed table-striped"><thead><tr><th>${escapeHtml(T.interface)}</th><th>${escapeHtml(T.protocol)}</th><th>${escapeHtml(T.source)}</th><th>${escapeHtml(T.destination)}</th><th>NAT</th><th>${escapeHtml(T.state)}</th><th>${escapeHtml(T.bytes)}</th></tr></thead><tbody>${body}</tbody></table>` : escapeHtml(state.frozen?.data?.full ? T.no_states : T.snapshot_no_states),
+			message: `${state.frozen?.data?.capture?.states?.truncated ? `<div class="alert alert-warning">${escapeHtml(captureText(state.frozen.meta))}</div>` : ""}` + (body ? `<table class="table table-condensed table-striped"><thead><tr><th>${escapeHtml(T.interface)}</th><th>${escapeHtml(T.protocol)}</th><th>${escapeHtml(T.source)}</th><th>${escapeHtml(T.destination)}</th><th>NAT</th><th>${escapeHtml(T.state)}</th><th>${escapeHtml(T.bytes)}</th></tr></thead><tbody>${body}</tbody></table>` : escapeHtml(state.frozen?.data?.full ? T.no_states : T.snapshot_no_states)),
 			buttons: [{
 				label: T.close,
 				action: (dialog) => dialog.close()
