@@ -119,8 +119,10 @@ BACKGROUND_INTERVAL = 20.0
 THREAT_RECORD_SECONDS = 20.0
 THREAT_PRUNE_SECONDS = 3600.0
 MAX_FAILURE_BACKOFF = 30.0
-# while the state table is too large to walk, check its size this often
-TOO_MANY_STATES_INTERVAL = 30.0
+# While the table is too large to walk, only the cheap ``pfctl -si`` count runs. Refresh its
+# status before flow_summary.sh's nine-second fast-summary window expires, or viewers see a
+# misleading "Starting flow collector…" between honest too-many-states notices.
+TOO_MANY_STATES_INTERVAL = 5.0
 COLLECTOR_LOCK = f"{RUN_DIR}/collector.lock"
 # the last sample's timings are written at most this often
 TIMINGS_WRITE_SECONDS = 10.0

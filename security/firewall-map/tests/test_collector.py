@@ -346,6 +346,11 @@ class CollectorLoopTest(unittest.TestCase):
 
 
 class CollectorStateGuardTest(CollectorLoopTest):
+    def test_large_state_status_is_refreshed_before_the_summary_expires(self):
+        # flow_summary.sh's fast path accepts its document for nine seconds; a longer pause
+        # falls back to "starting" even though this collector is intentionally still running.
+        self.assertLess(COLLECTOR.TOO_MANY_STATES_INTERVAL, 9.0)
+
     def test_too_many_states_pauses_and_says_so(self):
         def huge():
             raise COLLECTOR.TooManyStates(500000, 100000)
