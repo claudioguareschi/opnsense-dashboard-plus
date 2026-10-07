@@ -43,4 +43,6 @@ bool protocol_write(FILE *, const struct aggregate *, bool with_deltas,
 bool protocol_write_ranked(FILE *, const struct aggregate *, const struct ranking *,
                            const struct threat_summary *, const struct event_match *, size_t,
                            struct fm_error *);
+bool protocol_write_selected(FILE *, const struct aggregate *,
+                             const struct ranked_flow *, size_t, struct fm_error *);
 #endif

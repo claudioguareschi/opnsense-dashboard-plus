@@ -22,25 +22,30 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef FM_RANKING_H
-#define FM_RANKING_H
-#include "aggregate.h"
-struct ranking;
-struct ranked_flow {
-  size_t flow;
-  double rate_in, rate_out, packet_rate, activity, score;
+
+#ifndef FM_SNAPSHOT_H
+#define FM_SNAPSHOT_H
+#include "pf_reader.h"
+#include "ranking.h"
+#define FM_SNAPSHOT_FLOWS 5000
+#define FM_SNAPSHOT_BYTES (10u * 1024u * 1024u)
+#define FM_SNAPSHOT_STATES 5000
+struct snapshot;
+struct snapshot_flow {
+  struct addr local, remote;
+  bool incident;
 };
-struct ranking *ranking_create(size_t limit, double fade, double smoothing,
-                               struct fm_error *);
-void ranking_destroy(struct ranking *);
-void ranking_reset(struct ranking *);
-bool ranking_update(struct ranking *, const struct aggregate *, double now,
-                    double elapsed, struct fm_error *);
-size_t ranking_count(const struct ranking *);
-size_t ranking_total(const struct ranking *);
-bool ranking_at(const struct ranking *, size_t, struct ranked_flow *);
-/* Snapshot-only rate/order view, including quiet flows for Python's IDS policy.
- * Uses existing history, without updating rates or re-ranking. */
-bool ranking_snapshot_at(const struct ranking *, const struct aggregate *, size_t,
-                         struct ranked_flow *, uint64_t *order);
+/* Borrows context; owns only bounded accepted evidence and a selected-flow index.
+ * Call snapshot_write only after the PF reader has completed successfully. */
+struct snapshot *snapshot_create(const struct context *, const struct snapshot_flow *,
+                                 size_t, size_t byte_limit, size_t state_limit,
+                                 uint64_t generation, double sample_time,
+                                 struct fm_error *);
+void snapshot_destroy(struct snapshot *);
+bool snapshot_add(const struct state *, void *, struct fm_error *);
+bool snapshot_write(struct snapshot *, FILE *, struct fm_error *);
+/* Snapshot-only session following a sample explicitly requesting it. The
+ * aggregate/ranking are borrowed until DETAIL or CANCEL closes the session. */
+bool snapshot_session(FILE *, FILE *, const struct context *, const struct aggregate *,
+                      const struct ranking *, uint64_t, double, struct fm_error *);
 #endif

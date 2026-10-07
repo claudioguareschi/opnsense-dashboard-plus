@@ -94,4 +94,6 @@ bool endpoint_equal(struct endpoint, struct endpoint);
 unsigned address_flags(const struct context *, struct addr);
 bool state_is_icmp(unsigned);
 size_t state_tuple(unsigned char *, unsigned, struct endpoint, struct endpoint);
+/* Shared logical aggregate identity; never includes a discovered map anchor. */
+void state_flow_key(unsigned char [34], struct addr, struct addr);
 #endif

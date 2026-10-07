@@ -30,6 +30,7 @@
 #include "pf_reader.h"
 #include "protocol.h"
 #include "ranking.h"
+#include "snapshot.h"
 #include "threat_summary.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -56,6 +57,7 @@ static bool parse_address(const char *text, struct addr *out,
 }
 
 static bool read_context(struct context *ctx, double *elapsed, bool *want_threats,
+                         bool *want_snapshot,
                          struct event_query *queries, size_t *query_count,
                          bool *clean_eof, struct fm_error *error) {
   char *line = NULL;
@@ -82,6 +84,8 @@ static bool read_context(struct context *ctx, double *elapsed, bool *want_threat
         have_elapsed = true;
     } else if (!strcmp(line, "T 1\n") && !*want_threats) {
       *want_threats = true;
+    } else if (!strcmp(line, "B 1\n") && !*want_snapshot) {
+      *want_snapshot = true;
     } else if (line[0] == 'Q' && sscanf(line, "Q %u %u %63s %u %63s %u", &id, &proto,
                                         a, &public_port, b, &remote_port) == 6 &&
                *query_count < FM_MAX_EVENT_QUERIES && id == *query_count &&
@@ -156,15 +160,16 @@ static bool add_state(const struct state *state, void *arg,
 
 static bool run_sample(struct history *history, struct ranking *ranking,
                        struct event_history *events,
+                       uint64_t generation,
                        bool *clean_eof, struct fm_error *error) {
   struct context *ctx = calloc(1, sizeof(*ctx));
   if (!ctx)
     return fm_error_set(error, errno, "configuration allocation");
   double elapsed = -1;
-  bool want_threats = false;
+  bool want_threats = false, want_snapshot = false;
   struct event_query queries[FM_MAX_EVENT_QUERIES];
   size_t query_count = 0;
-  if (!read_context(ctx, &elapsed, &want_threats, queries, &query_count,
+  if (!read_context(ctx, &elapsed, &want_threats, &want_snapshot, queries, &query_count,
                     clean_eof, error)) {
     free(ctx);
     return false;
@@ -184,7 +189,13 @@ static bool run_sample(struct history *history, struct ranking *ranking,
     return false;
   }
   struct sample sample = {.aggregate = aggregate};
-  struct timespec now;
+  struct timespec now, sample_time = {0};
+  if (want_snapshot && clock_gettime(CLOCK_REALTIME, &sample_time)) {
+    aggregate_destroy(aggregate);
+    history_abort(history);
+    free(ctx);
+    return fm_error_set(error, errno, "sample clock");
+  }
   bool ok = pf_reader_live(add_state, &sample, NULL, error) &&
             aggregate_finish(aggregate, error);
   if (ok && clock_gettime(CLOCK_MONOTONIC, &now))
@@ -213,6 +224,9 @@ static bool run_sample(struct history *history, struct ranking *ranking,
     history_commit(history);
   else
     history_abort(history);
+  if (ok && want_snapshot)
+    ok = snapshot_session(stdin, stdout, ctx, aggregate, ranking, generation,
+                          sample_time.tv_sec + sample_time.tv_nsec / 1e9, error);
   aggregate_destroy(aggregate);
   free(ctx);
   return ok;
@@ -231,14 +245,15 @@ int main(void) {
     event_history_destroy(events);
     return 1;
   }
-  if (fputs("FMNATIVE3\n", stdout) == EOF || fflush(stdout)) {
+  if (fputs("FMNATIVE4\n", stdout) == EOF || fflush(stdout)) {
     history_destroy(history);
     return 1;
   }
+  uint64_t generation = 0;
   for (;;) {
     memset(&error, 0, sizeof(error));
     bool clean_eof = false;
-    if (!run_sample(history, ranking, events, &clean_eof, &error)) {
+    if (!run_sample(history, ranking, events, ++generation, &clean_eof, &error)) {
       if (clean_eof)
         break;
       fprintf(stderr, "firewallmap-native: %s\n", error.message);

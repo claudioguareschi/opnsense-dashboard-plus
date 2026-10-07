@@ -71,7 +71,7 @@ from lib.blocklists import (
     threat_lists_for,
 )
 from lib.blocks import BlockTracker, FilterLogTail, block_event_time, block_summary, parse_block
-from lib.cache import CacheStore, GeoCache
+from lib.cache import GEO_LOOKUPS_PER_SAMPLE, CacheStore, GeoCache
 from lib.common import (
     COLLECTOR_TIMINGS, HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, SNAPSHOT_DIR,
     SNAPSHOT_REQUEST_DIR, connection_target, host_port, log_error, log_notice, log_warning, private_ip, public_ip,
@@ -1051,10 +1051,12 @@ class Collector:
 
     def build_snapshot_payload(self, records, now):
         """Bounded incident-first detail. Scan candidates, but never build an uncapped document."""
+        native_snapshot = records is None and self.engine_mode == "native"
         # Resolve through the existing per-sample lookup budget, without an O(F) address list.
-        self.geo.resolve(address for (local, remote), flow in self.tracker.flows.items()
-                         if self.tracker.activity(flow, now) > 0
-                         for address in (remote, local) if public_ip(address))
+        if not native_snapshot:
+            self.geo.resolve(address for (local, remote), flow in self.tracker.flows.items()
+                             if self.tracker.activity(flow, now) > 0
+                             for address in (remote, local) if public_ip(address))
         evidence = set(self.alerts.sources) | {key[3] for key in self.correlator.flows}
         coverage = {"candidates": 0, "available": 0, "captured": 0, "limit": SNAPSHOT_FLOWS,
                     "selection": "incident_then_traffic_v1", "omitted_limit": 0, "omitted_bytes": 0, "omitted_geo": 0}
@@ -1073,7 +1075,41 @@ class Collector:
                 rank = max(flow["rate"], 1.0) * activity
                 yield incident, rank, local, remote, flow, activity
 
-        selected = nsmallest(SNAPSHOT_FLOWS, candidates(), key=lambda item: (not item[0], -item[1]))
+        if native_snapshot:
+            evidence.update(self.blocks.sources)
+
+            def native_candidates():
+                required, lookup_budget = 0, GEO_LOOKUPS_PER_SAMPLE
+                for page in self.native_engine.snapshot_pages():
+                    addresses = list(dict.fromkeys(address for local, remote, _rank, _order in page
+                                                   for address in (remote, local) if public_ip(address)))
+                    unknown = sum(address not in self.geo.entries for address in addresses)
+                    if lookup_budget:
+                        self.geo.resolve(addresses, budget=lookup_budget)
+                        lookup_budget -= min(lookup_budget, unknown)
+                    for local, remote, rank, order in page:
+                        incident = remote in evidence or bool(threat_lists_for(remote, self.blocklists, self.reputation))
+                        if rank <= 0 and not incident:
+                            continue
+                        coverage["candidates"] += 1
+                        if self.geo.get(remote) is None:
+                            coverage["omitted_geo"] += 1
+                            continue
+                        coverage["available"] += 1
+                        required += int(incident)
+                        if required > SNAPSHOT_FLOWS:
+                            raise SnapshotTooLarge("required incident flows exceed snapshot flow ceiling")
+                        yield incident, rank, order, local, remote
+
+            identities = nsmallest(SNAPSHOT_FLOWS, native_candidates(),
+                                   key=lambda item: (not item[0], -item[1], item[2]))
+            aggregate = self.native_engine.snapshot_selection([(local, remote, incident)
+                                                               for incident, _rank, _order, local, remote in identities])
+            tracker = FlowTracker()
+            tracker.update_aggregate(aggregate, now)
+            selected = [(identity[0], *row) for identity, row in zip(identities, tracker.native_visible)]
+        else:
+            selected = nsmallest(SNAPSHOT_FLOWS, candidates(), key=lambda item: (not item[0], -item[1]))
         coverage["omitted_limit"] = coverage["available"] - len(selected)
         visible = [item[1:] for item in selected]
         payload = self.build_payload(now, visible=visible, snapshot=True)
@@ -1085,11 +1121,15 @@ class Collector:
         states = {"scope": "captured_flow_block_and_ids_remotes", "available": 0, "captured": 0,
                   "per_remote_limit": SNAPSHOT_STATES_PER_ADDRESS, "total_limit": SNAPSHOT_STATES_TOTAL,
                   "omitted_bytes": 0, "truncated": False}
+        if native_snapshot:
+            states = {"scope": "retained_logical_flows", "available": 0, "captured": 0,
+                      "total_limit": SNAPSHOT_STATES_TOTAL, "truncated": False, "complete": False}
         payload["capture"] = {"version": 1, "source": "collector", "detail_status": "complete",
                               "encoded_limit": SNAPSHOT_BYTES, "flows": coverage, "states": states}
         budget = DocumentBudget(payload, SNAPSHOT_BYTES)
         locations = {location["id"]: location for location in locations}
         kept_locations = {location["id"] for location in payload["locations"]}
+        required_pairs = {(item[2], item[3]) for item in selected if item[0]}
         for flow in flows:
             places = [locations[address] for address in dict.fromkeys((flow["origin"], flow["dest"]))
                       if address in locations and address not in kept_locations]
@@ -1098,6 +1138,8 @@ class Collector:
                          if address in names and address not in payload["hostnames"]}
             # The wrapper overhead is conservative; no full document is encoded to test a fit.
             if not budget.take({"flow": flow, "locations": places, "hostnames": hostnames}):
+                if native_snapshot and (flow["origin"], flow["dest"]) in required_pairs:
+                    raise SnapshotTooLarge("required incident flow evidence exceeds snapshot byte ceiling")
                 coverage["omitted_bytes"] += 1
                 continue
             payload["flows"].append(flow)
@@ -1108,7 +1150,15 @@ class Collector:
         coverage["captured"] = len(payload["flows"])
         remotes = {flow["dest"] for flow in payload["flows"]} | {block["source"] for block in payload["blocks"]}
         remotes.update(flow["dest"] for flow in payload["ids_flows"])
-        payload["states"] = self.state_rows(records, remotes, states, budget)
+        if native_snapshot:
+            identities = [(flow["origin"], flow["dest"], (flow["origin"], flow["dest"]) in required_pairs)
+                          for flow in payload["flows"]]
+            payload["states"], states = self.native_engine.snapshot_detail(
+                identities, max(0, budget.remaining), SNAPSHOT_STATES_TOTAL)
+            payload["capture"]["states"] = states
+            payload["capture"]["source"] = "native_collector"
+        else:
+            payload["states"] = self.state_rows(records, remotes, states, budget)
         if coverage["captured"] < coverage["candidates"] or states["truncated"]:
             payload["capture"]["detail_status"] = "truncated"
         if json_size(payload, SNAPSHOT_BYTES) > SNAPSHOT_BYTES:
@@ -1127,7 +1177,12 @@ class Collector:
         try:
             payload = self.build_snapshot_payload(records, now)
         except SnapshotTooLarge as error:
+            if records is None:
+                self.native_engine.close()
             payload = {"status": "snapshot_too_large", "error": str(error)}
+        except NativeError as error:
+            self.native_engine.close()
+            payload = {"status": "snapshot_failed", "error": str(error)}
         for snapshot_id in requests:
             if snapshot_valid_id(snapshot_id):
                 write_json(f"{SNAPSHOT_DIR}/{snapshot_id}.json", payload)
@@ -1203,14 +1258,15 @@ class Collector:
             records = None
             engine = "python"
             reset_history = self.engine_mode != "native" or self.native_last_at is None
-            if not self.snapshot_requested() and native_available():
+            if native_available():
                 try:
                     native_start = time.perf_counter()
                     elapsed = -1 if reset_history or self.native_last_at is None else started - self.native_last_at
                     native = self.native_engine.sample(
                         self.local_addresses, self.networks, self.interface_addresses,
                         self.primary_wan_device, elapsed, threat_summary=self.recorder.due(started),
-                        event_queries=self.correlator.native_queries(self.local_addresses, self.networks))
+                        event_queries=self.correlator.native_queries(self.local_addresses, self.networks),
+                        snapshot=not background and self.snapshot_requested())
                     timer.phases["native"] = time.perf_counter() - native_start
                     engine = "native"
                     self.native_failure_logged = False
@@ -1290,8 +1346,10 @@ class Collector:
             self.native_visible = False
         if not background:
             self.publish_summary(now, timer, state_count)
-            if records is not None:
+            if records is not None or self.native_engine.snapshot_open:
                 self.save_requested_snapshots(records, now)
+            if native is not None:
+                self.native_engine.snapshot_cancel()
         else:
             self.complete_sample(state_count)
         # locations resolved for the queue in the background are saved too (at most once a minute)

@@ -172,15 +172,16 @@ static void put_double(unsigned char **p, double value) {
   protocol_put(p, bits, 8);
 }
 
-bool protocol_write_ranked(FILE *f, const struct aggregate *a,
+static bool write_ranked(FILE *f, const struct aggregate *a,
                            const struct ranking *ranking,
+                           const struct ranked_flow *selection, size_t selection_count,
                            const struct threat_summary *threat_summary,
                            const struct event_match *matches,
                            size_t match_count, struct fm_error *error) {
   if (fwrite("FMAGG3\0\0", 1, 8, f) != 8)
     return fm_error_set(error, errno ? errno : EIO, "ranked aggregate header");
   size_t total_flows = aggregate_counts(a).flows;
-  size_t selected = ranking_count(ranking);
+  size_t selected = ranking ? ranking_count(ranking) : selection_count;
   if (total_flows > UINT32_MAX || total_flows > SIZE_MAX / sizeof(uint32_t))
     return fm_error_set(error, EOVERFLOW, "ranked flow count");
   uint32_t *ranked = total_flows ? malloc(total_flows * sizeof(*ranked)) : NULL;
@@ -195,7 +196,9 @@ bool protocol_write_ranked(FILE *f, const struct aggregate *a,
   if (!protocol_frame(f, b, p - b, &checksum, error)) goto fail;
   for (size_t n = 0; n < selected; n++) {
     struct ranked_flow rank;
-    if (!ranking_at(ranking, n, &rank) || rank.flow >= total_flows || n > UINT32_MAX) {
+    bool valid = ranking ? ranking_at(ranking, n, &rank) : true;
+    if (!ranking) rank = selection[n];
+    if (!valid || rank.flow >= total_flows || n > UINT32_MAX) {
       fm_error_set(error, EINVAL, "ranked flow identity");
       goto fail;
     }
@@ -331,4 +334,16 @@ bool protocol_write_ranked(FILE *f, const struct aggregate *a,
 fail:
   free(ranked);
   return false;
+}
+
+bool protocol_write_ranked(FILE *f, const struct aggregate *a,
+                           const struct ranking *r, const struct threat_summary *t,
+                           const struct event_match *m, size_t count, struct fm_error *error) {
+  return write_ranked(f, a, r, NULL, 0, t, m, count, error);
+}
+
+bool protocol_write_selected(FILE *f, const struct aggregate *a,
+                             const struct ranked_flow *rows, size_t count,
+                             struct fm_error *error) {
+  return write_ranked(f, a, NULL, rows, count, NULL, NULL, 0, error);
 }

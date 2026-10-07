@@ -126,9 +126,8 @@ static bool lan_label(struct aggregate *a, const struct state *s,
 static struct flow *flow_get(struct aggregate *a, const struct state_view *v,
                              uint64_t seq, uint32_t *id,
                              struct fm_error *error) {
-  unsigned char key[34], *p = key;
-  put_addr(&p, v->local);
-  put_addr(&p, v->remote);
+  unsigned char key[34];
+  state_flow_key(key, v->local, v->remote);
   struct item *i = lookup(&a->flows, key, sizeof(key), true, error);
   if (!i)
     return NULL;

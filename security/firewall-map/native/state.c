@@ -26,6 +26,13 @@
 #include <errno.h>
 #include <netinet/in.h>
 #include <string.h>
+
+void state_flow_key(unsigned char key[34], struct addr local, struct addr remote) {
+  key[0] = local.af;
+  memcpy(key + 1, local.b, 16);
+  key[17] = remote.af;
+  memcpy(key + 18, remote.b, 16);
+}
 bool address_equal(struct addr a, struct addr b) {
   return a.af == b.af && !memcmp(a.b, b.b, 16);
 }

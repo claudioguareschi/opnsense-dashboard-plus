@@ -141,8 +141,19 @@ details can be omitted so smaller entries still fit. Independently bounded block
 alert and correlated-IDS evidence is preserved; if that required evidence cannot fit, capture
 fails explicitly instead of silently replacing it with a summary.
 
-PF detail covers captured flow destinations, blocked sources and captured IDS connection
-remotes, with up to 50 rows per remote and 5,000 rows in total, also subject to the byte budget.
+With the native engine, PF detail is collected in a second, on-demand traversal and explicitly
+associated with each retained logical flow. Matching states are included up to the remaining
+document byte budget and the existing 5,000-row safety ceiling; there is no 50-row per-remote
+limit on this path. Incident PF evidence displaces ordinary rows when necessary. If required
+incident evidence alone exceeds a ceiling, capture fails explicitly. Quiet PF flows associated
+with IDS, alerts, blocked sources or threat intelligence remain eligible independently of the
+live top-150 ranking. Raw state rows remain protected by the Show States privilege.
+
+The detail counts and timestamps describe the second traversal, not an atomic copy of the
+first: states may disappear, new matching states may appear, and counters may advance.
+Generation, matching/captured/omitted counts and omission reasons are stored in
+`capture.states`. The legacy Python engine still covers captured flow destinations, blocked
+sources and captured IDS connection remotes, with up to 50 rows per remote and 5,000 rows total.
 The snapshot list, banner and JSON report captured versus available flows, geographic omissions
 and PF-row truncation. **Complete detail** means complete within this capture scope, not a full
 PF archive: the existing IDS/log evidence limits still apply. Hosts, Countries, Networks and

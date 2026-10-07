@@ -45,15 +45,11 @@ struct ranking {
   struct rank_row *rows;
   size_t rows_capacity, count, total, limit;
   uint64_t next_order;
-  double fade, smoothing;
+  double fade, smoothing, sampled_at;
 };
 
 static size_t key_for(unsigned char key[34], const struct flow *flow) {
-  unsigned char *p = key;
-  *p++ = flow->local.af;
-  memcpy(p, flow->local.b, 16); p += 16;
-  *p++ = flow->remote.af;
-  memcpy(p, flow->remote.b, 16);
+  state_flow_key(key, flow->local, flow->remote);
   return 34;
 }
 
@@ -194,6 +190,7 @@ bool ranking_update(struct ranking *r, const struct aggregate *aggregate,
   /* Stable descending score order: persistent flow insertion order breaks ties. */
   if (!sort_rows(r->rows, count, error)) return false;
   r->count = count < r->limit ? count : r->limit;
+  r->sampled_at = now;
   map_clear(&r->previous);
   r->previous = r->current;
   memset(&r->current, 0, sizeof(r->current));
@@ -211,5 +208,23 @@ bool ranking_at(const struct ranking *r, size_t n, struct ranked_flow *out) {
   const struct rank_row *row = &r->rows[n];
   *out = (struct ranked_flow){row->flow, row->in, row->out, row->packets,
                               row->activity, row->score};
+  return true;
+}
+
+bool ranking_snapshot_at(const struct ranking *r, const struct aggregate *a,
+                         size_t n, struct ranked_flow *out, uint64_t *order) {
+  const struct flow *flow = aggregate_flow(a, n);
+  if (!flow) return false;
+  unsigned char key[34];
+  state_flow_key(key, flow->local, flow->remote);
+  struct item *i = lookup((struct map *)&r->previous, key, sizeof(key), false, NULL);
+  if (!i || i->value >= r->previous_capacity) return false;
+  const struct rate_state *v = &r->previous_values[i->value];
+  double activity = v->active ? 1.0 - (r->sampled_at - v->last_active) / r->fade : 0.0;
+  if (activity < 0) activity = 0;
+  double rate = v->in + v->out;
+  *out = (struct ranked_flow){n, v->in, v->out, v->packets, activity,
+                             (rate > 1 ? rate : 1) * activity};
+  *order = v->order;
   return true;
 }
