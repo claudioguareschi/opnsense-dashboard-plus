@@ -44,7 +44,19 @@ class SnapshotReaderTest(unittest.TestCase):
             with open(path, "w") as handle:
                 json.dump({"status": "ok", "flows": []}, handle)
             self.assertEqual(SUMMARY.read_summary(path)["status"], "ok")
+            self.assertNotIn("collector", SUMMARY.read_summary(path))
             self.assertIsNone(SUMMARY.read_summary(path, now=time.time() + 60))
+
+    def test_additive_timing_passes_through_without_changing_freshness(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "flows.json")
+            timing = {"generation": "one", "revision": 5, "sample_completed_at": 100.0,
+                      "phase": "processing", "heartbeat_at": time.time()}
+            with open(path, "w") as handle:
+                json.dump({"status": "ok", "flows": [], "collector": timing}, handle)
+            self.assertEqual(SUMMARY.read_summary(path)["collector"], timing)
+            # This phase deliberately does not teach the reader to override its mtime policy.
+            self.assertIsNone(SUMMARY.read_summary(path, now=time.time() + 11))
 
 
 class SnapshotMainTest(unittest.TestCase):

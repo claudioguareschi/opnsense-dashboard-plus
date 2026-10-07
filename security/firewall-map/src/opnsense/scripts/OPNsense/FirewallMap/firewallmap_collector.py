@@ -55,10 +55,12 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 import traceback
 import urllib.error
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from heapq import nsmallest
 
@@ -88,7 +90,7 @@ from firewallmap_snapshots import (
     MAX_DOCUMENT_BYTES, DocumentBudget, SnapshotTooLarge, json_size, valid_id as snapshot_valid_id,
 )
 from lib.pf import (
-    StateFacts, TooManyStates, _Record, flow_endpoints, host_info, port_forwards, rule_descriptions, sample_states,
+    SAMPLE_TIMEOUT, StateFacts, TooManyStates, _Record, flow_endpoints, host_info, port_forwards, rule_descriptions, sample_states,
 )
 
 
@@ -638,6 +640,21 @@ class Collector:
         # the last sample's timings (SampleTimer.report) and when they were last written
         self.timings = None
         self.timings_written = None
+        # Sample fields describe the last successfully published revision, never an attempt.
+        # Phase fields describe this process now; payloads freeze their own copy at publication.
+        self.collector_status = {
+            "generation": uuid.uuid4().hex, "revision": 0, "state_count": None,
+            "sample_started_at": None, "sample_completed_at": None, "sample_duration": None,
+            "effective_sample_interval": None, "next_sample_due": None,
+            "phase": "starting", "phase_started_at": self.started_at,
+            "phase_deadline": None, "heartbeat_at": time.time(),
+        }
+        self._status_lock = threading.RLock()
+        self._diagnostic_timings = {}
+        self._sample_started = None
+        self._sample_revision = None
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread = None
         self.descriptions, self.interfaces, self.leases = {}, {}, {}
         self.local_addresses, self.role, self.networks, self.interface_addresses = set(), None, [], {}
         self.primary_wan_device = None
@@ -801,25 +818,84 @@ class Collector:
                 "id": origin, "name": origin, "lat": location["lat"], "lon": location["lon"], "local": True,
             })
         payload["provider"] = self.provider
+        payload["collector"] = self.timing_status()
         return payload
 
-    def publish_summary(self, now, timer=None):
+    def timing_status(self):
+        with self._status_lock:
+            return dict(self.collector_status)
+
+    def heartbeat(self):
+        """Atomic liveness update in the existing diagnostic file, not a data revision."""
+        with self._status_lock:
+            self.collector_status["heartbeat_at"] = time.time()
+            try:
+                write_json(COLLECTOR_TIMINGS, {**self._diagnostic_timings, "collector": self.timing_status()})
+            except OSError:
+                pass  # diagnostics must not prevent sampling when their file cannot be written
+
+    def start_heartbeat(self):
+        """Daemon-only instrumentation; never wakes or schedules the sampling loop."""
+        if self._heartbeat_thread is not None:
+            return
+
+        def beat():
+            while not self._heartbeat_stop.wait(TIMINGS_WRITE_SECONDS):
+                self.heartbeat()
+
+        self._heartbeat_thread = threading.Thread(target=beat, name="firewallmap-heartbeat", daemon=True)
+        self._heartbeat_thread.start()
+
+    def set_phase(self, phase, deadline=None, next_due=None):
+        with self._status_lock:
+            self.collector_status.update(phase=phase, phase_started_at=time.time(), phase_deadline=deadline,
+                                         next_sample_due=next_due)
+            self.heartbeat()
+
+    def complete_sample(self, states, payload=None):
+        """Commit sample identity only after atomic publication succeeds.
+
+        Completion is the publication preparation boundary (after payload construction, before
+        its atomic write); duration covers PF acquisition through that boundary. Background
+        samples publish timing/queue progress, not a new live-map file. The two files need not
+        match: each carries its own generation/revision and immutable sample fields.
+        """
+        with self._status_lock:
+            completed = time.time()
+            status = {**self.collector_status, "revision": self.collector_status["revision"] + 1,
+                      "state_count": states, "sample_started_at": self._sample_started[0],
+                      "sample_completed_at": completed,
+                      "sample_duration": max(0.0, time.monotonic() - self._sample_started[1]),
+                      "heartbeat_at": completed}
+            if payload is not None:
+                payload["collector"] = status
+                write_json(OUTPUT_FILE, payload)
+            else:
+                try:
+                    write_json(COLLECTOR_TIMINGS, {**self._diagnostic_timings, "collector": status})
+                except OSError:
+                    return
+            self.collector_status = dict(status)
+            self._sample_revision = status["revision"]
+
+    def publish_summary(self, now, timer=None, states=None):
         payload = self.build_payload(now)
         if timer:
             timer.phase("payload")
-        write_json(OUTPUT_FILE, payload)
+        self.complete_sample(states, payload)
         if timer:
             timer.phase("write")
 
     def save_timings(self, timer, states, background, now):
         """Keep the sample's timings; the Status page reads them from a file written every few seconds."""
         self.timings = timer.report(states, background)
+        # Cost diagnostics retain their existing 10 s refresh. Their identity is explicit,
+        # because the current liveness/sample record may already describe a newer revision.
+        self.timings.update(generation=self.collector_status["generation"], revision=self._sample_revision)
         if self.timings_written is None or now - self.timings_written >= TIMINGS_WRITE_SECONDS:
-            try:
-                write_json(COLLECTOR_TIMINGS, self.timings)
+            with self._status_lock:
+                self._diagnostic_timings = self.timings
                 self.timings_written = now
-            except OSError:
-                pass
 
     def state_rows(self, records, remotes, coverage=None, budget=None):
         """The PF states behind the given remote addresses, as the map page's States dialog lists them."""
@@ -944,7 +1020,27 @@ class Collector:
             except OSError:
                 pass
 
+    def rest_status(self, rest, failed=False):
+        """Describe the already chosen rest, without changing the scheduler's decision."""
+        wall = time.time()
+        phase = "retrying" if failed or self.failures or self.too_many_states or self.problem else (
+            "background" if self.background else "sleeping")
+        self.set_phase(phase, wall + rest, next_due=wall + rest)
+
     def step(self):
+        self.set_phase("preparing")
+        try:
+            rest = self._step()
+        except Exception:
+            self.set_phase("failed")
+            raise
+        if rest is None:
+            self.set_phase("idle")
+        else:
+            self.rest_status(rest)
+        return rest
+
+    def _step(self):
         """One iteration. Returns the seconds to rest before the next, or None to stop."""
         started = time.monotonic()
         timer = SampleTimer()
@@ -955,33 +1051,48 @@ class Collector:
             log_notice("no map open: recording threats in the background" if background and self.recording
                        else "no map open" if background else "a map is open: sampling every 2 seconds")
             self.background = background
+        with self._status_lock:
+            # Target at this sampling opportunity, not an adaptive interval or the rest floor.
+            # next_sample_due separately describes the chosen slow-sample/backoff rest.
+            self.collector_status["effective_sample_interval"] = (
+                BACKGROUND_INTERVAL if background else INTERVAL if requested(REQUEST_MARKER, ACTIVE_VIEWER_SECONDS)
+                else IDLE_INTERVAL)
         if background and not self.recording:
             log_notice("collector stopping: no map open and background recording is off")
             return None
         if not background and self.problem:
+            self.set_phase("failed")
             write_json(OUTPUT_FILE, status_document("no_database", reason=self.problem,
-                                                    error=geodb.read_status().get("last_error")))
+                                                    error=geodb.read_status().get("last_error"),
+                                                    collector=self.timing_status()))
             # re-check within a few seconds, the database may be downloading; only move the
             # next check earlier, never later, or repeated passes would postpone it forever
             self.checked["settings"] = min(self.checked["settings"], started - SETTINGS_REFRESH_SECONDS + 5)
             return self._rest(started, background)
         walk_cpu = time.process_time()
+        self._sample_started = (time.time(), time.monotonic())
+        self._sample_revision = None
+        # sample_states has two bounded 5 s preflight commands before the 10 s PF watchdog.
+        # This is an expected acquisition bound, not a new timeout or a processing watchdog.
+        self.set_phase("collecting", self._sample_started[0] + SAMPLE_TIMEOUT + 10)
         try:
             records = sample_states()
         except TooManyStates as error:
+            self.set_phase("failed")
             if not background:
                 write_json(OUTPUT_FILE, status_document("too_many_states", count=error.count, limit=error.limit,
-                                                        slow=error.slow))
+                                                        slow=error.slow, collector=self.timing_status()))
             if not self.too_many_states:
                 log_warning(f"sampling paused: {error}")
             self.too_many_states = True
             return TOO_MANY_STATES_INTERVAL
         except (OSError, subprocess.TimeoutExpired, RuntimeError) as error:
+            self.set_phase("failed")
             if not self.failures:
                 log_error(f"reading the firewall states failed: {error}")
             self.failures += 1
             if not background:
-                write_json(OUTPUT_FILE, status_document("failed", error=str(error)))
+                write_json(OUTPUT_FILE, status_document("failed", error=str(error), collector=self.timing_status()))
             return self._rest(started, background)
         if self.failures:
             log_notice(f"reading the firewall states works again, after {self.failures} failed attempts")
@@ -993,6 +1104,7 @@ class Collector:
         # our CPU time during the walk
         timer.phases["parse"] = time.process_time() - walk_cpu
         timer.phase("walk")
+        self.set_phase("processing")
         now = time.monotonic()
         wall = time.time()
         self.refresh_metadata(now)
@@ -1011,8 +1123,10 @@ class Collector:
         self.recorder.update(records, self, now, sample)
         timer.phase("threats")
         if not background:
-            self.publish_summary(now, timer)
+            self.publish_summary(now, timer, len(records))
             self.save_requested_snapshots(records, now)
+        else:
+            self.complete_sample(len(records))
         # locations resolved for the queue in the background are saved too (at most once a minute)
         self.geo.save()
         timer.phase("other")
@@ -1034,6 +1148,10 @@ class Collector:
         return rest
 
     def close(self):
+        self._heartbeat_stop.set()
+        if self._heartbeat_thread is not None:
+            self._heartbeat_thread.join()
+        self.set_phase("stopped")
         if self.geo is not None:
             self.geo.save(force=True)
 
@@ -1060,6 +1178,7 @@ def run():
     log_notice("collector started: " + ("a map is open" if requested(REQUEST_MARKER, IDLE_SECONDS)
                                         else "recording threats in the background"))
     collector = Collector()
+    collector.start_heartbeat()
     errors = 0
     try:
         while True:
@@ -1075,6 +1194,7 @@ def run():
                     log_error("collector iteration failed: " + " | ".join(traceback.format_exc().strip().splitlines()))
                 errors += 1
                 rest = min(MAX_FAILURE_BACKOFF, 2.0 ** errors)
+                collector.rest_status(rest, failed=True)
             if rest is None:
                 return
             if collector.background:

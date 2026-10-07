@@ -73,8 +73,11 @@ def collector(now=None):
         "recording": settings().get("record_threats", "1") != "0",
         "widget_in_use": widget_in_use(),
         "recording_wanted": recording_wanted(),
+        # Absent on older collectors; PID liveness and the existing reader policies still apply.
+        "timing": timings.get("collector"),
         # how long the last sample took (written by a running collector every few seconds)
-        "last_sample": {key: timings.get(key) for key in ("at", "states", "wall", "cpu", "programs", "phases")}
+        "last_sample": {key: timings.get(key) for key in
+                        ("at", "states", "wall", "cpu", "programs", "phases", "generation", "revision")}
         if timings.get("wall") is not None else None,
     }
 

@@ -641,7 +641,7 @@ class SampleTimingTest(CollectorLoopTest):
         self.collector.step()
         with open(os.path.join(self.directory, "collector_timings.json")) as handle:
             written = json.load(handle)
-        self.assertEqual(written, self.collector.timings)
+        self.assertEqual({key: value for key, value in written.items() if key != "collector"}, self.collector.timings)
         self.assertEqual((written["states"], written["background"]), (1, False))
         for phase in ("walk", "parse", "facts", "tracker", "ingest", "threats", "payload", "write"):
             self.assertGreaterEqual(written["phases"][phase], 0.0)
@@ -650,7 +650,207 @@ class SampleTimingTest(CollectorLoopTest):
         self.collector.step()
         self.assertNotEqual(self.collector.timings, written)
         with open(os.path.join(self.directory, "collector_timings.json")) as handle:
-            self.assertEqual(json.load(handle), written)
+            updated = json.load(handle)
+        self.assertEqual({key: value for key, value in updated.items() if key != "collector"},
+                         {key: value for key, value in written.items() if key != "collector"})
+        self.assertEqual(updated["collector"]["revision"], written["collector"]["revision"] + 1)
+
+
+class TimingContractTest(CollectorLoopTest):
+    def payload(self):
+        with open(self.output) as handle:
+            return json.load(handle)
+
+    def diagnostic(self):
+        with open(COLLECTOR.COLLECTOR_TIMINGS) as handle:
+            return json.load(handle)["collector"]
+
+    def test_generation_revision_and_sample_count(self):
+        generation = self.collector.timing_status()["generation"]
+        self.collector.step()
+        first = self.payload()["collector"]
+        with mock.patch.object(COLLECTOR, "sample_states", lambda: PF.parse_states(nat_state(2000, 2000)) * 2):
+            self.collector.step()
+        second = self.payload()["collector"]
+        self.assertEqual((first["generation"], second["generation"]), (generation, generation))
+        self.assertEqual((first["revision"], second["revision"]), (1, 2))
+        self.assertEqual((first["state_count"], second["state_count"]), (1, 2))
+        self.assertNotEqual(COLLECTOR.Collector(store=self.collector.store).timing_status()["generation"], generation)
+        self.assertEqual(first["phase"], "processing")
+        self.assertEqual(self.diagnostic()["phase"], "sleeping")
+        # Frozen payload metadata must not alias the mutable current phase/heartbeat.
+        self.assertEqual(first["revision"], 1)
+
+    def test_wall_clock_jumps_do_not_change_duration(self):
+        for jump in (-1000, 1000):
+            clock = {"mono": 100.0, "wall": 5000.0}
+
+            def sample():
+                self.assertEqual(self.collector.timing_status()["phase"], "collecting")
+                self.assertEqual(self.collector.timing_status()["phase_deadline"], 5020.0)
+                clock.update(mono=103.0, wall=5000.0 + jump)
+                return PF.parse_states(nat_state(1000, 1000))
+
+            with mock.patch.object(COLLECTOR.time, "monotonic", lambda: clock["mono"]), \
+                    mock.patch.object(COLLECTOR.time, "time", lambda: clock["wall"]), \
+                    mock.patch.object(COLLECTOR, "sample_states", sample), \
+                    mock.patch.object(COLLECTOR, "requested", return_value=True):
+                rest = self.collector.step()
+            status = self.payload()["collector"]
+            self.assertEqual((status["sample_started_at"], status["sample_completed_at"], status["sample_duration"]),
+                             (5000.0, 5000.0 + jump, 3.0))
+            current = self.diagnostic()
+            self.assertEqual(rest, 3.0)  # unchanged slow-sample rest floor
+            self.assertEqual(current["effective_sample_interval"], 2.0)
+            self.assertEqual(current["next_sample_due"], clock["wall"] + rest)
+            self.assertEqual(current["phase_deadline"], current["next_sample_due"])
+
+    def test_failure_and_admission_do_not_refresh_successful_identity(self):
+        self.collector.step()
+        success = self.payload()["collector"]
+        fields = ("generation", "revision", "state_count", "sample_started_at", "sample_completed_at", "sample_duration")
+        for error in (RuntimeError("pfctl failed"), COLLECTOR.TooManyStates(200000, 35000)):
+            with mock.patch.object(COLLECTOR, "sample_states", side_effect=error):
+                rest = self.collector.step()
+            failed = self.payload()["collector"]
+            self.assertEqual({key: failed[key] for key in fields}, {key: success[key] for key in fields})
+            self.assertEqual(failed["phase"], "failed")
+            self.assertEqual(self.diagnostic()["phase"], "retrying")
+            self.assertIsNotNone(self.diagnostic()["next_sample_due"])
+            self.assertGreater(rest, 0)
+        self.collector.step()
+        self.assertEqual(self.payload()["collector"]["revision"], 2)
+
+    def test_first_failure_has_no_successful_sample(self):
+        with mock.patch.object(COLLECTOR, "sample_states", side_effect=RuntimeError("first attempt failed")):
+            self.collector.step()
+        status = self.payload()["collector"]
+        self.assertEqual(status["revision"], 0)
+        for key in ("state_count", "sample_started_at", "sample_completed_at", "sample_duration"):
+            self.assertIsNone(status[key])
+        self.assertIsNotNone(status["heartbeat_at"])
+        self.assertEqual(self.diagnostic()["phase"], "retrying")
+
+    def test_retry_deadline_uses_existing_backoff_without_changing_target(self):
+        with mock.patch.object(COLLECTOR.time, "time", return_value=5000.0), \
+                mock.patch.object(COLLECTOR.time, "monotonic", return_value=100.0), \
+                mock.patch.object(COLLECTOR, "requested", return_value=True), \
+                mock.patch.object(COLLECTOR, "sample_states", side_effect=RuntimeError("pfctl failed")):
+            self.assertEqual([self.collector.step() for _ in range(4)], [2.0, 4.0, 8.0, 16.0])
+        current = self.diagnostic()
+        self.assertEqual((current["effective_sample_interval"], current["next_sample_due"]), (2.0, 5016.0))
+        self.assertEqual(current["phase_deadline"], 5016.0)
+        self.assertEqual(current["revision"], 0)
+
+    def test_unexpected_iteration_retry_is_not_reported_as_sleeping(self):
+        self.collector.rest_status(8.0, failed=True)
+        self.assertEqual(self.diagnostic()["phase"], "retrying")
+
+    def test_background_diagnostic_failure_does_not_commit_a_revision(self):
+        self.collector.step()
+        previous = self.payload()["collector"]
+        self.idle = True
+        writer = COLLECTOR.write_json
+
+        def fail_publication(path, payload):
+            if path == COLLECTOR.COLLECTOR_TIMINGS and payload["collector"]["revision"] == 2:
+                raise OSError("diagnostic publication failed")
+            writer(path, payload)
+
+        with mock.patch.object(COLLECTOR, "write_json", fail_publication):
+            self.assertIsNotNone(self.collector.step())
+        current = self.diagnostic()
+        self.assertEqual(current["revision"], previous["revision"])
+        self.assertEqual(current["sample_completed_at"], previous["sample_completed_at"])
+        self.assertEqual(current["phase"], "background")
+        self.assertIsNone(self.collector.timings["revision"])  # cost of an unpublished sample
+        self.assertEqual(self.queued(), [self.REMOTE])
+
+    def test_no_database_and_background_and_idle(self):
+        self.collector.step()
+        success = self.payload()["collector"]
+        self.collector.problem = "database_missing"
+        self.collector.step()
+        self.assertEqual(self.payload()["collector"]["revision"], success["revision"])
+        self.assertEqual(self.diagnostic()["phase"], "retrying")
+        self.collector.problem = None
+        self.idle = True
+        self.collector.step()
+        current = self.diagnostic()
+        self.assertEqual((current["phase"], current["effective_sample_interval"], current["revision"]),
+                         ("background", 20.0, 2))
+        self.assertEqual(self.payload()["collector"]["revision"], 1)  # no new live map in background
+        self.collector.recording = False
+        self.collector.checked["settings"] = time.monotonic()
+        self.assertIsNone(self.collector.step())
+        self.assertEqual(self.diagnostic()["phase"], "idle")
+        self.assertIsNone(self.diagnostic()["next_sample_due"])
+
+    def test_revision_commits_after_atomic_output_write(self):
+        self.collector.step()
+        previous = self.payload()
+        writer = COLLECTOR.write_json
+
+        def fail(path, payload):
+            if path == self.output:
+                self.assertEqual(self.collector.timing_status()["revision"], 1)
+                self.assertEqual(payload["collector"]["revision"], 2)
+                # Exercise the existing atomic writer failing at its rename/commit boundary.
+                with mock.patch.object(COLLECTOR.os, "replace", side_effect=OSError("rename failed")):
+                    writer(path, payload)
+            else:
+                writer(path, payload)
+
+        with mock.patch.object(COLLECTOR, "write_json", fail):
+            with self.assertRaisesRegex(OSError, "rename failed"):
+                self.collector.step()
+        self.assertEqual(self.payload(), previous)
+        self.assertEqual(self.diagnostic()["revision"], 1)
+        self.assertEqual(self.diagnostic()["phase"], "failed")
+        self.assertFalse(any(name.startswith(".flows.json.") for name in os.listdir(self.directory)))
+
+    def test_heartbeat_during_long_acquisition_does_not_refresh_success(self):
+        self.collector.step()
+        previous = self.payload()["collector"]
+        beat = COLLECTOR.threading.Event()
+        wall = [time.time()]
+        writer = COLLECTOR.write_json
+
+        def observe(path, payload):
+            writer(path, payload)
+            status = payload.get("collector", {})
+            if all((path == COLLECTOR.COLLECTOR_TIMINGS, status.get("phase") == "collecting",
+                    status.get("heartbeat_at") == wall[0], wall[0] > previous["sample_completed_at"] + 10)):
+                beat.set()
+
+        def sample():
+            wall[0] += 15  # older than every existing fixed freshness window
+            self.assertTrue(beat.wait(2), "the liveness worker did not publish while PF acquisition was blocked")
+            status = self.diagnostic()
+            self.assertEqual(status["revision"], previous["revision"])
+            self.assertEqual(status["sample_completed_at"], previous["sample_completed_at"])
+            self.assertEqual(status["heartbeat_at"], wall[0])
+            return PF.parse_states(nat_state(1000, 1000))
+
+        with mock.patch.object(COLLECTOR, "TIMINGS_WRITE_SECONDS", 0.01), \
+                mock.patch.object(COLLECTOR.time, "time", lambda: wall[0]), \
+                mock.patch.object(COLLECTOR, "write_json", observe), \
+                mock.patch.object(COLLECTOR, "sample_states", sample):
+            self.collector.start_heartbeat()
+            try:
+                self.collector.step()
+            finally:
+                self.collector.close()
+        self.assertEqual(self.diagnostic()["phase"], "stopped")
+        self.assertFalse(self.collector._heartbeat_thread.is_alive())
+
+    def test_payload_metadata_is_a_copy_and_snapshot_carries_sample_identity(self):
+        self.collector.step()
+        payload = self.collector.build_payload(time.monotonic())
+        snapshot = self.collector.build_snapshot_payload(PF.parse_states(nat_state(1000, 1000)), time.monotonic())
+        self.collector.set_phase("preparing")
+        self.assertEqual(payload["collector"]["phase"], "sleeping")
+        self.assertEqual(snapshot["collector"], payload["collector"])
 
 
 if __name__ == "__main__":

@@ -88,6 +88,14 @@ class StatusTest(unittest.TestCase):
                     handle.write(str(os.getpid()))
                 sample = STATUS.collector()["last_sample"]
                 self.assertEqual((sample["wall"], sample["cpu"], sample["states"]), (0.042, 0.03, 1225))
+                self.assertIsNone(STATUS.collector()["timing"])
+                timing = {"generation": "process-one", "revision": 3, "phase": "collecting",
+                          "sample_completed_at": 1000.0, "heartbeat_at": 1030.0}
+                with open(timings, "w") as handle:
+                    json.dump({"collector": timing}, handle)
+                result = STATUS.collector()
+                self.assertEqual(result["timing"], timing)
+                self.assertIsNone(result["last_sample"])
 
 
 if __name__ == "__main__":
