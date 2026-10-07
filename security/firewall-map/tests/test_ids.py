@@ -91,6 +91,54 @@ class CorrelationTest(unittest.TestCase):
                 "sid": 1, "signature": signature, "category": "Malware Command and Control",
                 "severity": severity, "action": "allowed", "flow_id": flow_id}
 
+    def test_compact_state_connection_preserves_all_fields(self):
+        correlator = IDS.Correlator()
+        correlator.observe_states(PF.parse_states(self.OUTBOUND), self.LOCAL, 1000.0, {"abc123": "IoT to Internet"})
+        key, connection = next(iter(correlator.current.items()))
+        self.assertNotIsInstance(connection, dict)
+        self.assertFalse(hasattr(connection, "__dict__"))
+        self.assertEqual(dict(connection), {
+            "key": key, "protocol": "tcp", "public": "1.2.3.163:13526", "remote": "162.217.103.70:443",
+            "inside": "192.168.30.52:52114", "remote_started": False, "bytes_in": 400, "bytes_out": 9000,
+            "age": 240, "rule": "abc123", "rule_description": "IoT to Internet", "interface": "igb1",
+            "state": "ESTABLISHED:ESTABLISHED", "decision": "pass", "source": "state", "seen": 1000.0,
+        })
+        self.assertIs(correlator.recent[key], connection)
+
+    def test_duplicate_tuple_last_winner_ambiguity_and_recent_order(self):
+        correlator = IDS.Correlator()
+        other = self.OUTBOUND.replace("162.217.103.70", "162.217.103.71").replace("id: 0a", "id: 0b")
+        duplicate = self.OUTBOUND.replace("192.168.30.52", "192.168.30.53").replace("id: 0a", "id: 0c")
+        correlator.observe_states(PF.parse_states(self.OUTBOUND + other + duplicate), self.LOCAL, 1000.0)
+        first, second = correlator.current
+        self.assertEqual(correlator.current[first]["inside"], "192.168.30.53:52114")
+        self.assertEqual(correlator.ambiguous_keys, {first})
+        self.assertEqual(list(correlator.recent), [first, second])
+        old = correlator.current[first]
+        correlator.observe_states(PF.parse_states(self.OUTBOUND), self.LOCAL, 1002.0)
+        self.assertEqual(list(correlator.recent), [second, first])
+        self.assertIsNot(correlator.current[first], old)
+        self.assertEqual(correlator.ambiguous_keys, set())
+
+    def test_pending_nat_evidence_retains_its_original_sample_record(self):
+        correlator = IDS.Correlator()
+        correlator.add_alert(self.alert("1.2.3.163", 13526, "162.217.103.70", 443), 1000.0)
+        correlator.resolve(self.LOCAL, 1000.0)
+        self.assertEqual(len(correlator.pending), 1)
+        correlator.observe_states(PF.parse_states(self.OUTBOUND), self.LOCAL, 1002.0)
+        correlator.resolve(self.LOCAL, 1002.0)
+        key, old = next(iter(correlator.current.items()))
+        evidence = correlator.flows[key]["connection"]
+        self.assertIs(evidence, old)
+        correlator.observe_states(PF.parse_states(self.OUTBOUND.replace("400:9000 bytes", "800:18000 bytes")),
+                                  self.LOCAL, 1004.0)
+        self.assertIsNot(correlator.current[key], old)
+        self.assertIs(correlator.flows[key]["connection"], old)
+        self.assertEqual((old["bytes_in"], old["bytes_out"], old["seen"]), (400, 9000, 1002.0))
+        correlator.observe_states([], self.LOCAL, 1006.0)
+        self.assertEqual(correlator.current, {})
+        self.assertEqual(correlator.recent[key]["seen"], 1004.0)
+
     def test_outbound_nat_connection_is_found_by_its_outside_tuple(self):
         correlator = IDS.Correlator()
         correlator.observe_states(PF.parse_states(self.OUTBOUND), self.LOCAL, 1000.0, {"abc123": "IoT to Internet"})

@@ -88,7 +88,7 @@ from firewallmap_snapshots import (
     MAX_DOCUMENT_BYTES, DocumentBudget, SnapshotTooLarge, json_size, valid_id as snapshot_valid_id,
 )
 from lib.pf import (
-    StateFacts, TooManyStates, flow_endpoints, host_info, port_forwards, rule_descriptions, sample_states,
+    StateFacts, TooManyStates, _Record, flow_endpoints, host_info, port_forwards, rule_descriptions, sample_states,
 )
 
 
@@ -159,6 +159,38 @@ def _ranked(counts, limit=None):
     return ranked[:limit] if limit is not None else ranked
 
 
+class _Flow(_Record):
+    """Persistent flow history and current metadata; the public payload is built separately."""
+    __slots__ = ("rate", "rate_in", "rate_out", "packet_rate", "last_active", "first_seen", "states",
+                 "protocols", "services", "service_ports", "age", "transferred", "rule", "inside", "egress",
+                 "initiated", "targets")
+
+    def __init__(self, first_seen):
+        self.rate = self.rate_in = self.rate_out = self.packet_rate = 0.0
+        self.last_active = None
+        self.first_seen = first_seen
+        # The remaining slots are filled by _update_flow() before the flow is read.
+
+
+class _FlowTotals(_Record):
+    """One sample's aggregate, with the same ordered weighted counts as before."""
+    __slots__ = ("toward", "away", "packets", "states", "protocols", "services", "inside", "egress",
+                 "remote_started", "local_started", "targets", "ports", "oldest", "bytes_toward", "bytes_away",
+                 "rules")
+
+    def __init__(self):
+        self.toward = self.away = self.packets = self.states = 0
+        self.protocols = set()
+        self.services = {}
+        self.inside = {}
+        self.egress = {}
+        self.remote_started = self.local_started = 0
+        self.targets = {}
+        self.ports = {}
+        self.oldest = self.bytes_toward = self.bytes_away = 0
+        self.rules = {}
+
+
 class FlowTracker:
     """Turn successive PF state samples into per-flow byte rates with activity fading."""
 
@@ -204,69 +236,75 @@ class FlowTracker:
                 delta = (0, 0, 0)
             total = totals.get(pair)
             if total is None:
-                total = totals[pair] = {
-                    "toward": 0, "away": 0, "packets": 0, "states": 0, "protocols": set(), "services": {},
-                    "inside": {}, "egress": {}, "remote_started": 0, "local_started": 0, "targets": {},
-                    "ports": {}, "oldest": 0, "bytes_toward": 0, "bytes_away": 0, "rules": {},
-                }
+                total = totals[pair] = _FlowTotals()
             # PF counts initiator->responder first; src is the initiator in parse_states()
             weight = delta[0] + delta[1] + 1
             if facts.remote_started:
-                total["remote_started"] += weight
+                total.remote_started += weight
                 # what the remote side connected to: a port-forward target or the firewall itself
-                counts, key = total["targets"], facts.target
+                counts, key = total.targets, facts.target
                 counts[key] = counts.get(key, 0) + weight
             else:
-                total["local_started"] += weight
+                total.local_started += weight
             if facts.inside:
-                counts, key = total["inside"], facts.inside.address
+                counts, key = total.inside, facts.inside.address
                 counts[key] = counts.get(key, 0) + weight
             key = record.origif
             if key:
-                counts = total["egress"]
+                counts = total.egress
                 counts[key] = counts.get(key, 0) + weight
             service = facts.service
-            counts = total["services"]
+            counts = total.services
             counts[service] = counts.get(service, 0) + weight
-            total["ports"].setdefault(service, facts.port_label)
-            if age is not None and age > total["oldest"]:
-                total["oldest"] = age
+            total.ports.setdefault(service, facts.port_label)
+            if age is not None and age > total.oldest:
+                total.oldest = age
             # bytes moved so far by the connections open now, and the rules that let them through
-            total["bytes_toward"] += toward
-            total["bytes_away"] += away
+            total.bytes_toward += toward
+            total.bytes_away += away
             rule = (lan_rules.get(facts.rule_key) if facts.rule_key is not None and lan_rules else None) \
                 or record.rule
             if rule:
-                counts = total["rules"]
+                counts = total.rules
                 counts[rule] = counts.get(rule, 0) + 1
-            total["toward"] += delta[0]
-            total["away"] += delta[1]
-            total["packets"] += delta[2]
-            total["states"] += 1
-            total["protocols"].add(record.protocol)
+            total.toward += delta[0]
+            total.away += delta[1]
+            total.packets += delta[2]
+            total.states += 1
+            total.protocols.add(record.protocol)
         return totals, counters
 
     def _update_flow(self, flow, total, elapsed, now):
-        for key, value in (("rate_in", total["toward"]), ("rate_out", total["away"]), ("packet_rate", total["packets"])):
-            current_rate = value / elapsed if elapsed else 0.0
-            flow[key] = self.smoothing * current_rate + (1 - self.smoothing) * flow[key]
-        flow["rate"] = flow["rate_in"] + flow["rate_out"]
-        flow["states"] = total["states"]
-        flow["protocols"] = sorted(total["protocols"])
-        flow["services"] = _ranked(total["services"], MAX_SERVICES)
-        flow["service_ports"] = {name: total["ports"][name] for name in flow["services"] if total["ports"].get(name)}
+        if isinstance(flow, dict):
+            # Some callers inject dict-shaped flows. Keep their object and mutate it as before;
+            # production flows use attributes directly, without a per-field adapter.
+            compact = _Flow(flow["first_seen"])
+            for key in compact.keys():
+                if key in flow:
+                    compact[key] = flow[key]
+            self._update_flow(compact, total, elapsed, now)
+            flow.update(dict(compact))
+            return
+        flow.rate_in = self.smoothing * (total.toward / elapsed if elapsed else 0.0) + (1 - self.smoothing) * flow.rate_in
+        flow.rate_out = self.smoothing * (total.away / elapsed if elapsed else 0.0) + (1 - self.smoothing) * flow.rate_out
+        flow.packet_rate = self.smoothing * (total.packets / elapsed if elapsed else 0.0) + (1 - self.smoothing) * flow.packet_rate
+        flow.rate = flow.rate_in + flow.rate_out
+        flow.states = total.states
+        flow.protocols = sorted(total.protocols)
+        flow.services = _ranked(total.services, MAX_SERVICES)
+        flow.service_ports = {name: total.ports[name] for name in flow.services if total.ports.get(name)}
         # how long the oldest connection behind this flow has been open
-        flow["age"] = total["oldest"]
-        flow["transferred"] = (total["bytes_toward"], total["bytes_away"])
-        flow["rule"] = (_ranked(total["rules"], 1) or [None])[0]
-        flow["inside"] = _ranked(total["inside"], MAX_INSIDE)
-        flow["egress"] = (_ranked(total["egress"], 1) or [None])[0]
-        started = total["remote_started"] + total["local_started"]
-        share = total["remote_started"] / started if started else 0.0
-        flow["initiated"] = "remote" if share >= 0.75 else "local" if share <= 0.25 else "both"
-        flow["targets"] = _ranked(total["targets"], MAX_INSIDE)
-        if total["toward"] + total["away"] > 0:
-            flow["last_active"] = now
+        flow.age = total.oldest
+        flow.transferred = (total.bytes_toward, total.bytes_away)
+        flow.rule = (_ranked(total.rules, 1) or [None])[0]
+        flow.inside = _ranked(total.inside, MAX_INSIDE)
+        flow.egress = (_ranked(total.egress, 1) or [None])[0]
+        started = total.remote_started + total.local_started
+        share = total.remote_started / started if started else 0.0
+        flow.initiated = "remote" if share >= 0.75 else "local" if share <= 0.25 else "both"
+        flow.targets = _ranked(total.targets, MAX_INSIDE)
+        if total.toward + total.away > 0:
+            flow.last_active = now
 
     def update(self, records, local_addresses, now, networks=None, sample=None,
                interface_addresses=None, primary_wan_device=None):
@@ -279,16 +317,14 @@ class FlowTracker:
             if pair not in totals:
                 del self.flows[pair]
         for pair, total in totals.items():
-            flow = self.flows.setdefault(pair, {
-                "rate": 0.0, "rate_in": 0.0, "rate_out": 0.0, "packet_rate": 0.0,
-                "last_active": None, "first_seen": now,
-            })
+            flow = self.flows.setdefault(pair, _Flow(now))
             self._update_flow(flow, total, elapsed, now)
 
     def activity(self, flow, now):
-        if flow["last_active"] is None:
+        last_active = flow.last_active if isinstance(flow, _Flow) else flow["last_active"]
+        if last_active is None:
             return 0.0
-        return max(0.0, 1.0 - (now - flow["last_active"]) / self.fade_seconds)
+        return max(0.0, 1.0 - (now - last_active) / self.fade_seconds)
 
     def visible(self, now, limit=MAX_FLOWS):
         """Active or fading flows, strongest first, capped before they reach the browser (None: all)."""
@@ -296,7 +332,8 @@ class FlowTracker:
         for (local, remote), flow in self.flows.items():
             activity = self.activity(flow, now)
             if activity > 0:
-                ranked.append((max(flow["rate"], 1.0) * activity, local, remote, flow, activity))
+                rate = flow.rate if isinstance(flow, _Flow) else flow["rate"]
+                ranked.append((max(rate, 1.0) * activity, local, remote, flow, activity))
         ranked.sort(key=lambda item: item[0], reverse=True)
         return ranked if limit is None else ranked[:limit]
 

@@ -42,6 +42,77 @@ class TrackerTest(unittest.TestCase):
     LOCAL = {"1.2.3.163"}
     PAIR = ("1.2.3.163", "45.56.79.53")
 
+    def test_compact_flow_keeps_every_field_and_exact_smoothing(self):
+        tracker = COLLECTOR.FlowTracker()
+        tracker.update(PF.parse_states(nat_state(1000, 1000)), self.LOCAL, now=100.0)
+        tracker.update(PF.parse_states(nat_state(1600, 1100, 10, 14)), self.LOCAL, now=102.0)
+        flow = tracker.flows[self.PAIR]
+        self.assertNotIsInstance(flow, dict)
+        self.assertFalse(hasattr(flow, "__dict__"))
+        self.assertEqual(dict(flow), {
+            "rate": 175.0, "rate_in": 150.0, "rate_out": 25.0, "packet_rate": 1.0,
+            "last_active": 102.0, "first_seen": 100.0, "states": 1, "protocols": ["tcp"],
+            "services": ["HTTPS"], "service_ports": {"HTTPS": "443/tcp"}, "age": 605,
+            "transferred": (1600, 1100), "rule": None, "inside": ["192.168.1.2"],
+            "egress": "vlan01", "initiated": "remote", "targets": ["tcp|192.168.1.2|443"],
+        })
+        entry = COLLECTOR._flow_entry(*self.PAIR, flow, 1.0, self.LOCAL, {}, 1002.0)
+        injected = COLLECTOR._flow_entry(*self.PAIR, dict(flow), 1.0, self.LOCAL, {}, 1002.0)
+        self.assertEqual(entry, injected)
+        self.assertEqual(json.dumps(entry), json.dumps(injected))
+        tracker.update(PF.parse_states(nat_state(1800, 1300, 12, 16)), self.LOCAL, now=104.0)
+        self.assertEqual((flow["rate_in"], flow["rate_out"], flow["rate"], flow["packet_rate"]),
+                         (125.0, 62.5, 187.5, 1.5))
+
+    def test_reappearance_gets_new_first_seen_and_tie_position(self):
+        tracker = COLLECTOR.FlowTracker()
+        second = nat_state(1000, 1000).replace("45.56.79.53", "45.56.79.54").replace("f501b86a", "f501b86b")
+        tracker.update(PF.parse_states(nat_state(1000, 1000) + second), self.LOCAL, now=100.0)
+        original = tracker.flows[self.PAIR]
+        for flow in tracker.flows.values():
+            flow["last_active"], flow["rate"] = 100.0, 1.0
+        self.assertEqual([item[2] for item in tracker.visible(100.0)], ["45.56.79.53", "45.56.79.54"])
+        tracker.update(PF.parse_states(second), self.LOCAL, now=102.0)
+        self.assertNotIn(self.PAIR, tracker.flows)
+        tracker.update(PF.parse_states(nat_state(1000, 1000) + second), self.LOCAL, now=104.0)
+        self.assertIsNot(tracker.flows[self.PAIR], original)
+        self.assertEqual(tracker.flows[self.PAIR]["first_seen"], 104.0)
+        for flow in tracker.flows.values():
+            flow["last_active"], flow["rate"] = 104.0, 1.0
+        self.assertEqual([item[2] for item in tracker.visible(104.0)], ["45.56.79.54", "45.56.79.53"])
+
+    def test_dictionary_injected_flow_can_still_update_and_rank(self):
+        tracker = COLLECTOR.FlowTracker()
+        tracker.update(PF.parse_states(nat_state(1000, 1000)), self.LOCAL, now=100.0)
+        injected = tracker.flows[self.PAIR] = dict(tracker.flows[self.PAIR])
+        tracker.update(PF.parse_states(nat_state(1600, 1100)), self.LOCAL, now=102.0)
+        self.assertIs(tracker.flows[self.PAIR], injected)
+        self.assertEqual(injected["rate"], 175.0)
+        self.assertEqual(tracker.visible(102.0)[0][3], injected)
+
+    def test_compact_totals_preserve_weighted_metadata_ties_and_lan_rule_order(self):
+        first = nat_state(1000, 1000).replace(" bytes\n", " bytes, rlabel wan1\n")
+        second = first.replace("192.168.1.2:443", "192.168.1.3:80").replace("1.2.3.163:443", "1.2.3.163:80")
+        second = second.replace("f501b86a", "f501b86b").replace("vlan01", "vlan02").replace("wan1", "wan2")
+        lan = ("all tcp 192.168.1.2:443 -> 45.56.79.53:35799 ESTABLISHED:ESTABLISHED\n"
+               "   age 00:10:05, expires in 00:00:30, 8:12 pkts, 1000:1000 bytes, rlabel lan1\n"
+               "   id: 0c creatorid: 01\n   origif: lan0\n")
+        results = []
+        for text in (first + second + lan, lan + first + second):
+            tracker = COLLECTOR.FlowTracker()
+            records = PF.parse_states(text)
+            totals, _ = tracker._totals(records, self.LOCAL, None)
+            self.assertNotIsInstance(totals[self.PAIR], dict)
+            self.assertFalse(hasattr(totals[self.PAIR], "__dict__"))
+            self.assertEqual(len(dict(totals[self.PAIR])), 16)
+            tracker.update(records, self.LOCAL, now=100.0)
+            results.append(dict(tracker.flows[self.PAIR]))
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[0]["services"], ["HTTPS", "HTTP"])
+        self.assertEqual(results[0]["inside"], ["192.168.1.2", "192.168.1.3"])
+        self.assertEqual(results[0]["targets"], ["tcp|192.168.1.2|443", "tcp|192.168.1.3|80"])
+        self.assertEqual((results[0]["egress"], results[0]["rule"]), ("vlan01", "lan1"))
+
     def test_rate_comes_from_counter_deltas_not_totals(self):
         tracker = COLLECTOR.FlowTracker(smoothing=1.0)
         tracker.update(PF.parse_states(nat_state(1000, 1000)), self.LOCAL, now=100.0)

@@ -38,7 +38,7 @@ from .blocks import MAX_BLOCK_SOURCES
 from .common import (connection_target, host_port, location_fields, normalize_ip, public_ip,
                      service_name, service_port_label, split_host_port)
 from .leases import describe_inside
-from .pf import StateFacts, forward_target, inside_address, outside_key
+from .pf import StateFacts, _Record, forward_target, inside_address, outside_key
 
 
 # Suricata's alert log (EVE JSON); read locally, only alert events
@@ -106,6 +106,30 @@ def make_connection(key, **fields):
     return connection
 
 
+class _StateConnection(_Record):
+    """A state-derived connection; recent and IDS evidence share this sample's record."""
+    __slots__ = ("key", "protocol", "public", "remote", "inside", "remote_started", "bytes_in", "bytes_out",
+                 "age", "rule", "rule_description", "interface", "state", "decision", "source", "seen")
+
+    def __init__(self, key, facts, record, rule, description, now):
+        self.key = key
+        self.protocol = key[0]
+        self.public = facts.public
+        self.remote = facts.remote
+        self.inside = facts.inside_text
+        self.remote_started = facts.remote_started
+        self.bytes_in = record.bytes_in
+        self.bytes_out = record.bytes_out
+        self.age = record.age
+        self.rule = rule
+        self.rule_description = description
+        self.interface = record.origif
+        self.state = record.state
+        self.decision = "pass"
+        self.source = "state"
+        self.seen = now
+
+
 class Correlator:
     """Joins Suricata alerts to the exact connection that raised them.
 
@@ -154,15 +178,9 @@ class Correlator:
                 continue
             rule = facts.rule_of(record, lan_rules)
             # make_connection()'s shape in one step: this runs for every state of every sample
-            connection = {
-                "key": key, "protocol": key[0], "public": facts.public, "remote": facts.remote,
-                "inside": facts.inside_text, "remote_started": facts.remote_started,
-                "bytes_in": record.bytes_in, "bytes_out": record.bytes_out, "age": record.age, "rule": rule,
-                "rule_description": descriptions.get(rule or "", ""), "interface": record.origif,
-                "state": record.state, "decision": "pass", "source": "state", "seen": now,
-            }
+            connection = _StateConnection(key, facts, record, rule, descriptions.get(rule or "", ""), now)
             previous = current.get(key)
-            if previous and previous["inside"] != connection["inside"]:
+            if previous and previous.inside != connection.inside:
                 ambiguous.add(key)
             current[key] = connection
         self.current = current
