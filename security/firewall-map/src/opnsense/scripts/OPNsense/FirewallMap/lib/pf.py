@@ -44,6 +44,7 @@ COUNTERS = re.compile(r"(?P<packets_in>\d+):(?P<packets_out>\d+) pkts,\s+(?P<byt
 AGE = re.compile(r"\bage (?:(?P<days>\d+)d)?(?P<h>\d+):(?P<m>\d+):(?P<s>\d+)")
 RLABEL = re.compile(r"\brlabel ([^,\s]+)")
 AGE_UNITS = (("days", 86400), ("h", 3600), ("m", 60), ("s", 1))
+MAX_SAMPLE_STRINGS = 65536
 STATE_ID = re.compile(r"\bid: (?P<id>[0-9a-f]+) creatorid: (?P<creator>[0-9a-f]+)")
 # the whole "age ..., expires in ..., pkts, bytes" line as pfctl prints it
 DETAIL = re.compile(r"age (?:(\d+)d)?(\d+):(\d+):(\d+), expires in [^,]*, (\d+):(\d+) pkts, (\d+):(\d+) bytes")
@@ -122,7 +123,36 @@ class PfState(_Record):
     __hash__ = None
 
 
-def endpoint(value):
+class _StringPool:
+    """Bounded value-preserving sharing for one parsing/derivation phase, never a cache.
+
+    Full pools still reuse admitted strings, but leave new values alone. Clearing on exit
+    also releases the lookup contents when an aborted sample's traceback is retained.
+    """
+    __slots__ = ("values", "limit")
+
+    def __init__(self, limit=MAX_SAMPLE_STRINGS):
+        self.values = {}
+        self.limit = limit
+
+    def share(self, value):
+        if value is None:
+            return None
+        previous = self.values.get(value)
+        if previous is not None:
+            return previous
+        if len(self.values) < self.limit:
+            self.values[value] = value
+        return value
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *error):
+        self.values.clear()
+
+
+def endpoint(value, addresses=None, ports=None):
     """Split the endpoint syntax emitted by pfctl for both address families.
 
     PF renders IPv4 ports as ``192.0.2.1:443`` and IPv6 ports as
@@ -132,18 +162,25 @@ def endpoint(value):
     value = value.strip("()")
     if value.startswith("[") and "]" in value:
         address, _, rest = value[1:].partition("]")
-        return Endpoint(normalize_ip(address), rest.lstrip(":") or None)
-    if value.count(":") > 1:
+        address, port = normalize_ip(address), rest.lstrip(":") or None
+    elif value.count(":") > 1:
         address, marker, rest = value.partition("[")
-        return Endpoint(normalize_ip(address), rest.rstrip("]") or None) if marker else Endpoint(normalize_ip(value), None)
-    # IPv4 (the common case, kept free of parsing: this runs per state); pfctl prints it canonical
-    address, _, port = value.partition(":")
-    if address and (not port or port.isdigit()):
-        return Endpoint(address, port or None)
-    return Endpoint(None, None)
+        address, port = (normalize_ip(address), rest.rstrip("]") or None) if marker else (normalize_ip(value), None)
+    else:
+        # IPv4 (the common case, kept free of parsing: this runs per state); pfctl prints it canonical
+        address, _, port = value.partition(":")
+        if address and (not port or port.isdigit()):
+            port = port or None
+        else:
+            address = port = None
+    if addresses is not None:
+        address = addresses.share(address)
+    if ports is not None:
+        port = ports.share(port)
+    return Endpoint(address, port)
 
 
-def _state_header(line):
+def _state_header(line, addresses=None, ports=None):
     """The endpoints of one state from its first line, or None when the map never draws it.
 
     "A [(A')] -> B [(B')] STATE": a translation follows the endpoint it belongs to.
@@ -153,8 +190,8 @@ def _state_header(line):
     if len(parts) < 6 or arrow is None or arrow < 3 or arrow + 1 >= len(parts):
         return None
     direction = "out" if parts[arrow] == "->" else "in"
-    left = endpoint(parts[2])
-    right = endpoint(parts[arrow + 1])
+    left = endpoint(parts[2], addresses, ports)
+    right = endpoint(parts[arrow + 1], addresses, ports)
     translated = arrow > 3 and parts[3].startswith("(")
     if not translated and not public_ip(left["address"]) and not public_ip(right["address"]):
         # LAN-internal state (or the LAN side of a NAT pair): never drawn, skip its details
@@ -168,7 +205,7 @@ def _state_header(line):
         direction,
         left if direction == "out" else right,
         right if direction == "out" else left,
-        endpoint(parts[3]) if translated else None,
+        endpoint(parts[3], addresses, ports) if translated else None,
     )
 
 
@@ -208,36 +245,37 @@ def parse_states(output, limit=None):
     records = []
     header = None
     skipping = False
-    for line in (output.splitlines() if isinstance(output, str) else output):
-        first = line[:1]
-        if first != " " and first != "\t":
-            header = known.get(line, _UNKNOWN)
-            if header is _UNKNOWN:
-                header = _state_header(line)
-            seen[line] = header
-            skipping = header is None
-            continue
-        # dispatch on the detail line's first word: running every pattern over every line was
-        # the collector's largest CPU cost
-        if skipping:
-            continue  # detail lines of a skipped state must not attach to the previous record
-        stripped = line.lstrip()
-        start = stripped[:3]
-        if start == "id:":
-            state_id = STATE_ID.search(stripped)
-            if state_id and records and records[-1].id is None:
-                records[-1].id = "%s/%s" % state_id.groups()
-        elif start == "ori" and stripped.startswith("origif:"):
-            if records and records[-1].origif is None:
-                # the interface the state was created on: for NAT states, the egress (WAN, VPN, ...)
-                records[-1].origif = sys.intern(stripped.split()[1])
-        elif start == "age" and header is not None and stripped.startswith("age "):
-            record = _counters_record(header, line, stripped)
-            if record:
-                records.append(record)
-                header = None
-                if limit is not None and len(records) > limit:
-                    raise TooManyStates(len(records), limit)
+    with _StringPool() as addresses, _StringPool() as ports:
+        for line in (output.splitlines() if isinstance(output, str) else output):
+            first = line[:1]
+            if first != " " and first != "\t":
+                header = known.get(line, _UNKNOWN)
+                if header is _UNKNOWN:
+                    header = _state_header(line, addresses, ports)
+                seen[line] = header
+                skipping = header is None
+                continue
+            # dispatch on the detail line's first word: running every pattern over every line was
+            # the collector's largest CPU cost
+            if skipping:
+                continue  # detail lines of a skipped state must not attach to the previous record
+            stripped = line.lstrip()
+            start = stripped[:3]
+            if start == "id:":
+                state_id = STATE_ID.search(stripped)
+                if state_id and records and records[-1].id is None:
+                    records[-1].id = "%s/%s" % state_id.groups()
+            elif start == "ori" and stripped.startswith("origif:"):
+                if records and records[-1].origif is None:
+                    # the interface the state was created on: for NAT states, the egress (WAN, VPN, ...)
+                    records[-1].origif = sys.intern(stripped.split()[1])
+            elif start == "age" and header is not None and stripped.startswith("age "):
+                record = _counters_record(header, line, stripped)
+                if record:
+                    records.append(record)
+                    header = None
+                    if limit is not None and len(records) > limit:
+                        raise TooManyStates(len(records), limit)
     # only this walk's lines are kept: the cache never outgrows the state table
     _known_headers = seen
     return records
@@ -656,18 +694,24 @@ class StateFacts:
         views = []
         lan_rules = {}
         facts_of = StateFacts.Facts
-        for record in records:
-            state_id = record.id
-            facts = known.get(state_id)
-            # the same state (and the same parsed header line: lines that differ never share Endpoints)
-            if facts is None or facts.src is not record.src or facts.dst is not record.dst \
-                    or facts.nat is not record.nat or facts.origif != record.origif or facts.rule != record.rule:
-                facts = facts_of(record, local_addresses, networks, interface_addresses, primary_wan_device)
-            if state_id is not None:
-                fresh[state_id] = facts
-            if facts.lan_key is not None:
-                lan_rules[facts.lan_key] = facts.rule
-            views.append((record, facts))
+        with _StringPool() as strings:
+            for record in records:
+                state_id = record.id
+                facts = known.get(state_id)
+                # the same state (and the same parsed header line: lines that differ never share Endpoints)
+                if facts is None or facts.src is not record.src or facts.dst is not record.dst \
+                        or facts.nat is not record.nat or facts.origif != record.origif or facts.rule != record.rule:
+                    facts = facts_of(record, local_addresses, networks, interface_addresses, primary_wan_device)
+                    facts.port_label = strings.share(facts.port_label)
+                    facts.inside_text = strings.share(facts.inside_text)
+                    facts.public = strings.share(facts.public)
+                    facts.remote = strings.share(facts.remote)
+                    facts.target = strings.share(facts.target)
+                if state_id is not None:
+                    fresh[state_id] = facts
+                if facts.lan_key is not None:
+                    lan_rules[facts.lan_key] = facts.rule
+                views.append((record, facts))
         self.known = fresh
         return views, lan_rules
 

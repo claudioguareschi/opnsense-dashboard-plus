@@ -31,6 +31,7 @@ import sys
 import tempfile
 import time
 import unittest
+import weakref
 from datetime import datetime
 from unittest import mock
 
@@ -80,6 +81,171 @@ class ParseTest(unittest.TestCase):
             "nat": None,
         }
         self.assertIsNone(PF.flow_endpoints(record, {"1.2.2.230", "1.2.3.163"}))
+
+
+class SampleStringSharingTest(unittest.TestCase):
+    @staticmethod
+    def copy(value):
+        return value.encode().decode()
+
+    @staticmethod
+    def table(count=48):
+        rows = []
+        for number in range(count):
+            remote = f"34.77.0.{number + 1}" if number % 2 == 0 else f"2606:4700:4701::{number + 1:x}"
+            far = f"{remote}:443" if number % 2 == 0 else f"{remote}[443]"
+            rows.append(f"all tcp 1.2.3.163:{30000 + number} (192.168.1.2:41000) -> {far} ESTABLISHED:ESTABLISHED\n"
+                        f"   age 00:10:00, expires in 00:00:30, 2:3 pkts, 100:200 bytes\n"
+                        f"   id: {number:016x} creatorid: 01\n   origif: igb1\n")
+        return "".join(rows)
+
+    def tracked_pools(self, limit):
+        references, sizes = [], []
+        original = PF._StringPool
+
+        class Values(dict):
+            __slots__ = ("__weakref__",)
+
+        class Pool(original):
+            __slots__ = ("__weakref__", "index")
+
+            def __init__(self):
+                super().__init__(limit)
+                self.values = Values()
+                self.index = len(sizes)
+                sizes.append(0)
+                references.append((weakref.ref(self), weakref.ref(self.values)))
+
+            def share(self, value):
+                result = super().share(value)
+                sizes[self.index] = max(sizes[self.index], len(self.values))
+                return result
+
+        return Pool, references, sizes
+
+    def test_bound_reuses_admitted_values_but_never_admits_overflow(self):
+        with PF._StringPool(limit=2) as pool:
+            first = self.copy("34.77.0.1")
+            duplicate = self.copy(first)
+            self.assertIsNot(first, duplicate)
+            self.assertIs(pool.share(first), first)
+            self.assertIs(pool.share(duplicate), first)
+            pool.share("2606:4700:4701::1")
+            for number in range(32):
+                value = f"34.78.0.{number + 1}"
+                self.assertIs(pool.share(value), value)
+            self.assertIs(pool.share(self.copy(first)), first)
+            self.assertEqual(len(pool.values), 2)
+            self.assertIsNone(pool.share(None))
+        self.assertEqual(pool.values, {})
+
+    def test_zero_bound_and_new_sample_have_correct_value_semantics(self):
+        first = self.copy("30000")
+        with PF._StringPool(limit=0) as empty:
+            self.assertIs(empty.share(first), first)
+            self.assertEqual(empty.values, {})
+        with PF._StringPool(limit=2) as old:
+            self.assertIs(old.share(first), first)
+        second = self.copy(first)
+        with PF._StringPool(limit=2) as fresh:
+            self.assertIs(fresh.share(second), second)
+            self.assertIsNot(fresh.share(second), first)
+        self.assertEqual(old.values, {})
+
+    def test_endpoint_sharing_preserves_all_existing_formats_and_invalid_values(self):
+        values = ("34.77.0.1:443", "34.77.0.1", "(192.168.1.2:41000)",
+                  "2606:4700:4701:0:0:0:0:1[443]", "[2606:4700:4701::1]:443",
+                  "2606:4700:4701::1", "", "34.77.0.1:unusual")
+        with PF._StringPool(limit=2) as addresses, PF._StringPool(limit=2) as ports:
+            for value in values:
+                self.assertEqual(PF.endpoint(value, addresses, ports), PF.endpoint(value))
+            self.assertLessEqual(len(addresses.values), 2)
+            self.assertLessEqual(len(ports.values), 2)
+
+    def test_parser_and_facts_share_only_values_without_retaining_lookup_tables(self):
+        first = self.table(1)
+        second = first.replace("1.2.3.163:30000", "1.2.3.163:30001").replace("id: 0000000000000000", "id: 01")
+        third = first.replace("34.77.0.1:443", "34.77.0.2:443").replace("id: 0000000000000000", "id: 02")
+        inbound = nat_state(100, 200)
+        inbound2 = inbound.replace("45.56.79.53:35799", "45.56.79.53:35800").replace("f501b86a", "f501b86b")
+        Pool, references, sizes = self.tracked_pools(64)
+        with mock.patch.object(PF, "_known_headers", {}), mock.patch.object(PF, "_StringPool", Pool):
+            records = PF.parse_states(first + second + third + inbound + inbound2)
+            headers = PF._known_headers
+            cache = PF.StateFacts()
+            views, _ = cache.view(records, {"1.2.3.163"})
+        self.assertIs(records[0].dst.address, records[1].dst.address)
+        self.assertIs(records[0].dst.port, records[1].dst.port)
+        a, b, c, incoming, incoming2 = [facts for record, facts in views]
+        self.assertIs(a.port_label, b.port_label)
+        self.assertIs(a.inside_text, b.inside_text)
+        self.assertIs(a.remote, b.remote)
+        self.assertIs(a.public, c.public)
+        self.assertIs(incoming.target, incoming2.target)
+        self.assertEqual(incoming.target, "tcp|192.168.1.2|443")
+        self.assertTrue(headers and cache.known and records and views)
+        self.assertEqual(len(references), 3)
+        self.assertTrue(all(owner() is None and values() is None for owner, values in references))
+        self.assertTrue(all(size <= 64 for size in sizes))
+
+    def test_adversarial_addresses_and_ports_are_bounded_and_not_retained(self):
+        Pool, references, sizes = self.tracked_pools(4)
+        with mock.patch.object(PF, "_known_headers", {}), mock.patch.object(PF, "_StringPool", Pool):
+            text = self.table()
+            records = PF.parse_states(text)
+            views, _ = PF.StateFacts().view(records, {"1.2.3.163"})
+        self.assertEqual(len(records), 48)
+        self.assertEqual(records[-1].dst.address, "2606:4700:4701::30")
+        self.assertEqual(records[-1].src.port, "30047")
+        self.assertIs(records[-1].src.address, records[0].src.address)
+        self.assertIs(records[-1].dst.port, records[0].dst.port)
+        self.assertEqual(views[-1][1].port_label, "443/tcp")
+        self.assertEqual(sizes, [4, 4, 4])
+        self.assertTrue(all(owner() is None and values() is None for owner, values in references))
+
+    def test_new_parse_uses_fresh_pools_without_changing_header_or_facts_cache_hits(self):
+        with mock.patch.object(PF, "_known_headers", {}):
+            text = self.table(1)
+            first = PF.parse_states(text)
+            cache = PF.StateFacts()
+            sample, _ = cache.view(first, {"1.2.3.163"})
+            second = PF.parse_states(text)
+            repeated, _ = cache.view(second, {"1.2.3.163"})
+            self.assertIs(first[0].src, second[0].src)
+            self.assertIs(sample[0][1], repeated[0][1])
+            third = PF.parse_states(text.replace("1.2.3.163:30000", "1.2.3.163:30001"))
+            self.assertEqual(first[0].dst.address, third[0].dst.address)
+            self.assertIsNot(first[0].dst.address, third[0].dst.address)
+
+    def test_failed_parse_clears_pools_even_when_its_traceback_survives(self):
+        Pool, references, sizes = self.tracked_pools(4)
+        retained = None
+        with mock.patch.object(PF, "_known_headers", {}), mock.patch.object(PF, "_StringPool", Pool):
+            try:
+                PF.parse_states(self.table(), limit=0)
+            except PF.TooManyStates as error:
+                retained = error
+        self.assertIsNotNone(retained)
+        self.assertTrue(any(size for size in sizes))
+        self.assertTrue(all(values() is None or not values() for owner, values in references))
+
+    def test_failed_fact_view_clears_pool_even_when_its_traceback_survives(self):
+        records = PF.parse_states(self.table(1))
+
+        def failing_records():
+            yield records[0]
+            raise ValueError("failed sample")
+
+        Pool, references, sizes = self.tracked_pools(4)
+        retained = None
+        with mock.patch.object(PF, "_StringPool", Pool):
+            try:
+                PF.StateFacts().view(failing_records(), {"1.2.3.163"})
+            except ValueError as error:
+                retained = error
+        self.assertIsNotNone(retained)
+        self.assertEqual(sizes, [4])
+        self.assertTrue(all(values() is None or not values() for owner, values in references))
 
 
 class InsideTest(unittest.TestCase):
@@ -403,9 +569,9 @@ class SampleCacheTest(unittest.TestCase):
         record = PF.parse_states(NAT_OUT.replace("1.2.3.163:19421", "192.168.0.2:19421"))[0]
         facts = PF.StateFacts()
         (_, first), = facts.view([record], set(), interface_addresses={"igb1": {"192.168.0.2"}},
-                                  primary_wan_device="igb1")[0]
+                                 primary_wan_device="igb1")[0]
         (_, changed), = facts.view([record], set(), interface_addresses={"igb1": {"192.168.0.3"}},
-                                    primary_wan_device="igb1")[0]
+                                   primary_wan_device="igb1")[0]
         self.assertEqual(first.pair, ("192.168.0.2", "34.209.15.107"))
         self.assertIsNone(changed.pair)
         self.assertIsNot(first, changed)
