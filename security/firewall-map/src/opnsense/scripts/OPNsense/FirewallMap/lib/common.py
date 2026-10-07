@@ -94,6 +94,20 @@ SERVICES = {
 }
 
 
+@functools.lru_cache(maxsize=256)
+def protocol_name(number):
+    """Resolve a PF protocol number using the system protocol database."""
+    try:
+        with open("/etc/protocols", encoding="ascii") as protocols:
+            for line in protocols:
+                fields = line.split("#", 1)[0].split()
+                if len(fields) >= 2 and fields[1].isdigit() and int(fields[1]) == number:
+                    return fields[0]
+    except OSError:
+        pass
+    return str(number)
+
+
 # files written by these scripts hold notes, host names and topology: not world-readable
 FILE_MODE = 0o640
 

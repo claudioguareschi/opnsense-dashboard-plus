@@ -44,7 +44,8 @@ import sqlite3
 import sys
 import time
 
-from lib.common import CACHE_DB, THREATS_DB, is_icmp, log_error, secure_umask, service_name
+from lib.common import (CACHE_DB, THREATS_DB, connection_target, is_icmp, log_error, protocol_name,
+                        secure_umask, service_name, service_port_label)
 from lib.leases import host_names
 from lib.pf import StateFacts
 
@@ -181,6 +182,70 @@ def observe(records, lists_for, local_addresses, networks=None, sample=None):
     for entry in seen.values():
         for field in ("targets", "inside", "services"):
             entry[field] = list(entry[field])
+    return seen
+
+
+_NATIVE_PROTOCOLS = {1: "icmp", 6: "tcp", 17: "udp", 58: "ipv6-icmp", 132: "sctp"}
+
+
+def _native_address(value):
+    if len(value) != 17 or value[0] not in (4, 6):
+        raise ValueError("invalid native address")
+    return str(ipaddress.ip_address(value[1:5] if value[0] == 4 else value[1:]))
+
+
+def observe_aggregates(aggregate, lists_for):
+    """Apply Python threat policy to native per-remote mechanical summaries."""
+    seen = {}
+    for index, remote in enumerate(aggregate["threat_remotes"]):
+        lists = lists_for(remote["address"])
+        if not lists:
+            continue
+        seen[remote["address"]] = {
+            "lists": lists, "inbound": remote["inbound"],
+            "outbound": remote["outbound"], "targets": [], "inside": [], "services": [],
+            "bytes": remote["bytes"], "youngest": remote["youngest"], "service_ports": {},
+            "_members": {"targets": set(), "inside": set(), "services": set()},
+        }
+    for remote_id, kind, sequence, association, value in sorted(
+            aggregate["threat_candidates"], key=lambda row: row[2]):
+        if remote_id >= len(aggregate["threat_remotes"]):
+            continue
+        entry = seen.get(aggregate["threat_remotes"][remote_id]["address"])
+        if entry is None:
+            continue
+        if kind == 2:
+            address = _native_address(value)
+            if address not in entry["_members"]["inside"]:
+                entry["_members"]["inside"].add(address)
+                entry["inside"].append(address)
+        elif kind == 4:
+            number = (association >> 16) & 255
+            protocol = _NATIVE_PROTOCOLS.get(number)
+            if protocol is None:
+                protocol = protocol_name(number)
+            port = association & 65535
+            if protocol is None:
+                continue
+            name = service_name(protocol, str(port) if port else None)
+            if name not in entry["_members"]["services"]:
+                entry["_members"]["services"].add(name)
+                entry["services"].append(name)
+                label = service_port_label(protocol, str(port) if port else None)
+                if label:
+                    entry["service_ports"][name] = label
+        elif kind == 5:
+            if len(value) != 20:
+                continue
+            protocol = _NATIVE_PROTOCOLS.get(value[0]) or protocol_name(value[0])
+            address = _native_address(value[1:18])
+            port = int.from_bytes(value[18:20], "big")
+            target = connection_target(protocol, address, str(port) if port else None)
+            if target not in entry["_members"]["targets"]:
+                entry["_members"]["targets"].add(target)
+                entry["targets"].append(target)
+    for entry in seen.values():
+        entry.pop("_members", None)
     return seen
 
 

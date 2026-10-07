@@ -166,6 +166,22 @@ class TrackerTest(unittest.TestCase):
         visible = tracker.visible(0.0, limit=2)
         self.assertEqual([item[2] for item in visible], ["8.8.8.4", "8.8.8.3"])
 
+    def test_native_aggregate_ingestion_keeps_only_native_ranked_top_150(self):
+        tracker = COLLECTOR.FlowTracker()
+        rows = []
+        for index in reversed(range(150)):
+            rows.append({"key": ("192.168.1.1", f"203.0.113.{index + 1}"), "states": 1,
+                         "toward": 10, "away": 2, "packets": 1, "bytes_toward": 10, "bytes_away": 2,
+                         "remote_started": 1, "local_started": 0, "oldest": 1,
+                         "rate_in": float(index + 1), "rate_out": 0.0, "packet_rate": 1.0,
+                         "activity": 1.0, "score": float(index + 1)})
+        tracker.update_aggregate({"flows": rows, "candidates": [],
+                                  "counts": {"flows": 151}}, 10.0)
+        self.assertEqual(tracker.total_flows, 151)
+        self.assertEqual(len(tracker.flows), 150)
+        self.assertEqual(len(tracker.native_visible), 150)
+        self.assertEqual(tracker.native_visible[0][2], "203.0.113.150")
+
     def test_private_origin_is_kept_without_a_map_anchor(self):
         tracker = COLLECTOR.FlowTracker(smoothing=1.0)
         pair = ("192.168.0.2", "45.56.79.53")

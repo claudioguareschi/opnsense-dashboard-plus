@@ -61,6 +61,17 @@ for PLUGIN in ${PLUGINS}; do
     rm -rf "${WORK:?}/${PLUGIN}"
     mkdir -p "$(dirname "${WORK}/${PLUGIN}")"
     cp -R "${ROOT}/${PLUGIN}" "${WORK}/${PLUGIN}"
+    if [ "${PLUGIN}" = "security/firewall-map" ]; then
+        if [ "$(uname -s)" != "FreeBSD" ]; then
+            echo "Firewall Map native helper must be built for OPNsense/FreeBSD" >&2
+            exit 1
+        fi
+        mkdir -p "${WORK}/${PLUGIN}/src/libexec"
+        ${NATIVE_CC:-cc} ${NATIVE_CFLAGS:--O2 -Wall -Wextra -Werror} \
+            -I"${WORK}/${PLUGIN}/native" "${WORK}/${PLUGIN}"/native/*.c -lm \
+            -o "${WORK}/${PLUGIN}/src/libexec/firewallmap-native"
+        chmod 0755 "${WORK}/${PLUGIN}/src/libexec/firewallmap-native"
+    fi
     # Bytecode from running the tests locally must not ship in the package.
     find "${WORK}/${PLUGIN}" -name __pycache__ -type d -prune -exec rm -rf {} +
     if [ -n "${DEVEL:-}" ]; then

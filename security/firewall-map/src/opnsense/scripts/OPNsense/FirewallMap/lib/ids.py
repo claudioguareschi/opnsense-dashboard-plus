@@ -27,6 +27,7 @@
 """Suricata alerts for Firewall Map+: EVE parsing, per-address history and connection matching."""
 
 import json
+import socket
 import time
 from collections import deque
 from datetime import datetime
@@ -190,6 +191,70 @@ class Correlator:
         for key, connection in current.items():
             self.recent.pop(key, None)
             self.recent[key] = connection
+        self._expire(now)
+
+    def native_queries(self, local_addresses, networks=None, limit=2500):
+        """Only tuples needed for pending or already-correlated IDS evidence cross the IPC boundary."""
+        keys = dict.fromkeys(self.flows)
+        for _received, alert in self.pending:
+            if alert.get("src_port") and alert.get("dst_port"):
+                keys.setdefault(self.alert_key(alert, local_addresses, networks), None)
+        return list(keys)[:limit]
+
+    def observe_native_matches(self, matches, now, descriptions=None):
+        """Refresh current IDS evidence from only the tuple matches requested from the native engine."""
+        descriptions = descriptions or {}
+        current, ambiguous = {}, set()
+        for key, value in matches.items():
+            if value["kind"] != 1:
+                continue
+            inside = host_port(value["inside"], value["inside_port"]) if value["inside"] else None
+            connection = make_connection(
+                key, inside=inside, remote_started=value["remote_started"], bytes_in=value["bytes_in"],
+                bytes_out=value["bytes_out"], age=value["age"], rule=value["rule"],
+                rule_description=descriptions.get(value["rule"] or "", ""), interface=value["interface"],
+                state=f"{value['id']}/{value['creator']}", decision="pass", source="state", seen=now)
+            current[key] = connection
+            if value["ambiguous"]:
+                ambiguous.add(key)
+        self.current = current
+        self.ambiguous_keys = ambiguous
+        self._flagged = None
+
+    def resolve_native(self, matches, local_addresses, now, networks=None):
+        """Resolve pending IDS alerts using bounded native tuple matches, then Python block policy."""
+        still = []
+        for received, alert in self.pending:
+            key = self.alert_key(alert, local_addresses, networks)
+            matched = matches.get(key)
+            if matched:
+                if matched["kind"] == 1:
+                    kind = "ambiguous" if matched["ambiguous"] else "current"
+                else:
+                    kind = "recent"
+                connection = self.current.get(key)
+                if connection is None:
+                    inside = host_port(matched["inside"], matched["inside_port"]) if matched["inside"] else None
+                    connection = make_connection(
+                        key, inside=inside, remote_started=matched["remote_started"],
+                        bytes_in=matched["bytes_in"], bytes_out=matched["bytes_out"], age=matched["age"],
+                        rule=matched["rule"], interface=matched["interface"],
+                        state=f"{matched['id']}/{matched['creator']}", decision="pass", source="state", seen=now)
+            elif key in self.blocked:
+                kind, connection = "blocked", self.blocked[key]
+            elif now - received < CORRELATION_RETRY_SECONDS:
+                still.append((received, alert))
+                continue
+            else:
+                self.stats["unmatched"] += 1
+                self.unmatched_samples = (self.unmatched_samples + [{
+                    "time": alert["time"], "key": list(key), "signature": alert["signature"]}])[-20:]
+                kind, connection = "alert", self.alert_connection(key, alert, now)
+            if kind != "alert":
+                self.stats[kind] += 1
+            self._attach(key, kind, connection, alert, now)
+        self.pending = deque(still, maxlen=MAX_PENDING_ALERTS)
+        self.stats["pending"] = len(still)
         self._expire(now)
 
     def observe_block(self, event, at, descriptions=None):

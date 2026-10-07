@@ -25,6 +25,7 @@
 """Unit tests for persisted threat history and disposition views."""
 
 import json
+import ipaddress
 import os
 import sqlite3
 import sys
@@ -72,6 +73,48 @@ class ThreatQueueTest(unittest.TestCase):
         lists_for.assert_called_once_with("34.1.1.1")
         # Existing accumulation is not capped at MAX_ITEMS; preserve that behavior.
         self.assertGreater(len(entry["inside"]), THREATS.MAX_ITEMS)
+
+    def test_native_remote_summary_matches_pf_attribution(self):
+        records = PF.parse_states(self.INBOUND + self.OUTBOUND)
+        views, _ = PF.StateFacts().view(records, {"1.2.3.163"})
+        remotes, candidates, remote_ids = [], [], {}
+        for sequence, (record, facts) in enumerate(views):
+            if facts.pair is None:
+                continue
+            remote = facts.pair[1]
+            if remote not in remote_ids:
+                remote_ids[remote] = len(remotes)
+                remotes.append({"address": remote, "inbound": 0, "outbound": 0,
+                                "bytes": 0, "youngest": None})
+            item = remotes[remote_ids[remote]]
+            item["inbound"] += int(facts.remote_started)
+            item["outbound"] += int(not facts.remote_started)
+            item["bytes"] += record.bytes_in + record.bytes_out
+            item["youngest"] = record.age if item["youngest"] is None else min(item["youngest"], record.age)
+            if facts.inside:
+                packed = ipaddress.ip_address(facts.inside.address).packed
+                address = bytes([4 if len(packed) == 4 else 6]) + packed.ljust(16, b"\0")
+                candidates.append((remote_ids[remote], 2, sequence, 0, address))
+            port = int(facts.service_port or 0)
+            number = 6 if record.protocol == "tcp" else 17
+            candidates.append((remote_ids[remote], 4, sequence, (number << 16) | port, b""))
+            if facts.remote_started:
+                target = facts.target
+                address, target_port = target.split("|")[1:]
+                packed = ipaddress.ip_address(address).packed
+                target_data = b"".join((
+                    bytes([number, 4 if len(packed) == 4 else 6]),
+                    packed.ljust(16, b"\0"),
+                    int(target_port).to_bytes(2, "big")))
+                candidates.append((remote_ids[remote], 5, sequence, 0, target_data))
+        native = {"threat_remotes": remotes, "threat_candidates": candidates}
+
+        def lists(_address):
+            return ["AbuseIPDB blacklist"]
+
+        expected = THREATS.observe(records, lists, {"1.2.3.163"})
+        actual = THREATS.observe_aggregates(native, lists)
+        self.assertEqual(actual, expected)
 
     def test_distinct_attributions_use_indexed_membership(self):
         class CountedText(str):
