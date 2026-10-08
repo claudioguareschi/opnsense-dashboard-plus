@@ -27,6 +27,7 @@
 #include "classify.h"
 #include "correlation.h"
 #include "discovery.h"
+#include "evidence.h"
 #include "history.h"
 #include "index.h"
 struct aggregate;
@@ -54,8 +55,7 @@ struct flow {
   uint64_t created; /* states new since the previous sample */
   uint32_t oldest, youngest;
   struct state_delta delta;
-  bool flagged;  /* threat-listed or evidence remote */
-  bool late;     /* admitted after some of its states streamed past (forced) */
+  struct evidence evidence; /* the remote's evidence (mask != 0: any evidence) */
   bool evicted;  /* a candidate summary of this flow evicted or dropped a value */
 };
 struct candidate_view {
@@ -88,7 +88,9 @@ struct admission {
   size_t limit, hard_limit, forced_limit, candidate_limit, join_limit;
   uint64_t threat_mask;
   const struct map *known, *promoted; /* flow keys */
-  const struct map *evidence;         /* 17-byte address keys */
+  /* 17-byte address keys; an item's value indexes evidence_facts */
+  const struct map *evidence;
+  const struct evidence *evidence_facts;
   struct discovery *discovery;        /* reset by the caller */
 };
 /* Context and history are borrowed for the lifetime of this single sample.

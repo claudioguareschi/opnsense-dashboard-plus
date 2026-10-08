@@ -90,6 +90,7 @@ struct request {
   bool threats, snapshot, correlation;
   uint64_t memory_budget, candidates_per_kind, threat_remotes;
   struct addr *evidence;
+  struct evidence *evidence_facts;
   size_t evidence_count;
   struct event_query queries[FM_MAX_EVENT_QUERIES];
   size_t query_count;
@@ -170,44 +171,23 @@ static void class_row(struct request *r, const char *line, struct fm_error *erro
   strcpy(set->name, name);
 }
 /* PROFILE <id> classic
- * PROFILE <id> scored <activity 0|1> <floor> <flagged> (<weight> <scale>) x 4
- * (bytes/s, packets/s, states, new states/s). */
+ * PROFILE <id> scored activity=<0|1> floors=<S3>,<S2>,<S1> <feature>=<weight>/<scale> ...
+ * (profile.h: the closed feature vocabulary, parsed once here). */
 static void profile_row(struct request *r, const char *line, struct fm_error *error) {
-  unsigned id, activity, floor;
-  char kind[16], extra;
-  double flagged, v[2 * PRIMITIVE_COUNT];
-  struct profile p = {0};
-  if (sscanf(line, "PROFILE %u %15s", &id, kind) != 2 || id != r->profile_count ||
+  unsigned id;
+  char kind[16];
+  int offset = 0;
+  if (sscanf(line, "PROFILE %u %15s %n", &id, kind, &offset) != 2 || id != r->profile_count ||
       r->profile_count >= PROFILE_MAX) {
     request_error(error, "PROFILE row");
     return;
   }
-  if (!strcmp(kind, "classic")) {
-    if (sscanf(line, "PROFILE %u %15s %c", &id, kind, &extra) != 2) {
-      request_error(error, "PROFILE row");
-      return;
-    }
+  struct profile p = {0};
+  const char *why = "PROFILE row";
+  if (!strcmp(kind, "classic") && !line[offset])
     p.classic = true;
-  } else if (!strcmp(kind, "scored") &&
-             sscanf(line, "PROFILE %u scored %u %u %lf %lf %lf %lf %lf %lf %lf %lf %lf %c", &id,
-                    &activity, &floor, &flagged, &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6],
-                    &v[7], &extra) == 12 &&
-             activity <= 1 && floor <= BUDGET_RANKED_FLOWS && isfinite(flagged) && flagged >= 0 &&
-             flagged <= 1000) {
-    p.activity = activity;
-    p.floor = floor;
-    p.flagged = flagged;
-    for (int k = 0; k < PRIMITIVE_COUNT; k++) {
-      p.weight[k] = v[2 * k];
-      p.scale[k] = v[2 * k + 1];
-      if (!isfinite(p.weight[k]) || p.weight[k] < 0 || p.weight[k] > 1000 || !isfinite(p.scale[k]) ||
-          p.scale[k] <= 0) {
-        request_error(error, "PROFILE weights");
-        return;
-      }
-    }
-  } else {
-    request_error(error, "PROFILE row");
+  else if (!(!strcmp(kind, "scored") && profile_parse(line + offset, &p, &why))) {
+    request_error(error, why);
     return;
   }
   r->profiles[r->profile_count++] = p;
@@ -268,16 +248,27 @@ static bool read_request(struct request *r, bool *clean_eof, struct fm_error *er
       }
       parse_address(a, &r->classify[r->classify_count++], error);
     } else if (!strncmp(line, "EVIDENCE ", 9)) {
-      if (sscanf(line, "EVIDENCE %63s %c", a, &extra) != 1 ||
-          r->evidence_count >= BUDGET_THREAT_REMOTES_MAX) {
+      /* EVIDENCE <address> <mask> <blocked hits> <IDS alerts> <IDS worst severity> */
+      unsigned mask, blocked, alerts, severity;
+      if (sscanf(line, "EVIDENCE %63s %u %u %u %u %c", a, &mask, &blocked, &alerts, &severity,
+                 &extra) != 5 ||
+          r->evidence_count >= BUDGET_THREAT_REMOTES_MAX || mask > 255 || severity > 255) {
         request_error(error, "EVIDENCE row");
         break;
       }
       if (!r->evidence &&
-          !(r->evidence = fm_calloc(BUDGET_THREAT_REMOTES_MAX, sizeof(*r->evidence)))) {
+          (!(r->evidence = fm_calloc(BUDGET_THREAT_REMOTES_MAX, sizeof(*r->evidence))) ||
+           !(r->evidence_facts =
+                 fm_calloc(BUDGET_THREAT_REMOTES_MAX, sizeof(*r->evidence_facts))))) {
         fm_error_set(error, errno, "evidence allocation");
         break;
       }
+      struct evidence facts = {(uint8_t)mask, (uint8_t)severity, blocked, alerts};
+      if (!evidence_valid(&facts) || !mask) {
+        request_error(error, "EVIDENCE facts");
+        break;
+      }
+      r->evidence_facts[r->evidence_count] = facts;
       parse_address(a, &r->evidence[r->evidence_count++], error);
     } else if (line[0] == 'Q' && sscanf(line, "Q %u %u %63s %u %63s %u %c", &id, &proto,
                                         a, &public_port, b, &remote_port, &extra) == 6) {
@@ -472,8 +463,8 @@ static bool select_union(struct engine *e, const struct aggregate *a, double int
     double least_states = INFINITY, least_created = INFINITY;
     for (size_t k = 0; k < selected; k++) {
       uint32_t flow = chosen[k].flow;
-      double s = profiles_value(a, e->ranking, flow, PRIMITIVE_STATES, interval);
-      double c = profiles_value(a, e->ranking, flow, PRIMITIVE_CREATED, interval);
+      double s = profiles_value(a, e->ranking, flow, FEATURE_STATES, interval);
+      double c = profiles_value(a, e->ranking, flow, FEATURE_NEW_STATE_RATE, interval);
       least_states = s < least_states ? s : least_states;
       least_created = c < least_created ? c : least_created;
       if ((*position)[flow]) continue;
@@ -484,12 +475,12 @@ static bool select_union(struct engine *e, const struct aggregate *a, double int
       (*position)[flow] = (uint32_t)++count;
     }
     bool full = selected == BUDGET_RANKED_FLOWS;
-    if (!def->classic && def->weight[PRIMITIVE_STATES] > 0) {
+    if (!def->classic && def->weight[FEATURE_STATES] > 0) {
       hints->states = true;
       states_full = states_full && full;
       states_edge = least_states < states_edge ? least_states : states_edge;
     }
-    if (!def->classic && def->weight[PRIMITIVE_CREATED] > 0) {
+    if (!def->classic && def->weight[FEATURE_NEW_STATE_RATE] > 0) {
       hints->created = true;
       created_full = created_full && full;
       created_edge = least_created < created_edge ? least_created : created_edge;
@@ -553,11 +544,20 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   for (size_t n = 0; tracked && n < r->evidence_count; n++) {
     unsigned char key[17] = {r->evidence[n].af};
     memcpy(key + 1, r->evidence[n].b, 16);
-    tracked = lookup(&evidence, key, sizeof(key), true, error) != NULL;
+    struct item *item = lookup(&evidence, key, sizeof(key), true, error);
+    if (!(tracked = item != NULL)) break;
+    if (item->count) {
+      request_error(error, "duplicate EVIDENCE address");
+      tracked = false;
+      break;
+    }
+    item->count = 1;
+    item->value = n;
   }
   if (tracked) {
     admission.threat_mask = classifier_category(e->classifier, 'T');
     admission.evidence = &evidence;
+    admission.evidence_facts = r->evidence_facts;
     aggregate_set_classifier(sample.aggregate, e->classifier);
     aggregate_set_admission(sample.aggregate, &admission);
   }
@@ -780,6 +780,7 @@ int main(int argc, char **argv) {
     if (request) {
       context_destroy(request->ctx);
       fm_free(request->evidence);
+      fm_free(request->evidence_facts);
       fm_free(request->classify);
     }
     fm_free(request);

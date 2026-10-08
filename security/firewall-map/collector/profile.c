@@ -27,6 +27,7 @@
 #include "alloc.h"
 #include <errno.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -38,16 +39,75 @@ struct profiles {
   struct selected *selection[PROFILE_MAX];
   size_t selected[PROFILE_MAX], capacity[PROFILE_MAX];
   struct map previous[PROFILE_MAX];
-  /* scratch: candidates of one selection (two bounded heaps) */
-  struct candidate_row *general, *reserved;
+  /* scratch: candidates of one selection (bounded heaps: general, and one
+   * per security class S1-S3) */
+  struct candidate_row *general, *reserved[4];
   size_t scratch;
 };
 struct candidate_row {
   uint32_t flow;
   double score;
   uint64_t order;
-  bool flagged;
 };
+
+/* The closed feature vocabulary, by its request keyword. */
+static const char *const FEATURE_KEYS[FEATURE_COUNT] = {
+    "byte_rate", "packet_rate", "states", "new_state_rate", "blocked", "threat_list", "ids"};
+
+bool profile_parse(const char *text, struct profile *p, const char **why) {
+  memset(p, 0, sizeof(*p));
+  bool seen[FEATURE_COUNT] = {0}, seen_activity = false, seen_floors = false;
+  char token[96];
+  const char *at = text;
+  unsigned total = 0;
+  for (;;) {
+    while (*at == ' ') at++;
+    if (!*at || *at == '\n') break;
+    size_t length = strcspn(at, " \n");
+    if (length >= sizeof(token)) return (*why = "PROFILE token"), false;
+    memcpy(token, at, length);
+    token[length] = 0;
+    at += length;
+    char *value = strchr(token, '=');
+    if (!value) return (*why = "PROFILE token"), false;
+    *value++ = 0;
+    char extra;
+    if (!strcmp(token, "activity")) {
+      unsigned on;
+      if (seen_activity || sscanf(value, "%u%c", &on, &extra) != 1 || on > 1)
+        return (*why = "PROFILE activity"), false;
+      p->activity = on;
+      seen_activity = true;
+      continue;
+    }
+    if (!strcmp(token, "floors")) {
+      unsigned s3, s2, s1;
+      if (seen_floors || sscanf(value, "%u,%u,%u%c", &s3, &s2, &s1, &extra) != 3)
+        return (*why = "PROFILE floors"), false;
+      p->floor[SECURITY_S3] = s3;
+      p->floor[SECURITY_S2] = s2;
+      p->floor[SECURITY_S1] = s1;
+      total = s3 + s2 + s1;
+      seen_floors = true;
+      continue;
+    }
+    int feature = -1;
+    for (int k = 0; k < FEATURE_COUNT; k++)
+      if (!strcmp(token, FEATURE_KEYS[k])) feature = k;
+    if (feature < 0) return (*why = "PROFILE unknown feature"), false;
+    double weight, scale;
+    if (seen[feature] || sscanf(value, "%lf/%lf%c", &weight, &scale, &extra) != 2 ||
+        !isfinite(weight) || weight < 0 || weight > 1000 || !isfinite(scale) || scale <= 0)
+      return (*why = "PROFILE feature weight"), false;
+    p->weight[feature] = weight;
+    p->scale[feature] = scale;
+    seen[feature] = true;
+  }
+  if (total > 150) return (*why = "PROFILE floors over the selection size"), false;
+  for (int k = 0; k < FEATURE_COUNT; k++)
+    if (!seen[k]) p->scale[k] = 1; /* weight 0: never contributes */
+  return true;
+}
 
 struct profiles *profiles_create(struct fm_error *error) {
   struct profiles *p = fm_calloc(1, sizeof(*p));
@@ -65,7 +125,7 @@ void profiles_destroy(struct profiles *p) {
   profiles_reset(p);
   for (size_t n = 0; n < PROFILE_MAX; n++) fm_free(p->selection[n]);
   fm_free(p->general);
-  fm_free(p->reserved);
+  for (int c = SECURITY_S1; c <= SECURITY_S3; c++) fm_free(p->reserved[c]);
   fm_free(p);
 }
 bool profiles_configure(struct profiles *p, const struct profile *defs, size_t count,
@@ -88,18 +148,26 @@ size_t profiles_selection(const struct profiles *p, size_t n, const struct selec
   return n < p->count ? p->selected[n] : 0;
 }
 
+static double feature_value(const struct flow *f, const struct flow_rates *rates,
+                            enum profile_feature feature, double interval) {
+  switch (feature) {
+  case FEATURE_BYTE_RATE: return rates->rate_from_remote + rates->rate_to_remote;
+  case FEATURE_PACKET_RATE: return rates->packet_rate;
+  case FEATURE_STATES: return (double)f->states;
+  case FEATURE_NEW_STATE_RATE: return interval > 0 ? (double)f->created / interval : 0;
+  case FEATURE_BLOCKED: return (double)f->evidence.blocked_hits;
+  case FEATURE_THREAT_LIST: return f->evidence.mask & EVIDENCE_THREAT_LIST ? 1 : 0;
+  case FEATURE_IDS:
+    return f->evidence.mask & EVIDENCE_IDS_HIGH ? 2 : f->evidence.mask & EVIDENCE_IDS ? 1 : 0;
+  default: return 0;
+  }
+}
 double profiles_value(const struct aggregate *a, const struct ranking *r, size_t flow,
-                      enum profile_primitive primitive, double interval) {
+                      enum profile_feature feature, double interval) {
   const struct flow *f = aggregate_flow(a, flow);
   struct flow_rates rates;
   if (!f || !ranking_rates(r, flow, &rates)) return 0;
-  switch (primitive) {
-  case PRIMITIVE_BYTES: return rates.rate_from_remote + rates.rate_to_remote;
-  case PRIMITIVE_PACKETS: return rates.packet_rate;
-  case PRIMITIVE_STATES: return (double)f->states;
-  case PRIMITIVE_CREATED: return interval > 0 ? (double)f->created / interval : 0;
-  default: return 0;
-  }
+  return feature_value(f, &rates, feature, interval);
 }
 
 /* Better first: higher score, then earlier first-seen. */
@@ -165,37 +233,40 @@ static bool select_scored(struct profiles *p, size_t n, const struct aggregate *
                           const struct ranking *r, double interval, size_t limit,
                           struct fm_error *error) {
   const struct profile *def = &p->defs[n];
-  size_t floor = def->floor < limit ? def->floor : limit;
-  size_t flows = aggregate_counts(a).flows, general = 0, reserved = 0;
+  size_t flows = aggregate_counts(a).flows, general = 0, reserved[4] = {0};
   for (size_t f = 0; f < flows; f++) {
     const struct flow *flow = aggregate_flow(a, f);
     struct flow_rates rates;
     if (!ranking_rates(r, f, &rates)) continue;
-    double score = flow->flagged ? def->flagged : 0;
-    for (int k = 0; k < PRIMITIVE_COUNT; k++)
-      if (def->weight[k] > 0 && def->scale[k] > 0)
-        score += def->weight[k] * log1p(profiles_value(a, r, f, k, interval) / def->scale[k]);
+    double score = 0;
+    for (int k = 0; k < FEATURE_COUNT; k++)
+      if (def->weight[k] > 0)
+        score += def->weight[k] * log1p(feature_value(flow, &rates, k, interval) / def->scale[k]);
     if (def->activity) score *= rates.activity;
     if (!(score > 0)) continue;
     unsigned char key[FM_FLOW_KEY_SIZE];
     state_flow_key(key, flow->local, flow->remote);
     if (map_find(&p->previous[n], key, sizeof(key))) score *= PROFILE_INCUMBENCY;
-    struct candidate_row row = {(uint32_t)f, score, rates.order, flow->flagged};
-    /* the floor's candidates are kept apart, so a general slot never takes
-     * a flow the floor needs */
-    if (row.flagged) heap_offer(p->reserved, &reserved, floor, &row);
+    struct candidate_row row = {(uint32_t)f, score, rates.order};
+    /* a flow counts for its own class's floor only (no flow takes two
+     * reserved places) and competes for the general places as well */
+    enum security_class class = security_class(&flow->evidence);
+    if (class != SECURITY_S0)
+      heap_offer(p->reserved[class], &reserved[class], def->floor[class], &row);
     heap_offer(p->general, &general, limit, &row);
   }
-  /* the floor's flows, then the best others until the limit */
-  qsort(p->reserved, reserved, sizeof(*p->reserved), best_first);
-  qsort(p->general, general, sizeof(*p->general), best_first);
   if (!reserve_rows(&p->selection[n], &p->capacity[n], limit, error)) return false;
+  /* the floors' flows (S3, S2, S1: disjoint), then the best others until
+   * the limit; places a floor did not use stay in the general pool */
   size_t count = 0;
-  for (size_t k = 0; k < reserved; k++)
-    p->selection[n][count++] = (struct selected){p->reserved[k].flow, p->reserved[k].score};
+  for (int c = SECURITY_S3; c >= SECURITY_S1; c--)
+    for (size_t k = 0; k < reserved[c] && count < limit; k++)
+      p->selection[n][count++] = (struct selected){p->reserved[c][k].flow, p->reserved[c][k].score};
+  size_t floors = count;
+  qsort(p->general, general, sizeof(*p->general), best_first);
   for (size_t k = 0; k < general && count < limit; k++) {
     bool taken = false;
-    for (size_t j = 0; j < reserved && !taken; j++) taken = p->reserved[j].flow == p->general[k].flow;
+    for (size_t j = 0; j < floors && !taken; j++) taken = p->selection[n][j].flow == p->general[k].flow;
     if (!taken) p->selection[n][count++] = (struct selected){p->general[k].flow, p->general[k].score};
   }
   /* final order: by score, then first-seen */
@@ -203,7 +274,7 @@ static bool select_scored(struct profiles *p, size_t n, const struct aggregate *
   for (size_t k = 0; k < count; k++) {
     struct flow_rates rates;
     ranking_rates(r, p->selection[n][k].flow, &rates);
-    order[k] = (struct candidate_row){p->selection[n][k].flow, p->selection[n][k].score, rates.order, false};
+    order[k] = (struct candidate_row){p->selection[n][k].flow, p->selection[n][k].score, rates.order};
   }
   qsort(order, count, sizeof(*order), best_first);
   for (size_t k = 0; k < count; k++) p->selection[n][k] = (struct selected){order[k].flow, order[k].score};
@@ -221,13 +292,16 @@ static bool select_scored(struct profiles *p, size_t n, const struct aggregate *
 
 bool profiles_select(struct profiles *p, const struct aggregate *a, const struct ranking *r,
                      double interval, size_t limit, struct fm_error *error) {
-  /* the scratch holds the general heap (limit) and the floor heap (limit) */
+  /* the scratch holds the general heap and one floor heap per class (limit each) */
   if (p->scratch < limit) {
     void *general = fm_realloc(p->general, limit * sizeof(*p->general));
-    if (general) p->general = general;
-    void *reserved = general ? fm_realloc(p->reserved, limit * sizeof(*p->reserved)) : NULL;
-    if (!reserved) return fm_error_set(error, errno ? errno : ENOMEM, "profile scratch");
-    p->reserved = reserved;
+    if (!general) return fm_error_set(error, errno ? errno : ENOMEM, "profile scratch");
+    p->general = general;
+    for (int c = SECURITY_S1; c <= SECURITY_S3; c++) {
+      void *reserved = fm_realloc(p->reserved[c], limit * sizeof(*p->reserved[c]));
+      if (!reserved) return fm_error_set(error, errno ? errno : ENOMEM, "profile scratch");
+      p->reserved[c] = reserved;
+    }
     p->scratch = limit;
   }
   for (size_t n = 0; n < p->count; n++)
@@ -238,7 +312,7 @@ bool profiles_select(struct profiles *p, const struct aggregate *a, const struct
 }
 
 size_t profiles_bytes(const struct profiles *p) {
-  size_t bytes = sizeof(*p) + p->scratch * 2 * sizeof(*p->general);
+  size_t bytes = sizeof(*p) + p->scratch * 4 * sizeof(*p->general);
   for (size_t n = 0; n < PROFILE_MAX; n++)
     bytes += p->capacity[n] * sizeof(*p->selection[n]) + map_bytes(&p->previous[n]);
   return bytes;

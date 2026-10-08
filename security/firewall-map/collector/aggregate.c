@@ -330,6 +330,7 @@ static int admit(struct aggregate *a, const unsigned char *key, uint64_t hash,
   if (room && ((ad->known && map_find_hashed(ad->known, key, FM_FLOW_KEY_SIZE, hash)) ||
                (ad->promoted && map_find_hashed(ad->promoted, key, FM_FLOW_KEY_SIZE, hash))))
     return 1;
+  /* any evidence: a threat-table match or an EVIDENCE row */
   bool flagged = classifier_lookup(a->classifier, v->remote) & ad->threat_mask;
   if (!flagged && ad->evidence && ad->evidence->used) {
     unsigned char remote[17];
@@ -379,11 +380,15 @@ static struct flow *flow_add(struct aggregate *a, const struct state_view *v,
   f->first = seq;
   /* one lookup per flow, never per state */
   f->classes = classifier_lookup(a->classifier, v->remote);
-  f->flagged = f->classes & a->admission.threat_mask;
-  if (!f->flagged && a->admission.evidence && a->admission.evidence->used) {
+  /* the remote's evidence: Python's facts, and the threat-table match */
+  if (a->admission.evidence && a->admission.evidence->used) {
     unsigned char remote[17];
-    f->flagged = map_find(a->admission.evidence, remote, address_key(remote, v->remote)) != NULL;
+    const struct item *i = map_find(a->admission.evidence, remote, address_key(remote, v->remote));
+    if (i)
+      f->evidence = a->admission.evidence_facts[i->value];
   }
+  if (f->classes & a->admission.threat_mask)
+    f->evidence.mask |= EVIDENCE_THREAT_LIST;
   return f;
 }
 static bool service_candidate(struct aggregate *a, uint32_t flow,

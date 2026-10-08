@@ -28,35 +28,44 @@
 #include "aggregate.h"
 #include "ranking.h"
 
-/* Flow Ranking Profiles (CONTRACTS.md, "Profiles"). Every enabled profile
- * selects its top flows each sample over the shared tracked set; a viewer's
- * Focus only chooses among the selections.
+/* Flow Ranking Profiles (CONTRACTS.md, "Profiles" and "Ranking features").
+ * Every enabled profile selects its top flows each sample over the shared
+ * tracked set; a viewer's Focus only chooses among the selections.
  *
- * Classic is the current ranking itself: max(rate, 1) x activity with EMA
- * rates, linear fade and first-seen ties. Every other profile scores
- *   sum_i weight_i * log1p(value_i / scale_i) + flagged weight (flagged flows)
- * over the primitives below, multiplied by the fade activity when the
+ * Classic is the existing ranking itself: max(byte rate, 1) x activity with
+ * EMA rates, linear fade and first-seen ties. Every other profile scores
+ *   sum over features f of weight_f * log1p(value_f / scale_f)
+ * over a closed set of features, multiplied by the fade activity when the
  * profile says so, plus an incumbency bonus for the flows it selected last
- * sample. A flow scoring 0 is never selected. `floor` reserves that many
- * slots for flagged flows (threat-listed or evidence) when there are such
- * flows; it is a minimum, never a cap: flagged flows also win general
- * slots on their score. Ties go to the earlier first-seen flow. */
+ * sample. A flow scoring 0 is never selected. Floors reserve places per
+ * security class (S3, S2, S1; evidence.h): each flow counts only for its own
+ * class, unused places return to the general pool, and a reserved class
+ * also wins general places on its score. Ties go to the earlier first-seen
+ * flow. */
 #define PROFILE_MAX 8
 #define PROFILE_INCUMBENCY 1.1
-enum profile_primitive {
-  PRIMITIVE_BYTES = 0,   /* smoothed byte rate, both directions (bytes/s) */
-  PRIMITIVE_PACKETS = 1, /* smoothed packet rate (packets/s) */
-  PRIMITIVE_STATES = 2,  /* PF states of the flow now */
-  PRIMITIVE_CREATED = 3, /* states created since the previous sample, per second */
-  PRIMITIVE_COUNT = 4
+/* The ranking features (a closed vocabulary: the request names them, the
+ * parser compiles them to these IDs once per request). */
+enum profile_feature {
+  FEATURE_BYTE_RATE = 0,      /* EMA-smoothed observed byte rate, both directions (bytes/s) */
+  FEATURE_PACKET_RATE = 1,    /* EMA-smoothed observed packet rate (packets/s) */
+  FEATURE_STATES = 2,         /* PF states of the flow now */
+  FEATURE_NEW_STATE_RATE = 3, /* states new since the previous sample, per second */
+  FEATURE_BLOCKED = 4,        /* logged blocked attempts of the remote in the window */
+  FEATURE_THREAT_LIST = 5,    /* 1 when the remote is in a threat-category PF table */
+  FEATURE_IDS = 6,            /* 1 with IDS evidence, 2 when it is high-severity */
+  FEATURE_COUNT = 7
 };
 struct profile {
   bool classic;
   bool activity;
-  unsigned floor;
-  double weight[PRIMITIVE_COUNT], scale[PRIMITIVE_COUNT];
-  double flagged;
+  unsigned floor[4]; /* reserved places by security class (index 1-3; 0 unused) */
+  double weight[FEATURE_COUNT], scale[FEATURE_COUNT];
 };
+/* Parses the scored part of a PROFILE row ("activity=1 floors=5,3,2
+ * byte_rate=30/10000 ..."): every key known, given once, in range; unknown
+ * or malformed is an error (message in `why`). Features left out weigh 0. */
+bool profile_parse(const char *text, struct profile *, const char **why);
 struct selected {
   uint32_t flow; /* aggregate flow index */
   double score;
@@ -72,9 +81,9 @@ const struct profile *profiles_at(const struct profiles *, size_t);
 bool profiles_select(struct profiles *, const struct aggregate *, const struct ranking *,
                      double interval, size_t limit, struct fm_error *);
 size_t profiles_selection(const struct profiles *, size_t profile, const struct selected **);
-/* The value of a primitive for an aggregate flow (as profiles_select saw it). */
+/* The value of a feature for an aggregate flow (as profiles_select saw it). */
 double profiles_value(const struct aggregate *, const struct ranking *, size_t flow,
-                      enum profile_primitive, double interval);
+                      enum profile_feature, double interval);
 /* Forgets incumbency (a refused sample). */
 void profiles_reset(struct profiles *);
 size_t profiles_bytes(const struct profiles *);

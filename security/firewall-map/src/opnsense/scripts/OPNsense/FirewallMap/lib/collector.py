@@ -54,7 +54,7 @@ import subprocess
 import time
 import zlib
 
-from . import classification, common
+from . import classification, common, evidence as evidence_facts
 
 HELPER = "/usr/local/libexec/firewallmap-collector"
 PROTOCOL_VERSION = 1
@@ -80,7 +80,7 @@ MEMORY_MIN_MIB, MEMORY_MAX_MIB, MEMORY_AUTO_MAX_MIB = 64, 16384, 1024
 MEMORY_AUTO_SHARE = 0.05
 # operator context maxima: over them a sample is refused, naming the kind (never truncated)
 CONTEXT_MAXIMA = {"L": 4096, "N": 8192, "A": 1024}
-_FLOW_RECORD, _CANDIDATE_RECORD, _THREAT_REMOTE_RECORD, _THREAT_CANDIDATE_RECORD = 171, 100, 62, 92
+_FLOW_RECORD, _CANDIDATE_RECORD, _THREAT_REMOTE_RECORD, _THREAT_CANDIDATE_RECORD = 182, 100, 62, 92
 _EVENT_RECORD, _CLASSIFIED_RECORD, _CLASS_SET_RECORD, _FIXED_RECORDS = 198, 30, 16, 4096
 # classification (collector/classify.h): PF tables given Firewall Map meaning, one bit each
 CLASS_MAX_SETS, CLASS_MAX_ADDRESSES = 64, 20000
@@ -109,7 +109,8 @@ FAILURE_CLASSES = {1: "structural", 2: "internal", 3: "incompatible", 4: "resour
 OMISSION_REASONS = ((1, "encoded_bytes"), (2, "state_count"), (4, "per_flow_evidence_limit"))
 SELECTION_POLICIES = {2: "bytes_desc_newest_identity_v1"}
 
-_FLOW = struct.Struct("!I17s17sQQQIIQQQQQQQddddd")
+_FLOW = struct.Struct("!I17s17sQQQIIQQQQQQQBBIIBddddd")
+SECURITY_CLASSES = ("S0", "S1", "S2", "S3")
 _TELEMETRY = struct.Struct("!IQddddd" + "Q" * 39)
 _TELEMETRY_FIELDS = ("pid", "sequence", "interval", "dump_seconds", "processing_seconds", "user_cpu",
                      "system_cpu", "max_rss", "heap_bytes", "heap_peak", "heap_blocks", "heap_budget",
@@ -396,6 +397,24 @@ def _class_rows(classification, classify):
     return rows, categories, asked
 
 
+def _evidence_rows(evidence):
+    """EVIDENCE rows: at most THREAT_REMOTES remotes, the strongest evidence first when over
+    (high-severity IDS, other IDS, then by blocked hits); the order of the rows does not matter."""
+    rows = {}
+    for address, (mask, blocked, alerts, severity) in evidence.items():
+        address = _context_address(address)
+        if address is None or not mask:
+            continue
+        if mask & ~evidence_facts.REQUEST_BITS or (mask, blocked, alerts, severity) != evidence_facts.facts(
+                blocked, alerts, severity, bool(mask & evidence_facts.REPUTATION)):
+            raise CollectorError("inconsistent evidence facts")
+        rows[address] = (mask, blocked, alerts, severity)
+    strongest = sorted(rows, key=lambda address: (not rows[address][0] & evidence_facts.IDS_HIGH,
+                                                  not rows[address][0] & evidence_facts.IDS,
+                                                  -rows[address][1], address))[:THREAT_REMOTES]
+    return [f"EVIDENCE {address} {' '.join(map(str, rows[address]))}" for address in sorted(strongest)]
+
+
 def _class_mask(mask, categories):
     if mask >> len(categories):
         raise CollectorError("FMAGG4 classification outside the requested sets")
@@ -436,8 +455,11 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
             if len(data) != 1 + _FLOW.size:
                 raise CollectorError("invalid FMAGG4 flow record")
             (rank, local, remote, states, from_remote, to_remote, oldest, youngest, remote_weight, local_weight,
-             first, delta_from, delta_to, delta_packets, classes, rate_from, rate_to, packet_rate, activity,
-             score) = _FLOW.unpack_from(data, 1)
+             first, delta_from, delta_to, delta_packets, classes, evidence_mask, security_class, blocked_hits,
+             ids_alerts, ids_severity, rate_from, rate_to, packet_rate, activity, score) = _FLOW.unpack_from(data, 1)
+            if evidence_mask & ~(evidence_facts.REQUEST_BITS | evidence_facts.THREAT_LIST) \
+                    or security_class >= len(SECURITY_CLASSES) or ids_severity > 3:
+                raise CollectorError("invalid FMAGG4 flow evidence")
             if rank != len(flows) or not all(math.isfinite(value) and value >= 0 for value in
                                              (rate_from, rate_to, packet_rate, activity, score)):
                 raise CollectorError("invalid FMAGG4 flow rank or rate")
@@ -449,7 +471,11 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
                           "delta_bytes_to_remote": delta_to, "delta_packets": delta_packets,
                           "rate_from_remote": rate_from, "rate_to_remote": rate_to,
                           "packet_rate": packet_rate, "activity": activity, "score": score,
-                          "classes": _class_mask(classes, categories)})
+                          "classes": _class_mask(classes, categories),
+                          # each evidence source its own fact; the class is the collector's derivation
+                          "evidence": {"mask": evidence_mask, "blocked_hits": blocked_hits,
+                                       "ids_alerts": ids_alerts, "ids_severity": ids_severity},
+                          "security_class": SECURITY_CLASSES[security_class]})
         elif kind == CANDIDATE:
             if len(data) < 32:
                 raise CollectorError("invalid FMAGG4 candidate record")
@@ -687,10 +713,11 @@ class CollectorEngine:
             raise
 
     def sample(self, local_addresses, networks, interface_addresses, primary_wan_device,
-               threat_summary=False, event_queries=(), snapshot=False, memory=None, evidence=(),
+               threat_summary=False, event_queries=(), snapshot=False, memory=None, evidence=None,
                correlation=True, classification=None, classify=(), profiles=()):
         """One complete sample. memory: the budget in bytes (default: automatic); evidence:
-        remotes the threat summary must keep first; correlation: whether anything consumes
+        {remote: lib.evidence facts} (sent every sample: the ranking, forced tracking and the
+        threat summary use them); correlation: whether anything consumes
         IDS/block tuple matching (it is skipped otherwise); classification: (generation token,
         [(category, PF table)...]) in set-ID order, the helper re-reading the tables only when
         either changes; classify: addresses whose set masks the response carries; profiles: the
@@ -712,8 +739,7 @@ class CollectorEngine:
         rows.append(f"CORRELATION {int(bool(correlation or event_queries))}")
         if threat_summary:
             rows.append("THREATS")
-            evidence_rows = sorted({address for address in map(_context_address, evidence) if address})
-            rows.extend(f"EVIDENCE {address}" for address in evidence_rows[:THREAT_REMOTES])
+        rows.extend(_evidence_rows(evidence or {}))
         if snapshot:
             rows.append("SNAPSHOT")
         class_rows, categories, asked = _class_rows(classification, classify)

@@ -117,7 +117,7 @@ bool protocol_frame(FILE *f, const void *data, size_t len, uint32_t *checksum,
 }
 
 /* Sizes of the fixed FMAGG4 records (PROTOCOL.md). */
-#define FLOW_RECORD_SIZE 167
+#define FLOW_RECORD_SIZE 178
 #define EVENT_RECORD_SIZE 194
 #define TELEMETRY_RECORD_SIZE 365
 #define FOOTER_RECORD_SIZE 117
@@ -158,6 +158,11 @@ static bool write_flow(FILE *f, size_t rank, const struct flow *flow,
   protocol_put(&p, flow->delta.bytes_to_remote, 8);
   protocol_put(&p, flow->delta.packets, 8);
   protocol_put(&p, flow->classes, 8);
+  *p++ = flow->evidence.mask;
+  *p++ = (unsigned char)security_class(&flow->evidence);
+  protocol_put(&p, flow->evidence.blocked_hits, 4);
+  protocol_put(&p, flow->evidence.ids_alerts, 4);
+  *p++ = flow->evidence.ids_severity;
   put_double(&p, rates->rate_from_remote);
   put_double(&p, rates->rate_to_remote);
   put_double(&p, rates->packet_rate);

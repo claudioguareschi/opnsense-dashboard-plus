@@ -70,6 +70,7 @@ from lib.blocklists import (
     REPUTATION_LIST, Reputation, ThreatClassification, chosen_threat_lists, tables_report, threat_fields,
     threat_lists_for,
 )
+from lib import evidence as evidence_facts
 from lib import profiles as ranking_profiles
 from lib.blocks import BlockTracker, FilterLogTail, block_event_time, block_summary, parse_block
 from lib.cache import GEO_LOOKUPS_PER_SAMPLE, CacheStore, GeoCache
@@ -1206,7 +1207,7 @@ class Collector:
                 threat_summary=threat_due, event_queries=queries,
                 snapshot=not background and self.snapshot_requested(),
                 memory=memory_budget(self.values.get("helper_memory")),
-                evidence=evidence if threat_due else (),
+                evidence=self.evidence_facts(),
                 correlation=bool(queries) or os.path.exists(EVE_LOG),
                 classification=self.blocklists.request(), classify=evidence,
                 profiles=ranking_profiles.request_rows(self.profiles))
@@ -1242,6 +1243,11 @@ class Collector:
         self.blocklists.observe(sample)
         self._record_collector(sample=sample)
         return sample
+
+    def evidence_facts(self):
+        """{remote: facts} of IDS, blocked-attempt and reputation evidence (lib/evidence.py), for the
+        collector's ranking, forced tracking and threat summary."""
+        return evidence_facts.gather(self.alerts, self.correlator, self.blocks, self.reputation)
 
     def evidence_remotes(self):
         """Remotes the threat summary keeps first: IDS, reputation and blocked-attempt evidence."""

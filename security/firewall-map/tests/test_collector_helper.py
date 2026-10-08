@@ -48,6 +48,7 @@ def header(threats=False, version=collector.PROTOCOL_VERSION):
 def flow(rank=0, local="192.168.1.2", remote="203.0.113.3", rate=4.0, classes=0):
     return b"".join((b"\x01", struct.pack("!I", rank), address(local), address(remote),
                      struct.pack("!QQQIIQQQQQQQ", 1, 400, 200, 20, 2, 1, 0, 9, 40, 20, 2, classes),
+                     struct.pack("!BBIIB", 0, 0, 0, 0, 0),
                      struct.pack("!ddddd", rate, 2.0, 0.2, 0.5, 3.0)))
 
 

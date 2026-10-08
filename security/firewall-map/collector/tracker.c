@@ -158,7 +158,7 @@ bool tracker_finish(struct tracker *t, const struct aggregate *a, const struct r
     size_t flagged = 0;
     for (size_t n = 0; n < counts.flows && flagged < t->forced_limit; n++) {
       const struct flow *f = aggregate_flow(a, n);
-      if (!f->flagged) continue;
+      if (!f->evidence.mask) continue;
       flagged++;
       unsigned char key[FM_FLOW_KEY_SIZE];
       state_flow_key(key, f->local, f->remote);

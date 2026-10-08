@@ -38,7 +38,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src/opnsense/scripts/OPNsense/FirewallMap"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import collector, profiles  # noqa: E402
+from lib import collector, evidence, profiles  # noqa: E402
 from collector_build import budget_limits, compile_worker, state_limit  # noqa: E402
 
 CONTEXT = ({"8.8.8.1"}, [], {}, None)
@@ -222,10 +222,102 @@ class CollectorScaleTest(unittest.TestCase):
     def test_profile_selections_do_not_depend_on_the_hash_key(self):
         rows = profiles.request_rows(profiles.enabled())
         outputs = []
+        facts = {f"9.1.{n >> 8}.{n & 255}": evidence.facts(n % 50, n % 3, 1 + n % 3, n % 2 == 0)
+                 for n in range(0, 3000, 11)}
         for key in ("00" * 16, "0123456789abcdeffedcba9876543210"):
-            results, _ = self.run_mode("mixed", 3000, samples=3, key=key, profiles=rows)
+            results, _ = self.run_mode("mixed", 3000, samples=3, key=key, profiles=rows, evidence=facts)
             outputs.append([(result["flows"], result["selections"]) for result in results])
         self.assertEqual(outputs[0], outputs[1])
+
+    # flows of the unique mode: remote 9.<n >> 16>.<n >> 8 & 255>.<n & 255>
+    def selected(self, result, profile):
+        return [result["flows"][index]["key"][1] for index, _ in result["selections"][profile]]
+
+    def test_every_evidence_source_keeps_its_fact(self):
+        facts = {"9.0.0.5": evidence.facts(40, 7, 1, True), "9.0.3.10": evidence.facts(40),
+                 "9.0.3.11": evidence.facts(3), "9.0.3.12": evidence.facts(ids_alerts=2, ids_severity=3),
+                 "9.0.3.13": evidence.facts(reputation=True)}
+        rows = ["PROFILE 0 classic", "PROFILE 1 scored activity=0 floors=1,2,147 states=1/10"]
+        (_, last), _ = self.run_mode("unique", 1000, profiles=rows, evidence=facts,
+                                     classification=("some", [("T", "threats_some")]))
+        flows = {flow["key"][1]: flow for flow in last["flows"]}
+        every = evidence.THREAT_LIST | evidence.PF_BLOCKED | evidence.IDS | evidence.IDS_HIGH | evidence.REPUTATION
+        expected = {
+            # threat-listed, blocked, high-severity IDS and reputation at once: S3, no fact lost
+            "9.0.0.5": ({"mask": every, "blocked_hits": 40, "ids_alerts": 7, "ids_severity": 1}, "S3"),
+            "9.0.0.6": ({"mask": evidence.THREAT_LIST, "blocked_hits": 0, "ids_alerts": 0, "ids_severity": 0}, "S1"),
+            "9.0.3.10": ({"mask": evidence.PF_BLOCKED, "blocked_hits": 40, "ids_alerts": 0, "ids_severity": 0}, "S2"),
+            "9.0.3.11": ({"mask": evidence.PF_BLOCKED, "blocked_hits": 3, "ids_alerts": 0, "ids_severity": 0}, "S1"),
+            "9.0.3.12": ({"mask": evidence.IDS, "blocked_hits": 0, "ids_alerts": 2, "ids_severity": 3}, "S2"),
+            "9.0.3.13": ({"mask": evidence.REPUTATION, "blocked_hits": 0, "ids_alerts": 0, "ids_severity": 0}, "S1"),
+            "9.0.0.130": ({"mask": 0, "blocked_hits": 0, "ids_alerts": 0, "ids_severity": 0}, "S0"),
+        }
+        for remote, (facts_seen, security) in expected.items():
+            with self.subTest(remote=remote):
+                self.assertIn(remote, flows)
+                self.assertEqual((flows[remote]["evidence"], flows[remote]["security_class"]), (facts_seen, security))
+
+    def test_security_floors_are_minimums_per_class(self):
+        def run(rows, facts):
+            (_, last), _ = self.run_mode("unique", 1000, profiles=["PROFILE 0 classic"] + rows, evidence=facts)
+            return self.selected(last, 1)
+        ordinary = [f"9.0.{n >> 8}.{n & 255}" for n in range(150)]
+        # one flow qualifying for S3, S2 and S1 takes only the S3 place: the S2 and S1 places go
+        # to the flows of those classes, and the rest to the general pool
+        multiple, strong, listed = "9.0.3.200", "9.0.3.201", "9.0.3.202"
+        chosen = run(["PROFILE 1 scored activity=0 floors=1,1,1 states=1/10"],
+                     {multiple: evidence.facts(40, 1, 1, True), strong: evidence.facts(40),
+                      listed: evidence.facts(reputation=True)})
+        self.assertEqual(len(chosen), 150)
+        self.assertTrue({multiple, strong, listed} <= set(chosen))
+        self.assertEqual(set(chosen) - {multiple, strong, listed}, set(ordinary[:147]))
+        # a reserved class also wins ordinary places on its score: five S3 flows, one reserved place
+        high = {f"9.0.3.{n}": evidence.facts(ids_alerts=1, ids_severity=1) for n in range(100, 105)}
+        chosen = run(["PROFILE 1 scored activity=0 floors=1,0,0 states=1/10 ids=100/1"], high)
+        self.assertEqual(set(chosen[:5]), set(high))
+        # unused floors return to the general pool
+        chosen = run(["PROFILE 1 scored activity=0 floors=50,30,20 states=1/10"], {})
+        self.assertEqual(chosen, ordinary)
+
+    def test_evidence_alone_forces_tracking_past_the_limit(self):
+        """As in Phase E, any evidence (here an EVIDENCE row, no threat list) is force-tracked
+        during the pass, pinned afterwards and summarized with its detail."""
+        engine = self.engine()
+        facts = {f"9.0.16.{n}": evidence.facts(reputation=True) for n in range(256)}
+        environment = {"FM_TEST_MODE": "unique", "FM_TEST_COUNT": "5000", "FM_TEST_INTERVAL": "2",
+                       "FM_TEST_CLASS_DIR": self.tables}
+        with patch.dict(os.environ, environment):
+            results = [engine.sample(*CONTEXT, memory=64 << 20, threat_summary=True, evidence=facts)
+                       for _ in range(3)]
+        for result in results:
+            self.assertEqual(result["regime"], "bounded")
+            self.assertEqual(sorted(remote["address"] for remote in result["threat_remotes"]), sorted(facts))
+            self.assertEqual(result["telemetry"]["forced_refused"], 0)
+            owners = {row[0] for row in result["threat_candidates"] if row[1] == collector.INSIDE_HOST}
+            self.assertEqual(owners, set(range(256)))
+
+    def test_classic_ignores_evidence(self):
+        rows = profiles.request_rows(profiles.enabled())
+        facts = {f"9.1.{n >> 8}.{n & 255}": evidence.facts(40, 3, 1, True) for n in range(0, 3000, 7)}
+        (_, alone), _ = self.run_mode("mixed", 3000)
+        (_, together), _ = self.run_mode("mixed", 3000, profiles=rows, evidence=facts,
+                                         classification=THREATS_ALL)
+        classic = [(together["flows"][index]["key"], score) for index, score in together["selections"][0]]
+        self.assertEqual(classic, [(row["key"], row["score"]) for row in alone["flows"]])
+
+    def test_malformed_evidence_and_profiles_are_refused(self):
+        rows, _ = collector._context_rows(*CONTEXT)
+        for bad in ("EVIDENCE 9.0.0.1 8 0 1 3", "EVIDENCE 9.0.0.1 2 0 0 0", "EVIDENCE 9.0.0.1 1 0 0 0",
+                    "EVIDENCE 9.0.0.1 2 2000000 0 0", "PROFILE 0 scored activity=1 volume=1/1",
+                    "PROFILE 0 scored activity=1 states=1/10 states=2/10", "PROFILE 0 scored floors=100,40,20",
+                    "PROFILE 0 scored states=1/0", "PROFILE 0 classic extra"):
+            with self.subTest(row=bad):
+                engine = self.engine()
+                engine._start()
+                text = "FMCONF2\n{rows}{bad}\nRUN\n".format(rows="".join(row + "\n" for row in rows), bad=bad)
+                with self.assertRaises(collector.CollectorError) as raised:
+                    engine._request(text, lambda stream, process: collector._decode(stream, process, (), False))
+                self.assertEqual(raised.exception.failure_class, "request")
 
     def test_heavy_untracked_flows_are_promoted(self):
         engine = self.engine()
@@ -246,7 +338,7 @@ class CollectorScaleTest(unittest.TestCase):
                         FM_TEST_CLASS_DIR=self.tables):
             engine.sample(*CONTEXT)
             rows, _ = collector._context_rows(*CONTEXT)
-            text = ("FMCONF2\nBUDGET {memory} 16 100\nTHREATS\nEVIDENCE 9.0.1.200\n"
+            text = ("FMCONF2\nBUDGET {memory} 16 100\nTHREATS\nEVIDENCE 9.0.1.200 16 0 0 0\n"
                     "CLASS 0 T threats_all\nCLASSGEN all\n{rows}RUN\n".format(
                 memory=collector.memory_budget(), rows="".join(row + "\n" for row in rows)))
             summary = engine._request(text, lambda stream, process: collector._decode(
@@ -263,7 +355,8 @@ class CollectorScaleTest(unittest.TestCase):
         """Focus-independent: the summary is what the threat lists and evidence name, not the
         long tail; country sets classify without making a remote a threat."""
         classification = ("some", [("T", "threats_some"), ("C", "country"), ("T", "absent")])
-        (_, last), _ = self.run_mode("unique", 1000, threat_summary=True, evidence=["9.0.2.7"],
+        (_, last), _ = self.run_mode("unique", 1000, threat_summary=True,
+                                     evidence={"9.0.2.7": evidence.facts(reputation=True)},
                                      classification=classification, classify=["9.0.0.5", "9.0.0.200", "9.0.3.1"])
         remotes = {remote["address"]: remote["classes"] for remote in last["threat_remotes"]}
         # 9.0.0.0/24 without its negated upper half, plus the evidence remote
