@@ -87,7 +87,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   double anchor = 1;
   for (size_t offset = 0; offset < size && !error.code;) {
     if (!history_begin(history, anchor, &error)) break;
-    struct aggregate *aggregate = aggregate_create(ctx, history, true, &error);
+    struct event_sample *stream = event_sample_begin(events, NULL, 0, &error);
+    struct aggregate *aggregate =
+        stream ? aggregate_create(ctx, history, event_sample_observe, stream, &error) : NULL;
     bool ok = aggregate != NULL;
     for (unsigned n = 0; ok && n < 64 && offset + RECORD <= size; n++, offset += RECORD) {
       struct state s;
@@ -105,7 +107,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
          ranking_update(ranking, aggregate, anchor, history_interval(history), &error);
     struct threat_limits limits = {NULL, 0, 100, 4};
     struct threat_summary *threats = ok ? threat_summary_create(aggregate, limits, &error) : NULL;
-    ok = ok && threats && event_history_update(events, aggregate, anchor, &error);
+    ok = ok && threats;
+    if (ok) {
+      event_sample_finish(events, stream, anchor, NULL, 0, &error);
+      ok = !error.code;
+    }
+    event_sample_destroy(stream);
     if (ok) {
       char *buffer = NULL;
       size_t length = 0;

@@ -45,6 +45,20 @@ struct correlation_value {
   bool remote_initiated, apparent_remote_initiated;
   bool has_inside, ambiguous;
 };
+/* Called once per correlated state, in PF order (aggregate.c). */
+typedef bool (*tuple_observer)(void *, const struct outside_key *,
+                               const struct correlation_value *, struct fm_error *);
+/* The tuple rule shared by every consumer: the last state wins; `ambiguous`
+ * records whether the states seen so far disagreed about the inside endpoint.
+ * `seen` says whether `current` already holds an earlier state. */
+void correlation_merge(struct correlation_value *current, bool seen,
+                       const struct correlation_value *value);
+#define OUTSIDE_KEY_SIZE 39
+size_t outside_key_encode(unsigned char out[OUTSIDE_KEY_SIZE], struct outside_key);
+/* The full per-tuple map: devel tools and tests only (it is O(S)); production
+ * streams tuples into the bounded event sample instead (event_correlation.c). */
+bool correlation_observe(void *correlation, const struct outside_key *,
+                         const struct correlation_value *, struct fm_error *);
 struct correlation *correlation_create(struct fm_error *);
 void correlation_destroy(struct correlation *);
 bool correlation_add(struct correlation *, struct outside_key,

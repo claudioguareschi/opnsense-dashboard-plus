@@ -33,7 +33,8 @@ typedef char label_slot[FM_LABEL_SIZE];
 struct aggregate {
   const struct context *ctx;
   struct history *history;
-  struct correlation *correlation;
+  tuple_observer observe;
+  void *observer;
   /* flows: value unused, id is the flow id. candidates: value holds the
    * association of the earliest state. lan: value is a slot in lan_labels.
    * pending: count/seq only. */
@@ -43,7 +44,7 @@ struct aggregate {
   label_slot *lan_labels;
   size_t lan_label_capacity;
   uint64_t seen, retained, mapped, skipped_af_translation;
-  bool finished, correlate;
+  bool finished;
 };
 static void put32(unsigned char **p, uint32_t value) {
   for (unsigned n = 4; n; n--)
@@ -65,8 +66,8 @@ static bool add_count(uint64_t *dest, uint64_t value, struct fm_error *error) {
   return true;
 }
 struct aggregate *aggregate_create(const struct context *ctx,
-                                   struct history *history, bool correlate,
-                                   struct fm_error *error) {
+                                   struct history *history, tuple_observer observe,
+                                   void *observer, struct fm_error *error) {
   struct aggregate *a = fm_calloc(1, sizeof(*a));
   if (!a) {
     fm_error_set(error, errno, "aggregate allocation");
@@ -74,18 +75,13 @@ struct aggregate *aggregate_create(const struct context *ctx,
   }
   a->ctx = ctx;
   a->history = history;
-  a->correlate = correlate;
-  a->correlation = correlation_create(error);
-  if (!a->correlation) {
-    fm_free(a);
-    return NULL;
-  }
+  a->observe = observe;
+  a->observer = observer;
   return a;
 }
 void aggregate_destroy(struct aggregate *a) {
   if (!a)
     return;
-  correlation_destroy(a->correlation);
   map_clear(&a->lan);
   map_clear(&a->pending);
   map_clear(&a->flows);
@@ -279,10 +275,8 @@ static bool add_correlation(struct aggregate *a, const struct state *s,
   memcpy(value.rule, s->label, sizeof(value.rule));
   if (v->has_inside)
     value.inside = v->inside;
-  return correlation_add(
-      a->correlation,
-      (struct outside_key){v->pf.proto, public, v->remote_endpoint}, &value,
-      error);
+  struct outside_key key = {v->pf.proto, public, v->remote_endpoint};
+  return a->observe(a->observer, &key, &value, error);
 }
 bool aggregate_add(struct aggregate *a, const struct state *s,
                    struct fm_error *error) {
@@ -326,7 +320,7 @@ bool aggregate_add(struct aggregate *a, const struct state *s,
                                              : &f->local_initiated_weight,
                  weight, error))
     return false;
-  if (a->correlate && !add_correlation(a, s, &v, error))
+  if (a->observe && !add_correlation(a, s, &v, error))
     return false;
   f->states++;
   if (!add_count(v.apparent_remote_initiated ? &f->remote_initiated_states
@@ -373,23 +367,10 @@ bool aggregate_candidate(const struct aggregate *a, size_t n,
                                i->seq,        i->count,  i->value};
   return true;
 }
-bool aggregate_correlation(const struct aggregate *a, size_t n,
-                           struct outside_key *key,
-                           struct correlation_value *value) {
-  return a->finished && correlation_at(a->correlation, n, key, value);
-}
-size_t aggregate_correlation_count(const struct aggregate *a) {
-  return a->finished ? correlation_count(a->correlation) : 0;
-}
-bool aggregate_correlation_lookup(const struct aggregate *a,
-                                  struct outside_key key,
-                                  struct correlation_value *value) {
-  return a->finished && correlation_lookup(a->correlation, key, value);
-}
 size_t aggregate_bytes(const struct aggregate *a) {
   size_t bytes = sizeof(*a) + a->capacity * sizeof(*a->totals) +
                  a->lan_label_capacity * sizeof(*a->lan_labels);
   bytes += map_bytes(&a->flows) + map_bytes(&a->candidates) +
            map_bytes(&a->lan) + map_bytes(&a->pending);
-  return bytes + correlation_bytes(a->correlation);
+  return bytes;
 }

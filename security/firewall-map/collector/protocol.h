@@ -84,6 +84,6 @@ bool protocol_write_refusal(FILE *, struct sample_outcome, uint64_t states_seen,
 void protocol_write_failure(FILE *, const struct fm_error *);
 /* Devel-only FMAGG2 aggregate dump used by the equivalence tools; defined in
  * devel/collector_fmagg2.c, not in the installed helper. */
-bool protocol_write(FILE *, const struct aggregate *, bool with_deltas,
+bool protocol_write(FILE *, const struct aggregate *, const struct correlation *, bool with_deltas,
                     struct fm_error *);
 #endif

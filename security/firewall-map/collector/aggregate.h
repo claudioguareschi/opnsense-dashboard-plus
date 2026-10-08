@@ -60,10 +60,11 @@ struct aggregate_counts {
 };
 /* Context and history are borrowed for the lifetime of this single sample.
  * Returned flow/candidate views remain valid until aggregate_destroy(). */
-/* correlate: record outside tuples for IDS/block event matching (skipped
- * when nothing consumes them). */
+/* observe (optional): called with the outside tuple of every correlated
+ * state, for IDS/block event matching; NULL skips that work. */
 struct aggregate *aggregate_create(const struct context *, struct history *,
-                                   bool correlate, struct fm_error *);
+                                   tuple_observer observe, void *observer,
+                                   struct fm_error *);
 void aggregate_destroy(struct aggregate *);
 bool aggregate_add(struct aggregate *, const struct state *, struct fm_error *);
 bool aggregate_finish(struct aggregate *, struct fm_error *);
@@ -71,10 +72,5 @@ struct aggregate_counts aggregate_counts(const struct aggregate *);
 const struct flow *aggregate_flow(const struct aggregate *, size_t);
 bool aggregate_candidate(const struct aggregate *, size_t,
                          struct candidate_view *);
-bool aggregate_correlation(const struct aggregate *, size_t,
-                           struct outside_key *, struct correlation_value *);
-size_t aggregate_correlation_count(const struct aggregate *);
-bool aggregate_correlation_lookup(const struct aggregate *, struct outside_key,
-                                  struct correlation_value *);
 size_t aggregate_bytes(const struct aggregate *);
 #endif

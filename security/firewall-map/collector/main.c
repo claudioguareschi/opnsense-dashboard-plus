@@ -304,7 +304,14 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
                                              telemetry.preflight_states, state_limit},
                   0, &telemetry, error);
   struct sample sample = {.history = e->history, .state_limit = state_limit};
-  sample.aggregate = aggregate_create(r->ctx, e->history, r->correlation, error);
+  /* IDS/block tuple matching streams through a bounded event sample (never an
+   * O(states) map); without correlation nothing consumes tuples at all */
+  struct event_sample *events =
+      r->correlation ? event_sample_begin(e->events, r->queries, r->query_count, error) : NULL;
+  sample.aggregate = !r->correlation || events
+                         ? aggregate_create(r->ctx, e->history, events ? event_sample_observe : NULL,
+                                            events, error)
+                         : NULL;
   struct timespec wall = {0};
   /* presize the baseline from PF's own count (+10% for growth during the
    * dump) so the traversal does not rehash it */
@@ -329,14 +336,13 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   struct event_match *matches =
       ok && r->query_count ? fm_calloc(r->query_count, sizeof(*matches)) : NULL;
   ok = ok && (!r->query_count || matches || fm_error_set(error, errno, "event matches"));
-  if (ok && r->correlation)
-    ok = event_history_update(e->events, sample.aggregate, sample.anchor, error);
+  size_t match_count = 0;
+  if (ok && events)
+    match_count = event_sample_finish(e->events, events, sample.anchor, matches, r->query_count,
+                                      error);
   else if (ok)
     event_history_clear(e->events); /* nothing consumes it: no IDS, no queries */
-  size_t match_count = ok ? event_history_match(e->events, sample.aggregate, r->queries,
-                                                r->query_count, matches, r->query_count,
-                                                error)
-                          : 0;
+  event_sample_destroy(events);
   ok = ok && !error->code;
   struct response response = {0};
   if (ok) {

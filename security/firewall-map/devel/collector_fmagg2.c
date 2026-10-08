@@ -31,7 +31,7 @@
 
 /* FMAGG2: every aggregate flow, candidate and correlation, for the devel
  * equivalence tools only. Not used by the production request loop. */
-bool protocol_write(FILE *f, const struct aggregate *a, bool deltas,
+bool protocol_write(FILE *f, const struct aggregate *a, const struct correlation *c, bool deltas,
                     struct fm_error *error) {
   if (fwrite("FMAGG2\0", 1, 8, f) != 8)
     return fm_error_set(error, errno ? errno : EIO, "aggregate header");
@@ -85,10 +85,10 @@ bool protocol_write(FILE *f, const struct aggregate *a, bool deltas,
     if (!protocol_frame(f, b, p - b, &checksum, error))
       return false;
   }
-  for (size_t n = 0; n < aggregate_correlation_count(a); n++) {
+  for (size_t n = 0; n < correlation_count(c); n++) {
     struct outside_key key;
     struct correlation_value value;
-    if (!aggregate_correlation(a, n, &key, &value))
+    if (!correlation_at(c, n, &key, &value))
       return fm_error_set(error, EINVAL, "correlation record");
     p = b;
     *p++ = 3;
@@ -121,7 +121,7 @@ bool protocol_write(FILE *f, const struct aggregate *a, bool deltas,
   protocol_put(&p, count.mapped, 8);
   protocol_put(&p, count.flows, 8);
   protocol_put(&p, count.candidates, 8);
-  protocol_put(&p, aggregate_correlation_count(a), 8);
+  protocol_put(&p, correlation_count(c), 8);
   protocol_put(&p, checksum, 8);
   return protocol_frame(f, b, p - b, NULL, error) &&
          (fflush(f) == 0 || fm_error_set(error, errno, "aggregate flush"));

@@ -48,10 +48,14 @@ struct map {
  * any map is used; nothing hashed outlives the process. Iteration order never
  * depends on the hash, so output is identical under any key. */
 void index_set_hash_key(const uint8_t key[16]);
+/* The same keyed hash, for fixed-capacity tables built on it. */
+uint64_t index_hash(const void *, size_t);
 struct item *lookup(struct map *, const void *, size_t, bool add,
                     struct fm_error *);
 /* Lookup without insertion; never fails, never modifies the map. */
 const struct item *map_find(const struct map *, const void *, size_t);
+/* The same, with the key's index_hash already computed. */
+const struct item *map_find_hashed(const struct map *, const void *, size_t, uint64_t);
 void map_clear(struct map *);
 size_t map_bytes(const struct map *);
 #endif

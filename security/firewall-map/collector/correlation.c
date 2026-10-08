@@ -77,18 +77,29 @@ bool correlation_add(struct correlation *c, struct outside_key key,
     c->values = next;
     c->allocated = capacity;
   }
-  struct correlation_value *current = &c->values[index];
-  bool ambiguous = false;
-  if (item->count) {
-    ambiguous = current->ambiguous ||
-        current->has_inside != value->has_inside ||
-        (current->has_inside &&
-         !endpoint_equal(current->inside, value->inside));
-  }
-  *current = *value;
-  current->ambiguous = ambiguous;
+  correlation_merge(&c->values[index], item->count > 0, value);
   item->count++;
   return true;
+}
+
+void correlation_merge(struct correlation_value *current, bool seen,
+                       const struct correlation_value *value) {
+  bool ambiguous = seen && (current->ambiguous ||
+                            current->has_inside != value->has_inside ||
+                            (current->has_inside &&
+                             !endpoint_equal(current->inside, value->inside)));
+  *current = *value;
+  current->ambiguous = ambiguous;
+}
+
+bool correlation_observe(void *c, const struct outside_key *key,
+                         const struct correlation_value *value,
+                         struct fm_error *error) {
+  return correlation_add(c, *key, value, error);
+}
+
+size_t outside_key_encode(unsigned char out[OUTSIDE_KEY_SIZE], struct outside_key key) {
+  return encode(out, key);
 }
 bool correlation_lookup(const struct correlation *c, struct outside_key key,
                         struct correlation_value *value) {

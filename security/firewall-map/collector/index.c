@@ -33,6 +33,7 @@ void index_set_hash_key(const uint8_t key[16]) { memcpy(hash_key, key, sizeof(ha
 static uint64_t hash(const void *data, size_t len) {
   return siphash13(hash_key, data, len);
 }
+uint64_t index_hash(const void *data, size_t len) { return hash(data, len); }
 static bool resize(struct map *m, struct fm_error *error) {
   size_t capacity = m->capacity ? m->capacity * 2 : 64;
   if (capacity < m->capacity || capacity > SIZE_MAX / sizeof(*m->buckets))
@@ -60,6 +61,10 @@ static struct item *find(const struct map *m, const void *key, size_t len,
 }
 const struct item *map_find(const struct map *m, const void *key, size_t len) {
   return find(m, key, len, hash(key, len));
+}
+const struct item *map_find_hashed(const struct map *m, const void *key, size_t len,
+                                   uint64_t h) {
+  return find(m, key, len, h);
 }
 struct item *lookup(struct map *m, const void *key, size_t len, bool add,
                     struct fm_error *error) {

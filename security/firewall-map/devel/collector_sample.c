@@ -223,30 +223,37 @@ static bool process_fixture(const char *input, const char *output_path,
                             double elapsed, bool deltas,
                             struct fm_error *error) {
   if (!begin_with_elapsed(history, elapsed, error)) return false;
-  struct aggregate *aggregate = aggregate_create(ctx, history, true, error);
-  if (!aggregate) { history_abort(history); return false; }
+  /* the equivalence output lists every outside tuple: keep the full map */
+  struct correlation *tuples = correlation_create(error);
+  struct aggregate *aggregate =
+      tuples ? aggregate_create(ctx, history, correlation_observe, tuples, error) : NULL;
+  if (!aggregate) { correlation_destroy(tuples); history_abort(history); return false; }
   struct sample sample = {.aggregate = aggregate};
   if (!read_fixture(input, &sample, error) ||
       !aggregate_finish(aggregate, error)) {
     history_abort(history);
     aggregate_destroy(aggregate);
+    correlation_destroy(tuples);
     return false;
   }
   FILE *output = fopen(output_path, "wb");
-  if (!output || !protocol_write(output, aggregate, deltas, error)) {
+  if (!output || !protocol_write(output, aggregate, tuples, deltas, error)) {
     if (output) fclose(output);
     history_abort(history);
     aggregate_destroy(aggregate);
+    correlation_destroy(tuples);
     return false;
   }
   if (fclose(output)) {
     fm_error_set(error, errno, "close aggregate output");
     history_abort(history);
     aggregate_destroy(aggregate);
+    correlation_destroy(tuples);
     return false;
   }
   history_commit(history);
   aggregate_destroy(aggregate);
+  correlation_destroy(tuples);
   return true;
 }
 
@@ -294,28 +301,25 @@ static int correlate_fixture(const char *context_path, const char *input_path,
       !read_context(context_path, context, error) ||
       !begin_with_elapsed(history, -1, error))
     goto fail;
-  struct aggregate *aggregate = aggregate_create(context, history, true, error);
-  if (!aggregate)
-    goto fail_history;
-  struct sample sample = {.aggregate = aggregate};
-  if (!read_fixture(input_path, &sample, error) ||
-      !aggregate_finish(aggregate, error) ||
-      !event_history_update(events, aggregate, 100.0, error)) {
-    aggregate_destroy(aggregate);
-    goto fail_history;
-  }
-  struct event_query queries[FM_MAX_EVENT_QUERIES];
-  struct event_match matches[FM_MAX_EVENT_QUERIES];
+  static struct event_query queries[FM_MAX_EVENT_QUERIES];
+  static struct event_match matches[FM_MAX_EVENT_QUERIES];
   size_t query_count = 0;
-  if (!read_queries(query_path, queries, &query_count, error) ||
-      !ranking_update(ranking, aggregate, 100.0, -1.0, error)) {
-    aggregate_destroy(aggregate);
+  if (!read_queries(query_path, queries, &query_count, error))
+    goto fail_history;
+  /* the production path: tuples stream through a bounded event sample */
+  struct event_sample *stream = event_sample_begin(events, queries, query_count, error);
+  struct aggregate *aggregate =
+      stream ? aggregate_create(context, history, event_sample_observe, stream, error) : NULL;
+  if (!aggregate) {
+    event_sample_destroy(stream);
     goto fail_history;
   }
-  size_t match_count = event_history_match(events, aggregate, queries,
-                                            query_count, matches,
-                                            FM_MAX_EVENT_QUERIES, error);
-  if (error->code) {
+  struct sample sample = {.aggregate = aggregate};
+  size_t match_count = 0;
+  if (read_fixture(input_path, &sample, error) && aggregate_finish(aggregate, error))
+    match_count = event_sample_finish(events, stream, 100.0, matches, FM_MAX_EVENT_QUERIES, error);
+  event_sample_destroy(stream);
+  if (error->code || !ranking_update(ranking, aggregate, 100.0, -1.0, error)) {
     aggregate_destroy(aggregate);
     goto fail_history;
   }
@@ -402,21 +406,23 @@ int main(int argc, char **argv) {
   if (!ctx || !read_context(argv[2], ctx, &error)) return report_error(&error);
   struct history *history = history_create(&error);
   if (!history || !begin_with_elapsed(history, -1, &error)) return report_error(&error);
-  struct aggregate *aggregate = aggregate_create(ctx, history, true, &error);
-  if (!aggregate) return report_error(&error);
+  struct correlation *tuples = correlation_create(&error);
+  struct aggregate *aggregate =
+      tuples ? aggregate_create(ctx, history, correlation_observe, tuples, &error) : NULL;
+  if (!aggregate) { correlation_destroy(tuples); return report_error(&error); }
   struct sample sample = {.aggregate = aggregate};
   bool ok = !strcmp(argv[1], "live")
                 ? pf_reader_live(state_callback, &sample, NULL, NULL, &error)
                 : read_fixture(argv[4], &sample, &error);
   if (!ok || !aggregate_finish(aggregate, &error)) {
-    history_abort(history); aggregate_destroy(aggregate); context_destroy(ctx);
-    history_destroy(history); return report_error(&error);
+    history_abort(history); aggregate_destroy(aggregate); correlation_destroy(tuples);
+    context_destroy(ctx); history_destroy(history); return report_error(&error);
   }
   history_commit(history);
   FILE *output = fopen(argv[3], "wb");
-  if (!output || !protocol_write(output, aggregate, false, &error)) {
+  if (!output || !protocol_write(output, aggregate, tuples, false, &error)) {
     if (output) fclose(output);
-    aggregate_destroy(aggregate); history_destroy(history); context_destroy(ctx);
+    aggregate_destroy(aggregate); correlation_destroy(tuples); history_destroy(history); context_destroy(ctx);
     return report_error(&error);
   }
   fclose(output);
@@ -433,8 +439,8 @@ int main(int argc, char **argv) {
   fprintf(stderr, "states=%llu retained=%llu mapped=%llu flows=%zu candidates=%zu correlations=%zu history_bytes=%zu aggregate_bytes=%zu peak_rss_kib=%ld elapsed_ms=%.3f\n",
           (unsigned long long)counts.seen, (unsigned long long)counts.retained,
           (unsigned long long)counts.mapped, counts.flows, counts.candidates,
-          aggregate_correlation_count(aggregate), history_bytes(history),
+          correlation_count(tuples), history_bytes(history),
           aggregate_bytes(aggregate), rss_kib, elapsed_ms);
-  aggregate_destroy(aggregate); history_destroy(history); context_destroy(ctx);
+  aggregate_destroy(aggregate); correlation_destroy(tuples); history_destroy(history); context_destroy(ctx);
   return 0;
 }
