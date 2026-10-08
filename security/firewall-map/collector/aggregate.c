@@ -42,6 +42,9 @@ struct candidate {
 };
 struct groups {
   uint32_t head[CANDIDATE_KIND_COUNT];
+  /* per kind: the entry (index + 1) the flow's latest value went to, so a
+   * repeated value skips the keyed table lookup (see candidate()) */
+  uint32_t last[CANDIDATE_KIND_COUNT];
   unsigned char count[CANDIDATE_KIND_COUNT];
 };
 struct aggregate {
@@ -191,6 +194,18 @@ static bool lighter(const struct candidate *x, const struct candidate *y) {
   if (x->seq != y->seq) return x->seq > y->seq; /* the newer value goes first */
   return x->len != y->len ? x->len < y->len : memcmp(x->value, y->value, x->len) < 0;
 }
+/* A value already in the table: its weight grows, and the earliest
+ * observation keeps the first-seen order and the association. */
+static bool candidate_hit(struct candidate *c, uint64_t weight, uint64_t seq, uint64_t association,
+                          struct fm_error *error) {
+  if (!add_count(&c->weight, weight, error))
+    return false;
+  if (seq < c->seq) {
+    c->seq = seq;
+    c->association = association;
+  }
+  return true;
+}
 static bool candidate(struct aggregate *a, uint32_t flow, unsigned char kind,
                       const void *value, size_t len, uint64_t weight,
                       uint64_t seq, uint64_t association,
@@ -199,23 +214,26 @@ static bool candidate(struct aggregate *a, uint32_t flow, unsigned char kind,
     return fm_error_set(error, EOVERFLOW, "candidate size");
   if (!kind || kind > CANDIDATE_KIND_COUNT)
     return fm_error_set(error, EINVAL, "candidate kind");
+  struct groups *g = &a->groups[flow];
+  unsigned k = kind - 1;
+  /* the flow's previous value of this kind, again: a (flow, kind, value) is
+   * in the table at most once, so the entry that still holds exactly it is
+   * the one the keyed lookup below would find (an evicted or replaced entry
+   * no longer matches and takes the lookup) */
+  if (g->last[k]) {
+    struct candidate *c = &a->candidates[g->last[k] - 1];
+    if (c->flow == flow && c->kind == kind && c->len == len && !memcmp(c->value, value, len))
+      return candidate_hit(c, weight, seq, association, error);
+  }
   unsigned char key[5 + CANDIDATE_VALUE_MAX];
   uint64_t hash = index_hash(key, candidate_key(key, flow, kind, value, len));
   if (a->slots) {
     size_t slot = slot_find(a, hash, flow, kind, value, len);
     if (a->slots[slot]) {
-      struct candidate *c = &a->candidates[a->slots[slot] - 1];
-      if (!add_count(&c->weight, weight, error))
-        return false;
-      if (seq < c->seq) {
-        c->seq = seq;
-        c->association = association;
-      }
-      return true;
+      g->last[k] = a->slots[slot];
+      return candidate_hit(&a->candidates[a->slots[slot] - 1], weight, seq, association, error);
     }
   }
-  struct groups *g = &a->groups[flow];
-  unsigned k = kind - 1;
   if (g->count[k] < CANDIDATE_SLOTS &&
       (!a->limited || a->candidate_count < a->admission.candidate_limit)) {
     if (!candidate_reserve(a, error))
@@ -229,6 +247,7 @@ static bool candidate(struct aggregate *a, uint32_t flow, unsigned char kind,
     g->head[k] = (uint32_t)n + 1;
     g->count[k]++;
     a->slots[slot_find(a, hash, flow, kind, value, len)] = (uint32_t)n + 1;
+    g->last[k] = (uint32_t)n + 1;
     return true;
   }
   /* full: replace the group's lightest value (an empty group of a full table
@@ -252,6 +271,7 @@ static bool candidate(struct aggregate *a, uint32_t flow, unsigned char kind,
   lightest->len = (unsigned char)len;
   memcpy(lightest->value, value, len);
   a->slots[slot_find(a, hash, flow, kind, value, len)] = (uint32_t)(lightest - a->candidates) + 1;
+  g->last[k] = (uint32_t)(lightest - a->candidates) + 1;
   return true;
 }
 

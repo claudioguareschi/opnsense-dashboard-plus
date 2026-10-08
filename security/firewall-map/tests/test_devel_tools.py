@@ -30,7 +30,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 # needs FreeBSD's pf headers
-FREEBSD_ONLY = {"getstates_probe.c", "fuzz_netlink.c"}
+FREEBSD_ONLY = {"getstates_probe.c", "fuzz_netlink.c", "collector_cost.c"}
 
 
 class DevelToolsTest(unittest.TestCase):
