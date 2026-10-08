@@ -22,7 +22,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-# Bounded, reproducible fuzzing of the native helper (not part of the normal test run).
+# Bounded, reproducible fuzzing of the state collector (not part of the normal test run).
 #
 #   devel/fuzz/run.sh state [seconds]      portable: PF states through the whole engine
 #   devel/fuzz/run.sh netlink [seconds]    FreeBSD build host only: the raw netlink decoder
@@ -33,7 +33,7 @@
 
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
-NATIVE="${HERE}/../../native"
+COLLECTOR="${HERE}/../../collector"
 TARGET="${1:-state}"
 SECONDS_BUDGET="${2:-300}"
 CC="${FUZZ_CC:-clang}"
@@ -41,11 +41,11 @@ SANITIZERS="${FUZZ_SANITIZERS:-fuzzer,address,undefined}"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/firewallmap-fuzz.XXXXXX")"
 case "${TARGET}" in
 state)
-    SOURCES="$(ls "${NATIVE}"/*.c | grep -v firewallmap_native.c)"
+    SOURCES="$(ls "${COLLECTOR}"/*.c | grep -v "/main\.c$")"
     ;;
 netlink)
     [ "$(uname -s)" = "FreeBSD" ] || { echo "the netlink target needs FreeBSD's pf headers" >&2; exit 1; }
-    SOURCES="${NATIVE}/pf_reader.c ${NATIVE}/error.c ${NATIVE}/protocol.c ${NATIVE}/alloc.c"
+    SOURCES="${COLLECTOR}/pf_reader.c ${COLLECTOR}/error.c ${COLLECTOR}/protocol.c ${COLLECTOR}/alloc.c"
     ;;
 *)
     echo "usage: $0 state|netlink [seconds]" >&2
@@ -54,7 +54,7 @@ netlink)
 esac
 # shellcheck disable=SC2086
 "${CC}" -g -O1 -fsanitize="${SANITIZERS}" -fno-sanitize-recover=undefined \
-    -fno-sanitize=unsigned-integer-overflow -DFM_DEVEL_TOOLS -I"${NATIVE}" ${SOURCES} \
+    -fno-sanitize=unsigned-integer-overflow -DFM_DEVEL_TOOLS -I"${COLLECTOR}" ${SOURCES} \
     "${HERE}/fuzz_${TARGET}.c" -lm -o "${WORK}/fuzz_${TARGET}"
 mkdir -p "${WORK}/corpus" "${WORK}/artifacts"
 if [ -n "${FUZZ_SEEDS:-}" ]; then

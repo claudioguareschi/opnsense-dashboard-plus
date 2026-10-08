@@ -61,7 +61,7 @@
  * state its own flow, remote, correlation tuple and attribution values, with
  * current and previous history and ranking generations and a threat summary.
  * Measured on LP64 with the synthetic reader's "unique" table: 2262 bytes per
- * state between 100,000 and 200,000 states (tests/test_native_scale.py), plus
+ * state between 100,000 and 200,000 states (tests/test_collector_scale.py), plus
  * a 25% margin. Accounting counts requested bytes, not allocator overhead, so
  * the figure does not depend on the libc; how RSS relates to it on the target
  * (jemalloc) is pending FreeBSD calibration. */

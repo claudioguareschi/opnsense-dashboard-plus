@@ -36,7 +36,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from support import REFERENCE, COLLECTOR, COMMON, PF, SUMMARY, THREATS, Geo, nat_state  # noqa: E402
-from native_fixture import NativeFixture  # noqa: E402
+from collector_fixture import CollectorFixture  # noqa: E402
 
 
 class TrackerTest(unittest.TestCase):
@@ -167,7 +167,7 @@ class TrackerTest(unittest.TestCase):
         visible = tracker.visible(0.0, limit=2)
         self.assertEqual([item[2] for item in visible], ["8.8.8.4", "8.8.8.3"])
 
-    def test_native_aggregate_ingestion_keeps_only_native_ranked_top_150(self):
+    def test_collector_aggregate_ingestion_keeps_only_collector_ranked_top_150(self):
         tracker = COLLECTOR.FlowTracker()
         rows = []
         for index in reversed(range(150)):
@@ -180,10 +180,10 @@ class TrackerTest(unittest.TestCase):
                                   "counts": {"flows": 151}}, 10.0)
         self.assertEqual(tracker.total_flows, 151)
         self.assertEqual(len(tracker.flows), 150)
-        self.assertEqual(len(tracker.native_visible), 150)
-        self.assertEqual(tracker.native_visible[0][2], "203.0.113.150")
+        self.assertEqual(len(tracker.collector_visible), 150)
+        self.assertEqual(tracker.collector_visible[0][2], "203.0.113.150")
 
-    def test_native_aggregate_resolves_nonstandard_protocol_number(self):
+    def test_collector_aggregate_resolves_nonstandard_protocol_number(self):
         tracker = COLLECTOR.FlowTracker()
         row = {"key": self.PAIR, "states": 1, "bytes_from_remote": 10, "bytes_to_remote": 2,
                "remote_initiated_weight": 1, "local_initiated_weight": 0,
@@ -359,7 +359,7 @@ class CollectorLoopTest(unittest.TestCase):
         settings.start()
         self.addCleanup(settings.stop)
         self.collector = COLLECTOR.Collector(store=COLLECTOR.CacheStore(os.path.join(self.directory, "cache.db")))
-        self.collector.native_engine = NativeFixture(lambda: PF.parse_states(nat_state(self.bytes, self.bytes)))
+        self.collector.collector_engine = CollectorFixture(lambda: PF.parse_states(nat_state(self.bytes, self.bytes)))
         self.collector.log = COLLECTOR.FilterLogTail(os.path.join(self.directory, "filter.log"))
         self.collector.eve = COLLECTOR.FilterLogTail(os.path.join(self.directory, "eve.json"))
         self.addCleanup(self.collector.log.close)
@@ -463,7 +463,7 @@ class SnapshotSafetyTest(CollectorLoopTest):
                 {**original, "rate": 1000 - number, "last_active": now}
             for number in range(count)
         }
-        self.collector.native_engine.snapshot_flows = self.collector.tracker.flows
+        self.collector.collector_engine.snapshot_flows = self.collector.tracker.flows
         return now
 
     def test_snapshot_is_bounded_and_incident_flows_come_first(self):
@@ -525,7 +525,7 @@ class SnapshotSafetyTest(CollectorLoopTest):
                     "matched": 2, "included": 1, "omitted": 1, "omitted_bytes": 1,
                     "complete": False, "truncated": True, "atomic": False,
                     "generation": 1, "omission_reasons": ["encoded_bytes"]}
-        with mock.patch.object(self.collector.native_engine, "snapshot_detail", return_value=({}, coverage)):
+        with mock.patch.object(self.collector.collector_engine, "snapshot_detail", return_value=({}, coverage)):
             payload = self.collector.build_snapshot_payload(now)
         self.assertEqual(payload["capture"]["states"]["omitted_bytes"], 1)
         self.assertTrue(payload["capture"]["states"]["truncated"])
@@ -572,7 +572,7 @@ class SnapshotSafetyTest(CollectorLoopTest):
                     "matched": 7, "included": 2, "omitted": 5, "complete": False,
                     "truncated": True, "atomic": False, "generation": 1,
                     "omission_reasons": ["state_count"]}
-        with mock.patch.object(self.collector.native_engine, "snapshot_detail", return_value=({}, coverage)):
+        with mock.patch.object(self.collector.collector_engine, "snapshot_detail", return_value=({}, coverage)):
             payload = self.collector.build_snapshot_payload(now)
         self.assertEqual((payload["capture"]["states"]["available"], payload["capture"]["states"]["captured"]), (7, 2))
         self.assertTrue(payload["capture"]["states"]["truncated"])
@@ -587,8 +587,8 @@ class SnapshotSafetyTest(CollectorLoopTest):
 
 class ThreatRecorderTest(unittest.TestCase):
     @staticmethod
-    def native(records):
-        return NativeFixture(lambda: records).sample({"1.2.3.163"}, [], {}, None, threat_summary=True)
+    def collector_sample(records):
+        return CollectorFixture(lambda: records).sample({"1.2.3.163"}, [], {}, None, threat_summary=True)
 
     def test_hostnames_are_loaded_once_per_recording(self):
         recorder = COLLECTOR.ThreatRecorder(":memory:")
@@ -602,14 +602,14 @@ class ThreatRecorderTest(unittest.TestCase):
         records = PF.parse_states(nat_state(100, 100) + nat_state(100, 100).replace("45.56.79.53", "34.1.1.1"))
         with mock.patch.object(COLLECTOR, "threat_lists_for", return_value=["Test list"]), \
                 mock.patch.object(COLLECTOR, "connection_summary", return_value=[]) as connections:
-            native = self.native(records)
-            recorder.update(native, collector, now=0.0)
+            sample = self.collector_sample(records)
+            recorder.update(sample, collector, now=0.0)
             collector.host_names.assert_called_once_with()
             self.assertEqual(connections.call_count, 2)
             self.assertTrue(all(call.args[2] is names for call in connections.call_args_list))
-            recorder.update(native, collector, now=1.0)
+            recorder.update(sample, collector, now=1.0)
             collector.host_names.assert_called_once_with()
-            recorder.update(native, collector, now=COLLECTOR.THREAT_RECORD_SECONDS)
+            recorder.update(sample, collector, now=COLLECTOR.THREAT_RECORD_SECONDS)
             self.assertEqual(collector.host_names.call_count, 2)
         recorder.db.close()
 
@@ -619,7 +619,7 @@ class ThreatRecorderTest(unittest.TestCase):
         collector.local_addresses, collector.networks = {"1.2.3.163"}, []
         collector.correlator = COLLECTOR.Correlator()
         with mock.patch.object(COLLECTOR, "threat_lists_for", return_value=[]):
-            recorder.update(self.native(PF.parse_states(nat_state(100, 100))), collector, now=0.0)
+            recorder.update(self.collector_sample(PF.parse_states(nat_state(100, 100))), collector, now=0.0)
         collector.host_names.assert_not_called()
         recorder.db.close()
 
@@ -636,9 +636,9 @@ class ThreatRecorderTest(unittest.TestCase):
             collector.leases, collector.interfaces = {}, {}
             records = PF.parse_states(nat_state(100, 100))
             with mock.patch.object(COLLECTOR, "threat_lists_for", lambda address, *args: ["Test list"]):
-                native = self.native(records)
-                recorder.update(native, collector, now=0.0)
-                recorder.update(native, collector, now=1.0)  # within the recording interval: skipped
+                sample = self.collector_sample(records)
+                recorder.update(sample, collector, now=0.0)
+                recorder.update(sample, collector, now=1.0)  # within the recording interval: skipped
             (row,) = THREATS.listing(THREATS.connect(os.path.join(directory, "queue.db")))["rows"]
             self.assertEqual((row["address"], row["samples"], row["lists"]), ("45.56.79.53", 1, ["Test list"]))
             self.assertEqual(row["remote"]["hostname"], "scanner.example")
@@ -654,7 +654,7 @@ class ThreatRecorderCommitTest(unittest.TestCase):
         collector.alerts.summary.return_value = None
         collector.correlator = COLLECTOR.Correlator()
         records = PF.parse_states(nat_state(100, 100))
-        native = NativeFixture(lambda: records).sample({"1.2.3.163"}, [], {}, None, threat_summary=True)
+        sample = CollectorFixture(lambda: records).sample({"1.2.3.163"}, [], {}, None, threat_summary=True)
         windows = []
 
         def blocks(correlator, seen, since, *args):
@@ -666,7 +666,7 @@ class ThreatRecorderCommitTest(unittest.TestCase):
                 mock.patch.object(COLLECTOR, "firewall_blocks", blocks), \
                 mock.patch.object(COLLECTOR, "log_error"), \
                 mock.patch.object(COLLECTOR.threats, "record", side_effect=sqlite3.OperationalError("locked")):
-            recorder.update(native, collector, now=100.0)
+            recorder.update(sample, collector, now=100.0)
         self.assertIsNone(recorder.recorded)
         self.assertEqual(recorder.last_wall, 0.0)
         self.assertFalse(recorder.due(101.0))  # retried later, not every sample
@@ -674,7 +674,7 @@ class ThreatRecorderCommitTest(unittest.TestCase):
                 mock.patch.object(COLLECTOR, "connection_summary", return_value=[]), \
                 mock.patch.object(COLLECTOR, "firewall_blocks", blocks), \
                 mock.patch.object(COLLECTOR, "log_notice"):
-            recorder.update(native, collector, now=100.0 + COLLECTOR.THREAT_RECORD_SECONDS)
+            recorder.update(sample, collector, now=100.0 + COLLECTOR.THREAT_RECORD_SECONDS)
         # the retry offered the same evidence window, then the window moved on
         self.assertEqual(windows, [0.0, 0.0])
         self.assertEqual(recorder.recorded, 100.0 + COLLECTOR.THREAT_RECORD_SECONDS)
@@ -703,7 +703,7 @@ class SampleTimingTest(CollectorLoopTest):
             written = json.load(handle)
         self.assertEqual({key: value for key, value in written.items() if key != "collector"}, self.collector.timings)
         self.assertEqual((written["states"], written["background"]), (1, False))
-        for phase in ("native", "tracker", "ingest", "threats", "payload", "write"):
+        for phase in ("state_collector", "tracker", "ingest", "threats", "payload", "write"):
             self.assertGreaterEqual(written["phases"][phase], 0.0)
         self.assertGreaterEqual(written["wall"], written["phases"]["payload"])
         # kept in memory every sample, written to the file every few seconds
@@ -731,7 +731,7 @@ class TimingContractTest(CollectorLoopTest):
         self.assertFalse(os.path.exists(self.output))
         self.collector.step()
         first = self.payload()["collector"]
-        self.collector.native_engine.records = lambda: PF.parse_states(nat_state(2000, 2000)) * 2
+        self.collector.collector_engine.records = lambda: PF.parse_states(nat_state(2000, 2000)) * 2
         self.collector.step()
         second = self.payload()["collector"]
         self.assertEqual((first["generation"], second["generation"]), (generation, generation))
@@ -748,7 +748,7 @@ class TimingContractTest(CollectorLoopTest):
         for jump in (-1000, 1000):
             clock = {"mono": 100.0, "wall": 5000.0}
 
-            original = self.collector.native_engine.sample
+            original = self.collector.collector_engine.sample
 
             def sample(*args, **kwargs):
                 self.assertEqual(self.collector.timing_status()["phase"], "collecting")
@@ -758,7 +758,7 @@ class TimingContractTest(CollectorLoopTest):
 
             with mock.patch.object(COLLECTOR.time, "monotonic", lambda: clock["mono"]), \
                     mock.patch.object(COLLECTOR.time, "time", lambda: clock["wall"]), \
-                    mock.patch.object(self.collector.native_engine, "sample", sample), \
+                    mock.patch.object(self.collector.collector_engine, "sample", sample), \
                     mock.patch.object(COLLECTOR, "requested", return_value=True):
                 rest = self.collector.step()
             status = self.payload()["collector"]
@@ -770,14 +770,14 @@ class TimingContractTest(CollectorLoopTest):
             self.assertEqual(current["next_sample_due"], clock["wall"] + rest)
             self.assertEqual(current["phase_deadline"], current["next_sample_due"])
 
-    def test_native_failure_does_not_refresh_successful_identity(self):
+    def test_collector_failure_does_not_refresh_successful_identity(self):
         self.collector.step()  # baseline
         self.collector.step()
         previous = self.payload()
         success = self.payload()["collector"]
         fields = ("generation", "revision", "state_count", "sample_started_at", "sample_completed_at", "sample_duration")
-        with mock.patch.object(self.collector.native_engine, "sample",
-                               side_effect=COLLECTOR.NativeError("native sample failed")):
+        with mock.patch.object(self.collector.collector_engine, "sample",
+                               side_effect=COLLECTOR.CollectorError("collector sample failed")):
             rest = self.collector.step()
             failed = self.payload()["collector"]
             self.assertEqual({key: failed[key] for key in fields}, {key: success[key] for key in fields})
@@ -791,15 +791,15 @@ class TimingContractTest(CollectorLoopTest):
         self.assertEqual(self.payload(), previous)
         self.collector.step()
         self.assertEqual(self.payload()["collector"]["revision"], 4)
-        self.assertEqual(self.collector.native_engine.baselines, [True, False, True, False])
+        self.assertEqual(self.collector.collector_engine.baselines, [True, False, True, False])
 
-    def test_missing_native_helper_has_no_python_fallback_and_output_expires(self):
+    def test_missing_collector_has_no_python_fallback_and_output_expires(self):
         self.collector.step()  # baseline
         self.collector.step()
         previous = self.payload()
         modified = os.stat(self.output).st_mtime
-        with mock.patch.object(self.collector.native_engine, "sample",
-                               side_effect=COLLECTOR.NativeError("native helper unavailable")):
+        with mock.patch.object(self.collector.collector_engine, "sample",
+                               side_effect=COLLECTOR.CollectorError("collector unavailable")):
             self.collector.step()
         self.assertFalse(hasattr(COLLECTOR, "sample_states"))
         self.assertEqual(self.payload(), previous)
@@ -824,35 +824,35 @@ class TimingContractTest(CollectorLoopTest):
         self.collector.step()
         self.bytes = 5000
         saved, requests = self.snapshot_request()
-        with mock.patch.object(self.collector.native_engine, "snapshot_detail",
-                               side_effect=COLLECTOR.NativeError("detail failed")):
+        with mock.patch.object(self.collector.collector_engine, "snapshot_detail",
+                               side_effect=COLLECTOR.CollectorError("detail failed")):
             self.collector.step()
         with open(saved) as handle:
             self.assertEqual(json.load(handle)["status"], "snapshot_failed")
         self.assertFalse(os.listdir(requests))
-        self.assertFalse(self.collector.native_engine.snapshot_open)
+        self.assertFalse(self.collector.collector_engine.snapshot_open)
         self.bytes = 7000
         self.collector.step()
         # no generation was lost: no new baseline, rates continue
-        self.assertEqual(self.collector.native_engine.baselines, [True, False, False, False])
+        self.assertEqual(self.collector.collector_engine.baselines, [True, False, False, False])
         self.assertGreater(self.payload()["flows"][0]["rate"], 0)
 
     def test_python_failure_during_snapshot_answers_the_request_and_cancels(self):
         self.collector.step()  # baseline
         self.collector.step()
         saved, requests = self.snapshot_request()
-        cancel = mock.Mock(wraps=self.collector.native_engine.snapshot_cancel)
+        cancel = mock.Mock(wraps=self.collector.collector_engine.snapshot_cancel)
         with mock.patch.object(self.collector, "build_snapshot_payload", side_effect=KeyError("boom")), \
-                mock.patch.object(self.collector.native_engine, "snapshot_cancel", cancel):
+                mock.patch.object(self.collector.collector_engine, "snapshot_cancel", cancel):
             with self.assertRaises(KeyError):
                 self.collector.step()
         cancel.assert_called()
         with open(saved) as handle:
             self.assertEqual(json.load(handle)["status"], "snapshot_failed")
         self.assertFalse(os.listdir(requests))
-        self.assertFalse(self.collector.native_engine.snapshot_open)
+        self.assertFalse(self.collector.collector_engine.snapshot_open)
         self.collector.step()
-        self.assertEqual(self.collector.native_engine.baselines[-1], False)
+        self.assertEqual(self.collector.collector_engine.baselines[-1], False)
 
     def test_post_sample_python_failure_keeps_the_helper(self):
         self.collector.step()  # baseline
@@ -862,47 +862,73 @@ class TimingContractTest(CollectorLoopTest):
             with self.assertRaises(ValueError):
                 self.collector.step()
         self.assertEqual(self.payload(), previous)  # nothing published by the failed iteration
-        self.assertIsNotNone(self.collector.native_engine.process)
+        self.assertIsNotNone(self.collector.collector_engine.process)
         self.bytes = 9000
         self.collector.step()
-        self.assertEqual(self.collector.native_engine.baselines, [True, False, False, False])
+        self.assertEqual(self.collector.collector_engine.baselines, [True, False, False, False])
         self.assertGreater(self.payload()["collector"]["revision"], previous["collector"]["revision"])
 
     def test_baseline_after_restart_keeps_the_published_map(self):
         self.collector.step()  # baseline
         self.collector.step()
         previous = self.payload()
-        self.collector.native_engine.close()
+        self.collector.collector_engine.close()
         self.collector.step()
-        self.assertTrue(self.collector.native_engine.baselines[-1])
+        self.assertTrue(self.collector.collector_engine.baselines[-1])
         self.assertEqual(self.payload(), previous)
 
-    def test_incompatible_helper_publishes_its_status_and_retries_slowly(self):
+    def test_incompatible_pf_abi_publishes_its_status_and_retries_slowly(self):
         self.collector.step()  # baseline
         self.collector.step()
-        error = COLLECTOR.NativeError("PF state ABI version 9, helper built for 8", "incompatible")
-        with mock.patch.object(self.collector.native_engine, "sample", side_effect=error), \
+        error = COLLECTOR.CollectorError("PF state ABI version 9, collector built for 8", "incompatible")
+        with mock.patch.object(self.collector.collector_engine, "sample", side_effect=error), \
                 mock.patch.object(COLLECTOR, "log_error"):
             rest = self.collector.step()
         self.assertGreaterEqual(rest, COLLECTOR.INCOMPATIBLE_RETRY_SECONDS)
         payload = self.payload()
-        self.assertEqual((payload["status"], payload["error"]), ("native_incompatible", str(error)))
-        self.assertEqual(self.diagnostic()["native"]["incompatible"], str(error))
-        self.assertEqual(self.diagnostic()["native"]["last_error_class"], "incompatible")
+        self.assertEqual((payload["status"], payload["error"], payload["reason"]),
+                         ("collector_incompatible", str(error), "pf_abi"))
+        self.assertEqual((payload["protocol"], payload["expected_protocol"]), (1, 1))
+        self.assertEqual(self.diagnostic()["state_collector"]["incompatible"]["error"], str(error))
+        self.assertEqual(self.diagnostic()["state_collector"]["last_error_class"], "incompatible")
         self.collector.step()  # compatible again (a new helper): baseline, then normal pacing
-        self.assertIsNone(self.collector.native_incompatible)
+        self.assertIsNone(self.collector.collector_incompatible)
+        self.assertLess(self.collector.step(), COLLECTOR.INCOMPATIBLE_RETRY_SECONDS)
+
+    def test_protocol_mismatch_is_a_package_problem_not_a_restart_loop(self):
+        self.collector.step()  # baseline
+        self.collector.step()
+        for protocol, shown in ((2, "2"), (None, "unknown")):
+            with self.subTest(protocol=protocol):
+                error = COLLECTOR.state_collector.CollectorIncompatible(protocol)
+                with mock.patch.object(self.collector.collector_engine, "sample", side_effect=error), \
+                        mock.patch.object(COLLECTOR, "log_error") as logged:
+                    rests = [self.collector.step() for _ in range(3)]
+                self.assertTrue(all(rest >= COLLECTOR.INCOMPATIBLE_RETRY_SECONDS for rest in rests))
+                payload = self.payload()
+                self.assertEqual((payload["status"], payload["reason"], payload["protocol"],
+                                  payload["expected_protocol"]), ("collector_incompatible", "protocol", protocol, 1))
+                messages = [call.args[0] for call in logged.call_args_list if "incompatible protocols" in call.args[0]]
+                if protocol == 2:  # logged once per incompatibility, not once per retry
+                    self.assertEqual(len(messages), 1)
+                    self.assertIn(f"collector protocol {shown}, expected 1", messages[0])
+                    self.assertIn("Reinstall or upgrade the Firewall Map package", messages[0])
+                status = self.diagnostic()["state_collector"]["incompatible"]
+                self.assertEqual((status["reason"], status["protocol"]), ("protocol", protocol))
+        self.collector.step()  # a consistent package: baseline, then normal pacing
+        self.assertIsNone(self.collector.collector_incompatible)
         self.assertLess(self.collector.step(), COLLECTOR.INCOMPATIBLE_RETRY_SECONDS)
 
     def test_skipped_states_mark_the_map_incomplete(self):
         self.collector.step()  # baseline
-        original = self.collector.native_engine.sample
+        original = self.collector.collector_engine.sample
 
         def skipping(*args, **kwargs):
             result = original(*args, **kwargs)
             result["skipped"] = {"af_translation": 3}
             return result
 
-        with mock.patch.object(self.collector.native_engine, "sample", skipping), \
+        with mock.patch.object(self.collector.collector_engine, "sample", skipping), \
                 mock.patch.object(COLLECTOR, "log_notice") as notice:
             self.collector.step()
         self.assertEqual(self.payload()["incomplete"], {"skipped_states": {"af_translation": 3}})
@@ -922,12 +948,12 @@ class TimingContractTest(CollectorLoopTest):
                       "threat_summary": False, "telemetry": {"state_limit": 400000, "interval": -1},
                       "baseline": False, "refused": refused, "counts": {"states": 0, "flows": 0}}
             with self.subTest(reason=refused["reason"]), \
-                    mock.patch.object(self.collector.native_engine, "sample", return_value=result):
+                    mock.patch.object(self.collector.collector_engine, "sample", return_value=result):
                 self.collector.step()
                 payload = self.payload()
                 self.assertEqual({key: payload[key] for key in expected}, expected)
                 self.assertEqual(payload["flows"], [])
-                self.assertEqual(self.diagnostic()["native"]["refused"], refused)
+                self.assertEqual(self.diagnostic()["state_collector"]["refused"], refused)
 
     def test_malformed_log_lines_are_contained_and_counted(self):
         with open(os.path.join(self.directory, "eve.json"), "a") as handle:
@@ -940,13 +966,13 @@ class TimingContractTest(CollectorLoopTest):
             self.collector.step()
         self.assertGreaterEqual(self.collector.ingest_rejected["eve"], 2)
         self.assertGreaterEqual(self.collector.ingest_rejected["filterlog"], 1)
-        status = self.diagnostic()["native"]
+        status = self.diagnostic()["state_collector"]
         self.assertEqual(status["ingest_rejected"], self.collector.ingest_rejected)
         self.assertTrue(os.path.exists(self.output))
 
     def test_first_failure_has_no_successful_sample(self):
-        with mock.patch.object(self.collector.native_engine, "sample",
-                               side_effect=COLLECTOR.NativeError("first attempt failed")):
+        with mock.patch.object(self.collector.collector_engine, "sample",
+                               side_effect=COLLECTOR.CollectorError("first attempt failed")):
             self.collector.step()
         status = self.diagnostic()
         self.assertEqual(status["revision"], 0)
@@ -960,8 +986,8 @@ class TimingContractTest(CollectorLoopTest):
         with mock.patch.object(COLLECTOR.time, "time", return_value=5000.0), \
                 mock.patch.object(COLLECTOR.time, "monotonic", return_value=100.0), \
                 mock.patch.object(COLLECTOR, "requested", return_value=True), \
-                mock.patch.object(self.collector.native_engine, "sample",
-                                  side_effect=COLLECTOR.NativeError("native failed")):
+                mock.patch.object(self.collector.collector_engine, "sample",
+                                  side_effect=COLLECTOR.CollectorError("collector failed")):
             self.assertEqual([self.collector.step() for _ in range(4)], [2.0, 4.0, 8.0, 16.0])
         current = self.diagnostic()
         self.assertEqual((current["effective_sample_interval"], current["next_sample_due"]), (2.0, 5016.0))
@@ -1053,7 +1079,7 @@ class TimingContractTest(CollectorLoopTest):
                     status.get("heartbeat_at") == wall[0], wall[0] > previous["sample_completed_at"] + 10)):
                 beat.set()
 
-        original = self.collector.native_engine.sample
+        original = self.collector.collector_engine.sample
 
         def sample(*args, **kwargs):
             wall[0] += 15  # older than every existing fixed freshness window
@@ -1067,7 +1093,7 @@ class TimingContractTest(CollectorLoopTest):
         with mock.patch.object(COLLECTOR, "TIMINGS_WRITE_SECONDS", 0.01), \
                 mock.patch.object(COLLECTOR.time, "time", lambda: wall[0]), \
                 mock.patch.object(COLLECTOR, "write_json", observe), \
-                mock.patch.object(self.collector.native_engine, "sample", sample):
+                mock.patch.object(self.collector.collector_engine, "sample", sample):
             self.collector.start_heartbeat()
             try:
                 self.collector.step()

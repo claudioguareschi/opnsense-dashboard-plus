@@ -65,7 +65,8 @@ def feeds_in_use(values=None):
     return [feed for feed in FEEDS if feed["name"] in chosen]
 
 
-# Sanity limits for downloaded lists: a feed is third-party data. A network wider than these
+# Threat-feed policy for downloaded lists (sanity limits, not syntax checks: such an entry is a
+# valid network the policy rejects): a feed is third-party data. A network wider than these
 # prefixes (a hijacked or broken feed listing 0.0.0.0/0) would flag a large part of the internet;
 # networks without a global address cannot name a remote peer; and more entries than the threat
 # index takes means the download is not the list it claims to be.
@@ -75,9 +76,9 @@ MIN_PREFIX = {4: 8, 6: 16}
 def parse_feed(text, max_entries=BLOCKLIST_MAX_ENTRIES):
     """Addresses and networks, one per line; ';' and '#' start comments (Spamhaus, FireHOL, abuse.ch).
 
-    Returns (entries, skipped): entries wider than MIN_PREFIX or entirely outside global address
-    space are skipped and counted. More than max_entries usable entries raise ValueError, so the
-    previous copy stays in use.
+    Returns (entries, skipped): entries the threat-feed policy rejects (wider than MIN_PREFIX, or
+    entirely outside global address space) are skipped and counted; unparsable lines are ignored.
+    More than max_entries usable entries raise ValueError, so the previous copy stays in use.
     """
     entries = []
     seen = set()
@@ -138,7 +139,8 @@ def update(force=False, fetch=download, now=None, feeds=None):
             entry.update({"updated": now, "count": len(entries), "skipped": skipped, "error": None})
             results[feed["name"]] = "ok"
             log_notice(f"threat feed {feed['label']} downloaded: {len(entries)} entries"
-                       + (f", {skipped} too wide or not global (skipped)" if skipped else ""))
+                       + (f", {skipped} rejected by the threat-feed policy (wider than IPv4 /8 or IPv6 /16, "
+                          "or not global)" if skipped else ""))
         except urllib.error.HTTPError as error:
             entry["error"] = f"HTTP {error.code}"
             results[feed["name"]] = entry["error"]

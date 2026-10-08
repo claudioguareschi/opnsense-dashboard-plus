@@ -23,7 +23,7 @@
 
 """Development-only equivalence harness; never imports adaptive working edits.
 
-native_equivalence.py --src CLEAN_SCRIPTS --helper ./native_sample --dir TEMP_DIR
+collector_equivalence.py --src CLEAN_SCRIPTS --helper ./collector_sample --dir TEMP_DIR
 Modes: context (ifconfig), live (one read-only dump), synthetic (saved fixture),
 compare (same captured states), decode (aggregate-only memory measurement).
 No repeated live loops, traffic generation, collector construction or installs.
@@ -370,7 +370,7 @@ def read_aggregates(path, common):
 
 
 def normalize(r):
-    # The retired Python engine did not retain the native-only youngest-state age.
+    # The retired Python engine did not retain the collector-only youngest-state age.
     return {k: sorted(v) if k == 'protocols' else list(v.items()) if isinstance(v, dict) else v
             for k, v in r.items() if k != 'youngest'}
 
@@ -438,7 +438,7 @@ def compare(directory, pf, collector, common):
         raise AssertionError(f'flow count mismatch: {len(reference)} != {len(actual)}')
     for index, (expected, observed) in enumerate(zip(reference, actual)):
         if expected != observed:
-            differences = {k: {'python': expected.get(k), 'native': observed.get(k)}
+            differences = {k: {'python': expected.get(k), 'collector': observed.get(k)}
                            for k in expected.keys() | observed.keys() if expected.get(k) != observed.get(k)}
             raise AssertionError(json.dumps({'flow_index': index, 'differences': differences}, indent=2))
     print(json.dumps({'equivalence': 'exact', **counts, 'format_fixture_ms': formatting * 1000,

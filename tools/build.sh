@@ -63,16 +63,16 @@ for PLUGIN in ${PLUGINS}; do
     cp -R "${ROOT}/${PLUGIN}" "${WORK}/${PLUGIN}"
     if [ "${PLUGIN}" = "security/firewall-map" ]; then
         if [ "$(uname -s)" != "FreeBSD" ]; then
-            echo "Firewall Map native helper must be built for OPNsense/FreeBSD" >&2
+            echo "Firewall Map state collector must be built for OPNsense/FreeBSD" >&2
             exit 1
         fi
         mkdir -p "${WORK}/${PLUGIN}/src/libexec"
         # hardened by default: stack protector, fortified libc calls, PIE, full RELRO
-        ${NATIVE_CC:-cc} ${NATIVE_CFLAGS:--O2 -Wall -Wextra -Werror -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE} \
-            -I"${WORK}/${PLUGIN}/native" "${WORK}/${PLUGIN}"/native/*.c -lm \
-            ${NATIVE_LDFLAGS:--pie -Wl,-z,relro -Wl,-z,now} \
-            -o "${WORK}/${PLUGIN}/src/libexec/firewallmap-native"
-        chmod 0755 "${WORK}/${PLUGIN}/src/libexec/firewallmap-native"
+        ${COLLECTOR_CC:-cc} ${COLLECTOR_CFLAGS:--O2 -Wall -Wextra -Werror -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE} \
+            -I"${WORK}/${PLUGIN}/collector" "${WORK}/${PLUGIN}"/collector/*.c -lm \
+            ${COLLECTOR_LDFLAGS:--pie -Wl,-z,relro -Wl,-z,now} \
+            -o "${WORK}/${PLUGIN}/src/libexec/firewallmap-collector"
+        chmod 0755 "${WORK}/${PLUGIN}/src/libexec/firewallmap-collector"
     fi
     # Bytecode from running the tests locally must not ship in the package.
     find "${WORK}/${PLUGIN}" -name __pycache__ -type d -prune -exec rm -rf {} +

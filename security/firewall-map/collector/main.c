@@ -403,9 +403,10 @@ static void seed_hash(void) {
 #define __VERSION__ "unknown"
 #endif
 static int print_version(void) {
-  printf("{\"helper\":\"firewallmap-native\",\"protocol\":\"FMAGG4\",\"banner\":\"FMNATIVE5\","
+  printf("{\"collector\":\"firewallmap-collector\",\"protocol\":%u,"
          "\"pf_state_version\":%u,\"freebsd_version\":%u,\"compiler\":\"%s\"}\n",
-         pf_reader_state_version(), (unsigned)BUILD_FREEBSD_VERSION, __VERSION__);
+         (unsigned)FM_PROTOCOL_VERSION, pf_reader_state_version(), (unsigned)BUILD_FREEBSD_VERSION,
+         __VERSION__);
   return 0;
 }
 static bool count_state(const struct state *state, void *arg, struct fm_error *error) {
@@ -447,7 +448,7 @@ int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--selftest"))
     return self_test();
   if (argc != 1) {
-    fprintf(stderr, "usage: firewallmap-native [--version | --selftest]\n");
+    fprintf(stderr, "usage: firewallmap-collector [--version | --selftest]\n");
     return 2;
   }
   seed_hash();
@@ -457,12 +458,13 @@ int main(int argc, char **argv) {
       .ranking = ranking_create(BUDGET_RANKED_FLOWS, FADE_SECONDS, RATE_SMOOTHING, &error),
       .events = event_history_create(&error)};
   if (!engine.history || !engine.ranking || !engine.events) {
-    fprintf(stderr, "firewallmap-native: %s\n", error.message);
+    fprintf(stderr, "firewallmap-collector: %s\n", error.message);
     close_engine(&engine);
     return 1;
   }
-  if (printf("FMNATIVE5 pf_state_version=%u freebsd_version=%u\n",
-             pf_reader_state_version(), (unsigned)BUILD_FREEBSD_VERSION) < 0 ||
+  if (printf("FMCOLLECTOR protocol=%u pf_state_version=%u freebsd_version=%u\n",
+             (unsigned)FM_PROTOCOL_VERSION, pf_reader_state_version(),
+             (unsigned)BUILD_FREEBSD_VERSION) < 0 ||
       fflush(stdout)) {
     close_engine(&engine);
     return 1;
@@ -493,7 +495,7 @@ int main(int argc, char **argv) {
     if (ok)
       continue;
     if (!clean_eof) {
-      fprintf(stderr, "firewallmap-native: %s\n", error.message);
+      fprintf(stderr, "firewallmap-collector: %s\n", error.message);
       protocol_write_failure(stdout, &error);
       status = 1;
     }

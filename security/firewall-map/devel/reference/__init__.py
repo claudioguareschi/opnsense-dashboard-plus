@@ -24,10 +24,10 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Unshipped semantic oracles for native PF equivalence and regression tests.
+"""Unshipped semantic oracles for state collector PF equivalence and regression tests.
 
 The oracle preserves the retired Python engine's behavior on purpose. Where the specification
-deliberately corrects it, the native engine diverges and the difference is declared here (and
+deliberately corrects it, the state collector diverges and the difference is declared here (and
 covered by a specification test that does not use the oracle).
 """
 
@@ -38,23 +38,23 @@ DIVERGENCES = (
      "(forward, reverse) as (bytes_in, bytes_out)",
      "bytes_in is traffic from the remote and bytes_out traffic to it, oriented by the PF "
      "initiator, as for Suricata-derived connections",
-     "tests/test_native_engine.py: test_event_matches_are_oriented_by_the_pf_initiator_not_raw_counter_order"),
+     "tests/test_collector_engine.py: test_event_matches_are_oriented_by_the_pf_initiator_not_raw_counter_order"),
     ("sample-interval-ownership",
      "the collector supplied the elapsed time between its own step starts",
      "the helper measures the interval between its own PF dump requests and reports a "
      "baseline (no rates) for a helper's first sample",
-     "tests/test_native_engine.py: test_first_sample_of_a_helper_is_a_baseline_then_intervals_are_measured_in_c"),
+     "tests/test_collector_engine.py: test_first_sample_of_a_helper_is_a_baseline_then_intervals_are_measured_in_c"),
     ("address-family-translation",
      "a state whose wire and stack keys had different address families failed the whole sample",
      "af-to states are recognized, skipped before any aggregation and counted; the sample is "
      "marked incomplete; anything else unrecognized still fails it",
-     "tests/test_native_specification.py: test_address_family_translation_is_skipped_and_counted"),
+     "tests/test_collector_specification.py: test_address_family_translation_is_skipped_and_counted"),
     ("snapshot-exemplar-selection",
      "snapshot detail kept states in traversal order and failed when incident evidence exceeded "
      "the ceiling",
      "per-flow quotas (80% reserved for incident flows, 20 each first, water-filled), most "
      "bytes then newest then PF identity, exact totals; truncation is reported, never a failure",
-     "tests/test_native_snapshot.py: test_byte_and_count_backstops_and_incident_truncation"),
+     "tests/test_collector_snapshot.py: test_byte_and_count_backstops_and_incident_truncation"),
     ("address-classification",
      "classification followed the running Python's ipaddress module, where IPv4-mapped shared "
      "address space (::ffff:100.64.0.0/106) was neither public nor private",

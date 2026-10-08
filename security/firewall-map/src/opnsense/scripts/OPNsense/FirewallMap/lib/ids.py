@@ -33,7 +33,7 @@ from datetime import datetime
 from heapq import nsmallest
 from itertools import islice
 
-from .native import EVENT_MATCH_CURRENT
+from .collector import EVENT_MATCH_CURRENT
 from .blocklists import IDS_LIST, threat_fields, threat_lists_for
 from .blocks import MAX_BLOCK_SOURCES
 from .common import (connection_target, host_port, location_fields, normalize_ip, public_ip,
@@ -142,7 +142,7 @@ class Correlator:
             self._in_order = False
         self._newest = at if self._newest is None else max(self._newest, at)
 
-    def native_queries(self, local_addresses, networks=None, limit=2500):
+    def collector_queries(self, local_addresses, networks=None, limit=2500):
         """Only tuples needed for pending or already-correlated IDS evidence cross the IPC boundary."""
         keys = dict.fromkeys(self.flows)
         for _received, alert in self.pending:
@@ -150,8 +150,8 @@ class Correlator:
                 keys.setdefault(self.alert_key(alert, local_addresses, networks), None)
         return list(keys)[:limit]
 
-    def observe_native_matches(self, matches, now, descriptions=None):
-        """Refresh current IDS evidence from only the tuple matches requested from the native engine."""
+    def observe_collector_matches(self, matches, now, descriptions=None):
+        """Refresh current IDS evidence from only the tuple matches requested from the state collector."""
         descriptions = descriptions or {}
         current, ambiguous = {}, set()
         for key, value in matches.items():
@@ -171,8 +171,8 @@ class Correlator:
         self.ambiguous_keys = ambiguous
         self._flagged = None
 
-    def resolve_native(self, matches, local_addresses, now, networks=None):
-        """Resolve pending IDS alerts using bounded native tuple matches, then Python block policy."""
+    def resolve_collector_matches(self, matches, local_addresses, now, networks=None):
+        """Resolve pending IDS alerts using bounded collector tuple matches, then Python block policy."""
         still = []
         for received, alert in self.pending:
             key = self.alert_key(alert, local_addresses, networks)

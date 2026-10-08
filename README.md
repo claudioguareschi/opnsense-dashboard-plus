@@ -237,17 +237,21 @@ The plugin settings are in **Reporting ▸ Firewall Map ▸ Settings** (administ
 DB-IP Lite), MaxMind license key (taken from a MaxMind GeoIP alias when present), database update
 frequency, threat lists, background recording, AbuseIPDB API key, *Maintain blocklist aliases* and
 the collector's *Memory budget*. The memory budget (empty: 5% of physical memory, at most
-1024 MiB) bounds the state engine and sets the largest PF state table the map processes; above it
+1024 MiB) bounds the state collector and sets the largest PF state table the map processes; above it
 the map says the state table is too large instead of slowing the firewall. Keys are write-only and never displayed or logged: leave a key field empty to keep the stored key,
 or tick *Remove the stored key* to delete it.
 
-**Reporting ▸ Firewall Map ▸ Status** shows whether the collector is running (with the usual start,
-stop and restart controls), how fresh the geolocation database, the threat feeds and the AbuseIPDB
-blacklist are, and any download errors. Each has an *Update now* button. Its *State engine* section
-shows the native helper (process, restarts, the PF state ABI it was built for), the state limit
-its memory budget allows, the cost of the last sample, anything left out (unsupported states,
-candidates or threat remotes over their budgets) and the last refusal or error. An administrator
-can check the engine against the running kernel with `configctl firewallmap native selftest`.
+**Reporting ▸ Firewall Map ▸ Status** shows the installed Firewall Map version, whether the collector
+is running (with the usual start, stop and restart controls), how fresh the geolocation database, the
+threat feeds and the AbuseIPDB blacklist are, and any download errors. Each has an *Update now* button.
+Its *State collector* section shows the state collector (`/usr/local/libexec/firewallmap-collector`):
+whether it is running, its collector protocol and the expected one (1), its process, restarts and the
+PF state ABI it was built for, the state limit its memory budget allows, the cost of the last sample,
+anything left out (unsupported states, candidates or threat remotes over their budgets) and the last
+refusal or error. A collector that speaks another protocol means the package's components come from
+different versions: the status says *Incompatible* and the fix is to reinstall or upgrade the
+Firewall Map package. An administrator can check the collector against the running kernel with
+`configctl firewallmap collector selftest`.
 
 **Reporting ▸ Firewall Map ▸ Log File** is the plugin's log (System ▸ Settings ▸ Logging sets how long
 it is kept and can forward it). It records what helps diagnose a problem, without one line per

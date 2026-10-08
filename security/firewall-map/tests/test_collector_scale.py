@@ -19,7 +19,7 @@
 # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 
-"""Adversarial and scale tests of the native engine's resource model (synthetic PF reader).
+"""Adversarial and scale tests of the state collector's resource model (synthetic PF reader).
 
 These run the shipped engine code at high cardinality and check the bounds of PROTOCOL.md:
 response size, candidate and threat caps, hash-key independence, correlation skipping. Timings
@@ -38,14 +38,14 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src/opnsense/scripts/OPNsense/FirewallMap"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import native  # noqa: E402
-from native_build import compile_worker, state_limit  # noqa: E402
+from lib import collector  # noqa: E402
+from collector_build import compile_worker, state_limit  # noqa: E402
 
 CONTEXT = ({"8.8.8.1"}, [], {}, None)
 QUERY = ("tcp", "8.8.8.1", "30000", "9.9.9.9", "443")
 
 
-class NativeScaleTest(unittest.TestCase):
+class CollectorScaleTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.directory = tempfile.TemporaryDirectory()
@@ -56,7 +56,7 @@ class NativeScaleTest(unittest.TestCase):
         cls.directory.cleanup()
 
     def engine(self):
-        engine = native.NativeEngine(self.worker)
+        engine = collector.CollectorEngine(self.worker)
         self.addCleanup(engine.close)
         return engine
 
@@ -82,18 +82,18 @@ class NativeScaleTest(unittest.TestCase):
         self.assertIsNone(last["refused"])
         self.assertEqual(telemetry["state_limit"], state_limit(memory))
         self.assertLess(telemetry["heap_peak"], memory)
-        self.assertEqual(len(last["flows"]), native.RANKED_FLOWS)
-        self.assertEqual(len(last["threat_remotes"]), native.THREAT_REMOTES)
-        self.assertEqual(telemetry["threat_remotes_omitted"], count - native.THREAT_REMOTES)
+        self.assertEqual(len(last["flows"]), collector.RANKED_FLOWS)
+        self.assertEqual(len(last["threat_remotes"]), collector.THREAT_REMOTES)
+        self.assertEqual(telemetry["threat_remotes_omitted"], count - collector.THREAT_REMOTES)
         # worst-case accounting holds: the derived limit admits no more than the budget pays for
         per_state = (telemetry["heap_peak"] - (24 << 20)) / count
         self.assertLess(per_state, 2816)
 
     def test_candidates_per_flow_and_kind_are_capped(self):
         (_, last), _ = self.run_mode("ports", 5000)
-        services = [row for row in last["candidates"] if row[1] == native.SERVICE]
+        services = [row for row in last["candidates"] if row[1] == collector.SERVICE]
         self.assertEqual(len(last["flows"]), 1)
-        self.assertEqual(len(services), native.CANDIDATES_PER_KIND)
+        self.assertEqual(len(services), collector.CANDIDATES_PER_KIND)
         self.assertGreater(last["telemetry"]["candidates_omitted"], 4000)
         # the heaviest were kept: their weights are not below any omitted one's (all equal here)
         self.assertEqual(len({row[0] for row in services}), 1)
@@ -102,10 +102,10 @@ class NativeScaleTest(unittest.TestCase):
         engine = self.engine()
         with patch.dict(os.environ, FM_TEST_MODE="unique", FM_TEST_COUNT="500", FM_TEST_INTERVAL="2"):
             engine.sample(*CONTEXT)
-            rows, _ = native._context_rows(*CONTEXT)
+            rows, _ = collector._context_rows(*CONTEXT)
             text = ("FMCONF2\nBUDGET {memory} 16 100\nTHREATS\nEVIDENCE 9.0.1.200\n{rows}RUN\n".format(
-                memory=native.memory_budget(), rows="".join(row + "\n" for row in rows)))
-            summary = engine._request(text, lambda stream, process: native._decode(stream, process, (), True))
+                memory=collector.memory_budget(), rows="".join(row + "\n" for row in rows)))
+            summary = engine._request(text, lambda stream, process: collector._decode(stream, process, (), True))
         remotes = [remote["address"] for remote in summary["threat_remotes"]]
         self.assertEqual(len(remotes), 100)
         self.assertEqual(summary["telemetry"]["threat_remotes_omitted"], 400)

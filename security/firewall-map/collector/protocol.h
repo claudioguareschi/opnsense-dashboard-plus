@@ -29,7 +29,10 @@
 #include "ranking.h"
 #include "threat_summary.h"
 #include <stdio.h>
-/* Wire formats are specified in PROTOCOL.md. No C structure is serialized. */
+/* Wire formats are specified in PROTOCOL.md. No C structure is serialized.
+ * The collector speaks exactly one protocol: it is announced in the banner and
+ * carried by every response header (FMAGG4, FMSTATE2, FMPAGE1). */
+#define FM_PROTOCOL_VERSION 1
 #define FM_FRAME_MAX 4096
 enum record_kind {
   RECORD_HEADER = 0,
@@ -80,7 +83,7 @@ bool protocol_write_refusal(FILE *, struct sample_outcome, uint64_t states_seen,
 /* FMFAIL1: best effort; the helper exits afterwards. */
 void protocol_write_failure(FILE *, const struct fm_error *);
 /* Devel-only FMAGG2 aggregate dump used by the equivalence tools; defined in
- * devel/native_fmagg2.c, not in the installed helper. */
+ * devel/collector_fmagg2.c, not in the installed helper. */
 bool protocol_write(FILE *, const struct aggregate *, bool with_deltas,
                     struct fm_error *);
 #endif

@@ -49,6 +49,13 @@ class FeedTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             FEEDS.parse_feed("".join(f"45.56.{n // 256}.{n % 256}\n" for n in range(11)), max_entries=10)
 
+    def test_feed_policy_prefix_limits(self):
+        # the policy, not the syntax: IPv4 /8 and IPv6 /16 are the widest accepted networks
+        self.assertEqual(FEEDS.MIN_PREFIX, {4: 8, 6: 16})
+        accepted, rejected = FEEDS.parse_feed("8.0.0.0/8\n2a00::/16\n8.0.0.0/7\n2a00::/15\n0.0.0.0/0\n::/0\n"
+                                              "10.0.0.0/8\nfd00::/16\nnot-a-network\n300.1.1.1\n")
+        self.assertEqual((accepted, rejected), (["8.0.0.0/8", "2a00::/16"], 6))  # malformed lines are not counted
+
     def test_feeds_in_use(self):
         chosen = {"threat_lists": "FWMAP_Feodo,Other"}
         self.assertEqual([feed["name"] for feed in FEEDS.feeds_in_use(chosen)], ["FWMAP_Feodo"])

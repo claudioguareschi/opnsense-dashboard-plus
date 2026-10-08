@@ -21,7 +21,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Native snapshot protocol, association, and bounded-resource regression tests."""
+"""Collector snapshot protocol, association, and bounded-resource regression tests."""
 import ipaddress
 import json
 import os
@@ -37,11 +37,11 @@ from unittest.mock import Mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src/opnsense/scripts/OPNsense/FirewallMap"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import native  # noqa: E402
-from native_build import compile_worker  # noqa: E402
+from lib import collector  # noqa: E402
+from collector_build import compile_worker  # noqa: E402
 
 
-class NativeSnapshotTest(unittest.TestCase):
+class CollectorSnapshotTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.directory = tempfile.TemporaryDirectory()
@@ -52,10 +52,10 @@ class NativeSnapshotTest(unittest.TestCase):
         cls.directory.cleanup()
 
     def setUp(self):
-        self.engine = native.NativeEngine(self.worker)
+        self.engine = collector.CollectorEngine(self.worker)
         self.addCleanup(self.engine.close)
 
-    def capture(self, mode="one", count=12, byte_limit=native.SNAPSHOT_BYTES, state_limit=5000,
+    def capture(self, mode="one", count=12, byte_limit=collector.SNAPSHOT_BYTES, state_limit=5000,
                 select=None, incident=False):
         with patch.dict(os.environ, FM_TEST_MODE=mode, FM_TEST_COUNT=str(count)):
             args = ({"8.8.8.1", "2001:4860::1"}, [], {}, None)
@@ -167,7 +167,7 @@ class NativeSnapshotTest(unittest.TestCase):
     def test_incomplete_reader_and_cross_family_fail_atomically(self):
         for mode in ("incomplete", "cross"):
             self.engine.close()
-            with self.subTest(mode=mode), self.assertRaises(native.NativeError):
+            with self.subTest(mode=mode), self.assertRaises(collector.CollectorError):
                 self.capture(mode)
             self.assertIsNone(self.engine.process)
 
@@ -184,36 +184,56 @@ class NativeSnapshotTest(unittest.TestCase):
         row = {"id": "0000000000000001", "creatorid": "00000007",
                "flow": {"origin": "8.8.8.1", "dest": "9.9.9.9"}}
         encoded = json.dumps(row, separators=(",", ":")).encode()
-        records = [b"\0" + struct.pack("!IQ", 2, 2), b"\1" + struct.pack("!I", 0) + encoded,
-                   b"\2" + struct.pack("!IQQQQQQQQB", 0, 1, 1, 5, 6, 1, 1, 1, 20, 0)]
-        body, checksum = b"", 0
-        for record in records:
-            framed = struct.pack("!I", len(record)) + record
-            body += framed
-            checksum = zlib.crc32(framed, checksum)
-        cost = len(encoded) + len("9.9.9.9") + 8
-        footer = b"\xff" + struct.pack("!QQQQIIQIddd", 1, 1, 1, cost, 0, 2, 0, checksum, 3, 2, 1)
-        valid = b"FMSTATE2" + body + struct.pack("!I", len(footer)) + footer
+
+        def response(version=collector.PROTOCOL_VERSION):
+            records = [b"\0" + struct.pack("!IQ", version, 2), b"\1" + struct.pack("!I", 0) + encoded,
+                       b"\2" + struct.pack("!IQQQQQQQQB", 0, 1, 1, 5, 6, 1, 1, 1, 20, 0)]
+            body, checksum = b"", 0
+            for record in records:
+                framed = struct.pack("!I", len(record)) + record
+                body += framed
+                checksum = zlib.crc32(framed, checksum)
+            cost = len(encoded) + len("9.9.9.9") + 8
+            footer = b"\xff" + struct.pack("!QQQQIIQIddd", 1, 1, 1, cost, 0, 2, 0, checksum, 3, 2, 1)
+            return b"FMSTATE2" + body + struct.pack("!I", len(footer)) + footer
+
+        valid = response()
 
         def decode(data, identities=(("8.8.8.1", "9.9.9.9", False),)):
             with tempfile.TemporaryFile() as stream:
                 stream.write(data)
                 stream.seek(0)
-                return native._decode_detail(stream, Mock(poll=lambda: 0), identities, 2, 4096, 5000)
+                return collector._decode_detail(stream, Mock(poll=lambda: 0), identities, 2, 4096, 5000)
 
         # wall-clock times are reported, not required to be ordered
         rows, meta = decode(valid)
         self.assertTrue(meta["complete"])
         self.assertEqual(meta["flows"][0]["bytes_from_remote"], 5)
         self.assertEqual(meta["selection_policy"], "bytes_desc_newest_identity_v1")
-        for invalid in (valid[:-1], b"FMSTATE1" + valid[8:], valid[:-26] + b"x" + valid[-25:]):
-            with self.subTest(length=len(invalid)), self.assertRaises(native.NativeError):
+        for invalid in (valid[:-1], b"FMAGG4\0\0" + valid[8:], valid[:-26] + b"x" + valid[-25:],
+                        response(version=0), response(version=2)):
+            with self.subTest(length=len(invalid)), self.assertRaises(collector.CollectorError):
                 decode(invalid)
-        with self.assertRaises(native.NativeError):
+        with self.assertRaises(collector.CollectorError):
             decode(valid, (("8.8.8.2", "9.9.9.9", False),))
         # a flow without its totals record is incomplete evidence accounting
-        with self.assertRaises(native.NativeError):
+        with self.assertRaises(collector.CollectorError):
             decode(valid, (("8.8.8.1", "9.9.9.9", False), ("8.8.8.1", "9.9.9.8", False)))
+
+    def test_page_header_version(self):
+        def decode(version):
+            record = b"\0" + struct.pack("!IQQQI", version, 7, 0, 0, 0)
+            framed = struct.pack("!I", len(record)) + record
+            footer = b"\xff" + struct.pack("!I", zlib.crc32(framed))
+            with tempfile.TemporaryFile() as stream:
+                stream.write(b"FMPAGE1\0" + framed + struct.pack("!I", len(footer)) + footer)
+                stream.seek(0)
+                return collector._decode_page(stream, Mock(poll=lambda: 0))
+
+        self.assertEqual(decode(collector.PROTOCOL_VERSION)["generation"], 7)
+        for version in (0, 2):
+            with self.subTest(version=version), self.assertRaises(collector.CollectorError):
+                decode(version)
 
     def test_exact_encoded_budget(self):
         _, _, _, rows, meta = self.capture(count=1)

@@ -145,6 +145,10 @@ export function problemText(summary, text) {
   if (summary.status === 'starting') {
     return text.starting;
   }
+  if (summary.status === 'collector_incompatible') {
+    // the package's components disagree (another protocol) or the collector cannot read this PF
+    return summary.reason === 'pf_abi' ? text.collector_incompatible_pf : text.collector_incompatible;
+  }
   if (summary.status === 'too_many_states') {
     return fill(summary.slow ? text.too_slow_states : text.too_many_states, {count: Number(summary.count).toLocaleString(), limit: Number(summary.limit).toLocaleString()});
   }

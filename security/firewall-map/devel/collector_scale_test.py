@@ -21,7 +21,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Offline 10k/70k/200k native aggregation sanity measurements."""
+"""Offline 10k/70k/200k collector aggregation sanity measurements."""
 
 import argparse
 import ipaddress
@@ -32,7 +32,7 @@ import sys
 import zlib
 from pathlib import Path
 
-import native_equivalence as oracle
+import collector_equivalence as oracle
 
 
 def write_fixture(path, count, unique_flows):

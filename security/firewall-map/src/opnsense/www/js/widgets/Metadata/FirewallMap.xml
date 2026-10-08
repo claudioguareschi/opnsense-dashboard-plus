@@ -66,6 +66,8 @@
             <database_downloading>Downloading the geolocation database…</database_downloading>
             <carp_backup>CARP backup: traffic is passing through the master</carp_backup>
             <too_many_states>The state table is too large to map ({count} states). The map resumes below {limit}.</too_many_states>
+            <collector_incompatible>Firewall Map collector incompatible — The Firewall Map application and its state collector use incompatible protocols. Reinstall or upgrade the Firewall Map package so both components come from the same version.</collector_incompatible>
+            <collector_incompatible_pf>Firewall Map collector incompatible — The state collector was built for a different PF state format than this firewall uses. Install the Firewall Map package built for this OPNsense version.</collector_incompatible_pf>
             <too_slow_states>Reading the {count} states took too long on this firewall. The map tries again shortly.</too_slow_states>
             <data_unavailable>Live flow data is unavailable</data_unavailable>
             <webgl_unavailable>WebGL is required for Firewall Map+</webgl_unavailable>

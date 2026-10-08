@@ -72,16 +72,43 @@ class StatusTest(unittest.TestCase):
                 self.assertNotIn("key_id", json.dumps(blacklist))
                 self.assertNotIn("secret", json.dumps(blacklist))
 
-    def test_native_engine_status_and_version_warning(self):
-        timing = {"native": {"helper": {"pid": 7, "starts": 2, "pf_state_version": 20230404,
-                                        "freebsd_version": 1403000},
-                             "state_limit": 372363, "telemetry": {"sequence": 9}}}
+    def test_state_collector_status_and_version_warning(self):
+        timing = {"state_collector": {"helper": {"pid": 7, "starts": 2, "protocol": 1, "pf_state_version": 20230404,
+                                                 "freebsd_version": 1403000},
+                                      "state_limit": 372363, "telemetry": {"sequence": 9}, "last_sample_at": 100.0}}
         for kernel, warning in ((1403000, False), (1500000, True), (None, False)):
             with self.subTest(kernel=kernel), mock.patch.object(STATUS, "kernel_version", return_value=kernel):
-                engine = STATUS.native_engine(timing)
-                self.assertEqual((engine["version_warning"], engine["state_limit"]), (warning, 372363))
+                status = STATUS.state_collector(timing)
+                self.assertEqual((status["version_warning"], status["state_limit"]), (warning, 372363))
+                self.assertEqual((status["state"], status["protocol"], status["expected_protocol"]),
+                                 ("running", 1, 1))
         with mock.patch.object(STATUS, "kernel_version", return_value=None):
-            self.assertEqual(STATUS.native_engine(None)["version_warning"], False)
+            self.assertEqual(STATUS.state_collector(None)["version_warning"], False)
+            self.assertEqual(STATUS.state_collector(None)["state"], "stopped")
+
+    def test_state_collector_incompatible_and_failed(self):
+        def status(**fields):
+            with mock.patch.object(STATUS, "kernel_version", return_value=None):
+                return STATUS.state_collector({"state_collector": fields})
+
+        mismatch = status(incompatible={"reason": "protocol", "protocol": 2, "expected_protocol": 1, "error": "x"},
+                          last_error_at=200.0, last_sample_at=100.0)
+        self.assertEqual((mismatch["state"], mismatch["protocol"], mismatch["expected_protocol"]),
+                         ("incompatible", 2, 1))
+        unknown = status(incompatible={"reason": "protocol", "protocol": None, "expected_protocol": 1, "error": "x"})
+        self.assertEqual((unknown["state"], unknown["protocol"]), ("incompatible", None))
+        self.assertEqual(status(last_error_at=200.0, last_sample_at=100.0)["state"], "failed")
+        self.assertEqual(status(last_error_at=100.0, last_sample_at=200.0)["state"], "running")
+        self.assertEqual(status()["state"], "starting")
+
+    def test_installed_version_comes_from_the_package_version_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "firewall-map")
+            with mock.patch.object(STATUS, "VERSION_FILE", path):
+                self.assertIsNone(STATUS.installed_version())
+                with open(path, "w") as handle:
+                    json.dump({"product_name": "firewall-map", "product_version": "0.59.1"}, handle)
+                self.assertEqual(STATUS.installed_version(), "0.59.1")
 
     def test_last_sample_while_running(self):
         with tempfile.TemporaryDirectory() as directory, \

@@ -19,7 +19,7 @@
 # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 
-"""Specification tests of the native engine (compiled with the synthetic PF reader).
+"""Specification tests of the state collector (compiled with the synthetic PF reader).
 
 Expected values are derived by hand from the fixture's counters and from PF semantics, not
 from the retired Python engine:
@@ -43,8 +43,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src/opnsense/scripts/OPNsense/FirewallMap"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import native  # noqa: E402
-from native_build import compile_worker, state_limit  # noqa: E402
+from lib import collector  # noqa: E402
+from collector_build import compile_worker, state_limit  # noqa: E402
 
 LOCAL = {"8.8.8.1", "2001:4860::1"}
 CONTEXT = (LOCAL, [], {}, None)
@@ -52,7 +52,7 @@ OUTBOUND_QUERY = ("tcp", "8.8.8.1", "30000", "9.9.9.9", "443")
 INBOUND_QUERY = ("tcp", "8.8.8.1", "443", "9.9.9.9", "55000")
 
 
-class NativeEngineSpecificationTest(unittest.TestCase):
+class CollectorEngineSpecificationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.directory = tempfile.TemporaryDirectory()
@@ -63,7 +63,7 @@ class NativeEngineSpecificationTest(unittest.TestCase):
         cls.directory.cleanup()
 
     def setUp(self):
-        self.engine = native.NativeEngine(self.worker)
+        self.engine = collector.CollectorEngine(self.worker)
         self.addCleanup(self.engine.close)
 
     def samples(self, count, mode="one", states=12, **options):
@@ -123,12 +123,12 @@ class NativeEngineSpecificationTest(unittest.TestCase):
         with patch.dict(os.environ, FM_TEST_MODE="badlabel", FM_TEST_COUNT="3", FM_TEST_INTERVAL="2"):
             self.engine.sample(*CONTEXT)
             sample = self.engine.sample(*CONTEXT, snapshot=True)
-            labels = [value for _, kind, _, _, _, value in sample["candidates"] if kind == native.RULE_LABEL]
+            labels = [value for _, kind, _, _, _, value in sample["candidates"] if kind == collector.RULE_LABEL]
             self.assertEqual(labels, [b"caf\xc3"])
             pages = [row for page in self.engine.snapshot_pages() for row in page]
             identities = [(local, remote, False) for local, remote, _, _ in pages]
             self.engine.snapshot_selection(identities)
-            rows, _ = self.engine.snapshot_detail(identities, native.SNAPSHOT_BYTES)
+            rows, _ = self.engine.snapshot_detail(identities, collector.SNAPSHOT_BYTES)
         self.assertEqual(rows["9.9.9.9"][0]["rule_label"], "caf\ufffd")
         self.assertEqual(rows["9.9.9.9"][0]["bytes_from_remote"], 2000 + 600)
 
@@ -143,8 +143,8 @@ class NativeEngineSpecificationTest(unittest.TestCase):
             self.assertFalse(self.engine.snapshot_open)
             # the helper enforces the same maximum on its own
             rows = "".join(f"L {address}\n" for address in sorted(too_many))
-            text = f"FMCONF2\nBUDGET {native.memory_budget()} 16 20000\n{rows}RUN\n"
-            direct = self.engine._request(text, lambda stream, process: native._decode(stream, process, (), False))
+            text = f"FMCONF2\nBUDGET {collector.memory_budget()} 16 20000\n{rows}RUN\n"
+            direct = self.engine._request(text, lambda stream, process: collector._decode(stream, process, (), False))
             self.assertEqual(direct["refused"], {"reason": "refused_context", "kind": "L",
                                                  "actual": 4100, "limit": 4096})
             # a refusal is not a helper failure, and the next accepted sample is a baseline
@@ -186,7 +186,7 @@ class NativeEngineSpecificationTest(unittest.TestCase):
             recovered = self.engine.sample(*CONTEXT)
         self.assertIsNone(first["refused"])
         self.assertEqual(refused["refused"]["reason"], "refused_memory")
-        self.assertEqual(refused["refused"]["limit"], native.memory_budget())
+        self.assertEqual(refused["refused"]["limit"], collector.memory_budget())
         self.assertTrue(recovered["baseline"])
         self.assertEqual(self.engine.starts, 1)
 
@@ -194,15 +194,15 @@ class NativeEngineSpecificationTest(unittest.TestCase):
         with patch.dict(os.environ, FM_TEST_MODE="incomplete", FM_TEST_COUNT="4"):
             self.engine.sample(*CONTEXT)
             self.engine.sample(*CONTEXT)
-            with self.assertRaises(native.NativeError) as raised:
+            with self.assertRaises(collector.CollectorError) as raised:
                 self.engine.sample(*CONTEXT)
         self.assertEqual(raised.exception.failure_class, "structural")
         self.assertIn("synthetic incomplete multipart dump", str(raised.exception))
         self.assertIsNone(self.engine.process)
         self.engine._start()
-        with self.assertRaises(native.NativeError) as raised:
+        with self.assertRaises(collector.CollectorError) as raised:
             self.engine._request("FMCONF2\nBOGUS\nRUN\n",
-                                 lambda stream, process: native._decode(stream, process, (), False))
+                                 lambda stream, process: collector._decode(stream, process, (), False))
         self.assertEqual(raised.exception.failure_class, "request")
         self.assertIsNone(self.engine.process)
 
@@ -218,11 +218,81 @@ class NativeEngineSpecificationTest(unittest.TestCase):
 
     def test_banner_metadata(self):
         self.samples(1)
+        self.assertEqual(self.engine.metadata["protocol"], collector.PROTOCOL_VERSION)
         self.assertEqual(self.engine.metadata["pf_state_version"], 0)  # test build: no PF headers
         self.assertEqual(self.engine.starts, 1)
 
+    def test_version_reports_the_collector_protocol(self):
+        report = subprocess.run([str(self.worker), "--version"], capture_output=True, text=True, check=True)
+        self.assertEqual(__import__("json").loads(report.stdout)["protocol"], 1)
 
-class NativeMemoryTest(unittest.TestCase):
+
+class CollectorProtocolIdentityTest(unittest.TestCase):
+    """One protocol: a collector announcing another one is a package inconsistency, reported
+    as incompatible and never restarted until the installed binary changes."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.path = Path(directory.name) / "firewallmap-collector"
+
+    def install(self, banner):
+        self.path.write_text(f"#!/bin/sh\nprintf '{banner}\\n'\nexec cat >/dev/null\n")
+        self.path.chmod(0o755)
+
+    def start(self, engine):
+        with self.assertRaises(collector.CollectorError) as raised:
+            engine.sample(*CONTEXT)
+        return raised.exception
+
+    def test_expected_protocol_is_1(self):
+        self.assertEqual(collector.PROTOCOL_VERSION, 1)
+
+    def test_other_protocol_is_incompatible_and_the_same_binary_is_not_restarted(self):
+        self.install("FMCOLLECTOR protocol=2 pf_state_version=5 freebsd_version=1500000 extra=1")
+        engine = collector.CollectorEngine(str(self.path))
+        self.addCleanup(engine.close)
+        for _ in range(3):
+            error = self.start(engine)
+            self.assertIsInstance(error, collector.CollectorIncompatible)
+            self.assertEqual((error.failure_class, error.reason, error.protocol), ("incompatible", "protocol", 2))
+            self.assertIn("protocol 2", str(error))
+        self.assertEqual(engine.starts, 1)
+        self.assertIsNone(engine.process)
+
+    def test_unannounced_protocol_is_unknown(self):
+        for banner in ("FMOTHER pf_state_version=0 freebsd_version=0", "garbage", "FMCOLLECTOR protocol=x"):
+            with self.subTest(banner=banner):
+                self.install(banner)
+                error = self.start(collector.CollectorEngine(str(self.path)))
+                self.assertIsInstance(error, collector.CollectorIncompatible)
+                self.assertIsNone(error.protocol)
+                self.assertIn("unknown protocol", str(error))
+
+    def test_reinstalled_binary_is_started_again(self):
+        self.install("FMCOLLECTOR protocol=2 pf_state_version=0 freebsd_version=0")
+        engine = collector.CollectorEngine(str(self.path))
+        self.addCleanup(engine.close)
+        self.start(engine)
+        self.start(engine)
+        self.assertEqual(engine.starts, 1)
+        self.path.unlink()
+        self.install("FMCOLLECTOR protocol=3 pf_state_version=0 freebsd_version=0")
+        self.assertEqual(self.start(engine).protocol, 3)
+        self.assertEqual(engine.starts, 2)
+
+    def test_malformed_protocol_1_banner_is_an_ordinary_failure(self):
+        self.install("FMCOLLECTOR protocol=1 pf_state_version=x")
+        engine = collector.CollectorEngine(str(self.path))
+        self.addCleanup(engine.close)
+        error = self.start(engine)
+        self.assertNotIsInstance(error, collector.CollectorIncompatible)
+        self.assertIsNone(error.failure_class)
+        self.start(engine)
+        self.assertEqual(engine.starts, 2)
+
+
+class CollectorMemoryTest(unittest.TestCase):
     """Steady-state memory: what C1 (the ranking leak) would have failed."""
 
     @classmethod
@@ -235,7 +305,7 @@ class NativeMemoryTest(unittest.TestCase):
         cls.directory.cleanup()
 
     def run_samples(self, count, states=2000, mode="many"):
-        engine = native.NativeEngine(self.worker)
+        engine = collector.CollectorEngine(self.worker)
         self.addCleanup(engine.close)
         with patch.dict(os.environ, FM_TEST_MODE=mode, FM_TEST_COUNT=str(states), FM_TEST_INTERVAL="2"):
             telemetry = [engine.sample(*CONTEXT, threat_summary=True,

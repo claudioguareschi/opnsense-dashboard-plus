@@ -26,9 +26,9 @@
  * real <netpfil/pf/pf_nl.h> and snl headers). The input is one datagram of
  * netlink messages; the sequence number and generic family are fixed so the
  * fuzzer can reach state decoding. Seed it with datagrams from FMNLLE1
- * captures (devel/native_sample reader ... raw.bin) and mutated copies.
+ * captures (devel/collector_sample reader ... raw.bin) and mutated copies.
  * Build and run with devel/fuzz/run.sh on the FreeBSD build host. */
-#include "../../native/pf_reader.h"
+#include "../../collector/pf_reader.h"
 #include <stdlib.h>
 #include <string.h>
 

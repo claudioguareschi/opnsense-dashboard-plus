@@ -29,7 +29,7 @@ import unittest.mock
 import zlib
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "opnsense", "scripts", "OPNsense", "FirewallMap"))
-from lib import native  # noqa: E402
+from lib import collector  # noqa: E402
 
 
 def frame(record):
@@ -41,8 +41,8 @@ def address(value):
     return bytes([parsed.version]) + parsed.packed.ljust(16, b"\0")
 
 
-def header(threats=False):
-    return b"\x00" + struct.pack("!II", 4, int(threats))
+def header(threats=False, version=collector.PROTOCOL_VERSION):
+    return b"\x00" + struct.pack("!II", version, int(threats))
 
 
 def flow(rank=0, local="192.168.1.2", remote="203.0.113.3", rate=4.0):
@@ -103,14 +103,14 @@ class Process:
         return 0
 
 
-class NativeProtocolTest(unittest.TestCase):
+class CollectorProtocolTest(unittest.TestCase):
     def decode(self, data, query_keys=(QUERY,), require_threat_summary=False):
         read_fd, write_fd = os.pipe()
         with os.fdopen(write_fd, "wb") as output:
             output.write(data)
         stream = os.fdopen(read_fd, "rb", buffering=0)
         try:
-            return native._decode(stream, Process(), query_keys, require_threat_summary)
+            return collector._decode(stream, Process(), query_keys, require_threat_summary)
         finally:
             stream.close()
 
@@ -147,7 +147,10 @@ class NativeProtocolTest(unittest.TestCase):
         cases = {
             "truncated": response(VALID)[:-1],
             "checksum": response(VALID, corrupt=1),
-            "old magic": response(VALID, magic=b"FMAGG3\0\0"),
+            "unexpected magic": response(VALID, magic=b"FMSTATE2"),
+            "header version 0": response([header(version=0), telemetry()]),
+            "header version 2": response([header(version=2), telemetry()]),
+            "header flags": response([b"\x00" + struct.pack("!II", collector.PROTOCOL_VERSION, 2), telemetry()]),
             "no footer": response(VALID, footer=False),
             "missing header": response(VALID[1:]),
             "missing telemetry": response(VALID[:-1]),
@@ -168,34 +171,48 @@ class NativeProtocolTest(unittest.TestCase):
             "unknown record": response([header(), b"\x09" + b"x", telemetry()]),
             "nan rate": response([header(), flow(rate=float("nan")), telemetry()]),
             "empty frame": response([header(), b"", telemetry()]),
-            "oversized frame": b"FMAGG4\0\0" + struct.pack("!I", native.MAX_FRAME + 1),
+            "oversized frame": b"FMAGG4\0\0" + struct.pack("!I", collector.MAX_FRAME + 1),
         }
         for name, data in cases.items():
-            with self.subTest(case=name), self.assertRaises(native.NativeError):
+            with self.subTest(case=name), self.assertRaises(collector.CollectorError):
                 self.decode(data)
         # the label bytes are invalid UTF-8: decoded with replacement, never an error
         result = self.decode(response([header(), bad_label, telemetry()]))
         self.assertEqual(result["matches"][QUERY]["rule"], "\ufffd" * 64)
 
     def test_failure_report_carries_its_class(self):
-        message = b"PF state ABI version 2, helper built for 1"
+        message = b"PF state ABI version 2, collector built for 1"
         failure = b"FMFAIL1\0" + frame(b"\xfe" + struct.pack("!Ii", 3, 71) + message)
-        with self.assertRaises(native.NativeError) as raised:
+        with self.assertRaises(collector.CollectorError) as raised:
             self.decode(failure)
         self.assertEqual(raised.exception.failure_class, "incompatible")
-        self.assertIn("helper built for 1", str(raised.exception))
+        self.assertIn("collector built for 1", str(raised.exception))
 
     def test_timeout(self):
         read_fd, write_fd = os.pipe()
         self.addCleanup(os.close, write_fd)
         stream = os.fdopen(read_fd, "rb", buffering=0)
         self.addCleanup(stream.close)
-        with unittest.mock.patch.object(native, "READ_TIMEOUT", 0.05), self.assertRaises(native.NativeError) as raised:
-            native._decode(stream, Process(), (), False)
+        with unittest.mock.patch.object(collector, "READ_TIMEOUT", 0.05), \
+                self.assertRaises(collector.CollectorError) as raised:
+            collector._decode(stream, Process(), (), False)
         self.assertIn("timed out", str(raised.exception))
 
+    def test_build_configd_and_client_agree_on_the_installed_collector(self):
+        root = os.path.join(os.path.dirname(__file__), "..")
+        self.assertEqual(collector.HELPER, "/usr/local/libexec/firewallmap-collector")
+        with open(os.path.join(root, "..", "..", "tools", "build.sh")) as handle:
+            build = handle.read()
+        # the package installs src/ under /usr/local
+        self.assertIn('-o "${WORK}/${PLUGIN}/src/libexec/firewallmap-collector"', build)
+        self.assertIn('"${WORK}/${PLUGIN}"/collector/*.c', build)
+        with open(os.path.join(root, "src/opnsense/service/conf/actions.d/actions_firewallmap.conf")) as handle:
+            actions = handle.read()
+        for action, option in (("collector.selftest", "--selftest"), ("collector.version", "--version")):
+            self.assertIn(f"[{action}]\ncommand:{collector.HELPER} {option}\n", actions)
+
     def test_helper_detection_requires_executable(self):
-        self.assertFalse(native.available("/definitely/not/a/firewallmap-helper"))
+        self.assertFalse(collector.available("/definitely/not/a/firewallmap-helper"))
 
 
 if __name__ == "__main__":

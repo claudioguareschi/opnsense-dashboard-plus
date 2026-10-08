@@ -24,8 +24,9 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""What Reporting: Firewall Map: Status shows, as JSON: the collector, the geolocation database
-and the threat-list downloads. Reads status files only; it downloads nothing.
+"""What Reporting: Firewall Map: Status shows, as JSON: the installed version, the collector and
+its state collector, the geolocation database and the threat-list downloads. Reads status files
+only; it downloads nothing.
 
     firewallmap_status.py
 """
@@ -41,9 +42,17 @@ from firewallmap_collector import IDLE_SECONDS, recording_wanted
 from lib.config import abuseipdb_key, settings, widget_in_use
 from lib.blocklists import FEEDS
 from lib.common import COLLECTOR_TIMINGS, OUTPUT_FILE, REQUEST_MARKER, geodb_view, read_json, secure_umask
-from lib.native import kernel_version
+from lib.collector import PROTOCOL_VERSION, kernel_version
 
 PID_FILE = "/var/run/firewallmap.pid"
+# written by the plugins framework from the package's PLUGIN_VERSION
+VERSION_FILE = "/usr/local/opnsense/version/firewall-map"
+
+
+def installed_version():
+    """The installed Firewall Map package version (e.g. 0.59 or the development build 0.59.1)."""
+    version = read_json(VERSION_FILE).get("product_version")
+    return version if isinstance(version, str) and version else None
 
 
 def modified(path):
@@ -83,13 +92,26 @@ def collector(now=None):
     }
 
 
-def native_engine(timing):
-    """The state engine as the running collector last saw it: helper identity and build ABI,
-    the admission limit its budget derives, the last sample's cost, omissions, skips,
-    refusals and errors. A helper built for another FreeBSD version is only a warning: the
-    PF state ABI check decides compatibility."""
-    status = dict((timing or {}).get("native") or {})
+def state_collector(timing):
+    """The state collector as the running service last saw it: state (running, incompatible,
+    failed, starting, or stopped with the service), protocol (announced, or None when unknown)
+    and the expected one, process and build ABI, the admission limit its budget derives, the
+    last sample's cost, omissions, skips, refusals and errors. A collector built for another
+    FreeBSD version is only a warning: the PF state ABI check decides compatibility."""
+    status = dict((timing or {}).get("state_collector") or {})
     helper = status.get("helper") or {}
+    incompatible = status.get("incompatible")
+    if timing is None:
+        state = "stopped"
+    elif incompatible:
+        state = "incompatible"
+    elif status.get("last_error_at") and status["last_error_at"] >= (status.get("last_sample_at") or 0):
+        state = "failed"
+    else:
+        state = "running" if status.get("last_sample_at") else "starting"
+    status["state"] = state
+    status["protocol"] = incompatible["protocol"] if incompatible else helper.get("protocol")
+    status["expected_protocol"] = PROTOCOL_VERSION
     kernel = kernel_version()
     built = helper.get("freebsd_version")
     status["kernel_version"] = kernel
@@ -130,7 +152,8 @@ def blacklist():
 
 def overview():
     state = collector()
-    return {"collector": state, "native": native_engine(state.get("timing")), "database": database(),
+    return {"version": installed_version(), "collector": state, "state_collector": state_collector(state.get("timing")),
+            "database": database(),
             "feeds": threat_feeds(), "abuseipdb": blacklist(), "now": time.time()}
 
 

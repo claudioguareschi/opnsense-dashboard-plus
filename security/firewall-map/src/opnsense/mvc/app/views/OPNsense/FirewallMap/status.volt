@@ -75,6 +75,13 @@
             engine_rejected: {{ lang._('%s filter log and %s IDS lines rejected')|json_encode }},
             engine_refused: {{ lang._('Last sample refused: %s')|json_encode }},
             engine_incompatible: {{ lang._('Incompatible with this firewall: %s')|json_encode }},
+            engine_protocol_mismatch: {{ lang._('Firewall Map collector incompatible — The Firewall Map application and its state collector use incompatible protocols. Reinstall or upgrade the Firewall Map package so both components come from the same version.')|json_encode }},
+            collector_running: {{ lang._('Running')|json_encode }},
+            collector_incompatible: {{ lang._('Incompatible')|json_encode }},
+            collector_failed: {{ lang._('Failed')|json_encode }},
+            collector_starting: {{ lang._('Starting')|json_encode }},
+            collector_stopped: {{ lang._('Not running')|json_encode }},
+            unknown: {{ lang._('unknown')|json_encode }},
             none: {{ lang._('none')|json_encode }},
         });
         const PROVIDERS = plain({
@@ -102,6 +109,7 @@
 
         const render = function (data) {
             const now = data.now || Date.now() / 1000;
+            $('#version').text(data.version || T.unknown);
             const c = data.collector || {};
             $('#collector-status').html(c.running
                 ? state(null, c.mode === 'live' ? T.running_live : T.running_background)
@@ -112,7 +120,15 @@
             const ms = (seconds) => Math.round(seconds * 1000).toLocaleString();
             $('#collector-sample').text(sample ? T.sample.replace('%s', ms(sample.wall)).replace('%s', ms(sample.cpu)) : '—');
 
-            const engine = data.native || {};
+            const engine = data.state_collector || {};
+            const incompatible = engine.incompatible || null;
+            const stateText = T[`collector_${engine.state}`] || T.collector_stopped;
+            $('#engine-state').html(engine.state === 'incompatible' || engine.state === 'failed' ? state(stateText)
+                : engine.state === 'running' ? state(null, stateText)
+                : `<span class="text-muted">${escape(stateText)}</span>`);
+            $('#engine-protocol').text(engine.protocol === null || engine.protocol === undefined
+                ? (engine.state === 'incompatible' ? T.unknown : '—') : engine.protocol);
+            $('#engine-expected-protocol').text(engine.expected_protocol || '—');
             const helper = engine.helper || {};
             const telemetry = engine.telemetry || {};
             const count = (value) => Number(value || 0).toLocaleString();
@@ -132,7 +148,8 @@
                 count(telemetry.event_history_evicted)) : '—');
             const rejected = engine.ingest_rejected || {};
             $('#engine-rejected').text(fill(T.engine_rejected, count(rejected.filterlog), count(rejected.eve)));
-            const problem = engine.incompatible ? fill(T.engine_incompatible, engine.incompatible)
+            const problem = incompatible ? (incompatible.reason === 'protocol' ? T.engine_protocol_mismatch
+                    : fill(T.engine_incompatible, incompatible.error))
                 : engine.refused ? fill(T.engine_refused, `${engine.refused.reason} (${count(engine.refused.actual)} / ${count(engine.refused.limit)})`)
                 : engine.last_error ? engine.last_error : null;
             $('#engine-problem').html(problem ? state(problem) : escape(T.none));
@@ -218,7 +235,8 @@
     <table class="table table-condensed">
         <thead><tr><th colspan="2">{{ lang._('Collector') }}</th></tr></thead>
         <tbody>
-            <tr><td style="width: 25%;">{{ lang._('Status') }}</td><td id="collector-status"></td></tr>
+            <tr><td style="width: 25%;">{{ lang._('Firewall Map version') }}</td><td id="version"></td></tr>
+            <tr><td>{{ lang._('Status') }}</td><td id="collector-status"></td></tr>
             <tr><td>{{ lang._('Last map update') }}</td><td id="collector-update"></td></tr>
             <tr><td>{{ lang._('Background recording') }}</td><td id="collector-recording"></td></tr>
             <tr><td>{{ lang._('Last sample') }}</td><td id="collector-sample"></td></tr>
@@ -228,11 +246,14 @@
 
 <div class="content-box __mb">
     <table class="table table-condensed">
-        <thead><tr><th colspan="2">{{ lang._('State engine') }}</th></tr></thead>
+        <thead><tr><th colspan="2">{{ lang._('State collector') }}</th></tr></thead>
         <tbody>
-            <tr><td style="width: 25%;">{{ lang._('Helper') }}</td><td id="engine-helper"></td></tr>
+            <tr><td style="width: 25%;">{{ lang._('State collector') }}</td><td id="engine-state"></td></tr>
+            <tr><td>{{ lang._('Collector protocol') }}</td><td id="engine-protocol"></td></tr>
+            <tr><td>{{ lang._('Expected protocol') }}</td><td id="engine-expected-protocol"></td></tr>
+            <tr><td>{{ lang._('Process') }}</td><td id="engine-helper"></td></tr>
             <tr><td>{{ lang._('State limit') }}</td><td id="engine-limit"></td></tr>
-            <tr><td>{{ lang._('Last native sample') }}</td><td id="engine-sample"></td></tr>
+            <tr><td>{{ lang._('Last collector sample') }}</td><td id="engine-sample"></td></tr>
             <tr><td>{{ lang._('Left out') }}</td><td id="engine-omitted"></td></tr>
             <tr><td>{{ lang._('Rejected log lines') }}</td><td id="engine-rejected"></td></tr>
             <tr><td>{{ lang._('Problems') }}</td><td id="engine-problem"></td></tr>

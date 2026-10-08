@@ -21,7 +21,7 @@
 
 """Builds the production helper with the synthetic PF reader for tests (no PF access).
 
-The fixture (devel/native_snapshot_fixture.c) replaces only pf_reader.c; every other native
+The fixture (devel/collector_snapshot_fixture.c) replaces only pf_reader.c; every other collector
 source is the shipped code. FM_TEST_MODE, FM_TEST_COUNT and FM_TEST_INTERVAL select the
 synthetic state table and make sample anchors deterministic.
 """
@@ -38,9 +38,9 @@ FLAGS = ("-O2", "-Wall", "-Wextra", "-Werror", "-DFM_TEST_HOOKS")
 
 
 def budget_constant(name):
-    """A numeric #define from native/budget.h (the tests' single source for the budget model)."""
+    """A numeric #define from collector/budget.h (the tests' single source for the budget model)."""
     import re
-    text = (ROOT / "native" / "budget.h").read_text()
+    text = (ROOT / "collector" / "budget.h").read_text()
     match = re.search(rf"#define {name} \(?(?:UINT64_C\((\d+)\) << (\d+)|(\d+))\)?", text)
     if not match:
         raise LookupError(name)
@@ -53,13 +53,13 @@ def state_limit(memory):
 
 
 def compile_worker(output, extra_flags=()):
-    """FM_NATIVE_TEST_CC and FM_NATIVE_TEST_FLAGS select a sanitizer build, e.g.
-    FM_NATIVE_TEST_CC=clang FM_NATIVE_TEST_FLAGS="-g -fsanitize=undefined -fno-sanitize-recover=all"."""
-    compiler = shutil.which(os.environ.get("FM_NATIVE_TEST_CC", "cc"))
+    """FM_COLLECTOR_TEST_CC and FM_COLLECTOR_TEST_FLAGS select a sanitizer build, e.g.
+    FM_COLLECTOR_TEST_CC=clang FM_COLLECTOR_TEST_FLAGS="-g -fsanitize=undefined -fno-sanitize-recover=all"."""
+    compiler = shutil.which(os.environ.get("FM_COLLECTOR_TEST_CC", "cc"))
     if not compiler:
         raise unittest.SkipTest("C compiler unavailable")
-    extra_flags = (*extra_flags, *shlex.split(os.environ.get("FM_NATIVE_TEST_FLAGS", "")))
-    sources = [str(path) for path in sorted((ROOT / "native").glob("*.c")) if path.name != "pf_reader.c"]
-    subprocess.run([compiler, *FLAGS, *extra_flags, "-I", str(ROOT / "native"), *sources,
-                    str(ROOT / "devel/native_snapshot_fixture.c"), "-lm", "-o", str(output)], check=True)
+    extra_flags = (*extra_flags, *shlex.split(os.environ.get("FM_COLLECTOR_TEST_FLAGS", "")))
+    sources = [str(path) for path in sorted((ROOT / "collector").glob("*.c")) if path.name != "pf_reader.c"]
+    subprocess.run([compiler, *FLAGS, *extra_flags, "-I", str(ROOT / "collector"), *sources,
+                    str(ROOT / "devel/collector_snapshot_fixture.c"), "-lm", "-o", str(output)], check=True)
     return str(output)

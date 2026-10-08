@@ -23,13 +23,17 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-"""Client of the package-owned native PF engine (firewallmap-native).
+"""Client of the package-owned PF state collector (firewallmap-collector).
 
-The wire formats are specified in native/PROTOCOL.md. Every response is
-validated completely (framing, record order, counts, checksum) before any of
-it is used; anything unexpected closes the helper, so a stream is never
-resynchronized. Python never supplies elapsed time: the helper anchors each
-sample itself and reports a baseline (interval < 0) when it has none.
+The collector speaks exactly one protocol, PROTOCOL_VERSION; the wire formats
+are specified in collector/PROTOCOL.md. A collector announcing any other
+protocol comes from a different package version: that is an installation
+problem (CollectorIncompatible), not a transient failure, and the same binary
+is never started again. Every response is validated completely (framing,
+record order, counts, checksum) before any of it is used; anything unexpected
+closes the collector, so a stream is never resynchronized. Python never
+supplies elapsed time: the collector anchors each sample itself and reports a
+baseline (interval < 0) when it has none.
 
 Compatibility names: decoded event matches keep the historical keys
 ``bytes_in`` (traffic from the remote) and ``bytes_out`` (traffic to the
@@ -50,8 +54,11 @@ import zlib
 
 from . import classification, common
 
-HELPER = "/usr/local/libexec/firewallmap-native"
-BANNER = re.compile(rb"^FMNATIVE5 pf_state_version=(\d+) freebsd_version=(\d+)\n$")
+HELPER = "/usr/local/libexec/firewallmap-collector"
+PROTOCOL_VERSION = 1
+# the banner's first two fields are the same in every protocol; the rest is protocol 1's
+BANNER_PROTOCOL = re.compile(rb"^FMCOLLECTOR protocol=(\d{1,9})[ \n]")
+BANNER = re.compile(rb"^FMCOLLECTOR protocol=1 pf_state_version=(\d{1,10}) freebsd_version=(\d{1,10})\n$")
 MAX_FRAME = 4096
 # a response must complete within this; the window grows with the helper's own measured cost
 READ_TIMEOUT = 20
@@ -63,7 +70,7 @@ SNAPSHOT_BYTES = 10 * 1024 * 1024
 SNAPSHOT_STATES = 5000
 MAX_EVENT_QUERIES = 2500
 
-# Resource budgets (native/budget.h, PROTOCOL.md): the helper enforces the same maxima.
+# Resource budgets (collector/budget.h, PROTOCOL.md): the helper enforces the same maxima.
 RANKED_FLOWS = 150
 CANDIDATES_PER_KIND = 16
 THREAT_REMOTES = 20000
@@ -97,16 +104,28 @@ _TELEMETRY_FIELDS = ("pid", "sequence", "interval", "dump_seconds", "processing_
 _FOOTER = struct.Struct("!IIQQQQQQQQQQQI")
 
 
-class NativeError(RuntimeError):
-    """The native helper was absent, incompatible, or failed its complete sample.
+class CollectorError(RuntimeError):
+    """The collector was absent, incompatible, or failed its complete sample.
 
-    failure_class names the helper's own classification (FMFAIL1) when it gave
-    one: structural, internal, incompatible, resources or request.
+    failure_class names the collector's own classification (FMFAIL1) when it
+    gave one: structural, internal, incompatible, resources or request.
     """
 
     def __init__(self, message, failure_class=None):
         super().__init__(message)
         self.failure_class = failure_class
+
+
+class CollectorIncompatible(CollectorError):
+    """The installed collector speaks another protocol (protocol: the one it announced, or
+    None when its banner names none): the package's components come from different versions."""
+
+    def __init__(self, protocol):
+        announced = "an unknown protocol" if protocol is None else f"protocol {protocol}"
+        super().__init__(f"the collector uses {announced}; this Firewall Map expects protocol "
+                         f"{PROTOCOL_VERSION}", "incompatible")
+        self.reason = "protocol"
+        self.protocol = protocol
 
 
 def available(path=HELPER):
@@ -117,7 +136,7 @@ def self_test(path=HELPER, timeout=READ_TIMEOUT_MAX):
     """The helper's own compatibility check (one PF dump, no aggregation): a dict with ok,
     and class/error on failure. An incompatible PF ABI has class "incompatible"."""
     if not available(path):
-        return {"ok": False, "class": "unavailable", "error": "native helper unavailable"}
+        return {"ok": False, "class": "unavailable", "error": "collector unavailable"}
     try:
         result = subprocess.run([path, "--selftest"], capture_output=True, text=True, timeout=timeout, check=False)
         report = json.loads(result.stdout.strip().splitlines()[-1])
@@ -198,7 +217,7 @@ def _context_rows(local_addresses, networks, interface_addresses, primary_wan_de
             try:
                 number = socket.getprotobyname(protocol)
             except OSError as error:
-                raise NativeError(f"unsupported service protocol {protocol}") from error
+                raise CollectorError(f"unsupported service protocol {protocol}") from error
         groups.setdefault(name, len(groups) + 2)
         rows.append(f"S {number} {port} {groups[name]}")
     return rows, None
@@ -206,10 +225,10 @@ def _context_rows(local_addresses, networks, interface_addresses, primary_wan_de
 
 def _address(data):
     if len(data) != 17 or data[0] not in (4, 6):
-        raise NativeError("invalid native address")
+        raise CollectorError("invalid collector address")
     if data[0] == 4:
         if any(data[5:]):
-            raise NativeError("noncanonical IPv4 address")
+            raise CollectorError("noncanonical IPv4 address")
         return str(ipaddress.IPv4Address(data[1:5]))
     return str(ipaddress.IPv6Address(data[1:]))
 
@@ -225,11 +244,11 @@ def _read_exact(stream, size, process, deadline):
     while len(data) < size:
         remaining = deadline - time.monotonic()
         if remaining <= 0 or not select.select([descriptor], [], [], remaining)[0]:
-            raise NativeError("native helper response timed out")
+            raise CollectorError("collector response timed out")
         part = os.read(descriptor, size - len(data))
         if not part:
             code = process.poll()
-            raise NativeError(f"native helper ended before its response was complete ({code})")
+            raise CollectorError(f"collector ended before its response was complete ({code})")
         data.extend(part)
     return bytes(data)
 
@@ -241,9 +260,9 @@ def _frames(stream, process, deadline, byte_limit=None, received=8):
         length, = struct.unpack("!I", size)
         received += length + 4
         if not 0 < length <= MAX_FRAME:
-            raise NativeError("native frame size")
+            raise CollectorError("collector frame size")
         if byte_limit is not None and received > byte_limit:
-            raise NativeError("native response exceeds its byte ceiling")
+            raise CollectorError("collector response exceeds its byte ceiling")
         data = _read_exact(stream, length, process, deadline)
         yield size, data
         if data[0] == FOOTER:
@@ -254,14 +273,14 @@ def _failure(stream, process, deadline):
     size = _read_exact(stream, 4, process, deadline)
     length, = struct.unpack("!I", size)
     if not 9 <= length <= MAX_FRAME:
-        raise NativeError("malformed native failure report")
+        raise CollectorError("malformed collector failure report")
     data = _read_exact(stream, length, process, deadline)
     if data[0] != FAILURE:
-        raise NativeError("malformed native failure report")
+        raise CollectorError("malformed collector failure report")
     failure_class, code = struct.unpack_from("!Ii", data, 1)
     message = data[9:].decode("utf-8", "replace")
     name = FAILURE_CLASSES.get(failure_class, "unknown")
-    return NativeError(f"native helper failed ({name}, errno {code}): {message}", name)
+    return CollectorError(f"collector failed ({name}, errno {code}): {message}", name)
 
 
 def _magic(stream, process, deadline, expected):
@@ -269,7 +288,7 @@ def _magic(stream, process, deadline, expected):
     if magic == b"FMFAIL1\0":
         raise _failure(stream, process, deadline)
     if magic != expected:
-        raise NativeError("native helper protocol version mismatch")
+        raise CollectorError(f"unexpected collector response {magic!r}")
 
 
 def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANKED_FLOWS, byte_limit=None,
@@ -286,29 +305,29 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
             checksum = zlib.crc32(data, zlib.crc32(size, checksum))
         if threats_present is None:
             if kind != HEADER or len(data) != 9:
-                raise NativeError("FMAGG4 header missing")
+                raise CollectorError("FMAGG4 header missing")
             version, flags = struct.unpack_from("!II", data, 1)
-            if version != 4 or flags & ~1:
-                raise NativeError("FMAGG4 header version or flags")
+            if version != PROTOCOL_VERSION or flags & ~1:
+                raise CollectorError("FMAGG4 header version or flags")
             threats_present = bool(flags & 1)
             if require_threat_summary and not threats_present:
-                raise NativeError("FMAGG4 threat summary missing")
+                raise CollectorError("FMAGG4 threat summary missing")
             continue
         if telemetry is not None and kind != FOOTER:
-            raise NativeError("FMAGG4 record after telemetry")
+            raise CollectorError("FMAGG4 record after telemetry")
         if kind in (FLOW, CANDIDATE, THREAT_REMOTE, THREAT_CANDIDATE, EVENT_MATCH) and kind < previous_kind:
-            raise NativeError("FMAGG4 record order")
+            raise CollectorError("FMAGG4 record order")
         if kind != FOOTER:
             previous_kind = max(previous_kind, kind)
         if kind == FLOW:
             if len(data) != 1 + _FLOW.size:
-                raise NativeError("invalid FMAGG4 flow record")
+                raise CollectorError("invalid FMAGG4 flow record")
             (rank, local, remote, states, from_remote, to_remote, oldest, youngest, remote_weight, local_weight,
              first, delta_from, delta_to, delta_packets, rate_from, rate_to, packet_rate, activity,
              score) = _FLOW.unpack_from(data, 1)
             if rank != len(flows) or not all(math.isfinite(value) and value >= 0 for value in
                                              (rate_from, rate_to, packet_rate, activity, score)):
-                raise NativeError("invalid FMAGG4 flow rank or rate")
+                raise CollectorError("invalid FMAGG4 flow rank or rate")
             flows.append({"key": (_address(local), _address(remote)), "states": states,
                           "bytes_from_remote": from_remote, "bytes_to_remote": to_remote,
                           "oldest": oldest, "youngest": youngest,
@@ -319,49 +338,49 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
                           "packet_rate": packet_rate, "activity": activity, "score": score})
         elif kind == CANDIDATE:
             if len(data) < 32:
-                raise NativeError("invalid FMAGG4 candidate record")
+                raise CollectorError("invalid FMAGG4 candidate record")
             flow, candidate_kind, sequence, weight, association, length = struct.unpack_from("!IBQQQH", data, 1)
             if flow >= len(flows) or candidate_kind not in range(PROTOCOL, RULE_LABEL + 1) \
                     or length != len(data) - 32:
-                raise NativeError("invalid FMAGG4 candidate identity")
+                raise CollectorError("invalid FMAGG4 candidate identity")
             candidates.append((flow, candidate_kind, sequence, weight, association, data[32:]))
         elif kind == THREAT_REMOTE:
             if not threats_present or len(data) != 50:
-                raise NativeError("invalid FMAGG4 threat remote")
+                raise CollectorError("invalid FMAGG4 threat remote")
             index, = struct.unpack_from("!I", data, 1)
             remote_states, local_states, transferred, youngest = struct.unpack_from("!QQQI", data, 22)
             if index != len(threat_remotes):
-                raise NativeError("FMAGG4 threat remote order")
+                raise CollectorError("FMAGG4 threat remote order")
             threat_remotes.append({"address": _address(data[5:22]), "remote_initiated_states": remote_states,
                                    "local_initiated_states": local_states, "bytes": transferred,
                                    "youngest": youngest})
         elif kind == THREAT_CANDIDATE:
             if not threats_present or len(data) < 24:
-                raise NativeError("invalid FMAGG4 threat candidate")
+                raise CollectorError("invalid FMAGG4 threat candidate")
             remote, candidate_kind, sequence, association, length = struct.unpack_from("!IBQQH", data, 1)
             if remote >= len(threat_remotes) or candidate_kind not in THREAT_CANDIDATE_KINDS \
                     or length != len(data) - 24:
-                raise NativeError("invalid FMAGG4 threat candidate identity")
+                raise CollectorError("invalid FMAGG4 threat candidate identity")
             threat_candidates.append((remote, candidate_kind, sequence, association, data[24:]))
         elif kind == EVENT_MATCH:
             key, match = _event_match(data, query_keys)
             if key in matches:
-                raise NativeError("FMAGG4 duplicate event match")
+                raise CollectorError("FMAGG4 duplicate event match")
             matches[key] = match
         elif kind == TELEMETRY:
             if len(data) != 1 + _TELEMETRY.size:
-                raise NativeError("invalid FMAGG4 telemetry")
+                raise CollectorError("invalid FMAGG4 telemetry")
             telemetry = dict(zip(_TELEMETRY_FIELDS, _TELEMETRY.unpack_from(data, 1)))
             if not all(math.isfinite(telemetry[name]) for name in _TELEMETRY_FIELDS[2:7]):
-                raise NativeError("invalid FMAGG4 telemetry")
+                raise CollectorError("invalid FMAGG4 telemetry")
         elif kind == FOOTER:
             if len(data) != 1 + _FOOTER.size:
-                raise NativeError("invalid FMAGG4 footer")
+                raise CollectorError("invalid FMAGG4 footer")
             footer = _FOOTER.unpack_from(data, 1)
         else:
-            raise NativeError("unknown FMAGG4 record")
+            raise CollectorError("unknown FMAGG4 record")
     if threats_present is None or telemetry is None or footer is None:
-        raise NativeError("incomplete FMAGG4 response")
+        raise CollectorError("incomplete FMAGG4 response")
     (outcome, context_kind, actual, limit, seen, retained, mapped, flow_total, flows_sent, candidates_sent,
      matches_sent, remotes_sent, remote_candidates_sent, expected) = footer
     records = (flows, candidates, matches, threat_remotes, threat_candidates)
@@ -371,7 +390,7 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
             or len(flows) > flow_limit or not mapped <= retained <= seen \
             or sum(flow["states"] for flow in flows) > mapped \
             or (outcome and (any(records) or threats_present)):
-        raise NativeError("FMAGG4 completion validation failed")
+        raise CollectorError("FMAGG4 completion validation failed")
     refused = OUTCOMES[outcome] if outcome else None
     # a sample that skipped unsupported states is semantically incomplete; event matches say so,
     # since a skipped state could have shared their outside tuple
@@ -391,10 +410,10 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
 
 def _event_match(data, query_keys):
     if len(data) != 194:
-        raise NativeError("invalid FMAGG4 event match")
+        raise CollectorError("invalid FMAGG4 event match")
     query_id, match_kind, proto = struct.unpack_from("!HBB", data, 1)
     if query_id >= len(query_keys) or match_kind not in EVENT_MATCH_KINDS:
-        raise NativeError("invalid FMAGG4 event match identity")
+        raise CollectorError("invalid FMAGG4 event match identity")
     public, public_port = _address(data[5:22]), struct.unpack_from("!H", data, 22)[0]
     remote, remote_port = _address(data[24:41]), struct.unpack_from("!H", data, 41)[0]
     has_inside = data[43]
@@ -403,15 +422,15 @@ def _event_match(data, query_keys):
     age, from_remote, to_remote, packets_from, packets_to = struct.unpack_from("!IQQQQ", data, 76)
     remote_initiated, apparent = data[112], data[113]
     if not {has_inside, ambiguous, remote_initiated, apparent} <= {0, 1}:
-        raise NativeError("invalid FMAGG4 event flags")
+        raise CollectorError("invalid FMAGG4 event flags")
     try:
         protocol = common.protocol_name(proto)
     except (OSError, ValueError) as error:
-        raise NativeError("unknown FMAGG4 event protocol") from error
+        raise CollectorError("unknown FMAGG4 event protocol") from error
     key = (protocol, public, str(public_port) if public_port else "",
            remote, str(remote_port) if remote_port else "")
     if key != query_keys[query_id]:
-        raise NativeError("FMAGG4 event tuple mismatch")
+        raise CollectorError("FMAGG4 event tuple mismatch")
     return key, {"kind": match_kind, "inside": _address(data[44:61]) if has_inside else None,
                  "inside_port": inside_port if has_inside else None,
                  "id": state_id, "creator": creator, "ambiguous": bool(ambiguous), "age": age,
@@ -424,8 +443,8 @@ def _event_match(data, query_keys):
                  "interface": _text(data[114:130], "ascii"), "rule": _text(data[130:194]) or None}
 
 
-class NativeEngine:
-    """One collector-owned helper process; its native history lives across samples.
+class CollectorEngine:
+    """One collector process owned by the Python service; its history lives across samples.
 
     Every request goes through _request: a request that does not complete
     cleanly, for any reason (including an exception raised while it is in
@@ -441,10 +460,25 @@ class NativeEngine:
         self.starts = 0
         self.last_error = None
         self.read_timeout = READ_TIMEOUT
+        # (file identity, announced protocol) of a binary that speaks another protocol
+        self.incompatible = None
+
+    def _identity(self):
+        try:
+            info = os.stat(self.path)
+        except OSError:
+            return None
+        return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
 
     def _start(self):
         if not available(self.path):
-            raise NativeError("native helper unavailable")
+            raise CollectorError("collector unavailable")
+        identity = self._identity()
+        if self.incompatible is not None:
+            if self.incompatible[0] == identity:
+                # the same binary again: only a reinstall or upgrade can change the answer
+                raise CollectorIncompatible(self.incompatible[1])
+            self.incompatible = None
         try:
             self.process = subprocess.Popen([self.path], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                             bufsize=0)
@@ -455,18 +489,23 @@ class NativeEngine:
                 banner += _read_exact(self.process.stdout, 1, self.process, deadline)
             match = BANNER.match(bytes(banner))
             if not match:
-                raise NativeError("native helper capability mismatch")
-            self.metadata = {"pid": self.process.pid, "pf_state_version": int(match.group(1)),
-                             "freebsd_version": int(match.group(2))}
-        except (OSError, NativeError) as error:
+                announced = BANNER_PROTOCOL.match(bytes(banner))
+                protocol = int(announced.group(1)) if announced else None
+                if protocol == PROTOCOL_VERSION:
+                    raise CollectorError("malformed collector banner")
+                self.incompatible = identity, protocol
+                raise CollectorIncompatible(protocol)
+            self.metadata = {"pid": self.process.pid, "protocol": PROTOCOL_VERSION,
+                             "pf_state_version": int(match.group(1)), "freebsd_version": int(match.group(2))}
+        except (OSError, CollectorError) as error:
             self.close()
-            if isinstance(error, NativeError):
+            if isinstance(error, CollectorError):
                 raise
-            raise NativeError("could not start native helper") from error
+            raise CollectorError("could not start the collector") from error
 
     def _request(self, text, decoder):
         if self.process is None or self.process.poll() is not None:
-            raise NativeError("native helper is not running")
+            raise CollectorError("collector is not running")
         try:
             self.process.stdin.write(text.encode("ascii"))
             self.process.stdin.flush()
@@ -474,12 +513,12 @@ class NativeEngine:
         except BaseException as error:
             # framing is unknown: never reuse this helper
             self.close()
-            if isinstance(error, NativeError):
+            if isinstance(error, CollectorError):
                 self.last_error = str(error)
                 raise
             if isinstance(error, (OSError, UnicodeError, ValueError, struct.error)):
-                self.last_error = f"native helper request failed: {error}"
-                raise NativeError(self.last_error) from error
+                self.last_error = f"collector request failed: {error}"
+                raise CollectorError(self.last_error) from error
             raise
 
     def sample(self, local_addresses, networks, interface_addresses, primary_wan_device,
@@ -542,7 +581,7 @@ class NativeEngine:
             changed = changed or (active is not None and page["active"] != active)
             if changed:
                 self.close()
-                raise NativeError("native snapshot page generation/offset changed")
+                raise CollectorError("collector snapshot page generation/offset changed")
             active = page["active"]
             yield page["flows"]
             offset += len(page["flows"])
@@ -557,12 +596,12 @@ class NativeEngine:
             timeout=self.read_timeout))
         if [row["key"] for row in result["flows"]] != [tuple(item[:2]) for item in identities]:
             self.close()
-            raise NativeError("native snapshot selection identity mismatch")
+            raise CollectorError("collector snapshot selection identity mismatch")
         return result
 
     def snapshot_detail(self, identities, byte_limit, state_limit=SNAPSHOT_STATES):
         if not 0 <= byte_limit <= SNAPSHOT_BYTES or not 0 < state_limit <= SNAPSHOT_STATES:
-            raise NativeError("invalid native snapshot detail budget")
+            raise CollectorError("invalid collector snapshot detail budget")
         text = f"FMSNAP1 DETAIL {self.snapshot_generation} {byte_limit} {state_limit} {len(identities)}\n"
         text += _identity_rows(identities)
         generation = self.snapshot_generation
@@ -603,12 +642,12 @@ class NativeEngine:
 
 def _identity_rows(identities):
     if len(identities) > SNAPSHOT_FLOWS:
-        raise NativeError("too many native snapshot identities")
+        raise CollectorError("too many collector snapshot identities")
     seen, rows = set(), []
     for local, remote, incident in identities:
         pair = (str(ipaddress.ip_address(local)), str(ipaddress.ip_address(remote)))
         if pair in seen or incident not in (True, False):
-            raise NativeError("duplicate/invalid native snapshot identity")
+            raise CollectorError("duplicate/invalid collector snapshot identity")
         seen.add(pair)
         rows.append(f"F {pair[0]} {pair[1]} {int(incident)}\n")
     return "".join(rows) + "RUN\n"
@@ -629,24 +668,24 @@ def _decode_page(stream, process, timeout=None):
     for data, checksum in _snapshot_frames(stream, process, b"FMPAGE1\0", 16384, timeout):
         if data[0] == 0 and header is None and len(data) == 33:
             version, generation, active, offset, count = struct.unpack("!IQQQI", data[1:])
-            if version != 1 or not 0 <= count <= 150 or not offset + count <= active:
-                raise NativeError("native snapshot page header")
+            if version != PROTOCOL_VERSION or not 0 <= count <= 150 or not offset + count <= active:
+                raise CollectorError("collector snapshot page header")
             header = generation, active, offset, count
         elif data[0] == 1 and header is not None and len(data) == 51:
             pair = _address(data[1:18]), _address(data[18:35])
             score, order = struct.unpack("!dQ", data[35:])
             if pair in seen or not math.isfinite(score) or score < 0 or len(flows) >= header[3]:
-                raise NativeError("native snapshot page flow")
+                raise CollectorError("collector snapshot page flow")
             seen.add(pair)
             flows.append((*pair, score, order))
         elif data[0] == FOOTER and header is not None and len(data) == 5:
             if struct.unpack("!I", data[1:])[0] != checksum or len(flows) != header[3] or (
                     not flows and header[2] != header[1]):
-                raise NativeError("native snapshot page completion")
+                raise CollectorError("collector snapshot page completion")
             return dict(generation=header[0], active=header[1], offset=header[2], flows=flows)
         else:
-            raise NativeError("native snapshot page record")
-    raise NativeError("incomplete native snapshot page")
+            raise CollectorError("collector snapshot page record")
+    raise CollectorError("incomplete collector snapshot page")
 
 
 _FLOW_TOTALS = struct.Struct("!IQQQQQQQQB")
@@ -665,30 +704,30 @@ def _decode_detail(stream, process, identities, generation, byte_limit, state_li
     for data, checksum in _snapshot_frames(stream, process, b"FMSTATE2", ceiling, timeout):
         if data[0] == 0 and not started and len(data) == 13:
             version, received_generation = struct.unpack("!IQ", data[1:])
-            if version != 2 or received_generation != generation:
-                raise NativeError("native snapshot detail generation/version")
+            if version != PROTOCOL_VERSION or received_generation != generation:
+                raise CollectorError("collector snapshot detail generation/version")
             started = True
         elif data[0] == 1 and started and not totals and len(data) > 5:
             flow_id, = struct.unpack("!I", data[1:5])
             if flow_id >= len(identities) or len(seen) >= state_limit:
-                raise NativeError("native snapshot state association/limit")
+                raise CollectorError("collector snapshot state association/limit")
             row = json.loads(data[5:])
             local, remote, _incident = identities[flow_id]
             if not isinstance(row, dict) or row.get("flow") != {"origin": local, "dest": remote}:
-                raise NativeError("native snapshot flow mismatch")
+                raise CollectorError("collector snapshot flow mismatch")
             identity = row.get("id"), row.get("creatorid")
             invalid_identity = not all(isinstance(value, str) for value in identity)
             if not invalid_identity:
                 invalid_identity = (len(identity[0]) != 16 or len(identity[1]) != 8 or identity in seen)
             if invalid_identity:
-                raise NativeError("native snapshot PF identity")
+                raise CollectorError("collector snapshot PF identity")
             try:
                 int(identity[0], 16), int(identity[1], 16)
             except ValueError as error:
-                raise NativeError("native snapshot PF identity") from error
+                raise CollectorError("collector snapshot PF identity") from error
             actual_bytes += len(json.dumps(row, separators=(",", ":"))) + len(remote) + 8
             if actual_bytes > byte_limit:
-                raise NativeError("native snapshot encoded evidence ceiling")
+                raise CollectorError("collector snapshot encoded evidence ceiling")
             seen.add(identity)
             captured_by_flow[flow_id] += 1
             rows.setdefault(remote, []).append(row)
@@ -698,7 +737,7 @@ def _decode_detail(stream, process, identities, generation, byte_limit, state_li
             if flow_id != len(totals) or flow_id >= len(identities) or captured != captured_by_flow[flow_id] \
                     or captured > min(matching, quota) or reasons & ~7 \
                     or bool(matching - captured) != bool(reasons):
-                raise NativeError("native snapshot flow totals")
+                raise CollectorError("collector snapshot flow totals")
             local, remote, required = identities[flow_id]
             totals[flow_id] = {"origin": local, "dest": remote, "required": required, "matching": matching,
                                "matching_at_sample": sample_matching, "quota": quota,
@@ -720,7 +759,7 @@ def _decode_detail(stream, process, identities, generation, byte_limit, state_li
             # wall-clock times are reported, not ordered: the clock may step between them
             valid = valid and all(math.isfinite(t) and t > 0 for t in (sample, start, end))
             if not valid:
-                raise NativeError("native snapshot detail completion")
+                raise CollectorError("collector snapshot detail completion")
             required = [flow for flow in flows if flow["required"]]
             return rows, {
                 "scope": "retained_logical_flows", "available": observed, "captured": included,
@@ -735,5 +774,5 @@ def _decode_detail(stream, process, identities, generation, byte_limit, state_li
                 "atomic": False, "population": "detail_traversal",
             }
         else:
-            raise NativeError("native snapshot detail record")
-    raise NativeError("incomplete native snapshot detail")
+            raise CollectorError("collector snapshot detail record")
+    raise CollectorError("incomplete collector snapshot detail")

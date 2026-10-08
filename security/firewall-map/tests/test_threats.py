@@ -72,7 +72,7 @@ class ThreatQueueTest(unittest.TestCase):
         # Existing accumulation is not capped at MAX_ITEMS; preserve that behavior.
         self.assertGreater(len(entry["inside"]), THREATS.MAX_ITEMS)
 
-    def test_native_remote_summary_matches_pf_attribution(self):
+    def test_collector_remote_summary_matches_pf_attribution(self):
         records = PF.parse_states(self.INBOUND + self.OUTBOUND)
         views, _ = PF.StateFacts().view(records, {"1.2.3.163"})
         remotes, candidates, remote_ids = [], [], {}
@@ -105,13 +105,13 @@ class ThreatQueueTest(unittest.TestCase):
                     packed.ljust(16, b"\0"),
                     int(target_port).to_bytes(2, "big")))
                 candidates.append((remote_ids[remote], 5, sequence, 0, target_data))
-        native = {"threat_remotes": remotes, "threat_candidates": candidates}
+        sample = {"threat_remotes": remotes, "threat_candidates": candidates}
 
         def lists(_address):
             return ["AbuseIPDB blacklist"]
 
         expected = REFERENCE_THREATS.observe(records, lists, {"1.2.3.163"})
-        actual = THREATS.observe_aggregates(native, lists)
+        actual = THREATS.observe_aggregates(sample, lists)
         self.assertEqual(actual, expected)
 
     def test_distinct_attributions_use_indexed_membership(self):

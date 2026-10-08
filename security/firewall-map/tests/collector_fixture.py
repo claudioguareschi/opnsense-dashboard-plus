@@ -24,10 +24,10 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Native-shaped test responses, built from unshipped semantic fixture oracles.
+"""Collector-shaped test responses, built from unshipped semantic fixture oracles.
 
 This stand-in exercises production adapter/orchestration without any PF access.
-The real native protocol, history and snapshot worker have separate C tests.
+The real collector protocol, history and snapshot worker have separate C tests.
 """
 
 import ipaddress
@@ -47,7 +47,7 @@ def protocol(value):
 
 
 def aggregate(flows, count=0, threat_entries=None):
-    """Encode presented fixture flows as native-selected aggregate rows."""
+    """Encode presented fixture flows as collector-selected aggregate rows."""
     rows, candidates = [], []
     for pair, flow in flows:
         flow = dict(flow)
@@ -103,7 +103,7 @@ def aggregate(flows, count=0, threat_entries=None):
             "baseline": False, "refused": None, "telemetry": {"interval": 2.0, "sequence": 1}}
 
 
-class NativeFixture:
+class CollectorFixture:
     def __init__(self, records):
         self.records = records
         self.process = None

@@ -21,12 +21,12 @@
 
 """Raw netlink decoder tests: saved PF captures and their mutations through the real decoder.
 
-The decoder (native/pf_reader.c) compiles only against FreeBSD's pf/netlink headers, which the
+The decoder (collector/pf_reader.c) compiles only against FreeBSD's pf/netlink headers, which the
 repository deliberately does not vendor. On the FreeBSD build host:
 
-    python3 devel/native_equivalence.py live --src src/opnsense/scripts/OPNsense/FirewallMap \
-        --helper <native_sample built with -DFM_DEVEL_TOOLS> --dir <directory>    # needs PF access
-    FM_WIRE_CAPTURE_DIR=<directory> python3 -m unittest tests.test_native_wire
+    python3 devel/collector_equivalence.py live --src src/opnsense/scripts/OPNsense/FirewallMap \
+        --helper <collector_sample built with -DFM_DEVEL_TOOLS> --dir <directory>    # needs PF access
+    FM_WIRE_CAPTURE_DIR=<directory> python3 -m unittest tests.test_collector_wire
 
 The check decodes the capture, compares it field by field with pfctl's own export of the same
 states, and replays the mutation table (missing NLMSG_DONE, kernel error, wrong sequence,
@@ -46,19 +46,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class NativeWireTest(unittest.TestCase):
+class CollectorWireTest(unittest.TestCase):
     def test_saved_captures_and_mutations(self):
         directory = os.environ.get("FM_WIRE_CAPTURE_DIR")
         if platform.system() != "FreeBSD" or not directory:
             raise unittest.SkipTest("needs FreeBSD and FM_WIRE_CAPTURE_DIR (see the module docstring)")
         with tempfile.TemporaryDirectory() as build:
-            helper = Path(build) / "native_sample"
-            sources = [str(path) for path in sorted((ROOT / "native").glob("*.c"))
-                       if path.name != "firewallmap_native.c"]
+            helper = Path(build) / "collector_sample"
+            sources = [str(path) for path in sorted((ROOT / "collector").glob("*.c"))
+                       if path.name != "main.c"]
             subprocess.run([shutil.which("cc") or "cc", "-O2", "-Wall", "-Wextra", "-Werror", "-DFM_DEVEL_TOOLS",
-                            "-I", str(ROOT / "native"), *sources, str(ROOT / "devel/native_fmagg2.c"),
-                            str(ROOT / "devel/native_sample.c"), "-lm", "-o", str(helper)], check=True)
-            result = subprocess.run([sys.executable, str(ROOT / "devel/native_equivalence.py"), "readercheck",
+                            "-I", str(ROOT / "collector"), *sources, str(ROOT / "devel/collector_fmagg2.c"),
+                            str(ROOT / "devel/collector_sample.c"), "-lm", "-o", str(helper)], check=True)
+            result = subprocess.run([sys.executable, str(ROOT / "devel/collector_equivalence.py"), "readercheck",
                                      "--src", str(ROOT / "src/opnsense/scripts/OPNsense/FirewallMap"),
                                      "--helper", str(helper), "--dir", directory],
                                     capture_output=True, text=True, timeout=600)

@@ -19,7 +19,7 @@
 # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 
-"""The helper's indexed context lookups equal a naive first-match scan (native_context_check.c)."""
+"""The helper's indexed context lookups equal a naive first-match scan (collector_context_check.c)."""
 
 import shutil
 import subprocess
@@ -30,16 +30,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class NativeContextTest(unittest.TestCase):
+class CollectorContextTest(unittest.TestCase):
     def test_indexed_lookups_match_naive_first_match(self):
         compiler = shutil.which("cc")
         if not compiler:
             raise unittest.SkipTest("C compiler unavailable")
         with tempfile.TemporaryDirectory() as directory:
             program = Path(directory) / "context_check"
-            subprocess.run([compiler, "-O1", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "native"),
-                            str(ROOT / "native/context.c"), str(ROOT / "native/alloc.c"), str(ROOT / "native/error.c"),
-                            str(Path(__file__).with_name("native_context_check.c")), "-o", str(program)], check=True)
+            subprocess.run([compiler, "-O1", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "collector"),
+                            str(ROOT / "collector/context.c"), str(ROOT / "collector/alloc.c"),
+                            str(ROOT / "collector/error.c"),
+                            str(Path(__file__).with_name("collector_context_check.c")), "-o", str(program)], check=True)
             result = subprocess.run([str(program)], capture_output=True, text=True, timeout=120)
         self.assertEqual((result.returncode, result.stdout.strip()), (0, "ok"), result.stdout)
 

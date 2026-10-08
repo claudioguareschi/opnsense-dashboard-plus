@@ -29,14 +29,14 @@
  * Input: a sequence of sizeof(struct state) records, each copied into a state
  * (strings forced NUL-terminated, as the decoder guarantees); every 64
  * states one sample is committed. Build and run with devel/fuzz/run.sh. */
-#include "../../native/aggregate.h"
-#include "../../native/alloc.h"
-#include "../../native/budget.h"
-#include "../../native/event_correlation.h"
-#include "../../native/history.h"
-#include "../../native/protocol.h"
-#include "../../native/ranking.h"
-#include "../../native/threat_summary.h"
+#include "../../collector/aggregate.h"
+#include "../../collector/alloc.h"
+#include "../../collector/budget.h"
+#include "../../collector/event_correlation.h"
+#include "../../collector/history.h"
+#include "../../collector/protocol.h"
+#include "../../collector/ranking.h"
+#include "../../collector/threat_summary.h"
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>

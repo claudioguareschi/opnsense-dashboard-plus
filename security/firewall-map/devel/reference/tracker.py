@@ -34,7 +34,7 @@ from .pf import StateFacts
 
 class _FlowTotals(_Record):
     """The retired engine's per-sample totals (its own copy: production now carries only the
-    native-era fields). toward/away are bytes from/to the remote."""
+    state collector's fields). toward/away are bytes from/to the remote."""
     __slots__ = ("toward", "away", "packets", "states", "protocols", "services", "inside", "egress",
                  "remote_started", "local_started", "targets", "ports", "oldest", "bytes_toward", "bytes_away",
                  "rules")
@@ -65,7 +65,7 @@ class FlowTracker(production.FlowTracker):
         self.flows = {}
         self.sampled_at = None
         self.total_flows = 0
-        self.native_visible = None
+        self.collector_visible = None
 
     def _totals(self, records, local_addresses, elapsed, networks=None, sample=None,
                 interface_addresses=None, primary_wan_device=None):
@@ -179,7 +179,7 @@ class FlowTracker(production.FlowTracker):
                                              interface_addresses, primary_wan_device)
         self.sampled_at = now
         self.total_flows = len(totals)
-        self.native_visible = None
+        self.collector_visible = None
         # a flow disappears together with its last PF state
         for pair in list(self.flows):
             if pair not in totals:

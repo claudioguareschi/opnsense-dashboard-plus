@@ -22,7 +22,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "../native/correlation.h"
+#include "../collector/correlation.h"
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <stdio.h>

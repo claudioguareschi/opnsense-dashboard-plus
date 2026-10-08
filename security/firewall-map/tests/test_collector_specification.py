@@ -40,8 +40,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src/opnsense/scripts/OPNsense/FirewallMap"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import native  # noqa: E402
-from native_build import compile_worker  # noqa: E402
+from lib import collector  # noqa: E402
+from collector_build import compile_worker  # noqa: E402
 
 WAN = "45.33.32.10"
 LAN_NET = (ipaddress.ip_network("10.0.0.0/24"), "lan0")
@@ -74,7 +74,7 @@ class SpecificationTest(unittest.TestCase):
         path = Path(self.directory.name) / f"{self._testMethodName}.txt"
         path.write_text("".join(f"sample {number}\n" + "".join(line + "\n" for line in lines)
                                 for number, lines in samples.items()))
-        engine = native.NativeEngine(self.worker)
+        engine = collector.CollectorEngine(self.worker)
         self.addCleanup(engine.close)
         with patch.dict(os.environ, FM_TEST_STATES=str(path), FM_TEST_INTERVAL="2"):
             return [engine.sample(context["local"], context["networks"], context["assigned"], context["wan"],
@@ -94,7 +94,8 @@ class SpecificationTest(unittest.TestCase):
         # the remote's traffic is PF's reverse counter: (9000 - 5000) / 2 s, smoothed by half
         self.assertEqual((flow["rate_from_remote"], flow["rate_to_remote"]), (1000.0, 100.0))
         self.assertEqual((flow["bytes_from_remote"], flow["bytes_to_remote"]), (9000, 1400))
-        self.assertEqual(self.candidates(second, native.INSIDE_HOST), [bytes([4]) + bytes([10, 0, 0, 2]) + bytes(12)])
+        self.assertEqual(self.candidates(second, collector.INSIDE_HOST),
+                         [bytes([4]) + bytes([10, 0, 0, 2]) + bytes(12)])
         match = second["matches"][query]
         self.assertEqual((match["inside"], match["inside_port"], match["remote_initiated"]), ("10.0.0.2", 40000, False))
         self.assertEqual((match["bytes_in"], match["bytes_out"]), (9000, 1400))
@@ -137,7 +138,7 @@ class SpecificationTest(unittest.TestCase):
         # interface, and the routed host is its inside endpoint
         self.assertEqual(flow["key"], ("2001:470:0:1::2", "2606:4700::1111"))
         inside = ipaddress.ip_address("2001:470:1:2::10").packed
-        self.assertEqual(self.candidates(second, native.INSIDE_HOST), [bytes([6]) + inside])
+        self.assertEqual(self.candidates(second, collector.INSIDE_HOST), [bytes([6]) + inside])
         self.assertEqual((flow["rate_from_remote"], flow["rate_to_remote"]), (200.0, 50.0))
 
     def test_icmp_echo_keeps_the_inside_identifier(self):
@@ -147,7 +148,7 @@ class SpecificationTest(unittest.TestCase):
                                        2: [state(1, "out", keys, (168, 168, 2, 2), protocols=(1, 1))]},
                                       event_queries=[query])
         self.assertEqual(second["flows"][0]["key"], (WAN, "1.0.0.1"))
-        self.assertEqual(self.candidates(second, native.PROTOCOL), [b"\x01"])
+        self.assertEqual(self.candidates(second, collector.PROTOCOL), [b"\x01"])
         match = second["matches"][query]
         self.assertEqual((match["inside"], match["inside_port"]), ("10.0.0.2", 4321))
 
@@ -193,7 +194,7 @@ class SpecificationTest(unittest.TestCase):
 
     def test_unrecognised_protocol_mismatch_is_structural(self):
         keys = OUTBOUND_NAT
-        with self.assertRaises(native.NativeError) as raised:
+        with self.assertRaises(collector.CollectorError) as raised:
             self.run_scenario({1: [state(1, "out", keys, (1, 1, 1, 1), protocols=(6, 17))]})
         self.assertEqual(raised.exception.failure_class, "structural")
 
@@ -214,7 +215,7 @@ class SpecificationTest(unittest.TestCase):
                                            state(2, "in", internal, (90, 90, 1, 1), interface="lan0",
                                                  original="lan0")]})
         self.assertEqual([flow["key"] for flow in second["flows"]], [(WAN, "9.9.9.9")])
-        self.assertEqual(self.candidates(second, native.INSIDE_HOST), [])
+        self.assertEqual(self.candidates(second, collector.INSIDE_HOST), [])
         self.assertEqual((second["counts"]["states"], second["counts"]["retained"]), (2, 1))
 
 

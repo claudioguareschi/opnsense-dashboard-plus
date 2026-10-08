@@ -24,7 +24,7 @@
 
 /* Synthetic PF reader for production-worker protocol tests. Never linked into
  * the installed helper. Generates one borrowed state at a time. */
-#include "../native/snapshot.h"
+#include "../collector/snapshot.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <stdlib.h>

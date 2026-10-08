@@ -170,25 +170,25 @@ class CorrelationTest(unittest.TestCase):
         self.assertEqual(correlator.diagnostics()["current"], 2)
         self.assertEqual(correlator.diagnostics()["correlated_share"], 1.0)
 
-    def test_native_tuple_exchange_is_limited_to_incident_queries(self):
+    def test_collector_tuple_exchange_is_limited_to_incident_queries(self):
         correlator = IDS.Correlator()
         alert = self.alert("1.2.3.163", 13526, "162.217.103.70", 443)
         correlator.add_alert(alert, 1000.0)
         key = IDS.outside_key("tcp", "1.2.3.163", 13526, "162.217.103.70", 443)
-        self.assertEqual(correlator.native_queries(self.LOCAL), [key])
+        self.assertEqual(correlator.collector_queries(self.LOCAL), [key])
         match = {key: {"kind": 1, "inside": "192.168.30.52", "inside_port": 52114,
                        "id": 10, "creator": 1, "ambiguous": False, "age": 240,
                        "bytes_in": 400, "bytes_out": 9000, "remote_started": False,
                        "interface": "igb1", "rule": "abc123"}}
-        correlator.observe_native_matches(match, 1002.0, {"abc123": "IoT to Internet"})
-        correlator.resolve_native(match, self.LOCAL, 1002.0)
+        correlator.observe_collector_matches(match, 1002.0, {"abc123": "IoT to Internet"})
+        correlator.resolve_collector_matches(match, self.LOCAL, 1002.0)
         flow = correlator.flows[key]
         self.assertEqual((flow["kind"], flow["connection"]["inside"],
                           flow["connection"]["rule_description"]),
                          ("current", "192.168.30.52:52114", "IoT to Internet"))
         self.assertEqual(flow["connection"]["state"], "10/1")
 
-    def test_native_recent_match_resolves_pending_alert_without_exporting_index(self):
+    def test_collector_recent_match_resolves_pending_alert_without_exporting_index(self):
         correlator = IDS.Correlator()
         alert = self.alert("1.2.3.163", 13526, "162.217.103.70", 443)
         correlator.add_alert(alert, 1000.0)
@@ -197,7 +197,7 @@ class CorrelationTest(unittest.TestCase):
                        "id": 10, "creator": 1, "ambiguous": False, "age": 240,
                        "bytes_in": 400, "bytes_out": 9000, "remote_started": False,
                        "interface": "igb1", "rule": "abc123"}}
-        correlator.resolve_native(match, self.LOCAL, 1002.0)
+        correlator.resolve_collector_matches(match, self.LOCAL, 1002.0)
         self.assertEqual(correlator.flows[key]["kind"], "recent")
         self.assertEqual(len(correlator.pending), 0)
 

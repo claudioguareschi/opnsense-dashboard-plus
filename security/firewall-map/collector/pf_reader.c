@@ -272,7 +272,7 @@ static void state_attr(unsigned type, const unsigned char *p, size_t n,
     if (version != PF_STATE_VERSION) {
       char message[96];
       snprintf(message, sizeof(message),
-               "PF state ABI version %" PRIu64 ", helper built for %u", version,
+               "PF state ABI version %" PRIu64 ", collector built for %u", version,
                (unsigned)PF_STATE_VERSION);
       fm_error_fail(r->error, FM_FAILURE_INCOMPATIBLE, EPROTO, message);
       return;

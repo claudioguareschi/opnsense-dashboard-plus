@@ -24,12 +24,12 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Persistent native PF collector orchestrator for Firewall Map+.
+"""Persistent PF collector orchestrator for Firewall Map+.
 
-The required native worker samples PF, keeps counter history, aggregates and
-ranks flows, and returns only bounded mechanical results. Python applies policy
-and enrichment, then writes a compact, capped summary for the dashboard API;
-the browser never triggers a PF walk or a GeoIP lookup.
+The required state collector (firewallmap-collector) samples PF, keeps counter
+history, aggregates and ranks flows, and returns only bounded mechanical results.
+Python applies policy and enrichment, then writes a compact, capped summary for
+the dashboard API; the browser never triggers a PF walk or a GeoIP lookup.
 
 A flow is active only while its counters advance. Idle flows fade out over
 FADE_SECONDS and a flow is dropped as soon as its last PF state disappears.
@@ -93,8 +93,8 @@ from firewallmap_snapshots import (
 from lib.pf import (
     _Record, host_info, port_forwards, rule_descriptions,
 )
-from lib import native
-from lib.native import NativeEngine, NativeError, READ_TIMEOUT, memory_budget
+from lib import collector as state_collector
+from lib.collector import CollectorEngine, CollectorError, PROTOCOL_VERSION, READ_TIMEOUT, memory_budget
 
 
 EXTERNAL_IP_URL = "https://api.ipify.org"
@@ -192,23 +192,23 @@ class _FlowTotals(_Record):
         self.rules = {}
 
 
-def _native_address(value):
+def _collector_address(value):
     if len(value) != 17 or value[0] not in (4, 6):
-        raise NativeError("invalid native address in aggregate")
+        raise CollectorError("invalid collector address in aggregate")
     return str(ipaddress.ip_address(value[1:5] if value[0] == 4 else value[1:]))
 
 
 class FlowTracker:
-    """Adapt native-selected aggregates to the existing bounded flow presentation."""
+    """Adapt collector-selected aggregates to the existing bounded flow presentation."""
 
     def __init__(self, fade_seconds=FADE_SECONDS):
         self.fade_seconds = fade_seconds
         self.flows = {}
         self.total_flows = 0
-        self.native_visible = []
+        self.collector_visible = []
 
     def update_aggregate(self, aggregate, now):
-        """Ingest only the native top-K aggregates; rates and ordering are already final."""
+        """Ingest only the collector's top-K aggregates; rates and ordering are already final."""
         totals = {}
         rows_by_pair = {}
         protocols = {1: "icmp", 6: "tcp", 17: "udp", 58: "ipv6-icmp", 132: "sctp"}
@@ -225,7 +225,7 @@ class FlowTracker:
                 aggregate["candidates"], key=lambda candidate: candidate[2]):
             row = aggregate["flows"][flow_id]
             total = totals[row["key"]]
-            if kind == native.PROTOCOL:
+            if kind == state_collector.PROTOCOL:
                 number = value[0]
                 proto = protocols.get(number)
                 if proto is None:
@@ -235,25 +235,25 @@ class FlowTracker:
                         proto = str(number)
                     protocols[number] = proto
                 total.protocols.add(proto)
-            elif kind == native.INSIDE_HOST:
-                address = _native_address(value)
+            elif kind == state_collector.INSIDE_HOST:
+                address = _collector_address(value)
                 total.inside[address] = total.inside.get(address, 0) + weight
-            elif kind == native.EGRESS_INTERFACE:
+            elif kind == state_collector.EGRESS_INTERFACE:
                 device = value.decode("ascii", "replace")
                 total.egress[device] = total.egress.get(device, 0) + weight
-            elif kind == native.SERVICE:
+            elif kind == state_collector.SERVICE:
                 number, port = (association >> 16) & 255, association & 65535
                 proto = protocols.get(number, str(number))
                 name = service_name(proto, str(port) if port else None)
                 total.services[name] = total.services.get(name, 0) + weight
                 total.ports.setdefault(name, service_port_label(proto, str(port) if port else None))
-            elif kind == native.REMOTE_TARGET:
+            elif kind == state_collector.REMOTE_TARGET:
                 proto = protocols.get(value[0], str(value[0]))
-                address = _native_address(value[1:18])
+                address = _collector_address(value[1:18])
                 port = int.from_bytes(value[18:20], "big")
                 target = connection_target(proto, address, str(port) if port else None)
                 total.targets[target] = total.targets.get(target, 0) + weight
-            elif kind == native.RULE_LABEL:
+            elif kind == state_collector.RULE_LABEL:
                 # PF truncates labels at 63 bytes, possibly inside a UTF-8 sequence
                 rule = value.decode("utf-8", "replace")
                 total.rules[rule] = total.rules.get(rule, 0) + weight
@@ -284,8 +284,8 @@ class FlowTracker:
             current_flows[pair] = flow
             visible.append((row["score"], pair[0], pair[1], flow, row["activity"]))
         self.flows = current_flows
-        # The native order is already the stable FlowTracker ranking. No Python re-sort.
-        self.native_visible = visible
+        # The collector's order is already the stable FlowTracker ranking. No Python re-sort.
+        self.collector_visible = visible
 
 
 def _flow_entry(local, remote, flow, activity, local_addresses, context, wall_time):
@@ -347,7 +347,7 @@ def summarize_flows(tracker, geo, local_addresses, role, now, wall_time, hostnam
                     anchor=None, visible=None):
     context = context or {}
     if visible is None:
-        visible = tracker.native_visible
+        visible = tracker.collector_visible
         geo.resolve(address for _, local, remote, _, _ in visible for address in (remote, local) if public_ip(address))
     # Explicit candidates are already resolved by snapshot selection. Do not trigger a cache
     # eviction between counting their geographic availability and serializing those flows.
@@ -438,9 +438,9 @@ class ThreatRecorder:
             "city": location.get("city"),
         }.items() if value}
 
-    def update(self, native, collector, now):
-        """Record native mechanical summaries using Python threat policy."""
-        if not self.due(now) or not native.get("threat_summary"):
+    def update(self, sample, collector, now):
+        """Record the collector's mechanical summaries using Python threat policy."""
+        if not self.due(now) or not sample.get("threat_summary"):
             return
         blocklists, reputation, correlator = collector.blocklists, collector.reputation, collector.correlator
         # the cut-off of this recording: evidence after it belongs to the next one
@@ -452,7 +452,7 @@ class ThreatRecorder:
             def lists_for(address):
                 return threat_lists_for(address, blocklists, reputation, correlator)
 
-            seen = threats.observe_aggregates(native, lists_for)
+            seen = threats.observe_aggregates(sample, lists_for)
             seen.update(ips_drops(correlator, seen, self.last_wall, blocklists, reputation))
             seen.update(firewall_blocks(correlator, seen, self.last_wall, blocklists, reputation))
             if collector.geo is not None and seen:
@@ -539,11 +539,11 @@ def request_reload(path=RELOAD_MARKER):
 
 
 class SampleTimer:
-    """Where one sample's time went: wall seconds per collector phase ("native" is the whole
-    native request, PF traversal included), and the whole sample's wall and CPU time (the
-    collector's own plus that of the programs it ran, such as ifconfig; the persistent native
-    helper reports its own CPU in its telemetry). The Status page shows it, so anyone can check
-    the cost on their own hardware."""
+    """Where one sample's time went: wall seconds per collector phase ("state_collector" is the
+    whole state collector request, PF traversal included), and the whole sample's wall and CPU
+    time (the service's own plus that of the programs it ran, such as ifconfig; the persistent
+    state collector reports its own CPU in its telemetry). The Status page shows it, so anyone
+    can check the cost on their own hardware."""
 
     def __init__(self):
         self.phases = {}
@@ -578,6 +578,28 @@ def status_document(status, **fields):
             "flows": [], "locations": []}
 
 
+def incompatibility(error):
+    """What makes the state collector unusable on this installation, or None for any other
+    failure: another protocol (the package's components come from different versions; protocol
+    None when the collector named none), or a PF state ABI it was not built for (it speaks this
+    protocol but cannot read this kernel's states)."""
+    if getattr(error, "failure_class", None) != "incompatible":
+        return None
+    reason = getattr(error, "reason", "pf_abi")
+    return {"reason": reason, "protocol": error.protocol if reason == "protocol" else PROTOCOL_VERSION,
+            "expected_protocol": PROTOCOL_VERSION, "error": str(error)}
+
+
+def incompatibility_message(incompatible):
+    if incompatible["reason"] == "protocol":
+        protocol = "unknown" if incompatible["protocol"] is None else incompatible["protocol"]
+        return ("Firewall Map collector incompatible: the Firewall Map application and its state collector "
+                f"use incompatible protocols (collector protocol {protocol}, expected "
+                f"{incompatible['expected_protocol']}). Reinstall or upgrade the Firewall Map package so "
+                "both components come from the same version.")
+    return f"the state collector is incompatible with this firewall: {incompatible['error']}"
+
+
 class Collector:
     """The sampling loop, one iteration at a time.
 
@@ -601,9 +623,10 @@ class Collector:
         self.blocklists = BlocklistIndex()
         self.reputation = Reputation(self.store)
         self.recorder = ThreatRecorder()
-        self.native_engine = NativeEngine()
-        # set while the helper reports an incompatible PF ABI: explicit status, slow retry
-        self.native_incompatible = None
+        self.collector_engine = CollectorEngine()
+        # set while the state collector is incompatible (another protocol, or a PF ABI it was not
+        # built for): explicit status, slow retry, and a binary of another protocol is not restarted
+        self.collector_incompatible = None
         # unsupported states the last accepted sample skipped, by reason
         self.sample_skipped = {}
         # per-source counts of log lines rejected by per-line containment, and the last reason
@@ -616,7 +639,6 @@ class Collector:
         # Phase fields describe this process now; payloads freeze their own copy at publication.
         self.collector_status = {
             "generation": uuid.uuid4().hex, "revision": 0, "state_count": None,
-            "engine": None,
             "sample_started_at": None, "sample_completed_at": None, "sample_duration": None,
             "effective_sample_interval": None, "next_sample_due": None,
             "phase": "starting", "phase_started_at": self.started_at,
@@ -689,8 +711,8 @@ class Collector:
                 self.checked["blocklists"] = now
         self.reputation.refresh(now)
 
-    def ingest(self, native, now, wall, foreground):
-        """Feed native matches, blocked attempts and Suricata alerts to Python policy.
+    def ingest(self, sample, now, wall, foreground):
+        """Feed collector matches, blocked attempts and Suricata alerts to Python policy.
 
         Log lines are contained one by one: a malformed or failing line is counted and skipped,
         never allowed to abort the iteration (its offset has already been consumed).
@@ -706,7 +728,7 @@ class Collector:
             except Exception as error:  # noqa: BLE001 - per-line containment, counted below
                 self.ingest_rejected["filterlog"] += 1
                 self.ingest_last_rejection = f"filterlog: {type(error).__name__}: {error}"
-        self.correlator.observe_native_matches(native["matches"], wall, self.descriptions)
+        self.correlator.observe_collector_matches(sample["matches"], wall, self.descriptions)
         rejected = 0
         if foreground and not self.eve_loaded:
             self.eve_loaded = True
@@ -717,7 +739,7 @@ class Collector:
         if rejected:
             self.ingest_rejected["eve"] += rejected
             self.ingest_last_rejection = f"eve: {self.alerts.last_rejection}"
-        self.correlator.resolve_native(native["matches"], self.local_addresses, wall, self.networks)
+        self.correlator.resolve_collector_matches(sample["matches"], self.local_addresses, wall, self.networks)
         self.alerts.expire(wall)
 
     def _ingest_block(self, line, now, wall, foreground):
@@ -772,7 +794,7 @@ class Collector:
         resolver = self.hostnames if requested(HOSTNAME_MARKER, HOSTNAME_REQUEST_SECONDS) else None
         geo = self.geo
         if visible is None and not snapshot:
-            visible = self.tracker.native_visible
+            visible = self.tracker.collector_visible
             geo.resolve(address for _, local, remote, _, _ in visible for address in (remote, local)
                         if public_ip(address))
         context = {
@@ -903,9 +925,9 @@ class Collector:
 
         evidence.update(self.blocks.sources)
 
-        def native_candidates():
+        def ranked_candidates():
             lookup_budget = GEO_LOOKUPS_PER_SAMPLE
-            for page in self.native_engine.snapshot_pages():
+            for page in self.collector_engine.snapshot_pages():
                 addresses = list(dict.fromkeys(address for local, remote, _rank, _order in page
                                                for address in (remote, local) if public_ip(address)))
                 unknown = sum(address not in self.geo.entries for address in addresses)
@@ -924,13 +946,13 @@ class Collector:
                     coverage["required"] += int(incident)
                     yield incident, rank, order, local, remote
 
-        identities = nsmallest(SNAPSHOT_FLOWS, native_candidates(),
+        identities = nsmallest(SNAPSHOT_FLOWS, ranked_candidates(),
                                key=lambda item: (not item[0], -item[1], item[2]))
-        aggregate = self.native_engine.snapshot_selection([(local, remote, incident)
-                                                           for incident, _rank, _order, local, remote in identities])
+        aggregate = self.collector_engine.snapshot_selection(
+            [(local, remote, incident) for incident, _rank, _order, local, remote in identities])
         tracker = FlowTracker()
         tracker.update_aggregate(aggregate, now)
-        selected = [(identity[0], *row) for identity, row in zip(identities, tracker.native_visible)]
+        selected = [(identity[0], *row) for identity, row in zip(identities, tracker.collector_visible)]
         coverage["omitted_limit"] = coverage["available"] - len(selected)
         visible = [item[1:] for item in selected]
         payload = self.build_payload(now, visible=visible, snapshot=True)
@@ -969,10 +991,10 @@ class Collector:
         coverage["omitted_required"] += coverage["required"] - len(required_pairs)
         identities = [(flow["origin"], flow["dest"], (flow["origin"], flow["dest"]) in required_pairs)
                       for flow in payload["flows"]]
-        payload["states"], states = self.native_engine.snapshot_detail(
+        payload["states"], states = self.collector_engine.snapshot_detail(
             identities, max(0, budget.remaining), SNAPSHOT_STATES_TOTAL)
         payload["capture"]["states"] = states
-        payload["capture"]["source"] = "native_collector"
+        payload["capture"]["source"] = "state_collector"
         payload["capture"]["required_evidence_complete"] = (
             not coverage["omitted_required"] and states.get("required_evidence_complete", True))
         if coverage["captured"] < coverage["candidates"] or states["truncated"]:
@@ -986,7 +1008,7 @@ class Collector:
 
         Every request found here gets a document, the snapshot or an error, and its request file
         is removed, whatever happens. A failure the protocol survives (raised between commands)
-        ends the session with CANCEL and keeps the helper; NativeEngine closes the helper itself
+        ends the session with CANCEL and keeps the helper; CollectorEngine closes the helper itself
         when a request failed mid-stream.
         """
         try:
@@ -1001,10 +1023,10 @@ class Collector:
             payload = self.build_snapshot_payload(now)
         except SnapshotTooLarge as error:
             payload = {"status": "snapshot_too_large", "error": str(error)}
-        except NativeError as error:
+        except CollectorError as error:
             payload = {"status": "snapshot_failed", "error": str(error)}
         finally:
-            self.native_engine.snapshot_cancel()
+            self.collector_engine.snapshot_cancel()
             self._answer_snapshot_requests(requests, payload)
 
     @staticmethod
@@ -1055,9 +1077,9 @@ class Collector:
         still-fresh map), it is the diagnostics record. Before it, a failure leaves the previous
         publication untouched; after it (snapshots, cache saves, timings) nothing is unpublished.
 
-        The native helper keeps its own timing and history, so a Python failure after a complete
-        native response does not invalidate it. The helper is closed only when a native request
-        failed or was interrupted (NativeEngine), never for downstream Python errors.
+        The state collector keeps its own timing and history, so a Python failure after a complete
+        collector response does not invalidate it. The collector is closed only when a request to
+        it failed or was interrupted (CollectorEngine), never for downstream Python errors.
         """
         started = time.monotonic()
         timer = SampleTimer()
@@ -1065,27 +1087,27 @@ class Collector:
         if not proceed:
             return rest
         background = self.background
-        native = self._acquire(started, background, timer)
-        if native is None:
+        sample = self._acquire(started, background, timer)
+        if sample is None:
             return self._rest(started, background)
-        snapshot_due = self.native_engine.snapshot_open and not native["baseline"]
+        snapshot_due = self.collector_engine.snapshot_open and not sample["baseline"]
         try:
             self.set_phase("processing")
             now = time.monotonic()
             wall = time.time()
-            self._apply(native, now, wall, background, timer)
-            self._publish(native, now, background, timer)
+            self._apply(sample, now, wall, background, timer)
+            self._publish(sample, now, background, timer)
             if snapshot_due:
                 self.save_requested_snapshots(now)
         finally:
             # never leave a session open into the next request, and never leave a request
             # unanswered after its session failed
-            self.native_engine.snapshot_cancel()
+            self.collector_engine.snapshot_cancel()
             if snapshot_due:
                 self._answer_snapshot_requests(self._pending_snapshot_requests(),
                                                {"status": "snapshot_failed",
                                                 "error": "collector iteration failed"})
-        self._post_commit(native, now, background, timer)
+        self._post_commit(sample, now, background, timer)
         return self._rest(started, background)
 
     @staticmethod
@@ -1128,54 +1150,53 @@ class Collector:
         return True, None
 
     def _acquire(self, started, background, timer):
-        """The complete native response, or None when the request failed."""
+        """The complete state collector response, or None when the request failed."""
         self._sample_started = (time.time(), time.monotonic())
         self._sample_revision = None
-        timeout = getattr(self.native_engine, "read_timeout", READ_TIMEOUT)
+        timeout = getattr(self.collector_engine, "read_timeout", READ_TIMEOUT)
         self.set_phase("collecting", self._sample_started[0] + timeout)
-        native_start = time.perf_counter()
+        collector_start = time.perf_counter()
         threat_due = self.recorder.due(started)
-        queries = self.correlator.native_queries(self.local_addresses, self.networks)
+        queries = self.correlator.collector_queries(self.local_addresses, self.networks)
         try:
-            native = self.native_engine.sample(
+            sample = self.collector_engine.sample(
                 self.local_addresses, self.networks, self.interface_addresses, self.primary_wan_device,
                 threat_summary=threat_due, event_queries=queries,
                 snapshot=not background and self.snapshot_requested(),
                 memory=memory_budget(self.values.get("helper_memory")),
                 evidence=self.evidence_remotes() if threat_due else (),
                 correlation=bool(queries) or os.path.exists(EVE_LOG))
-        except NativeError as error:
-            self.native_engine.close()
+        except CollectorError as error:
+            self.collector_engine.close()
             self.set_phase("failed")
             if not self.failures:
                 log_error(f"reading the firewall states failed: {error}")
             self.failures += 1
-            incompatible = getattr(error, "failure_class", None) == "incompatible"
-            if incompatible and self.native_incompatible is None:
-                log_error(f"the native helper is incompatible with this firewall: {error}")
-            self.native_incompatible = str(error) if incompatible else None
-            self._record_native(error=error)
-            if incompatible:
-                if not background:
-                    write_json(OUTPUT_FILE, status_document("native_incompatible", error=str(error),
-                                                            collector=self.timing_status()))
+            incompatible = incompatibility(error)
+            if incompatible and self.collector_incompatible is None:
+                log_error(incompatibility_message(incompatible))
+            self.collector_incompatible = incompatible
+            self._record_collector(error=error)
+            if incompatible and not background:
+                write_json(OUTPUT_FILE, status_document("collector_incompatible", **incompatible,
+                                                        collector=self.timing_status()))
             # Preserve the last successful document and its mtime. Existing API
             # freshness expires it naturally; liveness diagnostics report failure.
             return None
-        timer.phases["native"] = time.perf_counter() - native_start
+        timer.phases["state_collector"] = time.perf_counter() - collector_start
         timer.mark = time.perf_counter()
         if self.failures:
             log_notice(f"reading the firewall states works again, after {self.failures} failed attempts")
         self.failures = 0
-        self.native_incompatible = None
-        if not native["refused"]:
-            skipped = native.get("skipped") or {}
+        self.collector_incompatible = None
+        if not sample["refused"]:
+            skipped = sample.get("skipped") or {}
             if skipped and not self.sample_skipped:
                 log_notice("some PF states are not mapped: " + ", ".join(
                     f"{count} {reason.replace('_', ' ')}" for reason, count in skipped.items()))
             self.sample_skipped = skipped
-        self._record_native(native=native)
-        return native
+        self._record_collector(sample=sample)
+        return sample
 
     def evidence_remotes(self):
         """Remotes the threat summary keeps first: IDS, reputation and blocked-attempt evidence."""
@@ -1184,13 +1205,13 @@ class Collector:
         evidence.update(self.reputation.flagged)
         return evidence
 
-    def _record_native(self, native=None, error=None):
-        """The helper's own view of the last request, for diagnostics; logs state changes once."""
+    def _record_collector(self, sample=None, error=None):
+        """The state collector's own view of the last request, for diagnostics; logs state changes once."""
         with self._status_lock:
-            current = dict(self.collector_status.get("native") or {})
-            if native is not None:
-                telemetry = native["telemetry"] or {}
-                refused = native["refused"]
+            current = dict(self.collector_status.get("state_collector") or {})
+            if sample is not None:
+                telemetry = sample["telemetry"] or {}
+                refused = sample["refused"]
                 omitted = telemetry.get("threat_remotes_omitted") or 0
                 if refused and refused != current.get("refused"):
                     log_warning("sample refused: {reason} ({kind}{actual} over the limit of {limit})".format(
@@ -1200,69 +1221,68 @@ class Collector:
                     log_notice("samples are accepted again")
                 if omitted and not current.get("threat_remotes_omitted"):
                     log_warning(f"threat recording incomplete: {omitted} remotes over the summary budget")
-                current.update(helper=native.get("helper"), telemetry=telemetry or None,
-                               baseline=native["baseline"], refused=refused, states=native["counts"]["states"],
-                               threat_remotes_omitted=omitted,
+                current.update(helper=sample.get("helper"), telemetry=telemetry or None,
+                               baseline=sample["baseline"], refused=refused, states=sample["counts"]["states"],
+                               threat_remotes_omitted=omitted, last_sample_at=time.time(),
                                state_limit=telemetry.get("state_limit", current.get("state_limit")))
             if error is not None:
                 current.update(last_error=str(error), last_error_class=getattr(error, "failure_class", None),
                                last_error_at=time.time())
-            current["incompatible"] = self.native_incompatible
+            current["incompatible"] = self.collector_incompatible
             current["ingest_rejected"] = dict(self.ingest_rejected)
             current["ingest_last_rejection"] = self.ingest_last_rejection
-            self.collector_status["native"] = current
-            self.collector_status["engine"] = "native"
+            self.collector_status["state_collector"] = current
 
-    def _apply(self, native, now, wall, background, timer):
+    def _apply(self, sample, now, wall, background, timer):
         """Python policy over an accepted sample: presentation state, evidence, threat history."""
-        if native["refused"]:
+        if sample["refused"]:
             return
-        if not background and not native["baseline"]:
-            self.tracker.update_aggregate(native, now)
+        if not background and not sample["baseline"]:
+            self.tracker.update_aggregate(sample, now)
             timer.phase("tracker")
-        self.ingest(native, now, wall, foreground=not background)
+        self.ingest(sample, now, wall, foreground=not background)
         timer.phase("ingest")
-        self.recorder.update(native, self, now)
+        self.recorder.update(sample, self, now)
         timer.phase("threats")
-        self._record_native()
+        self._record_collector()
 
-    def _publish(self, native, now, background, timer):
+    def _publish(self, sample, now, background, timer):
         """The commit point (see _step)."""
-        states = native["counts"]["states"]
-        refused = native["refused"]
+        states = sample["counts"]["states"]
+        refused = sample["refused"]
         if refused and not background:
-            self.complete_sample(states, self.refusal_document(native))
-        elif background or refused or native["baseline"]:
+            self.complete_sample(states, self.refusal_document(sample))
+        elif background or refused or sample["baseline"]:
             # a baseline has no rates yet: the previous map stays until it expires or is replaced
             self.complete_sample(states)
         else:
             self.publish_summary(now, timer, states)
 
     @staticmethod
-    def refusal_document(native):
+    def refusal_document(sample):
         """What the map shows for a refused sample. Too many states and an exhausted memory
         budget are the same condition for the viewer: the table is larger than this firewall's
         budget maps (the map's too_many_states message, with the derived limit)."""
-        refused = native["refused"]
+        refused = sample["refused"]
         if refused["reason"] in ("refused_states", "refused_memory"):
-            limit = (native["telemetry"] or {}).get("state_limit") or refused["limit"]
-            count = refused["actual"] if refused["reason"] == "refused_states" else native["counts"]["states"]
+            limit = (sample["telemetry"] or {}).get("state_limit") or refused["limit"]
+            count = refused["actual"] if refused["reason"] == "refused_states" else sample["counts"]["states"]
             return status_document("too_many_states", count=count, limit=limit, reason=refused["reason"],
                                    collector=None)
         return status_document("refused", **refused, collector=None)
 
-    def _post_commit(self, native, now, background, timer):
+    def _post_commit(self, sample, now, background, timer):
         self.geo.save()
         timer.phase("other")
-        timer.phases["native_states"] = native["counts"]["states"]
-        timer.phases["native_flows"] = native["counts"]["flows"]
-        self.save_timings(timer, native["counts"]["states"], background, now)
+        timer.phases["collector_states"] = sample["counts"]["states"]
+        timer.phases["collector_flows"] = sample["counts"]["flows"]
+        self.save_timings(timer, sample["counts"]["states"], background, now)
 
     def _rest(self, started, background):
         took = time.monotonic() - started
         if background:
             rest = max(BACKGROUND_INTERVAL - took, 0.05)
-            return max(rest, INCOMPATIBLE_RETRY_SECONDS) if self.native_incompatible is not None else rest
+            return max(rest, INCOMPATIBLE_RETRY_SECONDS) if self.collector_incompatible is not None else rest
         interval = INTERVAL if requested(REQUEST_MARKER, ACTIVE_VIEWER_SECONDS) else IDLE_INTERVAL
         with self._status_lock:
             # samples slower than the interval: the map updates at the rest floor below instead
@@ -1270,7 +1290,7 @@ class Collector:
         rest = max(interval - took, took, 0.05)
         if self.failures:
             rest = max(rest, min(MAX_FAILURE_BACKOFF, 2.0 ** self.failures))
-        if self.native_incompatible is not None:
+        if self.collector_incompatible is not None:
             rest = max(rest, INCOMPATIBLE_RETRY_SECONDS)
         return rest
 
@@ -1278,7 +1298,7 @@ class Collector:
         self._heartbeat_stop.set()
         if self._heartbeat_thread is not None:
             self._heartbeat_thread.join()
-        self.native_engine.close()
+        self.collector_engine.close()
         self.set_phase("stopped")
         if self.geo is not None:
             self.geo.save(force=True)

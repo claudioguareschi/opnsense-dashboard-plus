@@ -132,7 +132,7 @@ static bool write_header(FILE *f, bool threats, uint32_t *checksum,
     return fm_error_set(error, errno ? errno : EIO, "FMAGG4 header");
   unsigned char b[16], *p = b;
   *p++ = RECORD_HEADER;
-  protocol_put(&p, 4, 4);
+  protocol_put(&p, FM_PROTOCOL_VERSION, 4);
   protocol_put(&p, threats ? 1 : 0, 4);
   return protocol_frame(f, b, p - b, checksum, error);
 }

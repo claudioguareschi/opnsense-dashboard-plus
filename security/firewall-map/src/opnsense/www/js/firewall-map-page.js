@@ -2661,7 +2661,11 @@
 				const problem = host().problemText(summary, T);
 				showGeo(state.mode === "live" ? summary : null);
 				if (problem && state.mode === "live") {
-					if (summary.status === "no_database" || summary.status === "too_many_states") state.renderer.render({
+					if ([
+						"no_database",
+						"too_many_states",
+						"collector_incompatible"
+					].includes(summary.status)) state.renderer.render({
 						flows: [],
 						locations: []
 					});

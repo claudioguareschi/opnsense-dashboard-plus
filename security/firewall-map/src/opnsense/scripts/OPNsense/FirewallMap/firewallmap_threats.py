@@ -44,7 +44,7 @@ import sqlite3
 import sys
 import time
 
-from lib import native
+from lib import collector
 from lib.common import (CACHE_DB, THREATS_DB, connection_target, log_error, protocol_name,
                         secure_umask, service_name, service_port_label)
 from lib.leases import host_names
@@ -139,17 +139,17 @@ def merge(old, new):
     return result[:MAX_ITEMS]
 
 
-_NATIVE_PROTOCOLS = {1: "icmp", 6: "tcp", 17: "udp", 58: "ipv6-icmp", 132: "sctp"}
+_COLLECTOR_PROTOCOLS = {1: "icmp", 6: "tcp", 17: "udp", 58: "ipv6-icmp", 132: "sctp"}
 
 
-def _native_address(value):
+def _collector_address(value):
     if len(value) != 17 or value[0] not in (4, 6):
-        raise ValueError("invalid native address")
+        raise ValueError("invalid collector address")
     return str(ipaddress.ip_address(value[1:5] if value[0] == 4 else value[1:]))
 
 
 def observe_aggregates(aggregate, lists_for):
-    """Apply Python threat policy to native per-remote mechanical summaries."""
+    """Apply Python threat policy to the collector's per-remote mechanical summaries."""
     seen = {}
     for index, remote in enumerate(aggregate["threat_remotes"]):
         lists = lists_for(remote["address"])
@@ -169,14 +169,14 @@ def observe_aggregates(aggregate, lists_for):
         entry = seen.get(aggregate["threat_remotes"][remote_id]["address"])
         if entry is None:
             continue
-        if kind == native.INSIDE_HOST:
-            address = _native_address(value)
+        if kind == collector.INSIDE_HOST:
+            address = _collector_address(value)
             if address not in entry["_members"]["inside"]:
                 entry["_members"]["inside"].add(address)
                 entry["inside"].append(address)
-        elif kind == native.SERVICE:
+        elif kind == collector.SERVICE:
             number = (association >> 16) & 255
-            protocol = _NATIVE_PROTOCOLS.get(number)
+            protocol = _COLLECTOR_PROTOCOLS.get(number)
             if protocol is None:
                 protocol = protocol_name(number)
             port = association & 65535
@@ -189,11 +189,11 @@ def observe_aggregates(aggregate, lists_for):
                 label = service_port_label(protocol, str(port) if port else None)
                 if label:
                     entry["service_ports"][name] = label
-        elif kind == native.REMOTE_TARGET:
+        elif kind == collector.REMOTE_TARGET:
             if len(value) != 20:
                 continue
-            protocol = _NATIVE_PROTOCOLS.get(value[0]) or protocol_name(value[0])
-            address = _native_address(value[1:18])
+            protocol = _COLLECTOR_PROTOCOLS.get(value[0]) or protocol_name(value[0])
+            address = _collector_address(value[1:18])
             port = int.from_bytes(value[18:20], "big")
             target = connection_target(protocol, address, str(port) if port else None)
             if target not in entry["_members"]["targets"]:

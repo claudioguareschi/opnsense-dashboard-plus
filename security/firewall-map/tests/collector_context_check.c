@@ -22,11 +22,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* Property check of native/context.c: the indexed lookups must equal a naive
+/* Property check of collector/context.c: the indexed lookups must equal a naive
  * first-match scan in Python's row order, for random networks (duplicate
  * prefixes on several devices included), exclusions, ranges and addresses.
- * Built and run by tests/test_native_context.py; prints "ok" or a mismatch. */
-#include "../native/context.h"
+ * Built and run by tests/test_collector_context.py; prints "ok" or a mismatch. */
+#include "../collector/context.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

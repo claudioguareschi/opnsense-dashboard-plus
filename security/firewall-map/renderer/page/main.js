@@ -133,7 +133,7 @@ function poll(query) {
       showGeo(state.mode === 'live' ? summary : null);
       if (problem && state.mode === 'live') {
         // no database or no sample: an empty map, not the last picture
-        if (summary.status === 'no_database' || summary.status === 'too_many_states') {
+        if (['no_database', 'too_many_states', 'collector_incompatible'].includes(summary.status)) {
           state.renderer.render({flows: [], locations: []});
         }
         // the geolocation card says it on the map itself

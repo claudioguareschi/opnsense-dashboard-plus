@@ -22,11 +22,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* Development driver. Link this file with all native modules and libm. */
-#include "../native/aggregate.h"
-#include "../native/pf_reader.h"
-#include "../native/budget.h"
-#include "../native/protocol.h"
+/* Development driver. Link this file with all collector modules and libm. */
+#include "../collector/aggregate.h"
+#include "../collector/pf_reader.h"
+#include "../collector/budget.h"
+#include "../collector/protocol.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <math.h>

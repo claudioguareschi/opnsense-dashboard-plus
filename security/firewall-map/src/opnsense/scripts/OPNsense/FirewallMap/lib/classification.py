@@ -35,7 +35,7 @@ Classes, as the map uses them:
 The special-purpose networks below are the IANA IPv4 and IPv6 Special-Purpose Address
 Registries ("Globally Reachable: False" entries, with their globally reachable exceptions).
 IPv4-mapped IPv6 addresses (::ffff:0:0/96) are classified as the IPv4 address they carry.
-The native helper receives the same table as R rows (lib/native.py), so both sides always
+The state collector receives the same table as R rows (lib/collector.py), so both sides always
 agree, whatever ipaddress module the firewall's Python ships.
 """
 

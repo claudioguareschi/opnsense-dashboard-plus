@@ -28,7 +28,7 @@
 const AUTO_HEIGHT = 10000;
 // the renderer's content hash, written by tools/build-renderer.sh: a new renderer has a new
 // address, so a browser never runs an old cached copy with a newer widget
-const RENDERER_VERSION = '4e0cb31de955';
+const RENDERER_VERSION = 'b81bf0803136';
 // follow traffic is the map's own toggle, remembered per browser (as on the full-size map)
 const FOLLOW_KEY = 'firewallmap.widget.follow';
 
@@ -380,7 +380,7 @@ export default class FirewallMap extends BaseWidget {
             const problem = host.problemText(summary, this._text());
             await this._showGeo(summary);
             if (problem) {
-                if (summary.status === 'no_database' || summary.status === 'too_many_states') {
+                if (['no_database', 'too_many_states', 'collector_incompatible'].includes(summary.status)) {
                     // no locations or no sample: keep the map empty and say why
                     this.renderer.render({flows: [], locations: []});
                 } else if (summary.status !== 'starting') {

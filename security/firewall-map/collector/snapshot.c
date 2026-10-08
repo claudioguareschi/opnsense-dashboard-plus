@@ -400,7 +400,7 @@ bool snapshot_write(struct snapshot *s, FILE *out, struct fm_error *error) {
     return fm_error_set(error, EIO, "snapshot header");
   uint32_t crc = 0;
   unsigned char frame[FM_FRAME_MAX], *p = frame;
-  *p++ = 0; protocol_put(&p, 2, 4); protocol_put(&p, s->generation, 8);
+  *p++ = 0; protocol_put(&p, FM_PROTOCOL_VERSION, 4); protocol_put(&p, s->generation, 8);
   if (!protocol_frame(out, frame, p - frame, &crc, error)) return false;
   for (unsigned pass = 0; pass < 2; pass++)
     for (size_t n = 0; n < s->count; n++) {
@@ -479,7 +479,7 @@ static bool page_write(FILE *out, const struct aggregate *a, const struct rankin
   size_t count = active - start < 150 ? active - start : 150;
   if (fwrite("FMPAGE1\0", 1, 8, out) != 8) return fm_error_set(error, EIO, "snapshot page header");
   unsigned char b[128], *p = b; uint32_t crc = 0;
-  *p++ = 0; protocol_put(&p, 1, 4); protocol_put(&p, generation, 8);
+  *p++ = 0; protocol_put(&p, FM_PROTOCOL_VERSION, 4); protocol_put(&p, generation, 8);
   protocol_put(&p, active, 8); protocol_put(&p, start, 8); protocol_put(&p, count, 4);
   if (!protocol_frame(out, b, p - b, &crc, error)) return false;
   for (size_t n = 0; n < count; n++) {

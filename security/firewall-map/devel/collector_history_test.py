@@ -21,7 +21,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Compare native multi-sample history and correlation with Firewall Map."""
+"""Compare the collector's multi-sample history and correlation with Firewall Map."""
 
 import argparse
 import ipaddress
@@ -31,7 +31,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import native_equivalence as oracle
+import collector_equivalence as oracle
 
 
 def write_sample(path, states):
@@ -161,7 +161,7 @@ def correlation_test(directory, helper, pf, common):
     comparable = {key: {field: value[field] for field in expected[key]}
                   for key, value in actual.items() if key in expected}
     if set(actual) != set(expected) or comparable != expected:
-        raise AssertionError('native outside-tuple index differs from Python')
+        raise AssertionError('collector outside-tuple index differs from Python')
     if not any(row['ambiguous'] for row in actual.values()):
         raise AssertionError('duplicate outside tuple did not set ambiguity')
     print(json.dumps({'correlation_equivalence': 'exact', 'keys': len(actual),
