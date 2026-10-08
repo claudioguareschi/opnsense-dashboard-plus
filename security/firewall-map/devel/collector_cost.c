@@ -26,7 +26,7 @@
  *
  *   collector_cost record <wire>
  *   collector_cost <context> <wire> <copies> <samples>
- *   collector_cost <context> <wire> <copies> <samples> <recorded|grouped|adversarial>
+ *   collector_cost <context> <wire> <copies> <samples> <recorded|grouped|adversarial> [ids]
  *
  * record writes a raw GETSTATES recording of the running firewall (read-only); every sample replays it
  * <copies> times, each copy's states given their own IDs and ports, so a small table becomes a
@@ -42,9 +42,12 @@
  * the best locality); adversarial (flows interleaved, and each flow's states alternating between
  * its distinct attribution values: the fewest repeats). A digest of every flow total and
  * attribution value (weight, first-seen, association) shows whether two builds agree exactly.
+ * With ids, every state also goes through the IDS tuple correlation the collector runs when
+ * Suricata's log exists (the recent-tuple window, no queries), as in a live sample.
  * Copies change only ports from 32768 up (ephemeral ports), so services stay as recorded. */
 #include "../collector/aggregate.h"
 #include "../collector/context.h"
+#include "../collector/event_correlation.h"
 #include "../collector/history.h"
 #include "../collector/pf_reader.h"
 #include "../collector/state.h"
@@ -290,7 +293,8 @@ static uint64_t digest(const struct aggregate *a) {
   uint64_t tail[] = {counts.candidates, counts.candidate_evictions, counts.join_refused, counts.flows};
   return mix(h, tail, sizeof(tail));
 }
-static int post_decode(const char *context, const char *wire, unsigned copies, unsigned samples, const char *how) {
+static int post_decode(const char *context, const char *wire, unsigned copies, unsigned samples, const char *how,
+                       bool ids) {
   struct fm_error error = {0};
   struct context *ctx = context_create(&error);
   struct history *history = ctx && read_context(context, ctx, &error) ? history_create(&error) : NULL;
@@ -302,15 +306,28 @@ static int post_decode(const char *context, const char *wire, unsigned copies, u
     return 1;
   }
   order(&c, how);
+  struct event_history *events = ids ? event_history_create(&error) : NULL;
+  if (ids && !events) {
+    fprintf(stderr, "collector_cost: %s\n", error.message);
+    return 1;
+  }
   double clock = 1000;
   for (unsigned sample = 1; sample <= samples; sample++) {
     clock += 2;
-    struct aggregate *a = history_begin(history, clock, &error) ? aggregate_create(ctx, history, NULL, NULL, &error) : NULL;
+    struct event_sample *sample_events = ids ? event_sample_begin(events, NULL, 0, &error) : NULL;
+    struct aggregate *a = (!ids || sample_events) && history_begin(history, clock, &error)
+                              ? aggregate_create(ctx, history, ids ? event_sample_observe : NULL, sample_events, &error)
+                              : NULL;
     if (!a) break;
     double started = now();
     for (size_t n = 0; n < c.count && !error.code; n++) aggregate_add(a, &c.items[n].s, &error);
     double added = now();
     if (!error.code) aggregate_finish(a, &error);
+    if (ids && !error.code) {
+      struct event_match matches[1];
+      event_sample_finish(events, sample_events, clock, matches, 0, &error);
+    }
+    if (sample_events) event_sample_destroy(sample_events);
     double finished = now();
     if (error.code) {
       history_abort(history);
@@ -321,9 +338,9 @@ static int post_decode(const char *context, const char *wire, unsigned copies, u
     struct aggregate_counts counts = aggregate_counts(a);
     struct rusage usage;
     getrusage(RUSAGE_SELF, &usage);
-    printf("%s sample %u: %zu states, %zu flows, %zu candidates | after decode %.0f ns/state, finish %.1f ms | "
+    printf("%s%s sample %u: %zu states, %zu flows, %zu candidates | after decode %.0f ns/state, finish %.1f ms | "
            "digest %016llx | max RSS %ld KiB\n",
-           how, sample, c.count, counts.flows, counts.candidates, (added - started) * 1e9 / (c.count ? c.count : 1),
+           how, ids ? "+ids" : "", sample, c.count, counts.flows, counts.candidates, (added - started) * 1e9 / (c.count ? c.count : 1),
            (finished - added) * 1e3, (unsigned long long)digest(a), (long)usage.ru_maxrss);
     aggregate_destroy(a);
   }
@@ -332,6 +349,7 @@ static int post_decode(const char *context, const char *wire, unsigned copies, u
     return 1;
   }
   free(c.items);
+  if (events) event_history_destroy(events);
   history_destroy(history);
   context_destroy(ctx);
   return 0;
@@ -358,9 +376,9 @@ int main(int argc, char **argv) {
     printf("%llu states recorded\n", (unsigned long long)states);
     return 0;
   }
-  if (argc == 6)
+  if (argc == 6 || (argc == 7 && !strcmp(argv[6], "ids")))
     return post_decode(argv[1], argv[2], (unsigned)strtoul(argv[3], NULL, 10), (unsigned)strtoul(argv[4], NULL, 10),
-                       argv[5]);
+                       argv[5], argc == 7);
   if (argc != 5) {
     fprintf(stderr, "usage: collector_cost record <wire> | collector_cost <context> <wire> <copies> <samples> "
                     "[recorded|grouped|adversarial]\n");
