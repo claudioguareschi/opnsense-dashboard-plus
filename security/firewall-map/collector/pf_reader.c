@@ -48,6 +48,24 @@
 #include <sys/user.h>
 #include <time.h>
 #include <unistd.h>
+#ifdef FM_DEVEL_TOOLS
+#include <sys/filio.h>
+#include <sys/ioctl.h>
+/* FM_PROBE_BACKLOG (devel builds only): time spent in the state callback and
+ * the largest kernel reply backlog seen after a read, printed to stderr when
+ * the dump ends. Measures whether collector processing lets PF queue the dump. */
+static struct {
+  bool enabled;
+  double callback_seconds;
+  uint64_t states;
+  int max_backlog;
+} probe;
+static double probe_now(void) {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return t.tv_sec + t.tv_nsec / 1e9;
+}
+#endif
 
 _Static_assert(PF_RULE_LABEL_SIZE == FM_LABEL_SIZE, "PF rule label ABI");
 _Static_assert(IFNAMSIZ == FM_INTERFACE_SIZE, "PF interface ABI");
@@ -356,7 +374,18 @@ static void decode(struct reader *r, const struct nlmsghdr *hdr) {
       return;
     }
   if (!r->error->code)
+#ifdef FM_DEVEL_TOOLS
+  {
+    double started = probe.enabled ? probe_now() : 0;
+#endif
     r->callback(&s, r->arg, r->error);
+#ifdef FM_DEVEL_TOOLS
+    if (probe.enabled) {
+      probe.callback_seconds += probe_now() - started;
+      probe.states++;
+    }
+  }
+#endif
 }
 static void datagram(struct reader *r, unsigned char *buffer, size_t left,
                      uint32_t seq, int family, int *done) {
@@ -424,6 +453,10 @@ bool pf_reader_decode_datagram(unsigned char *buffer, size_t size, uint32_t seq,
 bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
                     double *request_anchor, struct fm_error *error) {
   struct reader r = {.callback = callback, .arg = arg, .error = error};
+#ifdef FM_DEVEL_TOOLS
+  memset(&probe, 0, sizeof(probe));
+  probe.enabled = getenv("FM_PROBE_BACKLOG") != NULL;
+#endif
   struct snl_state ss;
   if (!snl_init(&ss, NETLINK_GENERIC))
     return fm_error_set(error, errno, "netlink setup");
@@ -510,9 +543,20 @@ bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
     if (raw && !protocol_frame(raw, buffer, size, NULL, error))
       break;
 #endif
+#ifdef FM_DEVEL_TOOLS
+    int backlog;
+    if (probe.enabled && !ioctl(ss.fd, FIONREAD, &backlog) && backlog > probe.max_backlog)
+      probe.max_backlog = backlog;
+#endif
     datagram(&r, buffer, size, seq, family, &done);
   }
   ok = done && !error->code;
+#ifdef FM_DEVEL_TOOLS
+  if (probe.enabled)
+    fprintf(stderr, "probe: states %ju callback %.6f s (%.3f us/state) max_backlog %d B\n",
+            (uintmax_t)probe.states, probe.callback_seconds,
+            probe.states ? probe.callback_seconds * 1e6 / probe.states : 0.0, probe.max_backlog);
+#endif
 out:
   free(buffer);
   snl_free(&ss);
