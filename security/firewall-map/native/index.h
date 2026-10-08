@@ -26,20 +26,27 @@
 #define FM_INDEX_H
 #include "error.h"
 #include <stdint.h>
+/* An insertion-ordered hash map of byte-string keys.
+ *
+ * Ownership: the map owns each item and its copied key. `id` is the item's
+ * dense insertion index (0, 1, 2, ...), assigned by the map and never changed;
+ * callers that need a dense identity use it. `value`, `count` and `seq` belong
+ * to the caller and start as 0, 0 and UINT64_MAX; the map never reads them.
+ * Iteration in insertion order goes through order[0..used). */
 struct item {
   struct item *next;
   uint64_t hash, seq, count, value;
-  size_t len;
+  size_t id, len;
   unsigned char key[];
 };
-/* Keys are copied and owned by the index. Values are caller-owned.
- * order preserves first insertion independently of bucket resizing. */
 struct map {
   struct item **buckets, **order;
   size_t capacity, used, allocated;
 };
-struct item *lookup(struct map *, const void *, size_t, bool,
+struct item *lookup(struct map *, const void *, size_t, bool add,
                     struct fm_error *);
+/* Lookup without insertion; never fails, never modifies the map. */
+const struct item *map_find(const struct map *, const void *, size_t);
 void map_clear(struct map *);
 size_t map_bytes(const struct map *);
 #endif

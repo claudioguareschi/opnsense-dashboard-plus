@@ -27,6 +27,7 @@
 """Local geolocation lookups and the SQLite cache shared by the Firewall Map+ scripts."""
 
 import json
+import math
 import os
 import sqlite3
 import threading
@@ -71,21 +72,34 @@ def mmdb_lookup(database, address):
     return mmdb.flatten(record) if record is not None else {}
 
 
-def lookup_location(address, city_database, asn_database):
-    """Resolve one address against the local geolocation databases (never a remote service)."""
-    values = mmdb_lookup(city_database, address)
+def _number(text, minimum, maximum):
+    """A finite number within [minimum, maximum] from database text, or None."""
     try:
-        latitude = float(values[("location", "latitude")])
-        longitude = float(values[("location", "longitude")])
-    except (KeyError, ValueError):
+        value = float(text)
+    except (TypeError, ValueError):
         return None
+    return value if math.isfinite(value) and minimum <= value <= maximum else None
+
+
+def lookup_location(address, city_database, asn_database):
+    """Resolve one address against the local geolocation databases (never a remote service).
+
+    Database values are untrusted: coordinates must be finite and in range, and malformed
+    accuracy or AS numbers are left out rather than failing the lookup.
+    """
+    values = mmdb_lookup(city_database, address)
+    latitude = _number(values.get(("location", "latitude")), -90, 90)
+    longitude = _number(values.get(("location", "longitude")), -180, 180)
+    if latitude is None or longitude is None:
+        return None
+    accuracy = _number(values.get(("location", "accuracy_radius")), 0, 40075)
     location = {
         "lat": round(latitude, 4),
         "lon": round(longitude, 4),
         "city": values.get(("city", "names", "en")),
         # GeoLite often knows only the state/province (with a coarse accuracy radius)
         "region": values.get(("subdivisions", "names", "en")),
-        "accuracy_km": int(float(values[("location", "accuracy_radius")])) if ("location", "accuracy_radius") in values else None,
+        "accuracy_km": int(accuracy) if accuracy is not None else None,
         "country": values.get(("country", "iso_code")) or values.get(("registered_country", "iso_code")),
         "country_name": values.get(("country", "names", "en")) or values.get(("registered_country", "names", "en")),
     }
@@ -94,8 +108,9 @@ def lookup_location(address, city_database, asn_database):
             asn = mmdb_lookup(asn_database, address)
         except LookupError:
             asn = {}
-        if ("autonomous_system_number",) in asn:
-            location["asn"] = int(asn[("autonomous_system_number",)])
+        number = _number(asn.get(("autonomous_system_number",)), 0, 4294967295)
+        if number is not None and number == int(number):
+            location["asn"] = int(number)
             location["as_org"] = asn.get(("autonomous_system_organization",))
     return location
 

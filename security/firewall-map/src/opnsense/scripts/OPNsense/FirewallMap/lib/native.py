@@ -22,33 +22,76 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Focused adapter for the package-owned native PF aggregation helper."""
+
+"""Client of the package-owned native PF engine (firewallmap-native).
+
+The wire formats are specified in native/PROTOCOL.md. Every response is
+validated completely (framing, record order, counts, checksum) before any of
+it is used; anything unexpected closes the helper, so a stream is never
+resynchronized. Python never supplies elapsed time: the helper anchors each
+sample itself and reports a baseline (interval < 0) when it has none.
+
+Compatibility names: decoded event matches keep the historical keys
+``bytes_in`` (traffic from the remote) and ``bytes_out`` (traffic to the
+remote); flow rows use the explicit ``*_from_remote``/``*_to_remote`` names.
+"""
 
 import ipaddress
 import json
 import math
 import os
+import re
 import select
-import shutil
 import socket
 import struct
 import subprocess
+import time
 import zlib
 
 from . import common
 
 HELPER = "/usr/local/libexec/firewallmap-native"
-CAPABILITY = b"FMNATIVE4\n"
+BANNER = re.compile(rb"^FMNATIVE5 pf_state_version=(\d+) freebsd_version=(\d+)\n$")
 MAX_FRAME = 4096
 READ_TIMEOUT = 20
 PROTO_NUMBERS = {"icmp": 1, "tcp": 6, "udp": 17, "ipv6-icmp": 58, "sctp": 132}
 SNAPSHOT_FLOWS = 5000
 SNAPSHOT_BYTES = 10 * 1024 * 1024
 SNAPSHOT_STATES = 5000
+MAX_EVENT_QUERIES = 2500
+
+# FMAGG4 record kinds
+HEADER, FLOW, CANDIDATE, THREAT_REMOTE, THREAT_CANDIDATE, EVENT_MATCH, TELEMETRY = range(7)
+FAILURE, FOOTER = 254, 255
+# candidate kinds
+PROTOCOL, INSIDE_HOST, EGRESS_INTERFACE, SERVICE, REMOTE_TARGET, RULE_LABEL = range(1, 7)
+THREAT_CANDIDATE_KINDS = (INSIDE_HOST, SERVICE, REMOTE_TARGET)
+EVENT_MATCH_KINDS = (1, 2)  # current state, recently seen state
+OUTCOMES = {0: "sample", 1: "refused_states", 2: "refused_context", 3: "refused_memory"}
+FAILURE_CLASSES = {1: "structural", 2: "internal", 3: "incompatible", 4: "resources", 5: "request"}
+# FMSTATE2 omission reason bits and selection policies
+OMISSION_REASONS = ((1, "encoded_bytes"), (2, "state_count"), (4, "flow_quota"))
+SELECTION_POLICIES = {1: "arrival_incident_first_v1"}
+
+_FLOW = struct.Struct("!I17s17sQQQIIQQQQQQddddd")
+_TELEMETRY = struct.Struct("!IQdddddQQQQQQQQQQQ")
+_TELEMETRY_FIELDS = ("pid", "sequence", "interval", "dump_seconds", "processing_seconds", "user_cpu",
+                     "system_cpu", "max_rss", "heap_bytes", "heap_peak", "heap_blocks", "heap_budget",
+                     "preflight_states", "skipped_af_translation", "candidates_omitted",
+                     "threat_remotes_omitted", "threat_candidates_omitted", "event_history_evicted")
+_FOOTER = struct.Struct("!IIQQQQQQQQQQQI")
 
 
 class NativeError(RuntimeError):
-    """The native helper was absent, incompatible, or failed its complete sample."""
+    """The native helper was absent, incompatible, or failed its complete sample.
+
+    failure_class names the helper's own classification (FMFAIL1) when it gave
+    one: structural, internal, incompatible, resources or request.
+    """
+
+    def __init__(self, message, failure_class=None):
+        super().__init__(message)
+        self.failure_class = failure_class
 
 
 def available(path=HELPER):
@@ -107,7 +150,7 @@ def _context_rows(local_addresses, networks, interface_addresses, primary_wan_de
 
 def _address(data):
     if len(data) != 17 or data[0] not in (4, 6):
-        raise NativeError("invalid FMAGG3 address")
+        raise NativeError("invalid native address")
     if data[0] == 4:
         if any(data[5:]):
             raise NativeError("noncanonical IPv4 address")
@@ -115,175 +158,226 @@ def _address(data):
     return str(ipaddress.IPv6Address(data[1:]))
 
 
+def _text(data, encoding="utf-8"):
+    """A NUL-padded kernel string; never fails on a byte sequence PF truncated."""
+    return data.split(b"\0", 1)[0].decode(encoding, "replace")
+
+
 def _read_exact(stream, size, process, deadline):
     data = bytearray()
     descriptor = stream.fileno()
     while len(data) < size:
-        remaining = deadline - __import__("time").monotonic()
+        remaining = deadline - time.monotonic()
         if remaining <= 0 or not select.select([descriptor], [], [], remaining)[0]:
             raise NativeError("native helper response timed out")
         part = os.read(descriptor, size - len(data))
         if not part:
             code = process.poll()
-            raise NativeError(f"native helper ended before sample completion ({code})")
+            raise NativeError(f"native helper ended before its response was complete ({code})")
         data.extend(part)
     return bytes(data)
 
 
-def _decode(stream, process, query_keys, require_threat_summary, flow_limit=150, byte_limit=None):
-    import time
-
-    deadline = time.monotonic() + READ_TIMEOUT
-    if _read_exact(stream, 8, process, deadline) != b"FMAGG3\0\0":
-        raise NativeError("native helper protocol version mismatch")
-    checksum = 0
-    flows, candidates, matches = [], [], {}
-    threat_remotes, threat_candidates = [], []
-    started = False
-    capabilities = 0
-    counts = None
-    received = 8
+def _frames(stream, process, deadline, byte_limit=None, received=8):
+    """(frame bytes, payload) pairs; the footer (255) is the last one yielded."""
     while True:
         size = _read_exact(stream, 4, process, deadline)
         length, = struct.unpack("!I", size)
-        if length > MAX_FRAME:
-            raise NativeError("oversized FMAGG3 record")
         received += length + 4
+        if not 0 < length <= MAX_FRAME:
+            raise NativeError("native frame size")
         if byte_limit is not None and received > byte_limit:
-            raise NativeError("snapshot aggregate response exceeds safety ceiling")
+            raise NativeError("native response exceeds its byte ceiling")
         data = _read_exact(stream, length, process, deadline)
-        if not length:
-            raise NativeError("unexpected empty FMAGG3 frame")
+        yield size, data
+        if data[0] == FOOTER:
+            return
+
+
+def _failure(stream, process, deadline):
+    size = _read_exact(stream, 4, process, deadline)
+    length, = struct.unpack("!I", size)
+    if not 9 <= length <= MAX_FRAME:
+        raise NativeError("malformed native failure report")
+    data = _read_exact(stream, length, process, deadline)
+    if data[0] != FAILURE:
+        raise NativeError("malformed native failure report")
+    failure_class, code = struct.unpack_from("!Ii", data, 1)
+    message = data[9:].decode("utf-8", "replace")
+    name = FAILURE_CLASSES.get(failure_class, "unknown")
+    return NativeError(f"native helper failed ({name}, errno {code}): {message}", name)
+
+
+def _magic(stream, process, deadline, expected):
+    magic = _read_exact(stream, 8, process, deadline)
+    if magic == b"FMFAIL1\0":
+        raise _failure(stream, process, deadline)
+    if magic != expected:
+        raise NativeError("native helper protocol version mismatch")
+
+
+def _decode(stream, process, query_keys, require_threat_summary, flow_limit=150, byte_limit=None):
+    """Read one complete FMAGG4 response."""
+    deadline = time.monotonic() + READ_TIMEOUT
+    _magic(stream, process, deadline, b"FMAGG4\0\0")
+    checksum, threats_present, telemetry, footer, previous_kind = 0, None, None, None, HEADER
+    flows, candidates, matches = [], [], {}
+    threat_remotes, threat_candidates = [], []
+    for size, data in _frames(stream, process, deadline, byte_limit):
         kind = data[0]
-        if kind != 255:
-            checksum = zlib.crc32(size, checksum)
-            checksum = zlib.crc32(data, checksum)
-        if kind == 0:
-            if started or len(data) != 9 or struct.unpack_from("!I", data, 1)[0] != 3:
-                raise NativeError("FMAGG3 capability mismatch")
-            flags, = struct.unpack_from("!I", data, 5)
-            if flags not in (5, 7):
-                raise NativeError("FMAGG3 required capabilities missing")
-            if require_threat_summary and not flags & 2:
-                raise NativeError("FMAGG3 threat summary capability missing")
-            capabilities = flags
-            started = True
-        elif not started:
-            raise NativeError("FMAGG3 missing capability record")
-        elif kind == 1:
-            if len(data) != 159:
-                raise NativeError("invalid FMAGG3 flow record")
-            index, = struct.unpack_from("!I", data, 1)
-            if index != len(flows):
-                raise NativeError("FMAGG2 flow order mismatch")
-            local, remote = _address(data[5:22]), _address(data[22:39])
-            states, toward, away, oldest = struct.unpack_from("!QQQI", data, 39)
-            youngest, remote_started, local_started, first = struct.unpack_from("!IQQQ", data, 67)
-            delta_toward, delta_away, packets = struct.unpack_from("!QQQ", data, 95)
-            rate_in, rate_out, packet_rate, activity, score = struct.unpack_from("!ddddd", data, 119)
-            flows.append({"key": (local, remote), "states": states, "bytes_toward": toward,
-                          "bytes_away": away, "oldest": oldest, "youngest": youngest,
-                          "remote_started": remote_started,
-                          "local_started": local_started, "first": first, "toward": delta_toward,
-                          "away": delta_away, "packets": packets, "rate_in": rate_in,
-                          "rate_out": rate_out, "packet_rate": packet_rate,
-                          "activity": activity, "score": score})
-        elif kind == 2:
+        if kind != FOOTER:
+            checksum = zlib.crc32(data, zlib.crc32(size, checksum))
+        if threats_present is None:
+            if kind != HEADER or len(data) != 9:
+                raise NativeError("FMAGG4 header missing")
+            version, flags = struct.unpack_from("!II", data, 1)
+            if version != 4 or flags & ~1:
+                raise NativeError("FMAGG4 header version or flags")
+            threats_present = bool(flags & 1)
+            if require_threat_summary and not threats_present:
+                raise NativeError("FMAGG4 threat summary missing")
+            continue
+        if telemetry is not None and kind != FOOTER:
+            raise NativeError("FMAGG4 record after telemetry")
+        if kind in (FLOW, CANDIDATE, THREAT_REMOTE, THREAT_CANDIDATE, EVENT_MATCH) and kind < previous_kind:
+            raise NativeError("FMAGG4 record order")
+        if kind != FOOTER:
+            previous_kind = max(previous_kind, kind)
+        if kind == FLOW:
+            if len(data) != 1 + _FLOW.size:
+                raise NativeError("invalid FMAGG4 flow record")
+            (rank, local, remote, states, from_remote, to_remote, oldest, youngest, remote_weight, local_weight,
+             first, delta_from, delta_to, delta_packets, rate_from, rate_to, packet_rate, activity,
+             score) = _FLOW.unpack_from(data, 1)
+            if rank != len(flows) or not all(math.isfinite(value) and value >= 0 for value in
+                                             (rate_from, rate_to, packet_rate, activity, score)):
+                raise NativeError("invalid FMAGG4 flow rank or rate")
+            flows.append({"key": (_address(local), _address(remote)), "states": states,
+                          "bytes_from_remote": from_remote, "bytes_to_remote": to_remote,
+                          "oldest": oldest, "youngest": youngest,
+                          "remote_initiated_weight": remote_weight, "local_initiated_weight": local_weight,
+                          "first": first, "delta_bytes_from_remote": delta_from,
+                          "delta_bytes_to_remote": delta_to, "delta_packets": delta_packets,
+                          "rate_from_remote": rate_from, "rate_to_remote": rate_to,
+                          "packet_rate": packet_rate, "activity": activity, "score": score})
+        elif kind == CANDIDATE:
             if len(data) < 32:
-                raise NativeError("invalid FMAGG3 candidate record")
-            flow, candidate_kind, sequence, weight, association, value_length = struct.unpack_from(
-                "!IBQQQH", data, 1)
-            if flow >= len(flows) or candidate_kind not in range(1, 7) or value_length != len(data) - 32:
-                raise NativeError("invalid FMAGG3 candidate identity")
+                raise NativeError("invalid FMAGG4 candidate record")
+            flow, candidate_kind, sequence, weight, association, length = struct.unpack_from("!IBQQQH", data, 1)
+            if flow >= len(flows) or candidate_kind not in range(PROTOCOL, RULE_LABEL + 1) \
+                    or length != len(data) - 32:
+                raise NativeError("invalid FMAGG4 candidate identity")
             candidates.append((flow, candidate_kind, sequence, weight, association, data[32:]))
-        elif kind == 3:
-            if not capabilities & 2 or len(data) != 50:
-                raise NativeError("invalid FMAGG3 remote summary")
+        elif kind == THREAT_REMOTE:
+            if not threats_present or len(data) != 50:
+                raise NativeError("invalid FMAGG4 threat remote")
             index, = struct.unpack_from("!I", data, 1)
-            address = _address(data[5:22])
-            inbound, outbound, transferred, youngest = struct.unpack_from("!QQQI", data, 22)
+            remote_states, local_states, transferred, youngest = struct.unpack_from("!QQQI", data, 22)
             if index != len(threat_remotes):
-                raise NativeError("FMAGG3 remote order mismatch")
-            threat_remotes.append({"address": address, "inbound": inbound, "outbound": outbound,
-                                   "bytes": transferred, "youngest": youngest,
-                                   "targets": [], "inside": [], "services": [], "service_ports": {}})
-        elif kind == 4:
-            if not capabilities & 2 or len(data) < 24:
-                raise NativeError("invalid FMAGG3 remote candidate")
-            remote, candidate_kind, sequence, association, value_length = struct.unpack_from("!IBQQH", data, 1)
-            if remote >= len(threat_remotes) or candidate_kind not in (2, 4, 5) \
-                    or value_length != len(data) - 24:
-                raise NativeError("invalid FMAGG3 remote candidate identity")
+                raise NativeError("FMAGG4 threat remote order")
+            threat_remotes.append({"address": _address(data[5:22]), "remote_initiated_states": remote_states,
+                                   "local_initiated_states": local_states, "bytes": transferred,
+                                   "youngest": youngest})
+        elif kind == THREAT_CANDIDATE:
+            if not threats_present or len(data) < 24:
+                raise NativeError("invalid FMAGG4 threat candidate")
+            remote, candidate_kind, sequence, association, length = struct.unpack_from("!IBQQH", data, 1)
+            if remote >= len(threat_remotes) or candidate_kind not in THREAT_CANDIDATE_KINDS \
+                    or length != len(data) - 24:
+                raise NativeError("invalid FMAGG4 threat candidate identity")
             threat_candidates.append((remote, candidate_kind, sequence, association, data[24:]))
-        elif kind == 5:
-            if not capabilities & 4 or len(data) != 177:
-                raise NativeError("invalid FMAGG3 event match")
-            query_id, = struct.unpack_from("!H", data, 1)
-            match_kind, proto = data[3], data[4]
-            if query_id >= len(query_keys) or match_kind not in (1, 2):
-                raise NativeError("invalid FMAGG3 event match identity")
-            public, public_port = _address(data[5:22]), struct.unpack_from("!H", data, 22)[0]
-            remote, remote_port = _address(data[24:41]), struct.unpack_from("!H", data, 41)[0]
-            has_inside = data[43]
-            if has_inside not in (0, 1):
-                raise NativeError("invalid FMAGG3 inside flag")
-            inside = _address(data[44:61]) if has_inside else None
-            inside_port = struct.unpack_from("!H", data, 61)[0]
-            state_id, creator = struct.unpack_from("!QI", data, 63)
-            ambiguous = data[75]
-            age = struct.unpack_from("!I", data, 76)[0]
-            bytes_in, bytes_out = struct.unpack_from("!QQ", data, 80)
-            remote_started = data[96]
-            if ambiguous not in (0, 1) or remote_started not in (0, 1):
-                raise NativeError("invalid FMAGG3 event flags")
-            interface = data[97:113].split(b"\0", 1)[0].decode("ascii")
-            rule = data[113:177].split(b"\0", 1)[0].decode("utf-8")
-            try:
-                protocol = common.protocol_name(proto)
-            except (OSError, ValueError) as error:
-                raise NativeError("unknown FMAGG3 event protocol") from error
-            key = (protocol, public, str(public_port) if public_port else "",
-                   remote, str(remote_port) if remote_port else "")
-            if key != query_keys[query_id] or key in matches:
-                raise NativeError("FMAGG3 event tuple mismatch or duplicate")
-            matches[key] = {"kind": match_kind, "inside": inside,
-                            "inside_port": inside_port if has_inside else None,
-                            "id": state_id, "creator": creator, "ambiguous": bool(ambiguous),
-                            "age": age, "bytes_in": bytes_in, "bytes_out": bytes_out,
-                            "remote_started": bool(remote_started), "interface": interface,
-                            "rule": rule or None}
-        elif kind == 255:
-            if len(data) != 81:
-                raise NativeError("invalid FMAGG3 completion record")
-            total, retained, mapped, flow_total, flow_count, candidate_count, match_count, remote_count, \
-                remote_candidate_count, expected = struct.unpack("!QQQQQQQQQQ", data[1:])
-            if expected != checksum or flow_count != len(flows) or candidate_count != len(candidates) \
-                    or match_count != len(matches) or remote_count != len(threat_remotes) \
-                    or remote_candidate_count != len(threat_candidates) \
-                    or sum(f["states"] for f in flows) > mapped \
-                    or not flow_count <= flow_limit or not mapped <= retained <= total:
-                raise NativeError("FMAGG3 completion validation failed")
-            counts = {"states": total, "retained": retained, "mapped": mapped,
-                      "flows": flow_total, "captured_flows": flow_count,
-                      "candidates": candidate_count, "matches": match_count,
-                      "threat_remotes": remote_count, "threat_candidates": remote_candidate_count}
-            break
+        elif kind == EVENT_MATCH:
+            key, match = _event_match(data, query_keys)
+            if key in matches:
+                raise NativeError("FMAGG4 duplicate event match")
+            matches[key] = match
+        elif kind == TELEMETRY:
+            if len(data) != 1 + _TELEMETRY.size:
+                raise NativeError("invalid FMAGG4 telemetry")
+            telemetry = dict(zip(_TELEMETRY_FIELDS, _TELEMETRY.unpack_from(data, 1)))
+            if not all(math.isfinite(telemetry[name]) for name in _TELEMETRY_FIELDS[2:7]):
+                raise NativeError("invalid FMAGG4 telemetry")
+        elif kind == FOOTER:
+            if len(data) != 1 + _FOOTER.size:
+                raise NativeError("invalid FMAGG4 footer")
+            footer = _FOOTER.unpack_from(data, 1)
         else:
-            raise NativeError("unknown FMAGG3 record")
-    if (not capabilities & 2 and (counts["threat_remotes"] or counts["threat_candidates"])):
-        raise NativeError("FMAGG3 threat summary capability mismatch")
+            raise NativeError("unknown FMAGG4 record")
+    if threats_present is None or telemetry is None or footer is None:
+        raise NativeError("incomplete FMAGG4 response")
+    (outcome, context_kind, actual, limit, seen, retained, mapped, flow_total, flows_sent, candidates_sent,
+     matches_sent, remotes_sent, remote_candidates_sent, expected) = footer
+    records = (flows, candidates, matches, threat_remotes, threat_candidates)
+    if expected != checksum or outcome not in OUTCOMES \
+            or (flows_sent, candidates_sent, matches_sent, remotes_sent, remote_candidates_sent) \
+            != tuple(map(len, records)) \
+            or len(flows) > flow_limit or not mapped <= retained <= seen \
+            or sum(flow["states"] for flow in flows) > mapped \
+            or (outcome and (any(records) or threats_present)):
+        raise NativeError("FMAGG4 completion validation failed")
+    refused = OUTCOMES[outcome] if outcome else None
     return {"flows": flows, "candidates": candidates, "matches": matches,
             "threat_remotes": threat_remotes, "threat_candidates": threat_candidates,
-            "threat_summary": bool(capabilities & 2), "counts": counts}
+            "threat_summary": threats_present, "telemetry": telemetry,
+            "baseline": telemetry["interval"] < 0,
+            "refused": refused and {"reason": refused, "kind": chr(context_kind) if context_kind else None,
+                                    "actual": actual, "limit": limit},
+            "counts": {"states": seen, "retained": retained, "mapped": mapped, "flows": flow_total,
+                       "captured_flows": len(flows), "candidates": len(candidates), "matches": len(matches),
+                       "threat_remotes": len(threat_remotes), "threat_candidates": len(threat_candidates)}}
+
+
+def _event_match(data, query_keys):
+    if len(data) != 194:
+        raise NativeError("invalid FMAGG4 event match")
+    query_id, match_kind, proto = struct.unpack_from("!HBB", data, 1)
+    if query_id >= len(query_keys) or match_kind not in EVENT_MATCH_KINDS:
+        raise NativeError("invalid FMAGG4 event match identity")
+    public, public_port = _address(data[5:22]), struct.unpack_from("!H", data, 22)[0]
+    remote, remote_port = _address(data[24:41]), struct.unpack_from("!H", data, 41)[0]
+    has_inside = data[43]
+    inside_port, state_id, creator = struct.unpack_from("!HQI", data, 61)
+    ambiguous = data[75]
+    age, from_remote, to_remote, packets_from, packets_to = struct.unpack_from("!IQQQQ", data, 76)
+    remote_initiated, apparent = data[112], data[113]
+    if not {has_inside, ambiguous, remote_initiated, apparent} <= {0, 1}:
+        raise NativeError("invalid FMAGG4 event flags")
+    try:
+        protocol = common.protocol_name(proto)
+    except (OSError, ValueError) as error:
+        raise NativeError("unknown FMAGG4 event protocol") from error
+    key = (protocol, public, str(public_port) if public_port else "",
+           remote, str(remote_port) if remote_port else "")
+    if key != query_keys[query_id]:
+        raise NativeError("FMAGG4 event tuple mismatch")
+    return key, {"kind": match_kind, "inside": _address(data[44:61]) if has_inside else None,
+                 "inside_port": inside_port if has_inside else None,
+                 "id": state_id, "creator": creator, "ambiguous": bool(ambiguous), "age": age,
+                 # compatibility names: bytes_in is from the remote, bytes_out to the remote
+                 "bytes_in": from_remote, "bytes_out": to_remote,
+                 "packets_from_remote": packets_from, "packets_to_remote": packets_to,
+                 "remote_initiated": bool(remote_initiated),
+                 # historical name of the apparent-initiator heuristic
+                 "remote_started": bool(apparent),
+                 "interface": _text(data[114:130], "ascii"), "rule": _text(data[130:194]) or None}
 
 
 class NativeEngine:
-    """One collector-owned helper process; its native history lives across samples."""
+    """One collector-owned helper process; its native history lives across samples.
+
+    Every request goes through _request: a request that does not complete
+    cleanly, for any reason (including an exception raised while it is in
+    flight), leaves the stream in an unknown position, so the helper is closed.
+    """
 
     def __init__(self, path=HELPER):
         self.path = path
         self.process = None
         self.snapshot_open = False
+        self.snapshot_generation = None
+        self.metadata = None
+        self.starts = 0
+        self.last_error = None
 
     def _start(self):
         if not available(self.path):
@@ -291,27 +385,52 @@ class NativeEngine:
         try:
             self.process = subprocess.Popen([self.path], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                             bufsize=0)
-            import time
+            self.starts += 1
+            banner = bytearray()
             deadline = time.monotonic() + READ_TIMEOUT
-            if _read_exact(self.process.stdout, len(CAPABILITY), self.process, deadline) != CAPABILITY:
+            while not banner.endswith(b"\n") and len(banner) < 128:
+                banner += _read_exact(self.process.stdout, 1, self.process, deadline)
+            match = BANNER.match(bytes(banner))
+            if not match:
                 raise NativeError("native helper capability mismatch")
+            self.metadata = {"pid": self.process.pid, "pf_state_version": int(match.group(1)),
+                             "freebsd_version": int(match.group(2))}
         except (OSError, NativeError) as error:
             self.close()
             if isinstance(error, NativeError):
                 raise
             raise NativeError("could not start native helper") from error
 
-    def sample(self, local_addresses, networks, interface_addresses, primary_wan_device, elapsed,
+    def _request(self, text, decoder):
+        if self.process is None or self.process.poll() is not None:
+            raise NativeError("native helper is not running")
+        try:
+            self.process.stdin.write(text.encode("ascii"))
+            self.process.stdin.flush()
+            return decoder(self.process.stdout, self.process)
+        except BaseException as error:
+            # framing is unknown: never reuse this helper
+            self.close()
+            if isinstance(error, NativeError):
+                self.last_error = str(error)
+                raise
+            if isinstance(error, (OSError, UnicodeError, ValueError, struct.error)):
+                self.last_error = f"native helper request failed: {error}"
+                raise NativeError(self.last_error) from error
+            raise
+
+    def sample(self, local_addresses, networks, interface_addresses, primary_wan_device,
                threat_summary=False, event_queries=(), snapshot=False):
         if self.process is None or self.process.poll() is not None:
+            self.close()
             self._start()
         rows = _context_rows(local_addresses, networks, interface_addresses, primary_wan_device)
         if threat_summary:
-            rows.append("T 1")
+            rows.append("THREATS")
         if snapshot:
-            rows.append("B 1")
+            rows.append("SNAPSHOT")
         query_keys = []
-        for protocol, public, public_port, remote, remote_port in event_queries[:2500]:
+        for protocol, public, public_port, remote, remote_port in event_queries[:MAX_EVENT_QUERIES]:
             number = PROTO_NUMBERS.get(protocol)
             if number is None:
                 try:
@@ -321,46 +440,25 @@ class NativeEngine:
             query_keys.append((protocol, public, str(public_port or ""), remote, str(remote_port or "")))
             rows.append(f"Q {len(query_keys) - 1} {number} {public} {int(public_port or 0)} "
                         f"{remote} {int(remote_port or 0)}")
-        text = "FMCONF1\nE %.9f\n%sRUN\n" % (elapsed, "".join(row + "\n" for row in rows))
-        try:
-            self.process.stdin.write(text.encode("ascii"))
-            self.process.stdin.flush()
-            result = _decode(self.process.stdout, self.process, query_keys, threat_summary)
-            self.snapshot_open = snapshot
-            return result
-        except (OSError, UnicodeError, ValueError, struct.error, NativeError) as error:
-            self.close()
-            if isinstance(error, NativeError):
-                raise
-            raise NativeError("native helper request failed") from error
-
-    def _snapshot_request(self, text, decoder):
-        if self.process is None or self.process.poll() is not None:
-            raise NativeError("native snapshot session unavailable")
-        try:
-            self.process.stdin.write(text.encode("ascii"))
-            self.process.stdin.flush()
-            return decoder(self.process.stdout, self.process)
-        except (OSError, UnicodeError, ValueError, struct.error, NativeError) as error:
-            self.close()
-            if isinstance(error, NativeError):
-                raise
-            raise NativeError("native snapshot request failed") from error
+        text = "FMCONF2\n%sRUN\n" % "".join(row + "\n" for row in rows)
+        result = self._request(text, lambda stream, process: _decode(stream, process, query_keys,
+                                                                     threat_summary))
+        self.snapshot_open = snapshot and not result["refused"]
+        self.snapshot_generation = result["telemetry"]["sequence"] if self.snapshot_open else None
+        result["helper"] = dict(self.metadata or {}, starts=self.starts)
+        return result
 
     def snapshot_pages(self):
         """Bounded identity/score pages, not raw states or per-flow candidate lists."""
-        offset, generation, active = 0, None, None
+        offset, active = 0, None
         while True:
-            page = self._snapshot_request(f"FMSNAP1 PAGE {offset}\n", _decode_page)
-            changed = page["offset"] != offset
-            if generation is not None:
-                changed = changed or page["generation"] != generation
-                changed = changed or page["active"] != active
+            page = self._request(f"FMSNAP1 PAGE {offset}\n", _decode_page)
+            changed = page["offset"] != offset or page["generation"] != self.snapshot_generation
+            changed = changed or (active is not None and page["active"] != active)
             if changed:
                 self.close()
                 raise NativeError("native snapshot page generation/offset changed")
-            generation, active = page["generation"], page["active"]
-            self.snapshot_generation = generation
+            active = page["active"]
             yield page["flows"]
             offset += len(page["flows"])
             if offset == active:
@@ -369,7 +467,7 @@ class NativeEngine:
     def snapshot_selection(self, identities):
         text = f"FMSNAP1 SELECT {self.snapshot_generation} {len(identities)}\n"
         text += _identity_rows(identities)
-        result = self._snapshot_request(text, lambda stream, process: _decode(
+        result = self._request(text, lambda stream, process: _decode(
             stream, process, (), False, flow_limit=SNAPSHOT_FLOWS, byte_limit=SNAPSHOT_BYTES))
         if [row["key"] for row in result["flows"]] != [tuple(item[:2]) for item in identities]:
             self.close()
@@ -381,22 +479,26 @@ class NativeEngine:
             raise NativeError("invalid native snapshot detail budget")
         text = f"FMSNAP1 DETAIL {self.snapshot_generation} {byte_limit} {state_limit} {len(identities)}\n"
         text += _identity_rows(identities)
-        result = self._snapshot_request(text, lambda stream, process: _decode_detail(
-            stream, process, identities, self.snapshot_generation, byte_limit, state_limit))
-        self.snapshot_open = False
-        return result
+        generation = self.snapshot_generation
+        self.snapshot_open = False  # the session ends with this command, whatever its outcome
+        return self._request(text, lambda stream, process: _decode_detail(
+            stream, process, identities, generation, byte_limit, state_limit))
 
     def snapshot_cancel(self):
-        if self.process is not None and self.snapshot_open:
-            try:
-                self.process.stdin.write(b"FMSNAP1 CANCEL\n")
-                self.process.stdin.flush()
-                self.snapshot_open = False
-            except OSError:
-                self.close()
+        """End an open session; a helper that cannot take the command is closed."""
+        if self.process is None or not self.snapshot_open:
+            self.snapshot_open = False
+            return
+        self.snapshot_open = False
+        try:
+            self.process.stdin.write(b"FMSNAP1 CANCEL\n")
+            self.process.stdin.flush()
+        except OSError:
+            self.close()
 
     def close(self):
         self.snapshot_open = False
+        self.snapshot_generation = None
         process, self.process = self.process, None
         if process is None:
             return
@@ -427,24 +529,12 @@ def _identity_rows(identities):
 
 
 def _snapshot_frames(stream, process, magic, byte_limit):
-    import time
-
     deadline = time.monotonic() + READ_TIMEOUT
-    if _read_exact(stream, 8, process, deadline) != magic:
-        raise NativeError("native snapshot protocol version mismatch")
-    checksum, received = 0, 8
-    while True:
-        size = _read_exact(stream, 4, process, deadline)
-        length, = struct.unpack("!I", size)
-        received += length + 4
-        if not 0 < length <= MAX_FRAME or received > byte_limit:
-            raise NativeError("native snapshot frame/byte limit")
-        data = _read_exact(stream, length, process, deadline)
-        if data[0] == 255:
-            yield data, checksum
-            return
-        checksum = zlib.crc32(size, checksum)
-        checksum = zlib.crc32(data, checksum)
+    _magic(stream, process, deadline, magic)
+    checksum = 0
+    for size, data in _frames(stream, process, deadline, byte_limit):
+        if data[0] != FOOTER:
+            checksum = zlib.crc32(data, zlib.crc32(size, checksum))
         yield data, checksum
 
 
@@ -463,7 +553,7 @@ def _decode_page(stream, process):
                 raise NativeError("native snapshot page flow")
             seen.add(pair)
             flows.append((*pair, score, order))
-        elif data[0] == 255 and header is not None and len(data) == 5:
+        elif data[0] == FOOTER and header is not None and len(data) == 5:
             if struct.unpack("!I", data[1:])[0] != checksum or len(flows) != header[3] or (
                     not flows and header[2] != header[1]):
                 raise NativeError("native snapshot page completion")
@@ -473,16 +563,26 @@ def _decode_page(stream, process):
     raise NativeError("incomplete native snapshot page")
 
 
+_FLOW_TOTALS = struct.Struct("!IQQQQQQB")
+_DETAIL_FOOTER = struct.Struct("!QQQQIIQIddd")
+
+
+def _omission_reasons(bits):
+    return [name for bit, name in OMISSION_REASONS if bits & bit]
+
+
 def _decode_detail(stream, process, identities, generation, byte_limit, state_limit):
-    started, rows, seen, actual_bytes = False, {}, set(), 0
-    # JSON rows dominate the stream; allow fixed framing/completion overhead.
-    for data, checksum in _snapshot_frames(stream, process, b"FMSTATE1", byte_limit + state_limit * 9 + 128):
+    started, rows, seen, actual_bytes, totals = False, {}, set(), 0, {}
+    captured_by_flow = [0] * len(identities)
+    # JSON rows dominate the stream; allow fixed framing, totals and completion overhead.
+    ceiling = byte_limit + state_limit * 9 + len(identities) * (_FLOW_TOTALS.size + 5) + 128
+    for data, checksum in _snapshot_frames(stream, process, b"FMSTATE2", ceiling):
         if data[0] == 0 and not started and len(data) == 13:
             version, received_generation = struct.unpack("!IQ", data[1:])
-            if version != 1 or received_generation != generation:
+            if version != 2 or received_generation != generation:
                 raise NativeError("native snapshot detail generation/version")
             started = True
-        elif data[0] == 1 and started and len(data) > 5:
+        elif data[0] == 1 and started and not totals and len(data) > 5:
             flow_id, = struct.unpack("!I", data[1:5])
             if flow_id >= len(identities) or len(seen) >= state_limit:
                 raise NativeError("native snapshot state association/limit")
@@ -504,33 +604,45 @@ def _decode_detail(stream, process, identities, generation, byte_limit, state_li
             if actual_bytes > byte_limit:
                 raise NativeError("native snapshot encoded evidence ceiling")
             seen.add(identity)
+            captured_by_flow[flow_id] += 1
             rows.setdefault(remote, []).append(row)
-        elif data[0] == 255 and started and len(data) == 65:
-            traversed, observed, included, encoded, reasons, expected, sample, start, end = struct.unpack(
-                "!QQQQIIddd", data[1:])
-            valid_counts = included <= observed <= traversed
-            valid_size = actual_bytes <= encoded <= byte_limit
-            valid_reasons = bool(observed - included) == bool(reasons) and not reasons & ~3
-            valid_times = all(math.isfinite(t) and t > 0 for t in (sample, start, end))
-            valid_order = sample <= start <= end
-            valid_footer = expected == checksum
-            valid_footer = valid_footer and included == len(seen)
-            valid_footer = valid_footer and valid_counts and valid_size
-            valid_footer = valid_footer and valid_reasons and valid_times and valid_order
-            if not valid_footer:
+        elif data[0] == 2 and started and len(data) == 1 + _FLOW_TOTALS.size:
+            (flow_id, matching, captured, from_remote, to_remote, packets_from, packets_to,
+             reasons) = _FLOW_TOTALS.unpack_from(data, 1)
+            if flow_id != len(totals) or flow_id >= len(identities) or captured != captured_by_flow[flow_id] \
+                    or captured > matching or reasons & ~7 or bool(matching - captured) != bool(reasons):
+                raise NativeError("native snapshot flow totals")
+            local, remote, required = identities[flow_id]
+            totals[flow_id] = {"origin": local, "dest": remote, "required": required, "matching": matching,
+                               "captured": captured, "omitted": matching - captured,
+                               "complete": matching == captured,
+                               "bytes_from_remote": from_remote, "bytes_to_remote": to_remote,
+                               "packets_from_remote": packets_from, "packets_to_remote": packets_to,
+                               "omission_reasons": _omission_reasons(reasons)}
+        elif data[0] == FOOTER and started and len(data) == 1 + _DETAIL_FOOTER.size:
+            (traversed, observed, included, encoded, reasons, policy, skipped, expected, sample, start,
+             end) = _DETAIL_FOOTER.unpack_from(data, 1)
+            flows = [totals[n] for n in range(len(totals))]
+            valid = expected == checksum and len(totals) == len(identities)
+            valid = valid and included == len(seen) == sum(flow["captured"] for flow in flows)
+            valid = valid and observed == sum(flow["matching"] for flow in flows) and observed <= traversed
+            valid = valid and actual_bytes <= encoded <= byte_limit
+            valid = valid and bool(observed - included) == bool(reasons) and not reasons & ~7
+            valid = valid and policy in SELECTION_POLICIES
+            # wall-clock times are reported, not ordered: the clock may step between them
+            valid = valid and all(math.isfinite(t) and t > 0 for t in (sample, start, end))
+            if not valid:
                 raise NativeError("native snapshot detail completion")
-            omission_reasons = []
-            if reasons & 1:
-                omission_reasons.append("encoded_bytes")
-            if reasons & 2:
-                omission_reasons.append("state_count")
+            required = [flow for flow in flows if flow["required"]]
             return rows, {
                 "scope": "retained_logical_flows", "available": observed, "captured": included,
                 "omitted": observed - included, "complete": observed == included,
-                "truncated": observed != included, "total_limit": state_limit, "encoded_limit": byte_limit,
-                "encoded_bytes": encoded,
-                "omission_reasons": omission_reasons,
-                "traversed": traversed, "generation": generation,
+                "truncated": observed != included,
+                "required_evidence_complete": all(flow["complete"] for flow in required),
+                "total_limit": state_limit, "encoded_limit": byte_limit, "encoded_bytes": encoded,
+                "omission_reasons": _omission_reasons(reasons),
+                "selection_policy": SELECTION_POLICIES[policy], "skipped_states": skipped,
+                "flows": flows, "traversed": traversed, "generation": generation,
                 "sample_started_at": sample, "detail_started_at": start, "detail_completed_at": end,
                 "atomic": False, "population": "detail_traversal",
             }

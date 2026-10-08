@@ -26,9 +26,7 @@ import ipaddress
 import json
 import os
 from pathlib import Path
-import shutil
 import struct
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -38,20 +36,16 @@ from unittest.mock import Mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src/opnsense/scripts/OPNsense/FirewallMap"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import native  # noqa: E402
+from native_build import compile_worker  # noqa: E402
 
 
 class NativeSnapshotTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        compiler = shutil.which("cc")
-        if not compiler:
-            raise unittest.SkipTest("C compiler unavailable")
         cls.directory = tempfile.TemporaryDirectory()
-        cls.worker = str(Path(cls.directory.name) / "worker")
-        sources = [str(path) for path in sorted((ROOT / "native").glob("*.c")) if path.name != "pf_reader.c"]
-        subprocess.run([compiler, "-O2", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "native"),
-                        *sources, str(ROOT / "devel/native_snapshot_fixture.c"), "-lm", "-o", cls.worker], check=True)
+        cls.worker = compile_worker(Path(cls.directory.name) / "worker")
 
     @classmethod
     def tearDownClass(cls):
@@ -65,8 +59,8 @@ class NativeSnapshotTest(unittest.TestCase):
                 select=None, incident=False):
         with patch.dict(os.environ, FM_TEST_MODE=mode, FM_TEST_COUNT=str(count)):
             args = ({"8.8.8.1", "2001:4860::1"}, [], {}, None)
-            cold = self.engine.sample(*args, -1)
-            warm = self.engine.sample(*args, 2, snapshot=True)
+            cold = self.engine.sample(*args)
+            warm = self.engine.sample(*args, snapshot=True)
             pages = [row for page in self.engine.snapshot_pages() for row in page]
             identities = [(local, remote, incident) for local, remote, _rank, _order in pages
                           if select is None or select(remote)]
@@ -95,6 +89,11 @@ class NativeSnapshotTest(unittest.TestCase):
         self.assertEqual(row["expire"], 120)
         self.assertNotIn("states", cold)
         self.assertNotIn("states", warm)
+        self.assertTrue(cold["baseline"])
+        self.assertFalse(warm["baseline"])
+        (totals,) = meta["flows"]
+        self.assertEqual((totals["matching"], totals["captured"], totals["omitted"]), (60, 60, 0))
+        self.assertTrue(meta["required_evidence_complete"])
 
     def test_multiple_flows_nat_ipv6_icmp_association(self):
         _, _, summary, rows, meta = self.capture("mixed", 18)
@@ -141,10 +140,15 @@ class NativeSnapshotTest(unittest.TestCase):
                 self.assertLess(meta["captured"], 12)
                 self.assertTrue(meta["omission_reasons"])
                 self.assertLessEqual(meta["encoded_bytes"], meta["encoded_limit"])
+                (totals,) = meta["flows"]
+                self.assertEqual((totals["matching"], totals["captured"]), (12, meta["captured"]))
+                # exact totals over every matching state, whatever was captured
+                self.assertEqual(totals["bytes_from_remote"], 12 * (2000 + 3 * 200))  # the third traversal
                 if "state_limit" in limit:
                     self.assertEqual((meta["available"], meta["captured"], meta["omitted"]), (12, 2, 10))
                     self.assertFalse(meta["complete"])
                     self.assertEqual(meta["omission_reasons"], ["state_count"])
+                    self.assertEqual(totals["omission_reasons"], ["state_count"])
                 self.engine.close()
                 with self.assertRaises(native.NativeError):
                     self.capture(count=12, incident=True, **limit)
@@ -161,7 +165,7 @@ class NativeSnapshotTest(unittest.TestCase):
         self.assertFalse(self.engine.snapshot_open)
         self.engine.snapshot_cancel()  # must not send CANCEL into the next sample parser
         with patch.dict(os.environ, FM_TEST_MODE="one", FM_TEST_COUNT="20"):
-            sample = self.engine.sample({"8.8.8.1"}, [], {}, None, 2)
+            sample = self.engine.sample({"8.8.8.1"}, [], {}, None)
         self.assertEqual(sample["counts"]["states"], 20)
         self.assertNotIn("states", sample)
 
@@ -169,15 +173,16 @@ class NativeSnapshotTest(unittest.TestCase):
         row = {"id": "0000000000000001", "creatorid": "00000007",
                "flow": {"origin": "8.8.8.1", "dest": "9.9.9.9"}}
         encoded = json.dumps(row, separators=(",", ":")).encode()
-        records = [b"\0" + struct.pack("!IQ", 1, 2), b"\1" + struct.pack("!I", 0) + encoded]
+        records = [b"\0" + struct.pack("!IQ", 2, 2), b"\1" + struct.pack("!I", 0) + encoded,
+                   b"\2" + struct.pack("!IQQQQQQB", 0, 1, 1, 5, 6, 1, 1, 0)]
         body, checksum = b"", 0
         for record in records:
             framed = struct.pack("!I", len(record)) + record
             body += framed
             checksum = zlib.crc32(framed, checksum)
         cost = len(encoded) + len("9.9.9.9") + 8
-        footer = b"\xff" + struct.pack("!QQQQIIddd", 1, 1, 1, cost, 0, checksum, 1, 2, 3)
-        valid = b"FMSTATE1" + body + struct.pack("!I", len(footer)) + footer
+        footer = b"\xff" + struct.pack("!QQQQIIQIddd", 1, 1, 1, cost, 0, 1, 0, checksum, 3, 2, 1)
+        valid = b"FMSTATE2" + body + struct.pack("!I", len(footer)) + footer
 
         def decode(data, identities=(("8.8.8.1", "9.9.9.9", False),)):
             with tempfile.TemporaryFile() as stream:
@@ -185,12 +190,19 @@ class NativeSnapshotTest(unittest.TestCase):
                 stream.seek(0)
                 return native._decode_detail(stream, Mock(poll=lambda: 0), identities, 2, 4096, 5000)
 
-        self.assertTrue(decode(valid)[1]["complete"])
-        for invalid in (valid[:-1], b"FMSTATE2" + valid[8:], valid[:-32] + b"x" + valid[-31:]):
+        # wall-clock times are reported, not required to be ordered
+        rows, meta = decode(valid)
+        self.assertTrue(meta["complete"])
+        self.assertEqual(meta["flows"][0]["bytes_from_remote"], 5)
+        self.assertEqual(meta["selection_policy"], "arrival_incident_first_v1")
+        for invalid in (valid[:-1], b"FMSTATE1" + valid[8:], valid[:-26] + b"x" + valid[-25:]):
             with self.subTest(length=len(invalid)), self.assertRaises(native.NativeError):
                 decode(invalid)
         with self.assertRaises(native.NativeError):
             decode(valid, (("8.8.8.2", "9.9.9.9", False),))
+        # a flow without its totals record is incomplete evidence accounting
+        with self.assertRaises(native.NativeError):
+            decode(valid, (("8.8.8.1", "9.9.9.9", False), ("8.8.8.1", "9.9.9.8", False)))
 
     def test_exact_encoded_budget(self):
         _, _, _, rows, meta = self.capture(count=1)

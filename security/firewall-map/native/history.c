@@ -23,12 +23,13 @@
  */
 
 #include "history.h"
+#include "alloc.h"
 #include <errno.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 struct counter {
-  uint64_t id, toward, away, packets;
+  uint64_t id, bytes_from_remote, bytes_to_remote, packets;
   uint32_t creator;
 };
 struct table {
@@ -38,8 +39,8 @@ struct table {
 };
 struct history {
   struct table previous, current;
-  double elapsed;
-  bool staging;
+  double anchor, staged_anchor, interval;
+  bool anchored, staging;
 };
 static uint64_t identity_hash(uint64_t id, uint32_t creator) {
   uint64_t h = id ^ ((uint64_t)creator << 32);
@@ -50,8 +51,8 @@ static uint64_t identity_hash(uint64_t id, uint32_t creator) {
   return h ^ (h >> 31);
 }
 static void clear(struct table *t) {
-  free(t->rows);
-  free(t->used);
+  fm_free(t->rows);
+  fm_free(t->used);
   memset(t, 0, sizeof(*t));
 }
 static size_t slot(const struct table *t, uint64_t id, uint32_t creator) {
@@ -65,8 +66,8 @@ static bool grow(struct table *t, struct fm_error *error) {
   if (capacity < t->capacity || capacity > SIZE_MAX / sizeof(*t->rows))
     return fm_error_set(error, EOVERFLOW, "history capacity");
   struct table next = {.capacity = capacity, .count = t->count};
-  next.rows = calloc(capacity, sizeof(*next.rows));
-  next.used = calloc(capacity, 1);
+  next.rows = fm_calloc(capacity, sizeof(*next.rows));
+  next.used = fm_calloc(capacity, 1);
   if (!next.rows || !next.used) {
     clear(&next);
     return fm_error_set(error, ENOMEM, "history allocation");
@@ -82,7 +83,7 @@ static bool grow(struct table *t, struct fm_error *error) {
   return true;
 }
 struct history *history_create(struct fm_error *error) {
-  struct history *h = calloc(1, sizeof(*h));
+  struct history *h = fm_calloc(1, sizeof(*h));
   if (!h)
     fm_error_set(error, errno, "history allocation");
   return h;
@@ -91,7 +92,7 @@ void history_destroy(struct history *h) {
   if (h) {
     clear(&h->previous);
     clear(&h->current);
-    free(h);
+    fm_free(h);
   }
 }
 void history_reset(struct history *h) {
@@ -99,26 +100,30 @@ void history_reset(struct history *h) {
     return;
   clear(&h->previous);
   clear(&h->current);
+  h->anchored = false;
 }
-bool history_begin(struct history *h, double elapsed, struct fm_error *error) {
-  if (h->staging || !isfinite(elapsed))
-    return fm_error_set(error, EINVAL, "history sample boundary");
+bool history_begin(struct history *h, double anchor, struct fm_error *error) {
+  if (h->staging || !isfinite(anchor) ||
+      (h->anchored && anchor <= h->anchor))
+    return fm_error_fail(error, FM_FAILURE_INTERNAL, EINVAL, "history sample boundary");
   clear(&h->current);
-  h->elapsed = elapsed;
+  h->staged_anchor = anchor;
+  h->interval = h->anchored ? anchor - h->anchor : -1;
   h->staging = true;
   return true;
 }
+double history_interval(const struct history *h) { return h->interval; }
 bool history_observe(struct history *h, const struct state *s, bool remote,
                      struct state_delta *delta, struct fm_error *error) {
   if (!h->staging)
     return fm_error_set(error, EINVAL, "history sample not begun");
-  if (UINT64_MAX - s->packets[0] < s->packets[1])
+  if (UINT64_MAX - s->pf_packets[0] < s->pf_packets[1])
     return fm_error_set(error, EOVERFLOW, "packet total overflow");
   struct counter row = {.id = s->id,
                         .creator = s->creator,
-                        .toward = s->bytes[remote ? 0 : 1],
-                        .away = s->bytes[remote ? 1 : 0],
-                        .packets = s->packets[0] + s->packets[1]};
+                        .bytes_from_remote = state_bytes_from_remote(s, remote),
+                        .bytes_to_remote = state_bytes_to_remote(s, remote),
+                        .packets = s->pf_packets[0] + s->pf_packets[1]};
   const struct counter *old = NULL;
   if (h->previous.capacity) {
     size_t n = slot(&h->previous, s->id, s->creator);
@@ -127,13 +132,21 @@ bool history_observe(struct history *h, const struct state *s, bool remote,
   }
   memset(delta, 0, sizeof(*delta));
   if (old) {
-    delta->toward = row.toward > old->toward ? row.toward - old->toward : 0;
-    delta->away = row.away > old->away ? row.away - old->away : 0;
+    /* A counter that went backwards (reset or identity reuse) contributes
+     * nothing this sample; the new value becomes the next baseline. */
+    delta->bytes_from_remote = row.bytes_from_remote > old->bytes_from_remote
+                                   ? row.bytes_from_remote - old->bytes_from_remote
+                                   : 0;
+    delta->bytes_to_remote = row.bytes_to_remote > old->bytes_to_remote
+                                 ? row.bytes_to_remote - old->bytes_to_remote
+                                 : 0;
     delta->packets =
         row.packets > old->packets ? row.packets - old->packets : 0;
-  } else if (h->elapsed >= 0 && s->age <= 2 * h->elapsed) {
-    delta->toward = row.toward;
-    delta->away = row.away;
+  } else if (h->interval >= 0 && s->age <= 2 * h->interval) {
+    /* Created since the previous sample (age has whole-second resolution):
+     * all of its traffic is new. */
+    delta->bytes_from_remote = row.bytes_from_remote;
+    delta->bytes_to_remote = row.bytes_to_remote;
     delta->packets = row.packets;
   }
   struct table *t = &h->current;
@@ -155,6 +168,8 @@ void history_commit(struct history *h) {
   clear(&h->previous);
   h->previous = h->current;
   memset(&h->current, 0, sizeof(h->current));
+  h->anchor = h->staged_anchor;
+  h->anchored = true;
   h->staging = false;
 }
 void history_abort(struct history *h) {

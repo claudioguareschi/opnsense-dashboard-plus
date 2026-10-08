@@ -25,6 +25,7 @@
 
 #include "threat_summary.h"
 #include "index.h"
+#include "alloc.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,7 +55,7 @@ static bool reserve(struct threat_summary *summary, struct fm_error *error) {
   size_t next = summary->candidate_capacity ? summary->candidate_capacity * 2 : 64;
   if (next < summary->candidate_capacity || next > SIZE_MAX / sizeof(*summary->candidates))
     return fm_error_set(error, EOVERFLOW, "threat candidate capacity");
-  void *data = realloc(summary->candidates, next * sizeof(*summary->candidates));
+  void *data = fm_realloc(summary->candidates, next * sizeof(*summary->candidates));
   if (!data) return fm_error_set(error, errno, "threat candidate allocation");
   summary->candidates = data;
   summary->candidate_capacity = next;
@@ -63,7 +64,7 @@ static bool reserve(struct threat_summary *summary, struct fm_error *error) {
 
 struct threat_summary *threat_summary_create(const struct aggregate *aggregate,
                                              struct fm_error *error) {
-  struct threat_summary *summary = calloc(1, sizeof(*summary));
+  struct threat_summary *summary = fm_calloc(1, sizeof(*summary));
   struct aggregate_counts counts = aggregate_counts(aggregate);
   struct map ids = {0}, candidates = {0};
   if (!summary) {
@@ -74,7 +75,7 @@ struct threat_summary *threat_summary_create(const struct aggregate *aggregate,
     fm_error_set(error, EOVERFLOW, "threat remote capacity");
     goto fail;
   }
-  summary->remotes = counts.flows ? calloc(counts.flows, sizeof(*summary->remotes)) : NULL;
+  summary->remotes = counts.flows ? fm_calloc(counts.flows, sizeof(*summary->remotes)) : NULL;
   if (counts.flows && !summary->remotes) {
     fm_error_set(error, errno, "threat remote allocation");
     goto fail;
@@ -92,11 +93,11 @@ struct threat_summary *threat_summary_create(const struct aggregate *aggregate,
     }
     struct threat_remote *remote = &summary->remotes[item->value];
     uint64_t bytes;
-    if (UINT64_MAX - flow->toward < flow->away)
+    if (UINT64_MAX - flow->bytes_from_remote < flow->bytes_to_remote)
       { fm_error_set(error, EOVERFLOW, "threat flow byte total"); goto fail; }
-    bytes = flow->toward + flow->away;
-    if (!add_count(&remote->inbound, flow->remote_states, error) ||
-        !add_count(&remote->outbound, flow->local_states, error) ||
+    bytes = flow->bytes_from_remote + flow->bytes_to_remote;
+    if (!add_count(&remote->remote_initiated_states, flow->remote_initiated_states, error) ||
+        !add_count(&remote->local_initiated_states, flow->local_initiated_states, error) ||
         !add_count(&remote->bytes, bytes, error)) goto fail;
     if (flow->youngest < remote->youngest) remote->youngest = flow->youngest;
   }
@@ -106,7 +107,8 @@ struct threat_summary *threat_summary_create(const struct aggregate *aggregate,
       fm_error_set(error, EINVAL, "threat aggregate candidate");
       goto fail;
     }
-    if (candidate.kind != 2 && candidate.kind != 4 && candidate.kind != 5) continue;
+    if (candidate.kind != CANDIDATE_INSIDE_HOST && candidate.kind != CANDIDATE_SERVICE &&
+        candidate.kind != CANDIDATE_REMOTE_TARGET) continue;
     const struct flow *flow = aggregate_flow(aggregate, candidate.flow);
     unsigned char key[17];
     struct item *item = lookup(&ids, key, address_key(key, flow->remote), false, NULL);
@@ -117,7 +119,11 @@ struct threat_summary *threat_summary_create(const struct aggregate *aggregate,
     /* ThreatRecorder retains unique inside hosts, targets and services in
      * first-seen order. Deduplicate here so IPC size scales with distinct
      * evidence, not with the number of states repeating it. */
-    unsigned char candidate_key[27], *key_end = candidate_key;
+    unsigned char candidate_key[7 + CANDIDATE_VALUE_MAX], *key_end = candidate_key;
+    if (candidate.len > CANDIDATE_VALUE_MAX) {
+      fm_error_set(error, EOVERFLOW, "threat candidate size");
+      goto fail;
+    }
     uint32_t remote_id = (uint32_t)item->value;
     memcpy(key_end, &remote_id, sizeof(remote_id)); key_end += sizeof(remote_id);
     *key_end++ = candidate.kind;
@@ -145,9 +151,9 @@ fail:
 
 void threat_summary_destroy(struct threat_summary *summary) {
   if (!summary) return;
-  free(summary->remotes);
-  free(summary->candidates);
-  free(summary);
+  fm_free(summary->remotes);
+  fm_free(summary->candidates);
+  fm_free(summary);
 }
 size_t threat_summary_remote_count(const struct threat_summary *summary) { return summary->remote_count; }
 size_t threat_summary_candidate_count(const struct threat_summary *summary) { return summary->candidate_count; }

@@ -213,7 +213,8 @@ def write_text(path, text):
 
 
 def write_json(path, payload):
-    write_text(path, json.dumps(payload, separators=(",", ":")))
+    """NaN or infinity raise ValueError instead of producing a document JSON readers reject."""
+    write_text(path, json.dumps(payload, separators=(",", ":"), allow_nan=False))
 
 
 def read_json(path):

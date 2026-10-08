@@ -23,11 +23,19 @@
  */
 
 #include "error.h"
+#include <errno.h>
 #include <stdio.h>
-bool fm_error_set(struct fm_error *error, int code, const char *message) {
+bool fm_error_fail(struct fm_error *error, enum fm_failure_class failure_class,
+                   int code, const char *message) {
   if (error && !error->code) {
-    error->code = code;
+    error->code = code ? code : EIO;
+    error->failure_class = failure_class;
     snprintf(error->message, sizeof(error->message), "%s", message);
   }
   return false;
+}
+bool fm_error_set(struct fm_error *error, int code, const char *message) {
+  return fm_error_fail(error,
+                       code == ENOMEM ? FM_FAILURE_RESOURCES : FM_FAILURE_STRUCTURAL,
+                       code, message);
 }

@@ -27,7 +27,8 @@
 #include <netinet/in.h>
 #include <string.h>
 
-void state_flow_key(unsigned char key[34], struct addr local, struct addr remote) {
+void state_flow_key(unsigned char key[FM_FLOW_KEY_SIZE], struct addr local,
+                    struct addr remote) {
   key[0] = local.af;
   memcpy(key + 1, local.b, 16);
   key[17] = remote.af;
@@ -43,6 +44,12 @@ unsigned address_flags(const struct context *ctx, struct addr a) {
         memcmp(a.b, ctx->ranges[n].hi.b, 16) <= 0)
       return ctx->ranges[n].flags;
   return 0;
+}
+static bool is_public(const struct context *ctx, struct addr a) {
+  return address_flags(ctx, a) & FM_PUBLIC;
+}
+static bool is_private(const struct context *ctx, struct addr a) {
+  return address_flags(ctx, a) & FM_PRIVATE;
 }
 static int local(const struct context *ctx, struct addr a) {
   for (size_t n = 0; n < ctx->nl; n++)
@@ -67,8 +74,7 @@ static const char *device(const struct context *ctx, struct addr a,
 }
 static int inside_address(const struct context *ctx, struct addr a,
                           const char *excluded) {
-  return (address_flags(ctx, a) & 2) ||
-         (!local(ctx, a) && device(ctx, a, excluded));
+  return is_private(ctx, a) || (!local(ctx, a) && device(ctx, a, excluded));
 }
 static int wan_address(const struct context *ctx, struct addr a) {
   for (size_t n = 0; n < ctx->na; n++)
@@ -82,6 +88,18 @@ bool endpoint_equal(struct endpoint a, struct endpoint b) {
 }
 bool state_is_icmp(unsigned p) {
   return p == IPPROTO_ICMP || p == IPPROTO_ICMPV6;
+}
+uint64_t state_bytes_from_remote(const struct state *s, bool remote_initiated) {
+  return s->pf_bytes[remote_initiated ? FM_PF_FORWARD : FM_PF_REVERSE];
+}
+uint64_t state_bytes_to_remote(const struct state *s, bool remote_initiated) {
+  return s->pf_bytes[remote_initiated ? FM_PF_REVERSE : FM_PF_FORWARD];
+}
+uint64_t state_packets_from_remote(const struct state *s, bool remote_initiated) {
+  return s->pf_packets[remote_initiated ? FM_PF_FORWARD : FM_PF_REVERSE];
+}
+uint64_t state_packets_to_remote(const struct state *s, bool remote_initiated) {
+  return s->pf_packets[remote_initiated ? FM_PF_REVERSE : FM_PF_FORWARD];
 }
 
 /* Context local addresses arrive in Python's lexical order, not binary order.
@@ -115,50 +133,58 @@ size_t state_tuple(unsigned char *b, unsigned proto, struct endpoint inside,
   b += 16;
   *b++ = far.port >> 8;
   *b = far.port;
-  return 39;
+  return FM_TUPLE_SIZE;
 }
-bool state_normalize(const struct state *s, const struct context *ctx,
-                     struct state_view *v, struct fm_error *error) {
-  memset(v, 0, sizeof(*v));
+
+bool state_orient(const struct state *s, struct orientation *o,
+                  struct fm_error *error) {
+  memset(o, 0, sizeof(*o));
   for (unsigned k = 0; k < 2; k++) {
-    if (s->key[k].proto != s->key[0].proto)
+    if (s->key[k].proto != s->key[FM_WIRE_KEY].proto)
       return fm_error_set(error, EPROTO, "key protocols differ");
     for (unsigned e = 0; e < 2; e++)
       if (s->key[k].e[e].a.af != s->key[k].e[0].a.af ||
           (s->key[k].e[e].a.af != 4 && s->key[k].e[e].a.af != 6))
         return fm_error_set(error, EPROTO, "key address family");
   }
-  struct endpoint src, dst, nat, *inside = NULL;
-  int has_nat, direction = s->direction;
-  if (s->key[0].e[0].a.af != s->key[1].e[0].a.af)
+  if (s->key[FM_WIRE_KEY].e[0].a.af != s->key[FM_STACK_KEY].e[0].a.af)
     return fm_error_set(error, EPROTONOSUPPORT,
                         "cross-family translation unsupported");
-  unsigned proto = s->key[0].proto;
-  if (direction == FM_OUT) {
-    src = s->key[0].e[1];
-    dst = s->key[0].e[0];
-    nat = s->key[1].e[1];
-  } else if (direction == FM_IN) {
-    src = s->key[1].e[0];
-    dst = s->key[1].e[1];
-    nat = s->key[0].e[1];
+  const struct key *wire = &s->key[FM_WIRE_KEY], *stack = &s->key[FM_STACK_KEY];
+  o->proto = wire->proto;
+  if (s->pf_direction == FM_OUT) {
+    o->initiator = wire->e[1];
+    o->responder = wire->e[0];
+    o->untranslated = stack->e[1];
+  } else if (s->pf_direction == FM_IN) {
+    o->initiator = stack->e[0];
+    o->responder = stack->e[1];
+    o->untranslated = wire->e[1];
   } else
     return fm_error_set(error, EPROTO, "PF direction");
   /* Inbound pfctl equalizes the left-side ICMP identifier. Outbound it
    * equalizes the right side only: the inside/source identifier must survive.
    */
-  if (state_is_icmp(proto) && direction == FM_IN)
-    nat.port = dst.port;
-  has_nat = !endpoint_equal(nat, direction == FM_OUT ? src : dst);
-  v->src = src;
-  v->dst = dst;
-  v->nat = nat;
-  v->proto = proto;
-  v->has_nat = has_nat;
+  if (state_is_icmp(o->proto) && s->pf_direction == FM_IN)
+    o->untranslated.port = o->responder.port;
+  o->translated = !endpoint_equal(
+      o->untranslated, s->pf_direction == FM_OUT ? o->initiator : o->responder);
+  return true;
+}
+
+bool state_normalize(const struct state *s, const struct context *ctx,
+                     struct state_view *v, struct fm_error *error) {
+  memset(v, 0, sizeof(*v));
+  if (!state_orient(s, &v->pf, error))
+    return false;
+  struct endpoint src = v->pf.initiator, dst = v->pf.responder,
+                  nat = v->pf.untranslated, *inside = NULL;
+  bool has_nat = v->pf.translated;
+  unsigned proto = v->pf.proto;
+  int direction = s->pf_direction;
   /* Exact parser admission: untranslated private/private headers are skipped.
    */
-  if (!has_nat && !(address_flags(ctx, src.a) & 1) &&
-      !(address_flags(ctx, dst.a) & 1))
+  if (!has_nat && !is_public(ctx, src.a) && !is_public(ctx, dst.a))
     return true;
   v->retained = true;
   struct endpoint *sides[3];
@@ -172,80 +198,75 @@ bool state_normalize(const struct state *s, const struct context *ctx,
     sides[2] = &dst;
   }
   for (unsigned n = 0; n < 3 && !inside; n++)
-    if (sides[n] && (address_flags(ctx, sides[n]->a) & 2))
+    if (sides[n] && is_private(ctx, sides[n]->a))
       inside = sides[n];
-  if (!inside && s->orig[0])
+  if (!inside && s->original_interface[0])
     for (unsigned n = 0; n < 2; n++) {
       struct endpoint *e = n ? &dst : &src;
-      if (inside_address(ctx, e->a, s->orig)) {
+      if (inside_address(ctx, e->a, s->original_interface)) {
         inside = e;
         break;
       }
     }
   struct addr loc, remote;
   int tunnel = 0;
-  if (has_nat && (address_flags(ctx, nat.a) & 1))
+  if (has_nat && is_public(ctx, nat.a))
     loc = nat.a;
   else if (local(ctx, src.a))
     loc = src.a;
   else if (local(ctx, dst.a))
     loc = dst.a;
-  else if (has_nat && direction == FM_OUT && (address_flags(ctx, src.a) & 2) &&
-           (address_flags(ctx, dst.a) & 1) && !strcmp(s->orig, ctx->wan) &&
+  else if (has_nat && direction == FM_OUT && is_private(ctx, src.a) &&
+           is_public(ctx, dst.a) && !strcmp(s->original_interface, ctx->wan) &&
            wan_address(ctx, src.a))
     loc = src.a;
-  else if (has_nat && direction == FM_IN && (address_flags(ctx, nat.a) & 2) &&
-           (address_flags(ctx, src.a) & 1) && !strcmp(s->orig, ctx->wan) &&
+  else if (has_nat && direction == FM_IN && is_private(ctx, nat.a) &&
+           is_public(ctx, src.a) && !strcmp(s->original_interface, ctx->wan) &&
            wan_address(ctx, nat.a))
     loc = nat.a;
-  else if (has_nat && (address_flags(ctx, src.a) & 2) &&
-           (address_flags(ctx, dst.a) & 1) && ctx->nl) {
-    if (!origin(ctx, dst.a, s->orig, 0, &loc))
+  else if (has_nat && is_private(ctx, src.a) && is_public(ctx, dst.a) &&
+           ctx->nl) {
+    if (!origin(ctx, dst.a, s->original_interface, 0, &loc))
       return true;
     remote = dst.a;
     tunnel = 1;
   } else {
-    if (!ctx->nn || !inside || !(address_flags(ctx, inside->a) & 1))
+    if (!ctx->nn || !inside || !is_public(ctx, inside->a))
       return true;
     struct endpoint *far = inside == &src ? &dst : &src;
-    if (!(address_flags(ctx, far->a) & 1) ||
-        !origin(ctx, far->a, s->orig, 1, &loc))
+    if (!is_public(ctx, far->a) ||
+        !origin(ctx, far->a, s->original_interface, 1, &loc))
       return true;
     remote = far->a;
     tunnel = 1;
   }
   if (!tunnel) {
     remote = address_equal(loc, src.a) ? dst.a : src.a;
-    if (!(address_flags(ctx, remote) & 1) || address_equal(remote, loc) ||
+    if (!is_public(ctx, remote) || address_equal(remote, loc) ||
         local(ctx, remote))
       return true;
   }
-  int src_remote = address_equal(src.a, remote), remote_started = src_remote;
+  bool remote_initiated = address_equal(src.a, remote);
+  bool apparent = remote_initiated;
   unsigned service_port = dst.port;
-  if (!remote_started) {
+  if (!apparent) {
     unsigned source_port = inside ? inside->port : src.port;
     if ((proto == IPPROTO_TCP || proto == IPPROTO_UDP) && source_port &&
         dst.port && source_port < 1024 && dst.port >= 10000) {
-      remote_started = 1;
+      apparent = true;
       service_port = source_port;
     }
   }
-
-  v->src = src;
-  v->dst = dst;
-  v->nat = nat;
-  v->has_nat = has_nat;
   v->has_inside = inside != NULL;
   if (inside)
     v->inside = *inside;
   v->local = loc;
   v->remote = remote;
-  v->proto = proto;
-  v->src_remote = src_remote;
-  v->remote_started = remote_started;
+  v->remote_initiated = remote_initiated;
+  v->apparent_remote_initiated = apparent;
   v->service_port = service_port;
-  v->far = src_remote ? src : dst;
-  v->public = !src_remote ? src : has_nat ? nat : dst;
+  v->remote_endpoint = remote_initiated ? src : dst;
+  v->outside_view = !remote_initiated ? src : has_nat ? nat : dst;
   v->mapped = true;
   return true;
 }

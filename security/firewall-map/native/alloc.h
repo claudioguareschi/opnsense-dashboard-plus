@@ -22,20 +22,27 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef FM_PF_READER_H
-#define FM_PF_READER_H
-#include "state.h"
-#include <stdio.h>
-/* Callback state is borrowed and valid only during the call.
- * false aborts the dump. Callers must discard all staged results on any error.
- * No callback side effect may be published until this function succeeds. */
-typedef bool (*pf_state_callback)(const struct state *, void *,
-                                  struct fm_error *);
-/* request_anchor (optional) receives the CLOCK_MONOTONIC time, in seconds,
- * just before the dump request is sent: the sample's timing anchor. */
-bool pf_reader_live(pf_state_callback, void *, FILE *raw_fixture,
-                    double *request_anchor, struct fm_error *);
-/* PF_STATE_VERSION the reader was compiled against (0 without PF headers). */
-unsigned pf_reader_state_version(void);
-bool pf_reader_wire(const char *, pf_state_callback, void *, struct fm_error *);
+#ifndef FM_ALLOC_H
+#define FM_ALLOC_H
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+/* Accounted heap for every engine allocation. Callers use only these four
+ * functions; the accounting strategy (today a size header in front of each
+ * block) is private to alloc.c and may be replaced without touching callers.
+ * A failed allocation leaves errno set (ENOMEM also when the budget refuses). */
+void *fm_malloc(size_t size);
+void *fm_calloc(size_t count, size_t size);
+void *fm_realloc(void *pointer, size_t size);
+void fm_free(void *pointer);
+
+struct fm_heap_usage {
+  uint64_t bytes, peak_bytes, blocks, budget_bytes, refused;
+};
+/* 0 disables the budget. The budget bounds requested bytes, not allocator
+ * overhead; refusals are counted so a sample can report why it failed. */
+void fm_heap_set_budget(uint64_t budget_bytes);
+struct fm_heap_usage fm_heap_usage(void);
+/* Starts a new peak window (each sample reports its own peak). */
+void fm_heap_reset_peak(void);
 #endif

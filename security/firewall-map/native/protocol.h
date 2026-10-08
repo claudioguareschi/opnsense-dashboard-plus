@@ -29,20 +29,56 @@
 #include "ranking.h"
 #include "threat_summary.h"
 #include <stdio.h>
+/* Wire formats are specified in PROTOCOL.md. No C structure is serialized. */
 #define FM_FRAME_MAX 4096
-/* FMAGG3 frames are big-endian u32 length + payload. The stream contains only
- * ranked flow records, optional per-remote threat summaries, requested event
- * matches, and a checksummed completion footer. No C structure is serialized. */
+enum record_kind {
+  RECORD_HEADER = 0,
+  RECORD_FLOW = 1,
+  RECORD_CANDIDATE = 2,
+  RECORD_THREAT_REMOTE = 3,
+  RECORD_THREAT_CANDIDATE = 4,
+  RECORD_EVENT_MATCH = 5,
+  RECORD_TELEMETRY = 6,
+  RECORD_FAILURE = 254,
+  RECORD_FOOTER = 255,
+};
+enum sample_outcome_code {
+  OUTCOME_SAMPLE = 0,
+  OUTCOME_REFUSED_STATES = 1,
+  OUTCOME_REFUSED_CONTEXT = 2,
+  OUTCOME_REFUSED_MEMORY = 3,
+};
+struct sample_outcome {
+  uint32_t code, context_kind;
+  uint64_t actual, limit;
+};
+struct telemetry {
+  uint32_t pid;
+  uint64_t sequence;
+  double interval, dump_seconds, processing_seconds, user_cpu, system_cpu;
+  uint64_t max_rss, heap_bytes, heap_peak, heap_blocks, heap_budget,
+      preflight_states, skipped_af_translation, candidates_omitted,
+      threat_remotes_omitted, threat_candidates_omitted, event_history_evicted;
+};
 void protocol_put(unsigned char **, uint64_t, unsigned);
 uint64_t protocol_get(const unsigned char **, unsigned);
 void protocol_address_put(unsigned char **, struct addr);
 bool protocol_frame(FILE *, const void *, size_t, uint32_t *,
                     struct fm_error *);
-bool protocol_write(FILE *, const struct aggregate *, bool with_deltas,
-                    struct fm_error *);
+/* FMAGG4 sample response. */
 bool protocol_write_ranked(FILE *, const struct aggregate *, const struct ranking *,
                            const struct threat_summary *, const struct event_match *, size_t,
-                           struct fm_error *);
+                           const struct telemetry *, struct fm_error *);
+/* FMAGG4 response for a snapshot selection (explicit flows, no threats). */
 bool protocol_write_selected(FILE *, const struct aggregate *,
-                             const struct ranked_flow *, size_t, struct fm_error *);
+                             const struct ranked_flow *, size_t,
+                             const struct telemetry *, struct fm_error *);
+/* FMAGG4 refusal: header, telemetry and footer only. */
+bool protocol_write_refusal(FILE *, struct sample_outcome, uint64_t states_seen,
+                            const struct telemetry *, struct fm_error *);
+/* FMFAIL1: best effort; the helper exits afterwards. */
+void protocol_write_failure(FILE *, const struct fm_error *);
+/* Devel-only FMAGG2 aggregate dump used by the equivalence tools. */
+bool protocol_write(FILE *, const struct aggregate *, bool with_deltas,
+                    struct fm_error *);
 #endif

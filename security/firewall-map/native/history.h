@@ -25,17 +25,27 @@
 #ifndef FM_HISTORY_H
 #define FM_HISTORY_H
 #include "state.h"
+/* Per-state counter history and the sample interval it implies.
+ *
+ * Timing: each sample is anchored at the CLOCK_MONOTONIC time its PF dump
+ * request was sent. The interval of a sample is its anchor minus the anchor
+ * of the last committed sample. A sample with no committed predecessor (a new
+ * helper, after history_reset, or after an admission refusal) is a baseline:
+ * interval -1 and zero deltas. The anchor commits only with the counters, so a
+ * failed or aborted sample leaves both untouched and the next interval spans
+ * it, exactly as its counter deltas do. Snapshot traversals never call this. */
 struct history;
 struct state_delta {
-  uint64_t toward, away, packets;
+  uint64_t bytes_from_remote, bytes_to_remote, packets;
 };
 struct history *history_create(struct fm_error *);
 void history_destroy(struct history *);
 void history_reset(struct history *);
-/* A staged sample never mutates the previous successful counters.
- * Negative elapsed selects first-observation behavior. */
-bool history_begin(struct history *, double elapsed, struct fm_error *);
-bool history_observe(struct history *, const struct state *, bool src_remote,
+/* Stages a sample anchored at `anchor` (monotonic seconds). */
+bool history_begin(struct history *, double anchor, struct fm_error *);
+/* The staged sample's interval in seconds, or -1 for a baseline sample. */
+double history_interval(const struct history *);
+bool history_observe(struct history *, const struct state *, bool remote_initiated,
                      struct state_delta *, struct fm_error *);
 void history_commit(struct history *);
 void history_abort(struct history *);

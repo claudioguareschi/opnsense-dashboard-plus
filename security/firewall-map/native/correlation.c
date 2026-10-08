@@ -24,6 +24,7 @@
 
 #include "correlation.h"
 #include "index.h"
+#include "alloc.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -46,15 +47,15 @@ static size_t encode(unsigned char *out, struct outside_key key) {
   return (size_t)(p - out);
 }
 struct correlation *correlation_create(struct fm_error *error) {
-  struct correlation *c = calloc(1, sizeof(*c));
+  struct correlation *c = fm_calloc(1, sizeof(*c));
   if (!c) fm_error_set(error, errno, "correlation allocation");
   return c;
 }
 void correlation_destroy(struct correlation *c) {
   if (!c) return;
   map_clear(&c->keys);
-  free(c->values);
-  free(c);
+  fm_free(c->values);
+  fm_free(c);
 }
 bool correlation_add(struct correlation *c, struct outside_key key,
                      const struct correlation_value *value,
@@ -66,12 +67,12 @@ bool correlation_add(struct correlation *c, struct outside_key key,
   size_t length = encode(encoded, key);
   struct item *item = lookup(&c->keys, encoded, length, true, error);
   if (!item) return false;
-  size_t index = (size_t)item->value;
+  size_t index = item->id;
   if (c->keys.used > c->allocated) {
     size_t capacity = c->keys.allocated;
     if (capacity > SIZE_MAX / sizeof(*c->values))
       return fm_error_set(error, EOVERFLOW, "correlation value capacity");
-    void *next = realloc(c->values, capacity * sizeof(*c->values));
+    void *next = fm_realloc(c->values, capacity * sizeof(*c->values));
     if (!next) return fm_error_set(error, errno, "correlation values");
     c->values = next;
     c->allocated = capacity;
@@ -96,10 +97,9 @@ bool correlation_lookup(const struct correlation *c, struct outside_key key,
     return false;
   unsigned char encoded[39];
   size_t length = encode(encoded, key);
-  struct item *item = lookup((struct map *)&c->keys, encoded, length, false,
-                             NULL);
+  const struct item *item = map_find(&c->keys, encoded, length);
   if (!item) return false;
-  *value = c->values[item->value];
+  *value = c->values[item->id];
   return true;
 }
 size_t correlation_count(const struct correlation *c) { return c->keys.used; }
@@ -121,6 +121,6 @@ bool correlation_at(const struct correlation *c, size_t n,
     memcpy(&port, p, 2); p += 2;
     endpoints[i]->port = ntohs(port);
   }
-  *value = c->values[item->value];
+  *value = c->values[item->id];
   return true;
 }

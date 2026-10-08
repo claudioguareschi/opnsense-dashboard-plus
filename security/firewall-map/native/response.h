@@ -22,20 +22,22 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef FM_PF_READER_H
-#define FM_PF_READER_H
-#include "state.h"
+#ifndef FM_RESPONSE_H
+#define FM_RESPONSE_H
+#include "error.h"
 #include <stdio.h>
-/* Callback state is borrowed and valid only during the call.
- * false aborts the dump. Callers must discard all staged results on any error.
- * No callback side effect may be published until this function succeeds. */
-typedef bool (*pf_state_callback)(const struct state *, void *,
-                                  struct fm_error *);
-/* request_anchor (optional) receives the CLOCK_MONOTONIC time, in seconds,
- * just before the dump request is sent: the sample's timing anchor. */
-bool pf_reader_live(pf_state_callback, void *, FILE *raw_fixture,
-                    double *request_anchor, struct fm_error *);
-/* PF_STATE_VERSION the reader was compiled against (0 without PF headers). */
-unsigned pf_reader_state_version(void);
-bool pf_reader_wire(const char *, pf_state_callback, void *, struct fm_error *);
+/* One response rendered completely in memory, then written to the collector
+ * in a single step. A request that fails while rendering leaves nothing on
+ * the wire, so the helper can always answer with FMFAIL1 instead of a
+ * partial stream. The buffer is libc memory (open_memstream); its size is
+ * bounded by the response budgets in PROTOCOL.md. */
+struct response {
+  FILE *stream;
+  char *data;
+  size_t size;
+};
+bool response_begin(struct response *, struct fm_error *);
+/* Writes and flushes the rendered bytes to `out`, then releases the buffer. */
+bool response_commit(struct response *, FILE *out, struct fm_error *);
+void response_discard(struct response *);
 #endif

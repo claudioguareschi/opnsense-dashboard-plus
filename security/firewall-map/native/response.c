@@ -22,20 +22,29 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef FM_PF_READER_H
-#define FM_PF_READER_H
-#include "state.h"
-#include <stdio.h>
-/* Callback state is borrowed and valid only during the call.
- * false aborts the dump. Callers must discard all staged results on any error.
- * No callback side effect may be published until this function succeeds. */
-typedef bool (*pf_state_callback)(const struct state *, void *,
-                                  struct fm_error *);
-/* request_anchor (optional) receives the CLOCK_MONOTONIC time, in seconds,
- * just before the dump request is sent: the sample's timing anchor. */
-bool pf_reader_live(pf_state_callback, void *, FILE *raw_fixture,
-                    double *request_anchor, struct fm_error *);
-/* PF_STATE_VERSION the reader was compiled against (0 without PF headers). */
-unsigned pf_reader_state_version(void);
-bool pf_reader_wire(const char *, pf_state_callback, void *, struct fm_error *);
-#endif
+#include "response.h"
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+bool response_begin(struct response *r, struct fm_error *error) {
+  memset(r, 0, sizeof(*r));
+  r->stream = open_memstream(&r->data, &r->size);
+  return r->stream || fm_error_set(error, errno ? errno : ENOMEM, "response buffer");
+}
+bool response_commit(struct response *r, FILE *out, struct fm_error *error) {
+  bool ok = r->stream && fclose(r->stream) == 0;
+  r->stream = NULL;
+  if (!ok)
+    fm_error_set(error, errno ? errno : ENOMEM, "response buffer");
+  else if (fwrite(r->data, 1, r->size, out) != r->size || fflush(out))
+    ok = fm_error_set(error, errno ? errno : EIO, "response write");
+  free(r->data);
+  r->data = NULL;
+  return ok;
+}
+void response_discard(struct response *r) {
+  if (r->stream)
+    fclose(r->stream);
+  free(r->data);
+  memset(r, 0, sizeof(*r));
+}

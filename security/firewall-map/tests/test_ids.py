@@ -51,9 +51,26 @@ class AlertTest(unittest.TestCase):
         self.assertEqual((alert["src"], alert["dst_port"], alert["severity"], alert["protocol"]),
                          ("94.154.43.203", 80, 2, "tcp"))
         self.assertIsNone(IDS.parse_alert('{"event_type":"anomaly"}'))
-        self.assertIsNone(IDS.parse_alert('{"event_type":"alert", broken'))
+        # malformed alert lines are reported, so the feed can count and skip them
+        for line in ('{"event_type":"alert", broken', '[{"event_type":"alert"}]',
+                     '{"event_type":"alert","src_ip":["a"],"dest_ip":"1.2.3.4"}',
+                     '{"event_type":"alert","alert":"x","src_ip":"1.1.1.1","dest_ip":"1.2.3.4"}',
+                     '{"event_type":"alert","src_ip":"1.1.1.1","dest_ip":"1.2.3.4","src_port":70000}'):
+            with self.subTest(line=line), self.assertRaises(IDS.MalformedAlert):
+                IDS.parse_alert(line)
+        odd = IDS.parse_alert('{"event_type":"alert","src_ip":"1.1.1.1","dest_ip":"1.2.3.4",'
+                              '"dns":{"queries":"abc"},"alert":{"severity":"high","signature":5}}')
+        self.assertEqual((odd["severity"], odd["signature"], odd["query"]), (3, "", None))
         ipv6 = IDS.parse_alert(self.LINE.replace("94.154.43.203", "2001:4860:4860:0:0:0:0:8888"))
         self.assertEqual(ipv6["src"], "2001:4860:4860::8888")
+
+    def test_feed_contains_bad_lines_one_by_one(self):
+        alerts = IDS.AlertTracker()
+        rejected = alerts.feed(['{"event_type":"alert", broken', self.LINE, '[{"event_type":"alert"}]'],
+                               {"1.2.3.163"})
+        self.assertEqual(rejected, 2)
+        self.assertIn("MalformedAlert", alerts.last_rejection)
+        self.assertEqual(alerts.summary("94.154.43.203")["count"], 1)
 
     def test_tracks_per_remote_address_and_flags(self):
         alerts = IDS.AlertTracker()

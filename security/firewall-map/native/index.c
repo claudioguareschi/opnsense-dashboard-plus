@@ -23,6 +23,7 @@
  */
 
 #include "index.h"
+#include "alloc.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,7 +38,7 @@ static bool resize(struct map *m, struct fm_error *error) {
   size_t capacity = m->capacity ? m->capacity * 2 : 64;
   if (capacity < m->capacity || capacity > SIZE_MAX / sizeof(*m->buckets))
     return fm_error_set(error, EOVERFLOW, "index capacity");
-  struct item **buckets = calloc(capacity, sizeof(*buckets));
+  struct item **buckets = fm_calloc(capacity, sizeof(*buckets));
   if (!buckets)
     return fm_error_set(error, errno, "index buckets");
   for (size_t n = 0; n < m->used; n++) {
@@ -45,20 +46,28 @@ static bool resize(struct map *m, struct fm_error *error) {
     i->next = buckets[i->hash % capacity];
     buckets[i->hash % capacity] = i;
   }
-  free(m->buckets);
+  fm_free(m->buckets);
   m->buckets = buckets;
   m->capacity = capacity;
   return true;
 }
-struct item *lookup(struct map *m, const void *key, size_t len, bool add,
-                    struct fm_error *error) {
-  uint64_t h = hash(key, len);
+static struct item *find(const struct map *m, const void *key, size_t len,
+                         uint64_t h) {
   if (m->capacity)
     for (struct item *i = m->buckets[h % m->capacity]; i; i = i->next)
       if (i->hash == h && i->len == len && !memcmp(i->key, key, len))
         return i;
-  if (!add)
-    return NULL;
+  return NULL;
+}
+const struct item *map_find(const struct map *m, const void *key, size_t len) {
+  return find(m, key, len, hash(key, len));
+}
+struct item *lookup(struct map *m, const void *key, size_t len, bool add,
+                    struct fm_error *error) {
+  uint64_t h = hash(key, len);
+  struct item *found = find(m, key, len, h);
+  if (found || !add)
+    return found;
   if ((!m->capacity || m->used >= m->capacity * 3 / 4) && !resize(m, error))
     return NULL;
   if (m->used == m->allocated) {
@@ -67,7 +76,7 @@ struct item *lookup(struct map *m, const void *key, size_t len, bool add,
       fm_error_set(error, EOVERFLOW, "index order capacity");
       return NULL;
     }
-    void *p = realloc(m->order, n * sizeof(*m->order));
+    void *p = fm_realloc(m->order, n * sizeof(*m->order));
     if (!p) {
       fm_error_set(error, errno, "index order");
       return NULL;
@@ -79,7 +88,7 @@ struct item *lookup(struct map *m, const void *key, size_t len, bool add,
     fm_error_set(error, EOVERFLOW, "index key");
     return NULL;
   }
-  struct item *i = calloc(1, sizeof(*i) + len);
+  struct item *i = fm_calloc(1, sizeof(*i) + len);
   if (!i) {
     fm_error_set(error, errno, "index item");
     return NULL;
@@ -88,7 +97,7 @@ struct item *lookup(struct map *m, const void *key, size_t len, bool add,
   i->len = len;
   i->hash = h;
   i->seq = UINT64_MAX;
-  i->value = m->used;
+  i->id = m->used;
   m->order[m->used++] = i;
   i->next = m->buckets[h % m->capacity];
   m->buckets[h % m->capacity] = i;
@@ -96,9 +105,9 @@ struct item *lookup(struct map *m, const void *key, size_t len, bool add,
 }
 void map_clear(struct map *m) {
   for (size_t n = 0; n < m->used; n++)
-    free(m->order[n]);
-  free(m->order);
-  free(m->buckets);
+    fm_free(m->order[n]);
+  fm_free(m->order);
+  fm_free(m->buckets);
   memset(m, 0, sizeof(*m));
 }
 size_t map_bytes(const struct map *m) {

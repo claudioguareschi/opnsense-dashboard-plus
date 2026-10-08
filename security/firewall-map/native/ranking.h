@@ -28,14 +28,17 @@
 struct ranking;
 struct ranked_flow {
   size_t flow;
-  double rate_in, rate_out, packet_rate, activity, score;
+  double rate_from_remote, rate_to_remote, packet_rate, activity, score;
 };
 struct ranking *ranking_create(size_t limit, double fade, double smoothing,
                                struct fm_error *);
 void ranking_destroy(struct ranking *);
 void ranking_reset(struct ranking *);
+/* `now` is the sample's anchor on the same monotonic clock as history; an
+ * `interval` below zero marks a baseline sample (no rates). On failure the
+ * previous generation is untouched. */
 bool ranking_update(struct ranking *, const struct aggregate *, double now,
-                    double elapsed, struct fm_error *);
+                    double interval, struct fm_error *);
 size_t ranking_count(const struct ranking *);
 size_t ranking_total(const struct ranking *);
 bool ranking_at(const struct ranking *, size_t, struct ranked_flow *);
@@ -43,4 +46,5 @@ bool ranking_at(const struct ranking *, size_t, struct ranked_flow *);
  * Uses existing history, without updating rates or re-ranking. */
 bool ranking_snapshot_at(const struct ranking *, const struct aggregate *, size_t,
                          struct ranked_flow *, uint64_t *order);
+size_t ranking_bytes(const struct ranking *);
 #endif

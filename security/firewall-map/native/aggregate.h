@@ -27,10 +27,23 @@
 #include "correlation.h"
 #include "history.h"
 struct aggregate;
+/* Attribution evidence kept per flow, deduplicated by (flow, kind, value) and
+ * weighted by traffic. The numbers are part of the FMAGG4 wire format. */
+enum candidate_kind {
+  CANDIDATE_PROTOCOL = 1,         /* value: protocol number (1 byte) */
+  CANDIDATE_INSIDE_HOST = 2,      /* value: address (17 bytes) */
+  CANDIDATE_EGRESS_INTERFACE = 3, /* value: interface name */
+  CANDIDATE_SERVICE = 4,          /* value: group(4) proto(1) port(2) */
+  CANDIDATE_REMOTE_TARGET = 5,    /* value: proto(1) address(17) port(2) */
+  CANDIDATE_RULE_LABEL = 6,       /* value: PF rule label */
+};
+#define CANDIDATE_KIND_COUNT 6
+#define CANDIDATE_VALUE_MAX 64
 struct flow {
   struct addr local, remote;
-  uint64_t states, toward, away, remote_started, local_started, remote_states,
-      local_states, first;
+  uint64_t states, bytes_from_remote, bytes_to_remote, remote_initiated_weight,
+      local_initiated_weight, remote_initiated_states, local_initiated_states,
+      first;
   uint32_t oldest, youngest;
   struct state_delta delta;
 };
@@ -61,7 +74,5 @@ bool aggregate_correlation(const struct aggregate *, size_t,
 size_t aggregate_correlation_count(const struct aggregate *);
 bool aggregate_correlation_lookup(const struct aggregate *, struct outside_key,
                                   struct correlation_value *);
-const char *aggregate_rule(const struct aggregate *, const struct state_view *,
-                           const char *fallback);
 size_t aggregate_bytes(const struct aggregate *);
 #endif

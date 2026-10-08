@@ -27,6 +27,7 @@
 import importlib.util
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 import time
@@ -171,9 +172,9 @@ class TrackerTest(unittest.TestCase):
         rows = []
         for index in reversed(range(150)):
             rows.append({"key": ("192.168.1.1", f"203.0.113.{index + 1}"), "states": 1,
-                         "toward": 10, "away": 2, "packets": 1, "bytes_toward": 10, "bytes_away": 2,
-                         "remote_started": 1, "local_started": 0, "oldest": 1,
-                         "rate_in": float(index + 1), "rate_out": 0.0, "packet_rate": 1.0,
+                         "bytes_from_remote": 10, "bytes_to_remote": 2,
+                         "remote_initiated_weight": 1, "local_initiated_weight": 0, "oldest": 1,
+                         "rate_from_remote": float(index + 1), "rate_to_remote": 0.0, "packet_rate": 1.0,
                          "activity": 1.0, "score": float(index + 1)})
         tracker.update_aggregate({"flows": rows, "candidates": [],
                                   "counts": {"flows": 151}}, 10.0)
@@ -184,9 +185,9 @@ class TrackerTest(unittest.TestCase):
 
     def test_native_aggregate_resolves_nonstandard_protocol_number(self):
         tracker = COLLECTOR.FlowTracker()
-        row = {"key": self.PAIR, "states": 1, "toward": 10, "away": 2, "packets": 1,
-               "bytes_toward": 10, "bytes_away": 2, "remote_started": 1, "local_started": 0,
-               "oldest": 1, "rate_in": 1.0, "rate_out": 0.0, "packet_rate": 1.0,
+        row = {"key": self.PAIR, "states": 1, "bytes_from_remote": 10, "bytes_to_remote": 2,
+               "remote_initiated_weight": 1, "local_initiated_weight": 0,
+               "oldest": 1, "rate_from_remote": 1.0, "rate_to_remote": 0.0, "packet_rate": 1.0,
                "activity": 1.0, "score": 1.0}
         aggregate = {"flows": [row], "candidates": [(0, 1, 0, 1, 0, [47])],
                      "counts": {"flows": 1}}
@@ -572,8 +573,7 @@ class SnapshotSafetyTest(CollectorLoopTest):
 class ThreatRecorderTest(unittest.TestCase):
     @staticmethod
     def native(records):
-        return NativeFixture(lambda: records).sample({"1.2.3.163"}, [], {}, None, -1,
-                                                     threat_summary=True)
+        return NativeFixture(lambda: records).sample({"1.2.3.163"}, [], {}, None, threat_summary=True)
 
     def test_hostnames_are_loaded_once_per_recording(self):
         recorder = COLLECTOR.ThreatRecorder(":memory:")
@@ -630,6 +630,43 @@ class ThreatRecorderTest(unittest.TestCase):
             self.assertEqual(row["remote"]["org"], "Example")
 
 
+class ThreatRecorderCommitTest(unittest.TestCase):
+    def test_a_failed_recording_does_not_advance_the_evidence_window(self):
+        recorder = COLLECTOR.ThreatRecorder(":memory:")
+        collector = mock.Mock()
+        collector.local_addresses, collector.networks, collector.interfaces = {"1.2.3.163"}, [], {}
+        collector.geo, collector.hostnames = None, None
+        collector.alerts.summary.return_value = None
+        collector.correlator = COLLECTOR.Correlator()
+        records = PF.parse_states(nat_state(100, 100))
+        native = NativeFixture(lambda: records).sample({"1.2.3.163"}, [], {}, None, threat_summary=True)
+        windows = []
+
+        def blocks(correlator, seen, since, *args):
+            windows.append(since)
+            return {}
+
+        with mock.patch.object(COLLECTOR, "threat_lists_for", return_value=["Test list"]), \
+                mock.patch.object(COLLECTOR, "connection_summary", return_value=[]), \
+                mock.patch.object(COLLECTOR, "firewall_blocks", blocks), \
+                mock.patch.object(COLLECTOR, "log_error"), \
+                mock.patch.object(COLLECTOR.threats, "record", side_effect=sqlite3.OperationalError("locked")):
+            recorder.update(native, collector, now=100.0)
+        self.assertIsNone(recorder.recorded)
+        self.assertEqual(recorder.last_wall, 0.0)
+        self.assertFalse(recorder.due(101.0))  # retried later, not every sample
+        with mock.patch.object(COLLECTOR, "threat_lists_for", return_value=["Test list"]), \
+                mock.patch.object(COLLECTOR, "connection_summary", return_value=[]), \
+                mock.patch.object(COLLECTOR, "firewall_blocks", blocks), \
+                mock.patch.object(COLLECTOR, "log_notice"):
+            recorder.update(native, collector, now=100.0 + COLLECTOR.THREAT_RECORD_SECONDS)
+        # the retry offered the same evidence window, then the window moved on
+        self.assertEqual(windows, [0.0, 0.0])
+        self.assertEqual(recorder.recorded, 100.0 + COLLECTOR.THREAT_RECORD_SECONDS)
+        self.assertGreater(recorder.last_wall, 0.0)
+        recorder.db.close()
+
+
 class BenchmarkHarnessTest(unittest.TestCase):
     def test_table_construction_does_not_recount_all_connections(self):
         path = os.path.join(os.path.dirname(__file__), "..", "devel", "collector_benchmark.py")
@@ -644,12 +681,14 @@ class BenchmarkHarnessTest(unittest.TestCase):
 
 class SampleTimingTest(CollectorLoopTest):
     def test_each_sample_records_where_its_time_went(self):
+        self.collector.step()  # the helper's baseline sample: no rates, no new map
+        self.collector.timings_written = None
         self.collector.step()
         with open(os.path.join(self.directory, "collector_timings.json")) as handle:
             written = json.load(handle)
         self.assertEqual({key: value for key, value in written.items() if key != "collector"}, self.collector.timings)
         self.assertEqual((written["states"], written["background"]), (1, False))
-        for phase in ("native", "walk", "tracker", "ingest", "threats", "payload", "write"):
+        for phase in ("native", "tracker", "ingest", "threats", "payload", "write"):
             self.assertGreaterEqual(written["phases"][phase], 0.0)
         self.assertGreaterEqual(written["wall"], written["phases"]["payload"])
         # kept in memory every sample, written to the file every few seconds
@@ -673,21 +712,24 @@ class TimingContractTest(CollectorLoopTest):
 
     def test_generation_revision_and_sample_count(self):
         generation = self.collector.timing_status()["generation"]
+        self.collector.step()  # baseline: diagnostics revision 1, no map
+        self.assertFalse(os.path.exists(self.output))
         self.collector.step()
         first = self.payload()["collector"]
         self.collector.native_engine.records = lambda: PF.parse_states(nat_state(2000, 2000)) * 2
         self.collector.step()
         second = self.payload()["collector"]
         self.assertEqual((first["generation"], second["generation"]), (generation, generation))
-        self.assertEqual((first["revision"], second["revision"]), (1, 2))
+        self.assertEqual((first["revision"], second["revision"]), (2, 3))
         self.assertEqual((first["state_count"], second["state_count"]), (1, 2))
         self.assertNotEqual(COLLECTOR.Collector(store=self.collector.store).timing_status()["generation"], generation)
         self.assertEqual(first["phase"], "processing")
         self.assertEqual(self.diagnostic()["phase"], "sleeping")
         # Frozen payload metadata must not alias the mutable current phase/heartbeat.
-        self.assertEqual(first["revision"], 1)
+        self.assertEqual(first["revision"], 2)
 
     def test_wall_clock_jumps_do_not_change_duration(self):
+        self.collector.step()  # baseline
         for jump in (-1000, 1000):
             clock = {"mono": 100.0, "wall": 5000.0}
 
@@ -714,6 +756,7 @@ class TimingContractTest(CollectorLoopTest):
             self.assertEqual(current["phase_deadline"], current["next_sample_due"])
 
     def test_native_failure_does_not_refresh_successful_identity(self):
+        self.collector.step()  # baseline
         self.collector.step()
         previous = self.payload()
         success = self.payload()["collector"]
@@ -727,11 +770,16 @@ class TimingContractTest(CollectorLoopTest):
             self.assertIsNotNone(self.diagnostic()["next_sample_due"])
             self.assertGreater(rest, 0)
         self.assertEqual(self.payload(), previous)
+        # the failed request closed the helper: its successor starts with a baseline that
+        # keeps the previous map, and the next sample publishes again
         self.collector.step()
-        self.assertEqual(self.payload()["collector"]["revision"], 2)
-        self.assertEqual(self.collector.native_engine.elapsed[-1], -1)
+        self.assertEqual(self.payload(), previous)
+        self.collector.step()
+        self.assertEqual(self.payload()["collector"]["revision"], 4)
+        self.assertEqual(self.collector.native_engine.baselines, [True, False, True, False])
 
     def test_missing_native_helper_has_no_python_fallback_and_output_expires(self):
+        self.collector.step()  # baseline
         self.collector.step()
         previous = self.payload()
         modified = os.stat(self.output).st_mtime
@@ -743,31 +791,91 @@ class TimingContractTest(CollectorLoopTest):
         self.assertEqual(os.stat(self.output).st_mtime, modified)
         self.assertIsNone(SUMMARY.read_summary(self.output, now=modified + SUMMARY.STALE_SECONDS + 1))
 
-    def test_snapshot_failure_resets_worker_history_before_recovery(self):
+    def snapshot_request(self):
         snapshots = os.path.join(self.directory, "snapshots")
         requests = os.path.join(self.directory, "requests")
-        os.makedirs(requests)
+        os.makedirs(requests, exist_ok=True)
         for name, value in (("SNAPSHOT_DIR", snapshots), ("SNAPSHOT_REQUEST_DIR", requests)):
             patcher = mock.patch.object(COLLECTOR, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
-        self.collector.step()
-        self.bytes = 5000
         snapshot_id = "20261003T164210Z-1a2b"
         with open(os.path.join(requests, f"{snapshot_id}.request"), "w") as handle:
             handle.write("{}")
+        return os.path.join(snapshots, f"{snapshot_id}.json"), requests
+
+    def test_snapshot_failure_keeps_a_synchronized_helper(self):
+        self.collector.step()  # baseline
+        self.collector.step()
+        self.bytes = 5000
+        saved, requests = self.snapshot_request()
         with mock.patch.object(self.collector.native_engine, "snapshot_detail",
                                side_effect=COLLECTOR.NativeError("detail failed")):
             self.collector.step()
-        with open(os.path.join(snapshots, f"{snapshot_id}.json")) as handle:
+        with open(saved) as handle:
             self.assertEqual(json.load(handle)["status"], "snapshot_failed")
-        self.assertIsNone(self.collector.native_last_at)
-        self.collector.step()
-        self.assertEqual(self.collector.native_engine.elapsed[-1], -1)
-        self.assertEqual(self.payload()["flows"], [])
+        self.assertFalse(os.listdir(requests))
+        self.assertFalse(self.collector.native_engine.snapshot_open)
         self.bytes = 7000
         self.collector.step()
+        # no generation was lost: no new baseline, rates continue
+        self.assertEqual(self.collector.native_engine.baselines, [True, False, False, False])
         self.assertGreater(self.payload()["flows"][0]["rate"], 0)
+
+    def test_python_failure_during_snapshot_answers_the_request_and_cancels(self):
+        self.collector.step()  # baseline
+        self.collector.step()
+        saved, requests = self.snapshot_request()
+        cancel = mock.Mock(wraps=self.collector.native_engine.snapshot_cancel)
+        with mock.patch.object(self.collector, "build_snapshot_payload", side_effect=KeyError("boom")), \
+                mock.patch.object(self.collector.native_engine, "snapshot_cancel", cancel):
+            with self.assertRaises(KeyError):
+                self.collector.step()
+        cancel.assert_called()
+        with open(saved) as handle:
+            self.assertEqual(json.load(handle)["status"], "snapshot_failed")
+        self.assertFalse(os.listdir(requests))
+        self.assertFalse(self.collector.native_engine.snapshot_open)
+        self.collector.step()
+        self.assertEqual(self.collector.native_engine.baselines[-1], False)
+
+    def test_post_sample_python_failure_keeps_the_helper(self):
+        self.collector.step()  # baseline
+        self.collector.step()
+        previous = self.payload()
+        with mock.patch.object(self.collector.recorder, "update", side_effect=ValueError("policy bug")):
+            with self.assertRaises(ValueError):
+                self.collector.step()
+        self.assertEqual(self.payload(), previous)  # nothing published by the failed iteration
+        self.assertIsNotNone(self.collector.native_engine.process)
+        self.bytes = 9000
+        self.collector.step()
+        self.assertEqual(self.collector.native_engine.baselines, [True, False, False, False])
+        self.assertGreater(self.payload()["collector"]["revision"], previous["collector"]["revision"])
+
+    def test_baseline_after_restart_keeps_the_published_map(self):
+        self.collector.step()  # baseline
+        self.collector.step()
+        previous = self.payload()
+        self.collector.native_engine.close()
+        self.collector.step()
+        self.assertTrue(self.collector.native_engine.baselines[-1])
+        self.assertEqual(self.payload(), previous)
+
+    def test_malformed_log_lines_are_contained_and_counted(self):
+        with open(os.path.join(self.directory, "eve.json"), "a") as handle:
+            handle.write('{"event_type":"alert","src_ip":["not","an","address"]}\n')
+            handle.write('{"event_type":"alert", broken\n')
+        with mock.patch.object(COLLECTOR, "parse_block", side_effect=ValueError("odd line")):
+            with open(os.path.join(self.directory, "filter.log"), "a") as handle:
+                handle.write("garbage\n")
+            self.collector.step()
+            self.collector.step()
+        self.assertGreaterEqual(self.collector.ingest_rejected["eve"], 2)
+        self.assertGreaterEqual(self.collector.ingest_rejected["filterlog"], 1)
+        status = self.diagnostic()["native"]
+        self.assertEqual(status["ingest_rejected"], self.collector.ingest_rejected)
+        self.assertTrue(os.path.exists(self.output))
 
     def test_first_failure_has_no_successful_sample(self):
         with mock.patch.object(self.collector.native_engine, "sample",
@@ -798,13 +906,14 @@ class TimingContractTest(CollectorLoopTest):
         self.assertEqual(self.diagnostic()["phase"], "retrying")
 
     def test_background_diagnostic_failure_does_not_commit_a_revision(self):
+        self.collector.step()  # baseline
         self.collector.step()
         previous = self.payload()["collector"]
         self.idle = True
         writer = COLLECTOR.write_json
 
         def fail_publication(path, payload):
-            if path == COLLECTOR.COLLECTOR_TIMINGS and payload["collector"]["revision"] == 2:
+            if path == COLLECTOR.COLLECTOR_TIMINGS and payload["collector"]["revision"] == previous["revision"] + 1:
                 raise OSError("diagnostic publication failed")
             writer(path, payload)
 
@@ -818,6 +927,7 @@ class TimingContractTest(CollectorLoopTest):
         self.assertEqual(self.queued(), [self.REMOTE])
 
     def test_no_database_and_background_and_idle(self):
+        self.collector.step()  # baseline
         self.collector.step()
         success = self.payload()["collector"]
         self.collector.problem = "database_missing"
@@ -829,8 +939,8 @@ class TimingContractTest(CollectorLoopTest):
         self.collector.step()
         current = self.diagnostic()
         self.assertEqual((current["phase"], current["effective_sample_interval"], current["revision"]),
-                         ("background", 20.0, 2))
-        self.assertEqual(self.payload()["collector"]["revision"], 1)  # no new live map in background
+                         ("background", 20.0, 3))
+        self.assertEqual(self.payload()["collector"]["revision"], 2)  # no new live map in background
         self.collector.recording = False
         self.collector.checked["settings"] = time.monotonic()
         self.assertIsNone(self.collector.step())
@@ -838,14 +948,15 @@ class TimingContractTest(CollectorLoopTest):
         self.assertIsNone(self.diagnostic()["next_sample_due"])
 
     def test_revision_commits_after_atomic_output_write(self):
+        self.collector.step()  # baseline
         self.collector.step()
         previous = self.payload()
         writer = COLLECTOR.write_json
 
         def fail(path, payload):
             if path == self.output:
-                self.assertEqual(self.collector.timing_status()["revision"], 1)
-                self.assertEqual(payload["collector"]["revision"], 2)
+                self.assertEqual(self.collector.timing_status()["revision"], 2)
+                self.assertEqual(payload["collector"]["revision"], 3)
                 # Exercise the existing atomic writer failing at its rename/commit boundary.
                 with mock.patch.object(COLLECTOR.os, "replace", side_effect=OSError("rename failed")):
                     writer(path, payload)
@@ -856,11 +967,12 @@ class TimingContractTest(CollectorLoopTest):
             with self.assertRaisesRegex(OSError, "rename failed"):
                 self.collector.step()
         self.assertEqual(self.payload(), previous)
-        self.assertEqual(self.diagnostic()["revision"], 1)
+        self.assertEqual(self.diagnostic()["revision"], 2)
         self.assertEqual(self.diagnostic()["phase"], "failed")
         self.assertFalse(any(name.startswith(".flows.json.") for name in os.listdir(self.directory)))
 
     def test_heartbeat_during_long_acquisition_does_not_refresh_success(self):
+        self.collector.step()  # baseline
         self.collector.step()
         previous = self.payload()["collector"]
         beat = COLLECTOR.threading.Event()

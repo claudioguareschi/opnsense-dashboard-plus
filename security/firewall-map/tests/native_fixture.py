@@ -51,12 +51,13 @@ def aggregate(flows, count=0, threat_entries=None):
     rows, candidates = [], []
     for pair, flow in flows:
         flow = dict(flow)
-        row = {"key": pair, "states": flow["states"], "toward": 0, "away": 0, "packets": 0,
-               "bytes_toward": flow["transferred"][0], "bytes_away": flow["transferred"][1],
-               "remote_started": int(flow["initiated"] == "remote"),
-               "local_started": int(flow["initiated"] != "remote"), "oldest": flow["age"],
-               "rate_in": flow["rate_in"], "rate_out": flow["rate_out"], "packet_rate": flow["packet_rate"],
-               "activity": 1.0, "score": max(flow["rate"], 1.0)}
+        row = {"key": pair, "states": flow["states"], "delta_bytes_from_remote": 0, "delta_bytes_to_remote": 0,
+               "delta_packets": 0,
+               "bytes_from_remote": flow["transferred"][0], "bytes_to_remote": flow["transferred"][1],
+               "remote_initiated_weight": int(flow["initiated"] == "remote"),
+               "local_initiated_weight": int(flow["initiated"] != "remote"), "oldest": flow["age"],
+               "rate_from_remote": flow["rate_in"], "rate_to_remote": flow["rate_out"],
+               "packet_rate": flow["packet_rate"], "activity": 1.0, "score": max(flow["rate"], 1.0)}
         index = len(rows)
         rows.append(row)
 
@@ -80,8 +81,9 @@ def aggregate(flows, count=0, threat_entries=None):
     remotes, threat_candidates = [], []
     for remote, entry in (threat_entries or {}).items():
         index = len(remotes)
-        remotes.append({"address": remote, **{key: entry[key] for key in
-                       ("bytes", "inbound", "outbound", "youngest")}})
+        remotes.append({"address": remote, "bytes": entry["bytes"], "youngest": entry["youngest"],
+                        "remote_initiated_states": entry["inbound"],
+                        "local_initiated_states": entry["outbound"]})
         for kind, field in ((2, "inside"), (4, "services"), (5, "targets")):
             for item in entry[field]:
                 association = 0
@@ -97,7 +99,8 @@ def aggregate(flows, count=0, threat_entries=None):
                 threat_candidates.append((index, kind, len(threat_candidates), association, value))
     return {"flows": rows, "candidates": candidates, "matches": {},
             "threat_remotes": remotes, "threat_candidates": threat_candidates,
-            "counts": {"states": count, "flows": len(flows)}, "threat_summary": True}
+            "counts": {"states": count, "flows": len(flows)}, "threat_summary": True,
+            "baseline": False, "refused": None, "telemetry": {"interval": 2.0, "sequence": 1}}
 
 
 class NativeFixture:
@@ -108,17 +111,19 @@ class NativeFixture:
         self.tracker = REFERENCE.FlowTracker()
         self.snapshot_flows = None
         self.current_records = []
-        self.elapsed = []
+        # one entry per request: True when it was the helper's baseline (first) sample
+        self.baselines = []
 
     def close(self):
         self.process = None
         self.snapshot_open = False
 
-    def sample(self, local, networks, assigned, wan, elapsed, **options):
-        self.elapsed.append(elapsed)
-        if self.process is None:
+    def sample(self, local, networks, assigned, wan, **options):
+        """Like the helper: the first sample of a new process is a baseline (no rates)."""
+        baseline = self.process is None
+        self.baselines.append(baseline)
+        if baseline:
             self.process = SimpleNamespace(poll=lambda: None)
-        if elapsed < 0:
             self.tracker = REFERENCE.FlowTracker()
         records = self.current_records = self.records()
         now = time.monotonic()
@@ -127,6 +132,8 @@ class NativeFixture:
         threat_entries = REFERENCE_THREATS.observe(records, lambda remote: ["fixture"], local, networks)
         result = aggregate(selected, len(records), threat_entries)
         result["counts"]["flows"] = self.tracker.total_flows
+        result["baseline"] = baseline
+        result["telemetry"] = {"interval": -1.0 if baseline else 2.0, "sequence": len(self.baselines)}
         self.snapshot_open = options.get("snapshot", False)
         return result
 

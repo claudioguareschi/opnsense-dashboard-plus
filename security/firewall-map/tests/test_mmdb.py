@@ -128,6 +128,39 @@ class ReaderTest(unittest.TestCase):
             with self.assertRaises(LookupError):
                 CACHE.mmdb_lookup(empty, "8.8.8.8")
 
+    def test_hostile_values_are_an_invalid_database(self):
+        # a map key that is a map (unhashable), and pointer fan-out over one large string
+        map_key = bytes([(7 << 5) | 1]) + encode({"a": "b"}) + encode("x")
+        # a 70000-byte string: size 31 with three extra bytes (65821 + 4179)
+        string = bytes([(2 << 5) | 31]) + (70000 - 65821).to_bytes(3, "big") + b"y" * 70000
+        pointers = b"".join(bytes([(1 << 5) | 0, 0]) for _ in range(40))  # 40 pointers to offset 0
+        fan_out = string + bytes([(0 << 5) | 29, 11 - 7, 40 - 29]) + pointers
+        for data, start in ((map_key, 0), (fan_out, len(string))):
+            decoder = mmdb.Decoder(data, 0, len(data))
+            with self.assertRaises(mmdb.InvalidDatabaseError):
+                decoder.decode(start)
+
+    def test_hostile_location_values_are_rejected_or_left_out(self):
+        cases = (
+            ({"location": {"latitude": float("nan"), "longitude": 1.0}}, None),
+            ({"location": {"latitude": 91.0, "longitude": 1.0}}, None),
+            ({"location": {"latitude": 1.0, "longitude": float("inf")}}, None),
+            ({"location": {"latitude": 1.0, "longitude": 2.0, "accuracy_radius": "far"}}, {"accuracy_km": None}),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            city = os.path.join(directory, "city.mmdb")
+            asn = os.path.join(directory, "asn.mmdb")
+            for record, expected in cases:
+                with self.subTest(record=record):
+                    database(city, "8.8.8.0", 24, record)
+                    database(asn, "8.8.8.0", 24, {"autonomous_system_number": "AS-oops"})
+                    location = CACHE.lookup_location("8.8.8.8", city, asn)
+                    if expected is None:
+                        self.assertIsNone(location)
+                    else:
+                        self.assertEqual(location["accuracy_km"], expected["accuracy_km"])
+                        self.assertNotIn("asn", location)  # a malformed AS number is left out
+
     def test_location_from_the_database(self):
         with tempfile.TemporaryDirectory() as directory:
             city = os.path.join(directory, "city.mmdb")

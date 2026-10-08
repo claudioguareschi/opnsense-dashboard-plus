@@ -154,9 +154,10 @@ def observe_aggregates(aggregate, lists_for):
         lists = lists_for(remote["address"])
         if not lists:
             continue
+        # inbound/outbound are the stored names of remote- and locally-initiated state counts
         seen[remote["address"]] = {
-            "lists": lists, "inbound": remote["inbound"],
-            "outbound": remote["outbound"], "targets": [], "inside": [], "services": [],
+            "lists": lists, "inbound": remote["remote_initiated_states"],
+            "outbound": remote["local_initiated_states"], "targets": [], "inside": [], "services": [],
             "bytes": remote["bytes"], "youngest": remote["youngest"], "service_ports": {},
             "_members": {"targets": set(), "inside": set(), "services": set()},
         }

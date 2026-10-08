@@ -43,14 +43,18 @@ static struct addr address(const char *text) {
 static struct state make_state(size_t n, unsigned sample, const char *mode) {
   struct state s = {0};
   s.id = n + 1; s.creator = 7; s.age = 1; s.expire = 120; s.rule = 19;
-  s.bytes[0] = 1000 + sample * 100 + n % 50;
-  s.bytes[1] = 2000 + sample * 200;
-  s.packets[0] = 10 + sample; s.packets[1] = 20 + sample;
+  s.pf_bytes[0] = 1000 + sample * 100 + n % 50;
+  s.pf_bytes[1] = 2000 + sample * 200;
+  s.pf_packets[0] = 10 + sample; s.pf_packets[1] = 20 + sample;
   s.peer[0] = s.peer[1] = 4;
-  strcpy(s.iface, "igb0"); strcpy(s.orig, "igb1");
+  strcpy(s.interface, "igb0"); strcpy(s.original_interface, "igb1");
   strcpy(s.label, "snapshot \"rule\"");
-  unsigned kind = !strcmp(mode, "mixed") ? n % 6 : 0;
-  s.direction = kind == 1 || kind == 5 ? FM_IN : FM_OUT;
+  if (!strcmp(mode, "badlabel"))
+    /* "caf\xc3\xa9" cut after the first byte of the two-byte sequence */
+    memcpy(s.label, "caf\xc3", 5);
+  /* inbound: every state is a remote-initiated port forward (PF direction in) */
+  unsigned kind = !strcmp(mode, "mixed") ? n % 6 : !strcmp(mode, "inbound") ? 1 : 0;
+  s.pf_direction = kind == 1 || kind == 5 ? FM_IN : FM_OUT;
   unsigned proto = kind == 4 ? 1 : kind == 5 ? 58 : 6;
   struct endpoint local = {address(kind >= 3 && kind != 4 ? "2001:4860::1" : "8.8.8.1"), (uint16_t)(30000 + n % 20000)};
   struct endpoint remote = {address(kind >= 3 && kind != 4 ? "2001:4860::2" : "9.9.9.9"), 443};
@@ -61,7 +65,7 @@ static struct state make_state(size_t n, unsigned sample, const char *mode) {
     remote.a = address(text);
   }
   if (proto == 1 || proto == 58) local.port = remote.port = inside.port = 42;
-  if (s.direction == FM_OUT) {
+  if (s.pf_direction == FM_OUT) {
     s.key[0].e[0] = remote; s.key[0].e[1] = local;
     s.key[1].e[0] = remote; s.key[1].e[1] = kind == 2 ? local : inside;
   } else {
@@ -77,11 +81,22 @@ static struct state make_state(size_t n, unsigned sample, const char *mode) {
   return s;
 }
 
+unsigned pf_reader_state_version(void) { return 0; }
+
+/* FM_TEST_INTERVAL (seconds) makes sample anchors deterministic: sample n is
+ * anchored at n * interval; otherwise the real monotonic clock is used. */
 bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
-                    struct fm_error *error) {
+                    double *request_anchor, struct fm_error *error) {
   (void)raw;
   static unsigned sample = 0;
   sample++;
+  if (request_anchor) {
+    const char *interval = getenv("FM_TEST_INTERVAL");
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    *request_anchor = interval ? sample * strtod(interval, NULL)
+                               : now.tv_sec + now.tv_nsec / 1e9;
+  }
   const char *mode = getenv("FM_TEST_MODE");
   if (!mode) mode = "one";
   const char *size = getenv("FM_TEST_COUNT");

@@ -25,6 +25,7 @@
 
 #include "event_correlation.h"
 #include "index.h"
+#include "alloc.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -71,7 +72,7 @@ static void append(struct saved rows[RECENT_LIMIT], size_t *head,
 }
 
 struct event_history *event_history_create(struct fm_error *error) {
-  struct event_history *history = calloc(1, sizeof(*history));
+  struct event_history *history = fm_calloc(1, sizeof(*history));
   if (!history) fm_error_set(error, errno, "event history allocation");
   return history;
 }
@@ -79,13 +80,13 @@ struct event_history *event_history_create(struct fm_error *error) {
 void event_history_destroy(struct event_history *history) {
   if (!history) return;
   map_clear(&history->index);
-  free(history);
+  fm_free(history);
 }
 
 bool event_history_update(struct event_history *history,
                           const struct aggregate *aggregate, double now,
                           struct fm_error *error) {
-  struct saved *next = calloc(RECENT_LIMIT, sizeof(*next));
+  struct saved *next = fm_calloc(RECENT_LIMIT, sizeof(*next));
   if (!next) return fm_error_set(error, errno, "event history sample");
   size_t count = 0, head = 0;
   /* Keep recent keys that are not in the current sample, then append current
@@ -101,7 +102,7 @@ bool event_history_update(struct event_history *history,
     struct outside_key key;
     struct correlation_value value;
     if (!aggregate_correlation(aggregate, n, &key, &value)) {
-      free(next);
+      fm_free(next);
       return fm_error_set(error, EINVAL, "event history current key");
     }
     append(next, &head, &count, (struct saved){key, value, now});
@@ -109,7 +110,7 @@ bool event_history_update(struct event_history *history,
   for (size_t n = 0; n < count; n++)
     history->rows[n] = next[(head + n) % RECENT_LIMIT];
   history->count = count;
-  free(next);
+  fm_free(next);
   map_clear(&history->index);
   for (size_t n = 0; n < count; n++) {
     unsigned char key[39];
@@ -131,15 +132,15 @@ size_t event_history_match(const struct event_history *history,
     struct correlation_value value;
     unsigned char kind;
     if (aggregate_correlation_lookup(aggregate, queries[n].key, &value)) {
-      kind = 1;
+      kind = EVENT_MATCH_CURRENT;
     } else {
       unsigned char encoded[39];
-      struct item *item = lookup((struct map *)&history->index, encoded,
-                                 encode(encoded, queries[n].key), false, NULL);
+      const struct item *item =
+          map_find(&history->index, encoded, encode(encoded, queries[n].key));
       if (!item || item->value >= history->count) continue;
       const struct saved *saved = &history->rows[item->value];
       value = saved->value;
-      kind = 2;
+      kind = EVENT_MATCH_RECENT;
     }
     if (found == capacity) {
       fm_error_set(error, EOVERFLOW, "event match capacity");

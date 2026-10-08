@@ -56,12 +56,12 @@ static bool state_callback(const struct state *state, void *arg,
     unsigned char b[MAX_FRAME], *p = b;
     protocol_put(&p, state->id, 8);
     protocol_put(&p, state->creator, 4);
-    *p++ = state->direction;
-    memcpy(p, state->iface, FM_INTERFACE_SIZE); p += FM_INTERFACE_SIZE;
-    memcpy(p, state->orig, FM_INTERFACE_SIZE); p += FM_INTERFACE_SIZE;
+    *p++ = state->pf_direction;
+    memcpy(p, state->interface, FM_INTERFACE_SIZE); p += FM_INTERFACE_SIZE;
+    memcpy(p, state->original_interface, FM_INTERFACE_SIZE); p += FM_INTERFACE_SIZE;
     protocol_put(&p, state->age, 4);
-    for (unsigned n = 0; n < 2; n++) protocol_put(&p, state->bytes[n], 8);
-    for (unsigned n = 0; n < 2; n++) protocol_put(&p, state->packets[n], 8);
+    for (unsigned n = 0; n < 2; n++) protocol_put(&p, state->pf_bytes[n], 8);
+    for (unsigned n = 0; n < 2; n++) protocol_put(&p, state->pf_packets[n], 8);
     memcpy(p, state->peer, 2); p += 2;
     for (unsigned k = 0; k < 2; k++) {
       *p++ = state->key[k].proto;
@@ -162,12 +162,12 @@ static bool read_fixture(const char *path, struct sample *sample,
       fm_error_set(error, EPROTO, "state fixture frame"); goto fail;
     }
     struct state s = {0}; p = b;
-    s.id = protocol_get(&p, 8); s.creator = protocol_get(&p, 4); s.direction = *p++;
-    memcpy(s.iface, p, FM_INTERFACE_SIZE); p += FM_INTERFACE_SIZE;
-    memcpy(s.orig, p, FM_INTERFACE_SIZE); p += FM_INTERFACE_SIZE;
+    s.id = protocol_get(&p, 8); s.creator = protocol_get(&p, 4); s.pf_direction = *p++;
+    memcpy(s.interface, p, FM_INTERFACE_SIZE); p += FM_INTERFACE_SIZE;
+    memcpy(s.original_interface, p, FM_INTERFACE_SIZE); p += FM_INTERFACE_SIZE;
     s.age = protocol_get(&p, 4);
-    for (unsigned i = 0; i < 2; i++) s.bytes[i] = protocol_get(&p, 8);
-    for (unsigned i = 0; i < 2; i++) s.packets[i] = protocol_get(&p, 8);
+    for (unsigned i = 0; i < 2; i++) s.pf_bytes[i] = protocol_get(&p, 8);
+    for (unsigned i = 0; i < 2; i++) s.pf_packets[i] = protocol_get(&p, 8);
     memcpy(s.peer, p, 2); p += 2;
     for (unsigned k = 0; k < 2; k++) {
       s.key[k].proto = *p++;
@@ -202,11 +202,22 @@ static int report_error(const struct fm_error *error) {
   fprintf(stderr, "%s: %s\n", error->message, strerror(error->code));
   return 1;
 }
+/* Fixture runs pass the interval explicitly; the history API takes anchors,
+ * so this keeps a synthetic monotonic clock. A negative elapsed starts over
+ * with a baseline sample. */
+static bool begin_with_elapsed(struct history *history, double elapsed,
+                               struct fm_error *error) {
+  static double clock;
+  if (elapsed < 0)
+    history_reset(history);
+  clock += elapsed > 0 ? elapsed : 1000.0;
+  return history_begin(history, clock, error);
+}
 static bool process_fixture(const char *input, const char *output_path,
                             const struct context *ctx, struct history *history,
                             double elapsed, bool deltas,
                             struct fm_error *error) {
-  if (!history_begin(history, elapsed, error)) return false;
+  if (!begin_with_elapsed(history, elapsed, error)) return false;
   struct aggregate *aggregate = aggregate_create(ctx, history, error);
   if (!aggregate) { history_abort(history); return false; }
   struct sample sample = {.aggregate = aggregate};
@@ -276,7 +287,7 @@ static int correlate_fixture(const char *context_path, const char *input_path,
   struct event_history *events = event_history_create(error);
   if (!context || !history || !ranking || !events ||
       !read_context(context_path, context, error) ||
-      !history_begin(history, -1, error))
+      !begin_with_elapsed(history, -1, error))
     goto fail;
   struct aggregate *aggregate = aggregate_create(context, history, error);
   if (!aggregate)
@@ -304,8 +315,9 @@ static int correlate_fixture(const char *context_path, const char *input_path,
     goto fail_history;
   }
   FILE *output = fopen(output_path, "wb");
+  struct telemetry telemetry = {.interval = -1};
   bool ok = output && protocol_write_ranked(output, aggregate, ranking, NULL,
-                                             matches, match_count, error);
+                                             matches, match_count, &telemetry, error);
   if (output && fclose(output) && !error->code)
     fm_error_set(error, errno, "close event match fixture");
   aggregate_destroy(aggregate);
@@ -364,13 +376,13 @@ int main(int argc, char **argv) {
   if (!strcmp(argv[1], "reader") || !strcmp(argv[1], "wire")) {
     if (argc != 5 && argc != 6) return 2;
     FILE *capture = fopen(argv[4], "wb");
-    if (!capture) return report_error(&(struct fm_error){errno, "open capture"});
+    if (!capture) return report_error(&(struct fm_error){.code = errno, .message = "open capture"});
     if (fwrite("FMPFS2\0", 1, 8, capture) != 8) return 1;
     struct sample sample = {.capture = capture};
     FILE *raw = argc == 6 && !strcmp(argv[1], "reader")
                     ? fopen(argv[5], "wb") : NULL;
     bool ok = !strcmp(argv[1], "reader")
-                  ? pf_reader_live(state_callback, &sample, raw, &error)
+                  ? pf_reader_live(state_callback, &sample, raw, NULL, &error)
                   : argc == 6 && pf_reader_wire(argv[5], state_callback,
                                                 &sample, &error);
     if (raw && fclose(raw) && !error.code)
@@ -383,12 +395,12 @@ int main(int argc, char **argv) {
   struct context *ctx = calloc(1, sizeof(*ctx));
   if (!ctx || !read_context(argv[2], ctx, &error)) return report_error(&error);
   struct history *history = history_create(&error);
-  if (!history || !history_begin(history, -1, &error)) return report_error(&error);
+  if (!history || !begin_with_elapsed(history, -1, &error)) return report_error(&error);
   struct aggregate *aggregate = aggregate_create(ctx, history, &error);
   if (!aggregate) return report_error(&error);
   struct sample sample = {.aggregate = aggregate};
   bool ok = !strcmp(argv[1], "live")
-                ? pf_reader_live(state_callback, &sample, NULL, &error)
+                ? pf_reader_live(state_callback, &sample, NULL, NULL, &error)
                 : read_fixture(argv[4], &sample, &error);
   if (!ok || !aggregate_finish(aggregate, &error)) {
     history_abort(history); aggregate_destroy(aggregate); free(ctx);

@@ -31,9 +31,14 @@
 #define FM_MAX_EVENT_QUERIES 2500
 struct event_history;
 struct event_query { uint16_t id; struct outside_key key; };
+/* Wire values of event_match.kind (FMAGG4). */
+enum event_match_kind {
+  EVENT_MATCH_CURRENT = 1, /* a PF state in this sample */
+  EVENT_MATCH_RECENT = 2,  /* seen within the last 10 minutes, gone now */
+};
 struct event_match {
   uint16_t id;
-  unsigned char kind; /* 1 current PF state, 2 recently observed PF state */
+  unsigned char kind; /* enum event_match_kind */
   struct outside_key key;
   struct correlation_value value;
 };

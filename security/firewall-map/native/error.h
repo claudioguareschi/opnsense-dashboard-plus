@@ -26,9 +26,21 @@
 #define FM_ERROR_H
 #include <stdbool.h>
 #include <stddef.h>
+/* Why a request failed; sent to Python in FMFAIL1 (PROTOCOL.md). */
+enum fm_failure_class {
+  FM_FAILURE_STRUCTURAL = 1,   /* malformed or truncated PF/netlink data */
+  FM_FAILURE_INTERNAL = 2,     /* an engine invariant did not hold */
+  FM_FAILURE_INCOMPATIBLE = 3, /* the kernel's PF ABI differs from the build */
+  FM_FAILURE_RESOURCES = 4,    /* allocation failure */
+  FM_FAILURE_REQUEST = 5,      /* malformed request from the collector */
+};
 struct fm_error {
-  int code;
+  int code, failure_class;
   char message[160];
 };
+/* Records the first error only and returns false, so callers can write
+ * `return fm_error_set(...)`. ENOMEM is classed as a resource failure, any
+ * other code as structural; fm_error_fail names the class explicitly. */
 bool fm_error_set(struct fm_error *, int, const char *);
+bool fm_error_fail(struct fm_error *, enum fm_failure_class, int, const char *);
 #endif

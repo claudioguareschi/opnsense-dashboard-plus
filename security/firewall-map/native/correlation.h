@@ -30,14 +30,19 @@ struct outside_key {
   unsigned char protocol;
   struct endpoint public, remote;
 };
+/* The PF state behind one outside tuple. Counters are oriented by the PF
+ * initiator (remote_initiated), never by the apparent-initiator heuristic. When
+ * several states share the tuple the last one supplies the value and
+ * `ambiguous` records whether their inside endpoints disagreed. */
 struct correlation_value {
   struct endpoint inside;
   uint64_t state_id;
   uint32_t creator_id;
   uint32_t age;
-  uint64_t bytes[2];
+  uint64_t bytes_from_remote, bytes_to_remote, packets_from_remote,
+      packets_to_remote;
   char interface[FM_INTERFACE_SIZE], rule[FM_LABEL_SIZE];
-  bool remote_started;
+  bool remote_initiated, apparent_remote_initiated;
   bool has_inside, ambiguous;
 };
 struct correlation *correlation_create(struct fm_error *);

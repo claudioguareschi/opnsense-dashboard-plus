@@ -82,11 +82,11 @@ class ThreatQueueTest(unittest.TestCase):
             remote = facts.pair[1]
             if remote not in remote_ids:
                 remote_ids[remote] = len(remotes)
-                remotes.append({"address": remote, "inbound": 0, "outbound": 0,
+                remotes.append({"address": remote, "remote_initiated_states": 0, "local_initiated_states": 0,
                                 "bytes": 0, "youngest": None})
             item = remotes[remote_ids[remote]]
-            item["inbound"] += int(facts.remote_started)
-            item["outbound"] += int(not facts.remote_started)
+            item["remote_initiated_states"] += int(facts.remote_started)
+            item["local_initiated_states"] += int(not facts.remote_started)
             item["bytes"] += record.bytes_in + record.bytes_out
             item["youngest"] = record.age if item["youngest"] is None else min(item["youngest"], record.age)
             if facts.inside:

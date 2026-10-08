@@ -299,6 +299,7 @@ def read_aggregates(path, common):
             state_id, creator = struct.unpack_from('!QI', b, 60)
             ambiguous = b[72]
             age = struct.unpack_from('!I', b, 73)[0]
+            # oriented by the PF initiator: from/to the remote (reference.DIVERGENCES)
             bytes_in, bytes_out = struct.unpack_from('!QQ', b, 77)
             remote_started = b[93]
             interface = b[94:110].split(b'\0', 1)[0].decode('ascii')

@@ -93,6 +93,7 @@ from firewallmap_snapshots import (
 from lib.pf import (
     _Record, host_info, port_forwards, rule_descriptions,
 )
+from lib import native
 from lib.native import NativeEngine, NativeError, READ_TIMEOUT
 
 
@@ -172,12 +173,12 @@ class _Flow(_Record):
 
 class _FlowTotals(_Record):
     """One sample's aggregate, with the same ordered weighted counts as before."""
-    __slots__ = ("toward", "away", "packets", "states", "protocols", "services", "inside", "egress",
-                 "remote_started", "local_started", "targets", "ports", "oldest", "bytes_toward", "bytes_away",
-                 "rules")
+    __slots__ = ("states", "protocols", "services", "inside", "egress",
+                 "remote_started", "local_started", "targets", "ports", "oldest", "bytes_from_remote",
+                 "bytes_to_remote", "rules")
 
     def __init__(self):
-        self.toward = self.away = self.packets = self.states = 0
+        self.states = 0
         self.protocols = set()
         self.services = {}
         self.inside = {}
@@ -185,7 +186,7 @@ class _FlowTotals(_Record):
         self.remote_started = self.local_started = 0
         self.targets = {}
         self.ports = {}
-        self.oldest = self.bytes_toward = self.bytes_away = 0
+        self.oldest = self.bytes_from_remote = self.bytes_to_remote = 0
         self.rules = {}
 
 
@@ -213,9 +214,8 @@ class FlowTracker:
         for row in aggregate["flows"]:
             total = _FlowTotals()
             total.states = row["states"]
-            total.toward, total.away, total.packets = row["toward"], row["away"], row["packets"]
-            total.bytes_toward, total.bytes_away = row["bytes_toward"], row["bytes_away"]
-            total.remote_started, total.local_started = row["remote_started"], row["local_started"]
+            total.bytes_from_remote, total.bytes_to_remote = row["bytes_from_remote"], row["bytes_to_remote"]
+            total.remote_started, total.local_started = row["remote_initiated_weight"], row["local_initiated_weight"]
             total.oldest = row["oldest"]
             totals[row["key"]] = total
             rows_by_pair[row["key"]] = row
@@ -223,7 +223,7 @@ class FlowTracker:
                 aggregate["candidates"], key=lambda candidate: candidate[2]):
             row = aggregate["flows"][flow_id]
             total = totals[row["key"]]
-            if kind == 1:
+            if kind == native.PROTOCOL:
                 number = value[0]
                 proto = protocols.get(number)
                 if proto is None:
@@ -233,26 +233,27 @@ class FlowTracker:
                         proto = str(number)
                     protocols[number] = proto
                 total.protocols.add(proto)
-            elif kind == 2:
+            elif kind == native.INSIDE_HOST:
                 address = _native_address(value)
                 total.inside[address] = total.inside.get(address, 0) + weight
-            elif kind == 3:
-                device = value.decode("ascii")
+            elif kind == native.EGRESS_INTERFACE:
+                device = value.decode("ascii", "replace")
                 total.egress[device] = total.egress.get(device, 0) + weight
-            elif kind == 4:
+            elif kind == native.SERVICE:
                 number, port = (association >> 16) & 255, association & 65535
                 proto = protocols.get(number, str(number))
                 name = service_name(proto, str(port) if port else None)
                 total.services[name] = total.services.get(name, 0) + weight
                 total.ports.setdefault(name, service_port_label(proto, str(port) if port else None))
-            elif kind == 5:
+            elif kind == native.REMOTE_TARGET:
                 proto = protocols.get(value[0], str(value[0]))
                 address = _native_address(value[1:18])
                 port = int.from_bytes(value[18:20], "big")
                 target = connection_target(proto, address, str(port) if port else None)
                 total.targets[target] = total.targets.get(target, 0) + weight
-            elif kind == 6:
-                rule = value.decode("utf-8")
+            elif kind == native.RULE_LABEL:
+                # PF truncates labels at 63 bytes, possibly inside a UTF-8 sequence
+                rule = value.decode("utf-8", "replace")
                 total.rules[rule] = total.rules.get(rule, 0) + weight
         previous_flows = self.flows
         current_flows = {}
@@ -260,7 +261,8 @@ class FlowTracker:
         for pair, total in totals.items():
             row = rows_by_pair[pair]
             flow = previous_flows[pair] if pair in previous_flows else _Flow(now)
-            flow.rate_in, flow.rate_out = row["rate_in"], row["rate_out"]
+            # rate_in/rate_out are the external names of rate from/to the remote
+            flow.rate_in, flow.rate_out = row["rate_from_remote"], row["rate_to_remote"]
             flow.packet_rate = row["packet_rate"]
             flow.rate = flow.rate_in + flow.rate_out
             flow.states = total.states
@@ -268,7 +270,7 @@ class FlowTracker:
             flow.services = _ranked(total.services, MAX_SERVICES)
             flow.service_ports = {name: total.ports[name] for name in flow.services if total.ports.get(name)}
             flow.age = total.oldest
-            flow.transferred = (total.bytes_toward, total.bytes_away)
+            flow.transferred = (total.bytes_from_remote, total.bytes_to_remote)
             flow.rule = (_ranked(total.rules, 1) or [None])[0]
             flow.inside = _ranked(total.inside, MAX_INSIDE)
             flow.egress = (_ranked(total.egress, 1) or [None])[0]
@@ -408,11 +410,17 @@ class ThreatRecorder:
         self.db = None
         # a database problem is logged once, then again when recording works
         self.failing = False
+        # when the last recording was persisted (monotonic), and the wall-clock cut-off up to
+        # which firewall blocks and IPS drops were recorded: both advance only after the
+        # recording is committed, so a failed one is retried with the same evidence window
         self.recorded = None
+        self.retry_at = None
         self.pruned = None
         self.last_wall = 0.0
 
     def due(self, now):
+        if self.retry_at is not None and now < self.retry_at:
+            return False
         return self.recorded is None or now - self.recorded >= THREAT_RECORD_SECONDS
 
     def _identity(self, address, collector):
@@ -430,10 +438,11 @@ class ThreatRecorder:
 
     def update(self, native, collector, now):
         """Record native mechanical summaries using Python threat policy."""
-        if not self.due(now):
+        if not self.due(now) or not native.get("threat_summary"):
             return
-        self.recorded = now
         blocklists, reputation, correlator = collector.blocklists, collector.reputation, collector.correlator
+        # the cut-off of this recording: evidence after it belongs to the next one
+        wall = time.time()
         try:
             if self.db is None:
                 self.db = threats.connect(self.path)
@@ -453,11 +462,7 @@ class ThreatRecorder:
                 entry["ids"] = collector.alerts.summary(address)
                 entry["connections"] = connection_summary(address, correlator, names, collector.interfaces,
                                                           index=index)
-            self.last_wall = time.time()
             threats.record(self.db, seen)
-            if self.failing:
-                log_notice("threat recording works again")
-                self.failing = False
             # hourly by age; at once when a burst of flagged addresses overfills history
             over = self.db.execute("SELECT count(*) FROM threats").fetchone()[0] > threats.KEEP_ROWS + threats.KEEP_TOUCHED
             if over or self.pruned is None or now - self.pruned >= THREAT_PRUNE_SECONDS:
@@ -467,12 +472,19 @@ class ThreatRecorder:
             if not self.failing:
                 log_error(f"threat recording failed: {error}")
                 self.failing = True
-            # reconnect on the next recording, without leaving the failed connection open
+            # reconnect on the next attempt, without leaving the failed connection open
             try:
                 self.db.close()
             except (AttributeError, sqlite3.Error):
                 pass
             self.db = None
+            self.retry_at = now + THREAT_RECORD_SECONDS
+            return
+        # committed: only now does the evidence window move on
+        self.recorded, self.last_wall, self.retry_at = now, wall, None
+        if self.failing:
+            log_notice("threat recording works again")
+            self.failing = False
 
 
 def idle(started, now=None, marker=REQUEST_MARKER, idle_seconds=IDLE_SECONDS):
@@ -525,10 +537,11 @@ def request_reload(path=RELOAD_MARKER):
 
 
 class SampleTimer:
-    """Where one sample's time went: seconds per phase (wall time; "parse" is the CPU time spent
-    reading pfctl's output during the walk), and the whole sample's wall and CPU time (the
-    collector's own plus that of the programs it ran: pfctl, ifconfig). The Status page shows it,
-    so anyone can check the cost on their own hardware."""
+    """Where one sample's time went: wall seconds per collector phase ("native" is the whole
+    native request, PF traversal included), and the whole sample's wall and CPU time (the
+    collector's own plus that of the programs it ran, such as ifconfig; the persistent native
+    helper reports its own CPU in its telemetry). The Status page shows it, so anyone can check
+    the cost on their own hardware."""
 
     def __init__(self):
         self.phases = {}
@@ -587,7 +600,9 @@ class Collector:
         self.reputation = Reputation(self.store)
         self.recorder = ThreatRecorder()
         self.native_engine = NativeEngine()
-        self.native_last_at = None
+        # per-source counts of log lines rejected by per-line containment, and the last reason
+        self.ingest_rejected = {"filterlog": 0, "eve": 0}
+        self.ingest_last_rejection = None
         # the last sample's timings (SampleTimer.report) and when they were last written
         self.timings = None
         self.timings_written = None
@@ -669,33 +684,49 @@ class Collector:
         self.reputation.refresh(now)
 
     def ingest(self, native, now, wall, foreground):
-        """Feed native matches, blocked attempts and Suricata alerts to Python policy."""
+        """Feed native matches, blocked attempts and Suricata alerts to Python policy.
+
+        Log lines are contained one by one: a malformed or failing line is counted and skipped,
+        never allowed to abort the iteration (its offset has already been consumed).
+        """
         lines = self.log.lines()
         if foreground and not self.backlog_loaded:
             # the 10-minute hit window starts full
             self.backlog_loaded = True
             lines = self.log.backlog() + lines
         for line in lines:
-            event = parse_block(line)
-            # only connection attempts aimed at this firewall's own public addresses; blocked
-            # forwarded traffic (e.g. another host's outbound packets) is not an inbound probe
-            if not event or event["destination"] not in self.local_addresses:
-                continue
-            if foreground:
-                at = block_event_time(line, now, wall)
-                if at is None:
-                    continue
-                self.blocks.add(event, at)
-            # blocked attempts stay matchable for late alerts even with no map open
-            self.correlator.observe_block(event, wall, self.descriptions)
+            try:
+                self._ingest_block(line, now, wall, foreground)
+            except Exception as error:  # noqa: BLE001 - per-line containment, counted below
+                self.ingest_rejected["filterlog"] += 1
+                self.ingest_last_rejection = f"filterlog: {type(error).__name__}: {error}"
         self.correlator.observe_native_matches(native["matches"], wall, self.descriptions)
+        rejected = 0
         if foreground and not self.eve_loaded:
             self.eve_loaded = True
             # older alerts can only be address history: their connections are not indexed yet
-            self.alerts.feed(self.eve.backlog(ALERT_BACKLOG_BYTES), self.local_addresses, networks=self.networks)
-        self.alerts.feed(self.eve.lines(), self.local_addresses, self.correlator, wall, self.networks)
+            rejected += self.alerts.feed(self.eve.backlog(ALERT_BACKLOG_BYTES), self.local_addresses,
+                                         networks=self.networks)
+        rejected += self.alerts.feed(self.eve.lines(), self.local_addresses, self.correlator, wall, self.networks)
+        if rejected:
+            self.ingest_rejected["eve"] += rejected
+            self.ingest_last_rejection = f"eve: {self.alerts.last_rejection}"
         self.correlator.resolve_native(native["matches"], self.local_addresses, wall, self.networks)
         self.alerts.expire(wall)
+
+    def _ingest_block(self, line, now, wall, foreground):
+        event = parse_block(line)
+        # only connection attempts aimed at this firewall's own public addresses; blocked
+        # forwarded traffic (e.g. another host's outbound packets) is not an inbound probe
+        if not event or event["destination"] not in self.local_addresses:
+            return
+        if foreground:
+            at = block_event_time(line, now, wall)
+            if at is None:
+                return
+            self.blocks.add(event, at)
+        # blocked attempts stay matchable for late alerts even with no map open
+        self.correlator.observe_block(event, wall, self.descriptions)
 
     def map_anchor(self, now):
         """Coordinates for rendering a private-WAN origin, never an address substituted into a flow."""
@@ -936,7 +967,13 @@ class Collector:
         return payload
 
     def save_requested_snapshots(self, now):
-        """Write a full snapshot for each camera request waiting in SNAPSHOT_REQUEST_DIR."""
+        """Answer every camera request waiting in SNAPSHOT_REQUEST_DIR, from the open session.
+
+        Every request found here gets a document, the snapshot or an error, and its request file
+        is removed, whatever happens. A failure the protocol survives (raised between commands)
+        ends the session with CANCEL and keeps the helper; NativeEngine closes the helper itself
+        when a request failed mid-stream.
+        """
         try:
             names = sorted(os.listdir(SNAPSHOT_REQUEST_DIR))
         except OSError:
@@ -944,19 +981,25 @@ class Collector:
         requests = [name[:-len(".request")] for name in names if name.endswith(".request")]
         if not requests:
             return
+        payload = {"status": "snapshot_failed", "error": "collector iteration failed"}
         try:
             payload = self.build_snapshot_payload(now)
         except SnapshotTooLarge as error:
-            self.native_engine.close()
-            self.native_last_at = None
             payload = {"status": "snapshot_too_large", "error": str(error)}
         except NativeError as error:
-            self.native_engine.close()
-            self.native_last_at = None
             payload = {"status": "snapshot_failed", "error": str(error)}
+        finally:
+            self.native_engine.snapshot_cancel()
+            self._answer_snapshot_requests(requests, payload)
+
+    @staticmethod
+    def _answer_snapshot_requests(requests, payload):
         for snapshot_id in requests:
-            if snapshot_valid_id(snapshot_id):
-                write_json(f"{SNAPSHOT_DIR}/{snapshot_id}.json", payload)
+            try:
+                if snapshot_valid_id(snapshot_id):
+                    write_json(f"{SNAPSHOT_DIR}/{snapshot_id}.json", payload)
+            except OSError as error:
+                log_warning(f"snapshot {snapshot_id} could not be saved: {error}")
             try:
                 os.remove(f"{SNAPSHOT_REQUEST_DIR}/{snapshot_id}.request")
             except OSError:
@@ -990,9 +1033,56 @@ class Collector:
         return rest
 
     def _step(self):
-        """One iteration. Returns the seconds to rest before the next, or None to stop."""
+        """One iteration: prepare, acquire, apply, publish, then post-commit work.
+
+        Commit point: publication. In the foreground that is the atomic write of flows.json (or of
+        a refusal status); in the background, and for a baseline sample (which must not replace a
+        still-fresh map), it is the diagnostics record. Before it, a failure leaves the previous
+        publication untouched; after it (snapshots, cache saves, timings) nothing is unpublished.
+
+        The native helper keeps its own timing and history, so a Python failure after a complete
+        native response does not invalidate it. The helper is closed only when a native request
+        failed or was interrupted (NativeEngine), never for downstream Python errors.
+        """
         started = time.monotonic()
         timer = SampleTimer()
+        proceed, rest = self._prepare(started, timer)
+        if not proceed:
+            return rest
+        background = self.background
+        native = self._acquire(started, background, timer)
+        if native is None:
+            return self._rest(started, background)
+        snapshot_due = self.native_engine.snapshot_open and not native["baseline"]
+        try:
+            self.set_phase("processing")
+            now = time.monotonic()
+            wall = time.time()
+            self._apply(native, now, wall, background, timer)
+            self._publish(native, now, background, timer)
+            if snapshot_due:
+                self.save_requested_snapshots(now)
+        finally:
+            # never leave a session open into the next request, and never leave a request
+            # unanswered after its session failed
+            self.native_engine.snapshot_cancel()
+            if snapshot_due:
+                self._answer_snapshot_requests(self._pending_snapshot_requests(),
+                                               {"status": "snapshot_failed",
+                                                "error": "collector iteration failed"})
+        self._post_commit(native, now, background, timer)
+        return self._rest(started, background)
+
+    @staticmethod
+    def _pending_snapshot_requests():
+        try:
+            names = os.listdir(SNAPSHOT_REQUEST_DIR)
+        except OSError:
+            return []
+        return [name[:-len(".request")] for name in sorted(names) if name.endswith(".request")]
+
+    def _prepare(self, started, timer):
+        """Settings, metadata and mode. Returns (proceed, rest when not proceeding)."""
         self.refresh_settings(started)
         timer.phase("settings")
         background = idle(self.started_at)
@@ -1008,7 +1098,7 @@ class Collector:
                 else IDLE_INTERVAL)
         if background and not self.recording:
             log_notice("collector stopping: no map open and background recording is off")
-            return None
+            return False, None
         if not background and self.problem:
             self.set_phase("failed")
             write_json(OUTPUT_FILE, status_document("no_database", reason=self.problem,
@@ -1017,65 +1107,87 @@ class Collector:
             # re-check within a few seconds, the database may be downloading; only move the
             # next check earlier, never later, or repeated passes would postpone it forever
             self.checked["settings"] = min(self.checked["settings"], started - SETTINGS_REFRESH_SECONDS + 5)
-            return self._rest(started, background)
+            return False, self._rest(started, background)
         self.refresh_metadata(started)
         timer.phase("metadata")
+        return True, None
+
+    def _acquire(self, started, background, timer):
+        """The complete native response, or None when the request failed."""
         self._sample_started = (time.time(), time.monotonic())
         self._sample_revision = None
         self.set_phase("collecting", self._sample_started[0] + READ_TIMEOUT)
+        native_start = time.perf_counter()
         try:
-            native_start = time.perf_counter()
-            # A dead/closed worker owns no history, including after snapshot failure.
-            process = self.native_engine.process
-            fresh_worker = process is None or process.poll() is not None
-            elapsed = -1 if fresh_worker or self.native_last_at is None else started - self.native_last_at
             native = self.native_engine.sample(
-                self.local_addresses, self.networks, self.interface_addresses,
-                self.primary_wan_device, elapsed, threat_summary=self.recorder.due(started),
+                self.local_addresses, self.networks, self.interface_addresses, self.primary_wan_device,
+                threat_summary=self.recorder.due(started),
                 event_queries=self.correlator.native_queries(self.local_addresses, self.networks),
                 snapshot=not background and self.snapshot_requested())
-            timer.phases["native"] = time.perf_counter() - native_start
         except NativeError as error:
             self.native_engine.close()
-            self.native_last_at = None
             self.set_phase("failed")
             if not self.failures:
                 log_error(f"reading the firewall states failed: {error}")
             self.failures += 1
+            self._record_native(error=error)
             # Preserve the last successful document and its mtime. Existing API
             # freshness expires it naturally; liveness diagnostics report failure.
-            return self._rest(started, background)
-        timer.phase("walk")
-        self.set_phase("processing")
-        now = time.monotonic()
-        wall = time.time()
-        if not background:
+            return None
+        timer.phases["native"] = time.perf_counter() - native_start
+        timer.mark = time.perf_counter()
+        if self.failures:
+            log_notice(f"reading the firewall states works again, after {self.failures} failed attempts")
+        self.failures = 0
+        self._record_native(native=native)
+        return native
+
+    def _record_native(self, native=None, error=None):
+        """The helper's own view of the last request, for diagnostics."""
+        with self._status_lock:
+            current = dict(self.collector_status.get("native") or {})
+            if native is not None:
+                current.update(helper=native.get("helper"), telemetry=native["telemetry"],
+                               baseline=native["baseline"], refused=native["refused"])
+            if error is not None:
+                current.update(last_error=str(error), last_error_class=getattr(error, "failure_class", None),
+                               last_error_at=time.time())
+            current["ingest_rejected"] = dict(self.ingest_rejected)
+            current["ingest_last_rejection"] = self.ingest_last_rejection
+            self.collector_status["native"] = current
+            self.collector_status["engine"] = "native"
+
+    def _apply(self, native, now, wall, background, timer):
+        """Python policy over an accepted sample: presentation state, evidence, threat history."""
+        if native["refused"]:
+            return
+        if not background and not native["baseline"]:
             self.tracker.update_aggregate(native, now)
             timer.phase("tracker")
         self.ingest(native, now, wall, foreground=not background)
         timer.phase("ingest")
         self.recorder.update(native, self, now)
         timer.phase("threats")
-        state_count = native["counts"]["states"]
-        with self._status_lock:
-            self.collector_status["engine"] = "native"
-        self.native_last_at = started
-        if self.failures:
-            log_notice(f"reading the firewall states works again, after {self.failures} failed attempts")
-        self.failures = 0
-        if not background:
-            self.publish_summary(now, timer, state_count)
-            if self.native_engine.snapshot_open:
-                self.save_requested_snapshots(now)
-            self.native_engine.snapshot_cancel()
+        self._record_native()
+
+    def _publish(self, native, now, background, timer):
+        """The commit point (see _step)."""
+        states = native["counts"]["states"]
+        refused = native["refused"]
+        if refused and not background:
+            self.complete_sample(states, status_document("refused", **refused, collector=None))
+        elif background or refused or native["baseline"]:
+            # a baseline has no rates yet: the previous map stays until it expires or is replaced
+            self.complete_sample(states)
         else:
-            self.complete_sample(state_count)
+            self.publish_summary(now, timer, states)
+
+    def _post_commit(self, native, now, background, timer):
         self.geo.save()
         timer.phase("other")
         timer.phases["native_states"] = native["counts"]["states"]
         timer.phases["native_flows"] = native["counts"]["flows"]
-        self.save_timings(timer, state_count, background, now)
-        return self._rest(started, background)
+        self.save_timings(timer, native["counts"]["states"], background, now)
 
     def _rest(self, started, background):
         took = time.monotonic() - started
@@ -1092,7 +1204,6 @@ class Collector:
         if self._heartbeat_thread is not None:
             self._heartbeat_thread.join()
         self.native_engine.close()
-        self.native_last_at = None
         self.set_phase("stopped")
         if self.geo is not None:
             self.geo.save(force=True)

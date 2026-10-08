@@ -27,8 +27,30 @@
 """Test/development-only state history/ranking oracle."""
 
 import firewallmap_collector as production
-from firewallmap_collector import _Flow, _FlowTotals, _ranked, FADE_SECONDS, MAX_FLOWS, MAX_INSIDE, MAX_SERVICES
+from firewallmap_collector import _Flow, _ranked, FADE_SECONDS, MAX_FLOWS, MAX_INSIDE, MAX_SERVICES
+from lib.pf import _Record
 from .pf import StateFacts
+
+
+class _FlowTotals(_Record):
+    """The retired engine's per-sample totals (its own copy: production now carries only the
+    native-era fields). toward/away are bytes from/to the remote."""
+    __slots__ = ("toward", "away", "packets", "states", "protocols", "services", "inside", "egress",
+                 "remote_started", "local_started", "targets", "ports", "oldest", "bytes_toward", "bytes_away",
+                 "rules")
+
+    def __init__(self):
+        self.toward = self.away = self.packets = self.states = 0
+        self.protocols = set()
+        self.services = {}
+        self.inside = {}
+        self.egress = {}
+        self.remote_started = self.local_started = 0
+        self.targets = {}
+        self.ports = {}
+        self.oldest = self.bytes_toward = self.bytes_away = 0
+        self.rules = {}
+
 
 RATE_SMOOTHING = 0.5
 

@@ -30,7 +30,7 @@
 struct threat_summary;
 struct threat_remote {
   struct addr address;
-  uint64_t inbound, outbound, bytes;
+  uint64_t remote_initiated_states, local_initiated_states, bytes;
   uint32_t youngest;
 };
 struct threat_candidate_view {

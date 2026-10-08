@@ -22,14 +22,20 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-
 #ifndef FM_SNAPSHOT_H
 #define FM_SNAPSHOT_H
 #include "pf_reader.h"
+#include "protocol.h"
 #include "ranking.h"
 #define FM_SNAPSHOT_FLOWS 5000
 #define FM_SNAPSHOT_BYTES (10u * 1024u * 1024u)
 #define FM_SNAPSHOT_STATES 5000
+/* FMSTATE2 omission reason bits (PROTOCOL.md). */
+#define SNAPSHOT_OMITTED_BYTES 1
+#define SNAPSHOT_OMITTED_STATES 2
+#define SNAPSHOT_OMITTED_FLOW_QUOTA 4
+/* FMSTATE2 exemplar selection policies. */
+#define SNAPSHOT_POLICY_ARRIVAL 1 /* traversal order, incidents displace ordinary */
 struct snapshot;
 struct snapshot_flow {
   struct addr local, remote;
@@ -45,7 +51,9 @@ void snapshot_destroy(struct snapshot *);
 bool snapshot_add(const struct state *, void *, struct fm_error *);
 bool snapshot_write(struct snapshot *, FILE *, struct fm_error *);
 /* Snapshot-only session following a sample explicitly requesting it. The
- * aggregate/ranking are borrowed until DETAIL or CANCEL closes the session. */
+ * aggregate/ranking are borrowed until DETAIL or CANCEL closes the session;
+ * the telemetry describes the sample the session belongs to. */
 bool snapshot_session(FILE *, FILE *, const struct context *, const struct aggregate *,
-                      const struct ranking *, uint64_t, double, struct fm_error *);
+                      const struct ranking *, uint64_t, double,
+                      const struct telemetry *, struct fm_error *);
 #endif

@@ -50,6 +50,7 @@
 
 _Static_assert(PF_RULE_LABEL_SIZE == FM_LABEL_SIZE, "PF rule label ABI");
 _Static_assert(IFNAMSIZ == FM_INTERFACE_SIZE, "PF interface ABI");
+_Static_assert(PF_IN == FM_IN && PF_OUT == FM_OUT, "PF direction ABI");
 struct reader {
   pf_state_callback callback;
   void *arg;
@@ -198,7 +199,7 @@ static void state_attr(unsigned type, const unsigned char *p, size_t n,
       fm_error_set(r->error, EPROTO, "direction size");
       return;
     }
-    s->direction = *p;
+    s->pf_direction = *p;
     break;
   case PF_ST_CREATION:
     if (n != 4) {
@@ -268,16 +269,20 @@ static void state_attr(unsigned type, const unsigned char *p, size_t n,
     }
     memcpy(&version, p, 8);
     if (version != PF_STATE_VERSION) {
-      fm_error_set(r->error, EPROTO, "state ABI version mismatch");
+      char message[96];
+      snprintf(message, sizeof(message),
+               "PF state ABI version %" PRIu64 ", helper built for %u", version,
+               (unsigned)PF_STATE_VERSION);
+      fm_error_fail(r->error, FM_FAILURE_INCOMPATIBLE, EPROTO, message);
       return;
     }
     break;
   }
   case PF_ST_IFNAME:
-    string_attr(r, s->iface, sizeof(s->iface), p, n);
+    string_attr(r, s->interface, sizeof(s->interface), p, n);
     break;
   case PF_ST_ORIG_IFNAME:
-    string_attr(r, s->orig, sizeof(s->orig), p, n);
+    string_attr(r, s->original_interface, sizeof(s->original_interface), p, n);
     break;
   case PF_ST_RULE_LABEL:
     string_attr(r, s->label, sizeof(s->label), p, n);
@@ -288,7 +293,7 @@ static void state_attr(unsigned type, const unsigned char *p, size_t n,
       fm_error_set(r->error, EPROTO, "byte counter size");
       return;
     }
-    memcpy(&s->bytes[type - PF_ST_BYTES0], p, 8);
+    memcpy(&s->pf_bytes[type - PF_ST_BYTES0], p, 8);
     break;
   case PF_ST_PACKETS0:
   case PF_ST_PACKETS1:
@@ -296,7 +301,7 @@ static void state_attr(unsigned type, const unsigned char *p, size_t n,
       fm_error_set(r->error, EPROTO, "packet counter size");
       return;
     }
-    memcpy(&s->packets[type - PF_ST_PACKETS0], p, 8);
+    memcpy(&s->pf_packets[type - PF_ST_PACKETS0], p, 8);
     break;
   case PF_ST_KEY_WIRE:
   case PF_ST_KEY_STACK: {
@@ -403,7 +408,7 @@ static void datagram(struct reader *r, unsigned char *buffer, size_t left,
 }
 
 bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
-                    struct fm_error *error) {
+                    double *request_anchor, struct fm_error *error) {
   struct reader r = {.callback = callback, .arg = arg, .error = error};
   struct snl_state ss;
   if (!snl_init(&ss, NETLINK_GENERIC))
@@ -430,6 +435,14 @@ bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
   }
   request->nlmsg_flags |= NLM_F_DUMP;
   request = snl_finalize_msg(&nw);
+  struct timespec sent;
+  if (request_anchor) {
+    if (clock_gettime(CLOCK_MONOTONIC, &sent)) {
+      fm_error_fail(error, FM_FAILURE_INTERNAL, errno, "monotonic clock");
+      goto out;
+    }
+    *request_anchor = sent.tv_sec + sent.tv_nsec / 1e9;
+  }
   if (!request || !snl_send_message(&ss, request)) {
     fm_error_set(error, errno ? errno : EIO, "netlink send");
     goto out;
@@ -482,6 +495,7 @@ out:
   snl_free(&ss);
   return ok;
 }
+unsigned pf_reader_state_version(void) { return PF_STATE_VERSION; }
 bool pf_reader_wire(const char *path, pf_state_callback callback, void *arg,
                     struct fm_error *error) {
   struct reader r = {.callback = callback, .arg = arg, .error = error};
@@ -542,11 +556,13 @@ out:
 }
 
 #else
+unsigned pf_reader_state_version(void) { return 0; }
 bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
-                    struct fm_error *error) {
+                    double *request_anchor, struct fm_error *error) {
   (void)callback;
   (void)arg;
   (void)raw;
+  (void)request_anchor;
   return fm_error_set(error, ENOTSUP,
                       "live PF acquisition requires OPNsense/FreeBSD");
 }

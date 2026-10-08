@@ -246,6 +246,11 @@ class Correlator:
         return outside_key(alert["protocol"], dst, alert["dst_port"], src, alert["src_port"])
 
     def alert_connection(self, key, alert, now):
+        # The alert's src is the source of the packet that raised it, which is the flow's
+        # client only for alerts on client-to-server packets. Whether the installed
+        # Suricata reports the flow direction (and in which field) must be verified on the
+        # target before byte orientation is derived from it; until then this keeps the
+        # packet-source approximation (pending target verification).
         remote_started = alert["src"] == key[3]
         flow = alert.get("flow") or {}
         # Suricata counts to_server/to_client; the map counts toward/away from the remote side
@@ -387,35 +392,75 @@ def eve_time(value):
         return None
 
 
+class MalformedAlert(ValueError):
+    """An EVE alert line that is not the documented object shape."""
+
+
+def _object(value):
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise MalformedAlert("expected an object")
+    return value
+
+
+def _port(value):
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 65535:
+        raise MalformedAlert("invalid port")
+    return value
+
+
+def _address(value):
+    if not isinstance(value, str):
+        raise MalformedAlert("invalid address")
+    return normalize_ip(value)
+
+
+def _string(value, default=""):
+    return value if isinstance(value, str) else default
+
+
 def parse_alert(line):
-    """One Suricata EVE alert, or None for any other event (cheap check before JSON parsing)."""
+    """One Suricata EVE alert, or None for any other event (cheap check before JSON parsing).
+
+    Raises MalformedAlert for an alert line that is not valid JSON of the expected shape;
+    the caller counts and skips it.
+    """
     if '"event_type":"alert"' not in line and '"event_type": "alert"' not in line:
         return None
     try:
         event = json.loads(line)
-    except ValueError:
-        return None
-    alert = event.get("alert") or {}
-    at = eve_time(event.get("timestamp"))
+    except (ValueError, RecursionError) as error:
+        raise MalformedAlert("invalid JSON") from error
+    event = _object(event)
+    alert, flow, dns = _object(event.get("alert")), _object(event.get("flow")), _object(event.get("dns"))
+    queries = dns.get("queries")
+    first_query = queries[0] if isinstance(queries, list) and queries and isinstance(queries[0], dict) else {}
+    severity = alert.get("severity")
+    sid = alert.get("signature_id")
+    flow_id = event.get("flow_id")
     return {
-        "time": at,
-        "src": normalize_ip(event.get("src_ip")),
-        "dst": normalize_ip(event.get("dest_ip")),
-        "src_port": event.get("src_port"),
-        "dst_port": event.get("dest_port"),
-        "protocol": str(event.get("proto") or "").lower(),
-        "sid": alert.get("signature_id"),
-        "signature": alert.get("signature") or "",
-        "category": alert.get("category") or "",
-        "severity": alert.get("severity") or 3,
-        "action": alert.get("action") or "allowed",
-        "flow_id": event.get("flow_id"),
-        "flow": {**{key: (event.get("flow") or {}).get(key) for key in (
-            "pkts_toserver", "pkts_toclient", "bytes_toserver", "bytes_toclient")},
-            "start": eve_time((event.get("flow") or {}).get("start"))},
-        "app_proto": event.get("app_proto"),
+        "time": eve_time(_string(event.get("timestamp"))),
+        "src": _address(event.get("src_ip")),
+        "dst": _address(event.get("dest_ip")),
+        "src_port": _port(event.get("src_port")),
+        "dst_port": _port(event.get("dest_port")),
+        "protocol": _string(event.get("proto")).lower(),
+        "sid": sid if isinstance(sid, int) and not isinstance(sid, bool) else None,
+        "signature": _string(alert.get("signature")),
+        "category": _string(alert.get("category")),
+        "severity": severity if isinstance(severity, int) and not isinstance(severity, bool) else 3,
+        "action": _string(alert.get("action"), "allowed") or "allowed",
+        "flow_id": flow_id if isinstance(flow_id, int) and not isinstance(flow_id, bool) else None,
+        "flow": {**{key: (value if isinstance(value, int) and not isinstance(value, bool) else None)
+                    for key, value in ((key, flow.get(key)) for key in (
+                        "pkts_toserver", "pkts_toclient", "bytes_toserver", "bytes_toclient"))},
+                 "start": eve_time(_string(flow.get("start")))},
+        "app_proto": _string(event.get("app_proto"), None),
         # what was asked, for DNS alerts (the name behind "ET DNS Query for .cc TLD")
-        "query": ((event.get("dns") or {}).get("queries") or [{}])[0].get("rrname") or (event.get("dns") or {}).get("rrname"),
+        "query": _string(first_query.get("rrname"), None) or _string(dns.get("rrname"), None),
     }
 
 
@@ -423,6 +468,7 @@ class AlertTracker:
     """Suricata alerts per remote address over the last ALERT_WINDOW_SECONDS, bounded in memory."""
 
     def __init__(self, window=ALERT_WINDOW_SECONDS, max_sources=MAX_ALERT_SOURCES):
+        self.last_rejection = None
         self.window = window
         self.max_sources = max_sources
         self.sources = {}
@@ -479,12 +525,22 @@ class AlertTracker:
         return min(item["severity"] for item in entry["signatures"].values()) <= ALERT_FLAG_SEVERITY
 
     def feed(self, lines, local_addresses, correlator=None, now=None, networks=None):
+        """Feed EVE lines; returns how many alert lines were rejected (malformed or failing).
+
+        Each line is contained on its own: one bad line never stops the others.
+        """
+        rejected = 0
         for line in lines:
-            alert = parse_alert(line)
-            if alert:
-                self.add(alert, local_addresses, networks=networks)
-                if correlator is not None:
-                    correlator.add_alert(alert, now if now is not None else time.time())
+            try:
+                alert = parse_alert(line)
+                if alert:
+                    self.add(alert, local_addresses, networks=networks)
+                    if correlator is not None:
+                        correlator.add_alert(alert, now if now is not None else time.time())
+            except Exception as error:  # noqa: BLE001 - per-line containment, counted by the caller
+                rejected += 1
+                self.last_rejection = f"{type(error).__name__}: {error}"
+        return rejected
 
     def summary(self, address, now=None):
         """What the map shows for an address: count, worst severity and the top signatures."""

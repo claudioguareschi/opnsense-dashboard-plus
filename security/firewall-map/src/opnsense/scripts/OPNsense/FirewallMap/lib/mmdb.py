@@ -135,8 +135,10 @@ class Decoder:
     whose entries point back at itself would otherwise grow exponentially within the depth)."""
 
     MAX_DEPTH = 32
-    # a GeoLite2 City record has a few hundred values
+    # a GeoLite2 City record has a few hundred values and a few kilobytes of text; the byte
+    # budget stops pointer fan-out from copying one large string thousands of times
     MAX_VALUES = 20000
+    MAX_BYTES = 1 << 20
 
     def __init__(self, data, base, limit):
         self.data = data
@@ -148,16 +150,23 @@ class Decoder:
         try:
             # the budget is per lookup (a list, so the recursion shares it; the reader may be used
             # from more than one thread)
-            return self._decode(offset, 0, [self.MAX_VALUES])
+            return self._decode(offset, 0, [self.MAX_VALUES, self.MAX_BYTES])
         except InvalidDatabaseError:
             raise
-        except (IndexError, ValueError, struct.error, RecursionError) as error:
+        except (IndexError, ValueError, TypeError, OverflowError, struct.error, RecursionError) as error:
             raise InvalidDatabaseError(f"damaged data section ({error})") from None
 
     def _bytes(self, offset, size):
         if offset < 0 or offset + size > self.limit:
             raise InvalidDatabaseError("data runs past the end of the section")
         return self.data[offset:offset + size]
+
+    def _payload(self, offset, size, budget):
+        """A string or bytes value, charged to the lookup's byte budget."""
+        budget[1] -= size
+        if budget[1] < 0:
+            raise InvalidDatabaseError("value too large")
+        return self._bytes(offset, size)
 
     def _decode(self, offset, depth, budget, pointer_allowed=True):
         if depth > self.MAX_DEPTH:
@@ -194,11 +203,13 @@ class Decoder:
             offset += extra
             size = (29, 285, 65821)[extra - 1] + number
         if kind == 2:
-            return self._bytes(offset, size).decode("utf-8", "replace"), offset + size
+            return self._payload(offset, size, budget).decode("utf-8", "replace"), offset + size
         if kind == 7:
             result = {}
             for _ in range(size):
                 key, offset = self._decode(offset, depth + 1, budget)
+                if not isinstance(key, str):
+                    raise InvalidDatabaseError("map key is not a string")
                 result[key], offset = self._decode(offset, depth + 1, budget)
             return result, offset
         if kind == 11:
@@ -219,7 +230,7 @@ class Decoder:
         if kind == 14:
             return bool(size), offset
         if kind == 4:
-            return bytes(self._bytes(offset, size)), offset + size
+            return bytes(self._payload(offset, size, budget)), offset + size
         raise InvalidDatabaseError(f"unknown data type {kind}")
 
 
