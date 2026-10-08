@@ -25,7 +25,8 @@
 #ifndef FM_HISTORY_H
 #define FM_HISTORY_H
 #include "state.h"
-/* Per-state counter history and the sample interval it implies.
+/* The compact state baseline (CONTRACTS.md): per-state counters from the
+ * previous sample, keyed by (creator, id), and the sample interval.
  *
  * Timing: each sample is anchored at the CLOCK_MONOTONIC time its PF dump
  * request was sent. The interval of a sample is its anchor minus the anchor
@@ -38,9 +39,19 @@ struct history;
 struct state_delta {
   uint64_t bytes_from_remote, bytes_to_remote, packets;
 };
+/* What the staged (or last committed) sample saw: states new since the
+ * previous sample, states that survived from it, duplicates of a state
+ * within the sample, states the previous sample had that this one did not
+ * (counted at commit), and table resizes during the sample. */
+struct history_stats {
+  uint64_t new_states, surviving, duplicates, departed, resizes;
+};
 struct history *history_create(struct fm_error *);
 void history_destroy(struct history *);
 void history_reset(struct history *);
+/* Presizes the table for about `expected` entries (the GET_STATUS count)
+ * so a sample does not grow it mid-traversal. */
+bool history_reserve(struct history *, size_t expected, struct fm_error *);
 /* Stages a sample anchored at `anchor` (monotonic seconds). */
 bool history_begin(struct history *, double anchor, struct fm_error *);
 /* The staged sample's interval in seconds, or -1 for a baseline sample. */
@@ -48,6 +59,10 @@ double history_interval(const struct history *);
 bool history_observe(struct history *, const struct state *, bool remote_initiated,
                      struct state_delta *, struct fm_error *);
 void history_commit(struct history *);
+/* Counters are updated in place: an aborted sample resets the history, so
+ * the next sample is a baseline. */
 void history_abort(struct history *);
 size_t history_bytes(const struct history *);
+size_t history_entries(const struct history *);
+struct history_stats history_stats(const struct history *);
 #endif

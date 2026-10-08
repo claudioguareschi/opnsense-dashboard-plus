@@ -306,7 +306,12 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   struct sample sample = {.history = e->history, .state_limit = state_limit};
   sample.aggregate = aggregate_create(r->ctx, e->history, r->correlation, error);
   struct timespec wall = {0};
+  /* presize the baseline from PF's own count (+10% for growth during the
+   * dump) so the traversal does not rehash it */
   bool ok = sample.aggregate &&
+            (!telemetry.preflight_states ||
+             history_reserve(e->history, telemetry.preflight_states + telemetry.preflight_states / 10,
+                             error)) &&
             (!r->snapshot || !clock_gettime(CLOCK_REALTIME, &wall) ||
              fm_error_fail(error, FM_FAILURE_INTERNAL, errno, "sample clock"));
   ok = ok && pf_reader_live(add_state, &sample, NULL, &sample.anchor, error) &&
