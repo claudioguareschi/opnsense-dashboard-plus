@@ -35,6 +35,8 @@ class SettingsController extends \OPNsense\Base\IndexController
     public function indexAction()
     {
         $this->view->formSettings = $this->getForm('settings');
+        $this->view->formDialogProfile = $this->getForm('dialogProfile');
+        $this->view->formGridProfile = $this->getFormGrid('dialogProfile');
         $this->view->pick('OPNsense/FirewallMap/settings');
     }
 }

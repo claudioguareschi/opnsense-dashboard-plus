@@ -21,6 +21,7 @@
             <pattern>ui/firewallmap/status</pattern>
             <pattern>api/firewallmap/service/*</pattern>
             <pattern>api/firewallmap/settings/*</pattern>
+            <pattern>api/firewallmap/profiles/*</pattern>
             <pattern>api/firewallmap/investigate/*</pattern>
             <pattern>api/firewallmap/threats/*</pattern>
             <pattern>api/firewallmap/snapshot_admin/*</pattern>

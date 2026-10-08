@@ -1,0 +1,159 @@
+<form>
+    <field>
+        <id>profile.name</id>
+        <label>Name</label>
+        <type>text</type>
+        <grid_view>
+            <formatter>profile_name</formatter>
+        </grid_view>
+        <help>A name for this profile. Profiles are referenced by their identity, so renaming one changes nothing else.</help>
+    </field>
+    <field>
+        <id>profile.description</id>
+        <label>Description</label>
+        <type>text</type>
+        <help>For your reference.</help>
+    </field>
+    <field>
+        <type>header</type>
+        <label>Quality: weights totaling exactly 100</label>
+    </field>
+    <field>
+        <id>profile.byte_rate</id>
+        <label>Byte rate</label>
+        <type>text</type>
+        <help>How fast the flow moves data (smoothed bytes per second, both directions).</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <id>profile.packet_rate</id>
+        <label>Packet rate</label>
+        <type>text</type>
+        <help>How many packets per second the flow moves (smoothed).</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <id>profile.active_states</id>
+        <label>Active states</label>
+        <type>text</type>
+        <help>How many PF states the flow has now.</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <id>profile.new_state_rate</id>
+        <label>New-state rate</label>
+        <type>text</type>
+        <help>How many new states the flow opens per second.</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <id>profile.flow_volume</id>
+        <label>Flow volume</label>
+        <type>text</type>
+        <help>How many bytes the flow moved since it became active.</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <id>profile.pf_blocked</id>
+        <label>PF blocked activity</label>
+        <type>text</type>
+        <help>Blocked attempts by the remote in the firewall log (only rules with logging enabled).</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <id>profile.threat_intelligence</id>
+        <label>Threat intelligence</label>
+        <type>text</type>
+        <help>The remote is on a threat list.</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <id>profile.ids_evidence</id>
+        <label>IDS evidence</label>
+        <type>text</type>
+        <help>Suricata alerts for the remote; high-severity alerts count double.</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <type>header</type>
+        <label>Asset importance: multipliers, not part of the 100</label>
+    </field>
+    <field>
+        <id>profile.default_multiplier</id>
+        <label>Default multiplier</label>
+        <type>text</type>
+        <help>The multiplier of local hosts no rule below matches. 1 leaves the quality score as it is.</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <id>profile.assets</id>
+        <label>Rules</label>
+        <type>textbox</type>
+        <help>One rule per line: a network or host and its multiplier, for example "192.168.1.25 10" or "192.168.10.0/24 3". A flow takes the multiplier of its local host's longest matching rule; rules never multiply each other. Importance changes ranking only, never the security class of a flow.</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <type>header</type>
+        <label>Security visibility: minimum share of the ranked flows, not part of the 100</label>
+    </field>
+    <field>
+        <id>profile.s3_min_percent</id>
+        <label>S3 minimum (%)</label>
+        <type>text</type>
+        <help>Places kept for flows with high-severity IDS alerts, as a percentage of the ranked flows (rounded up). A minimum, never a cap: unused places go to other flows.</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <id>profile.s2_min_percent</id>
+        <label>S2 minimum (%)</label>
+        <type>text</type>
+        <help>Places kept for flows with other IDS alerts or heavy blocking, as a percentage of the ranked flows (rounded up). A minimum, never a cap: unused places go to other flows.</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <id>profile.s1_min_percent</id>
+        <label>S1 minimum (%)</label>
+        <type>text</type>
+        <help>Places kept for flows with any other security evidence, as a percentage of the ranked flows (rounded up). A minimum, never a cap: unused places go to other flows.</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <type>header</type>
+        <label>Modifiers</label>
+    </field>
+    <field>
+        <id>profile.direction</id>
+        <label>Direction</label>
+        <type>dropdown</type>
+        <help>Equal: inbound and outbound flows count the same.</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+</form>

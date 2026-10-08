@@ -166,11 +166,12 @@ class _Flow(_Record):
     """Persistent flow history and current metadata; the public payload is built separately."""
     __slots__ = ("rate", "rate_in", "rate_out", "packet_rate", "last_active", "first_seen", "states",
                  "protocols", "services", "service_ports", "age", "transferred", "rule", "inside", "egress",
-                 "initiated", "targets")
+                 "initiated", "targets", "security")
 
     def __init__(self, first_seen):
         self.rate = self.rate_in = self.rate_out = self.packet_rate = 0.0
         self.last_active = None
+        self.security = None
         self.first_seen = first_seen
         # Remaining presentation fields are filled by update_aggregate().
 
@@ -282,6 +283,9 @@ class FlowTracker:
             flow.age = total.oldest
             flow.transferred = (total.bytes_from_remote, total.bytes_to_remote)
             flow.rule = (_ranked(total.rules, 1) or [None])[0]
+            # the collector's security class and the evidence facts it was derived from (S0: none)
+            security_class = row.get("security_class", "S0")
+            flow.security = {"class": security_class, **row["evidence"]} if security_class != "S0" else None
             flow.inside = _ranked(total.inside, MAX_INSIDE)
             flow.egress = (_ranked(total.egress, 1) or [None])[0]
             started = total.remote_started + total.local_started
@@ -325,6 +329,8 @@ def _flow_entry(local, remote, flow, activity, local_addresses, context, wall_ti
         "transferred": flow.get("transferred"),
         "rule": context.get("descriptions", {}).get(flow.get("rule") or "", "") or None,
     }
+    if flow.get("security"):
+        entry["security"] = dict(flow["security"])
     # a permitted flow to a listed address is what deserves attention, not background scans
     entry["threat"] = bool(entry["lists"])
     return entry
