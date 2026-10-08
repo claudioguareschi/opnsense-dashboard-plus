@@ -50,6 +50,9 @@ export const state = {
   // the newest live summary, kept up to date in snapshot mode too
   live: null,
   mode: 'live',
+  // the map's wait state: why the live map waits for current data, and a capture being loaded
+  wait: null,
+  loading: null,
   // the saved snapshot on screen: {meta, data}
   frozen: null,
   snapshots: [],

@@ -124,7 +124,7 @@ def main(want_hostnames=False, block_minimum=None):
     payload = read_summary()
     if payload is None:
         start_collector()
-        payload = {"status": "starting", "flows": [], "locations": []}
+        payload = {"status": "waiting", "reason": "start", "flows": [], "locations": []}
     geodb = read_json(GEODB_STATUS)
     # the download's progress or its errors (a failed AS database also while the map works). A
     # download that died midway (a reboot, a kill) stops counting as running once its progress is

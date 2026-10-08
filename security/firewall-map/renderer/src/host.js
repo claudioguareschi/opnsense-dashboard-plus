@@ -107,6 +107,57 @@ export function toast(frame, html, ms = 6000) {
 }
 
 /**
+ * The map's one wait state, for any time there is nothing current to show or act on: the first
+ * start, a new collector process (after a restart, or for a new active ranking profile), a capture
+ * being loaded. waitText says why for a summary (null when it is not waiting); wait() covers the
+ * frame with it.
+ */
+export function waitText(summary, text) {
+  if (summary?.status !== 'waiting') {
+    return null;
+  }
+  const profile = summary.ranking_profile?.name;
+  if (summary.reason === 'profile' && profile) {
+    return fill(text.waiting_profile, {profile: plain(profile)});
+  }
+  return summary.reason === 'restart' ? text.waiting_restart : text.starting;
+}
+
+/**
+ * Covers a map frame while it waits: the last picture (if any) dimmed and blurred under a spinner
+ * and `message`, and no interaction with it (the cover takes every pointer event). A null
+ * `message` removes the cover.
+ */
+export function wait(frame, message) {
+  let cover = frame.querySelector('.fwmap-wait');
+  if (message === null || message === undefined) {
+    cover?.remove();
+    frame.removeAttribute('aria-busy');
+    return;
+  }
+  if (!cover) {
+    cover = document.createElement('div');
+    cover.className = 'fwmap-wait';
+    Object.assign(cover.style, {
+      position: 'absolute', inset: '0', zIndex: '20', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', gap: '12px', cursor: 'progress',
+      background: 'rgba(128, 128, 128, .25)', backdropFilter: 'blur(3px) grayscale(.6)',
+      webkitBackdropFilter: 'blur(3px) grayscale(.6)',
+    });
+    cover.innerHTML = '<i class="fa fa-spinner fa-pulse fa-2x" aria-hidden="true"></i>'
+      + '<span class="fwmap-wait-text" role="status"></span>';
+    Object.assign(cover.querySelector('.fwmap-wait-text').style, {
+      padding: '6px 12px', borderRadius: '10px', fontSize: '.92em', maxWidth: 'calc(100% - 24px)',
+      textAlign: 'center', background: 'var(--fwmap-panel, #fff)', color: 'var(--fwmap-text, #333)',
+      boxShadow: '0 6px 20px rgba(0, 0, 0, .25)',
+    });
+    frame.appendChild(cover);
+  }
+  cover.querySelector('.fwmap-wait-text').textContent = message;
+  frame.setAttribute('aria-busy', 'true');
+}
+
+/**
  * The status line under a map, as HTML-escaped parts: flows, blocked sources, threats that got
  * through, CARP backup. `text` holds active_flows_one/_many, blocked_sources_one/_many,
  * below_threshold, listed_flows_one/_many, no_flows and carp_backup.
@@ -154,10 +205,11 @@ export function creditHtml(provider) {
   return provider === 'dbip' ? '<a href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a>' : '';
 }
 
-/** The status text for a summary that is not "ok" (starting, no database, failed), or null. */
+/** The status text for a summary that is not "ok" (no database, failed...), or null (also while waiting). */
 export function problemText(summary, text) {
-  if (summary.status === 'starting') {
-    return text.starting;
+  if (summary.status === 'waiting') {
+    // not a problem: the map says it with wait()
+    return null;
   }
   if (summary.status === 'collector_incompatible') {
     // the package's components disagree (another protocol) or the collector cannot read this PF

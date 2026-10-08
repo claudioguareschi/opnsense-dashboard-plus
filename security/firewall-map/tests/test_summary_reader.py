@@ -82,7 +82,7 @@ class SnapshotMainTest(unittest.TestCase):
 
     def test_starts_the_collector_when_there_is_no_snapshot(self):
         payload = SUMMARY.main()
-        self.assertEqual((payload["status"], self.started), ("starting", [True]))
+        self.assertEqual((payload["status"], self.started), ("waiting", [True]))
         self.assertTrue(os.path.exists(SUMMARY.REQUEST_MARKER))
         self.assertFalse(os.path.exists(SUMMARY.HOSTNAME_MARKER))
 

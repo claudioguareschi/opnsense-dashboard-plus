@@ -411,8 +411,8 @@ class CollectorLoopTest(unittest.TestCase):
     def test_a_profile_change_on_reload_resumes_gracefully(self):
         """Apply reloads in place: a new active profile restarts only the collector process (its
         flow and rate state is dropped; the next sample is its baseline under the new profile),
-        while the map, threat history and evidence the service holds carry on. The map is never
-        empty or unavailable across the change, and names the new profile from then on."""
+        while threat history and evidence the service holds carry on. Through the baseline the map
+        waits instead of offering flows that may no longer exist, then names the new profile."""
         profiles = COLLECTOR.ranking_profiles
         engine = self.collector.collector_engine
         self.collector.step()
@@ -432,15 +432,14 @@ class CollectorLoopTest(unittest.TestCase):
                 after = json.load(handle)
         # one restart, whose first sample is the new collector's baseline
         self.assertEqual((engine.restarts, engine.baselines), (1, [True, False, True, False]))
-        # the baseline has no rates to rank by: the map keeps the document the old profile ranked
-        # (so labeled) for that one interval, then the new profile's ranking replaces it
-        balanced = profiles.descriptor(profiles.validate(profiles.BY_UUID[profiles.BALANCED]))
+        # the baseline has no rates to rank by: the map waits (offering no flows of the previous
+        # collector), then the new profile's ranking replaces the wait
         security = profiles.descriptor(profiles.validate(profiles.BY_UUID[profiles.SECURITY]))
-        for payload, profile in ((during, balanced), (after, security)):
-            self.assertEqual(payload["status"], "ok")
-            self.assertEqual([flow["dest"] for flow in payload["flows"]], [self.REMOTE])
-            self.assertEqual(payload["ranking_profile"], profile)
-        self.assertNotEqual(during["sampled_at"], after["sampled_at"])
+        self.assertEqual((during["status"], during["reason"], during["flows"], during["ranking_profile"]),
+                         ("waiting", "profile", [], security))
+        self.assertEqual(after["status"], "ok")
+        self.assertEqual([flow["dest"] for flow in after["flows"]], [self.REMOTE])
+        self.assertEqual(after["ranking_profile"], security)
         # rates resume from the new collector's own history
         self.assertGreater(after["flows"][0]["rate"], 0)
         self.assertEqual(self.queued(), [self.REMOTE])
@@ -857,8 +856,8 @@ class TimingContractTest(CollectorLoopTest):
 
     def test_generation_revision_and_sample_count(self):
         generation = self.collector.timing_status()["generation"]
-        self.collector.step()  # baseline: diagnostics revision 1, no map
-        self.assertFalse(os.path.exists(self.output))
+        self.collector.step()  # baseline: diagnostics revision 1, the map waits
+        self.assertEqual((self.payload()["status"], self.payload()["reason"]), ("waiting", "start"))
         self.collector.step()
         first = self.payload()["collector"]
         self.collector.collector_engine.records = lambda: PF.parse_states(nat_state(2000, 2000)) * 2
@@ -915,10 +914,11 @@ class TimingContractTest(CollectorLoopTest):
             self.assertIsNotNone(self.diagnostic()["next_sample_due"])
             self.assertGreater(rest, 0)
         self.assertEqual(self.payload(), previous)
-        # the failed request closed the helper: its successor starts with a baseline that
-        # keeps the previous map, and the next sample publishes again
+        # the failed request closed the helper: through its successor's baseline the map waits
+        # (no flows of the previous collector), and the next sample publishes again
         self.collector.step()
-        self.assertEqual(self.payload(), previous)
+        self.assertEqual((self.payload()["status"], self.payload()["reason"], self.payload()["flows"]),
+                         ("waiting", "restart", []))
         self.collector.step()
         self.assertEqual(self.payload()["collector"]["revision"], 4)
         self.assertEqual(self.collector.collector_engine.baselines, [True, False, True, False])
@@ -998,14 +998,23 @@ class TimingContractTest(CollectorLoopTest):
         self.assertEqual(self.collector.collector_engine.baselines, [True, False, False, False])
         self.assertGreater(self.payload()["collector"]["revision"], previous["collector"]["revision"])
 
-    def test_baseline_after_restart_keeps_the_published_map(self):
+    def test_baseline_after_restart_waits_then_resumes(self):
+        """The map's one wait state: a new collector process has no ranking, so its baseline
+        publishes a waiting document (no flows to act on) and the next sample resumes the map."""
         self.collector.step()  # baseline
         self.collector.step()
         previous = self.payload()
         self.collector.collector_engine.close()
         self.collector.step()
         self.assertTrue(self.collector.collector_engine.baselines[-1])
-        self.assertEqual(self.payload(), previous)
+        waiting = self.payload()
+        self.assertEqual((waiting["status"], waiting["reason"], waiting["flows"], waiting["locations"]),
+                         ("waiting", "restart", [], []))
+        self.assertEqual(waiting["ranking_profile"], previous["ranking_profile"])
+        self.collector.step()
+        self.assertEqual(self.payload()["status"], "ok")
+        self.assertEqual([flow["dest"] for flow in self.payload()["flows"]],
+                         [flow["dest"] for flow in previous["flows"]])
 
     def test_incompatible_pf_abi_publishes_its_status_and_versions(self):
         self.collector.step()  # baseline

@@ -194,9 +194,11 @@ def save(user, now=None, wait=WAIT_SECONDS, directory=SNAPSHOT_DIR, requests=SNA
             fresh = False
         payload = read_json(summary_file) if fresh else {}
         if payload.get("status") != "ok":
-            # nothing was saved: the next try must not be told a snapshot was just taken
+            # nothing was saved: the next try must not be told a snapshot was just taken; while
+            # the map waits for a new collector there is no current ranking to keep
             release(now, previous, requests)
-            return {"result": "failed", "error": "no current map data"}
+            return {"result": "failed",
+                    "error": "waiting" if payload.get("status") == "waiting" else "no current map data"}
         payload["capture"] = {"version": 1, "source": "live_summary", "detail_status": "unknown",
                               "flows": {"captured": len(payload.get("flows") or [])}}
         if json_size(payload, MAX_DOCUMENT_BYTES) > MAX_DOCUMENT_BYTES:

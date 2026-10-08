@@ -233,8 +233,9 @@ class ApiTest(unittest.TestCase):
         for output in ("", "not json", '{"status":"ok"}', '{"summary":"text"}'):
             result = php(f"echo json_encode(OPNsense\\FirewallMap\\FlowSummary::fromBackend({json.dumps(output)}, false, 1));")
             self.assertEqual(result, {"status": "failed", "flows": []})
-        starting = self.from_backend({"summary": {"status": "starting", "flows": [], "locations": []}}, False, 3)
-        self.assertEqual(starting, {"status": "starting", "flows": [], "locations": []})
+        starting = self.from_backend({"summary": {"status": "waiting", "reason": "start", "flows": [],
+                                                  "locations": []}}, False, 3)
+        self.assertEqual(starting, {"status": "waiting", "reason": "start", "flows": [], "locations": []})
 
 
 if __name__ == "__main__":

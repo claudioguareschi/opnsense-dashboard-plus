@@ -650,6 +650,9 @@ class Collector:
         self.recorder = ThreatRecorder()
         # the active ranking profile (an administrative setting; refreshed with the settings)
         self.profile, self.profile_problem = ranking_profiles.resolve()
+        # why the map waits through the next baseline sample: "start", "restart" (a new collector
+        # process after a failure) or "profile" (a new active ranking profile)
+        self.wait_reason = "start"
         self.collector_engine = CollectorEngine(profile=self.profile)
         # set while the state collector is incompatible (another protocol, or a PF ABI it was not
         # built for): explicit status and slow pacing; the engine does not run the same binary again
@@ -721,7 +724,11 @@ class Collector:
             if problem and problem != self.profile_problem:
                 log_error(f"{problem}: ranking with {profile['name']}")
             self.profile, self.profile_problem = profile, problem
-            if self.collector_engine.set_profile(self.profile) and self.collector_engine.starts:
+            changed = self.collector_engine.set_profile(self.profile)
+            if changed and self.wait_reason != "start":
+                # the map waits through the new collector's baseline, saying why
+                self.wait_reason = "profile"
+            if changed and self.collector_engine.starts:
                 log_notice(f"ranking profile {self.profile['name']}: restarting the collector; the next sample "
                            "is a baseline")
             # DB-IP while it stands in for a failing MaxMind download (its credit is then shown)
@@ -1365,10 +1372,17 @@ class Collector:
         refused = sample["refused"]
         if refused and not background:
             self.complete_sample(states, self.refusal_document(sample))
+        elif sample["baseline"] and not background and not refused:
+            # a new collector process (started, restarted after a failure, or for a new active
+            # profile) has no rates to rank by yet: the map must not keep offering flows of the
+            # previous one, so it waits until the next ranked sample
+            self.complete_sample(states, status_document(
+                "waiting", reason=self.wait_reason,
+                ranking_profile=ranking_profiles.descriptor(self.profile)))
         elif background or refused or sample["baseline"]:
-            # a baseline has no rates yet: the previous map stays until it expires or is replaced
             self.complete_sample(states)
         else:
+            self.wait_reason = "restart"
             self.publish_summary(now, timer, states)
 
     @staticmethod

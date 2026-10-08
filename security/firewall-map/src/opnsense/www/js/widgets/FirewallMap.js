@@ -28,7 +28,7 @@
 const AUTO_HEIGHT = 10000;
 // the renderer's content hash, written by tools/build-renderer.sh: a new renderer has a new
 // address, so a browser never runs an old cached copy with a newer widget
-const RENDERER_VERSION = 'b08087ddc3f1';
+const RENDERER_VERSION = 'f11f22c38b52';
 // follow traffic is the map's own toggle, remembered per browser (as on the full-size map)
 const FOLLOW_KEY = 'firewallmap.widget.follow';
 
@@ -194,7 +194,7 @@ export default class FirewallMap extends BaseWidget {
     async _takeSnapshot() {
         const frame = document.getElementById(`${this.id}-firewall-map`);
         const host = window.FirewallMapRenderer?.host;
-        if (!frame || !host) {
+        if (!frame || !host || this.waiting) {
             return;
         }
         host.flash(frame);
@@ -217,7 +217,8 @@ export default class FirewallMap extends BaseWidget {
                 + `<a href="/ui/firewallmap#snapshot=${encodeURIComponent(meta.id)}" class="btn btn-primary btn-xs">${escape(this.translations.snapshot_open)}</a>`);
         } catch (error) {
             console.error('Firewall Map+: snapshot not saved', error);
-            const text = error?.message === 'too_soon' ? this.translations.snapshot_too_soon : this.translations.snapshot_failed;
+            const text = error?.message === 'too_soon' ? this.translations.snapshot_too_soon
+                : error?.message === 'waiting' ? this._text().starting : this.translations.snapshot_failed;
             host.toast(frame, `<span>${window.FirewallMapRenderer.escapeHtml(text)}</span>`);
         } finally {
             $button.prop('disabled', false);
@@ -270,6 +271,15 @@ export default class FirewallMap extends BaseWidget {
             throw new Error('renderer script loaded but did not expose FirewallMapRenderer.create()');
         }
         return renderer;
+    }
+
+    /** The map's one wait state (host.wait), or none with a null message. */
+    _wait(message) {
+        this.waiting = Boolean(message);
+        const frame = document.getElementById(`${this.id}-firewall-map`);
+        if (frame && window.FirewallMapRenderer?.host) {
+            window.FirewallMapRenderer.host.wait(frame, message);
+        }
     }
 
     _status(message) {
@@ -355,6 +365,8 @@ export default class FirewallMap extends BaseWidget {
             // deck.gl positions its canvas absolutely without left/top, so pin it explicitly
             // rather than relying on the static position (the dashboard centers widget text).
             $(container).children('canvas').css({left: 0, top: 0});
+            // nothing to show before the first answer: the map waits
+            this._wait(this._text().starting);
         } catch (error) {
             console.error('Firewall Map+: renderer initialization failed', error);
             this._status(`${this.translations.renderer_failed}: ${error?.message || error}`);
@@ -378,12 +390,19 @@ export default class FirewallMap extends BaseWidget {
                 return;
             }
             const problem = host.problemText(summary, this._text());
+            // the map's wait state: nothing current yet (a start, a restart, a new ranking
+            // profile), so the last picture is covered until the first ranked sample
+            const waiting = host.waitText(summary, this._text());
+            this._wait(waiting);
+            if (waiting) {
+                return;
+            }
             await this._showGeo(summary);
             if (problem) {
                 if (['no_database', 'too_many_states', 'collector_incompatible'].includes(summary.status)) {
                     // no locations or no sample: keep the map empty and say why
                     this.renderer.render({flows: [], locations: []});
-                } else if (summary.status !== 'starting') {
+                } else {
                     console.error('Firewall Map+: collector reported', summary);
                 }
                 // the geolocation card says it on the map itself

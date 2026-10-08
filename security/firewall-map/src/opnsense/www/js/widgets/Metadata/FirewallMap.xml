@@ -66,6 +66,8 @@
             <database_downloading>Downloading the geolocation database…</database_downloading>
             <carp_backup>CARP backup: traffic is passing through the master</carp_backup>
             <map_profile>{profile} ranking</map_profile>
+            <waiting_restart>The collector is restarting: the map resumes with its first ranked sample</waiting_restart>
+            <waiting_profile>Applying the {profile} ranking profile: the map resumes with its first ranked sample</waiting_profile>
             <map_ranking_bounded>the top-ranked of {count} flows</map_ranking_bounded>
             <map_ranking_warming>ranking settling after a busy period</map_ranking_warming>
             <too_many_states>The state table is too large to map ({count} states). The map resumes below {limit}.</too_many_states>

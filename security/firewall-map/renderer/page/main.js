@@ -87,7 +87,19 @@ function updatedLine() {
     + `<i class="fwmap-live${seconds > 10 ? ' stale' : ''}"></i>`);
 }
 
+/**
+ * The map's one wait state (host.wait): while a capture loads, or while the live map waits for
+ * current data, the last picture is covered and the side panel's lists and details are out of
+ * reach, so nothing shown may be acted on. A snapshot on screen never waits for the live collector.
+ */
+function applyWait() {
+  const message = state.loading || (state.mode === 'live' ? state.wait : null);
+  host().wait(document.getElementById('fwmap-map'), message);
+  $('#fwmap-talkers, #fwmap-details-box').toggleClass('fwmap-waiting', Boolean(message));
+}
+
 function refresh(filterChanged = false) {
+  applyWait();
   const summary = state.data;
   if (!summary || summary.status !== 'ok') {
     return;
@@ -130,8 +142,15 @@ function poll(query) {
     try {
       const summary = await getJSON(`/api/firewallmap/flow/summary${query}`);
       const problem = host().problemText(summary, T);
+      state.wait = host().waitText(summary, T);
+      applyWait();
       showGeo(state.mode === 'live' ? summary : null);
-      if (problem && state.mode === 'live') {
+      if (state.wait) {
+        // the last picture stays under the cover until the first ranked sample replaces it
+        if (state.mode === 'live') {
+          $('#fwmap-status').text(state.wait);
+        }
+      } else if (problem && state.mode === 'live') {
         // no database or no sample: an empty map, not the last picture
         if (['no_database', 'too_many_states', 'collector_incompatible'].includes(summary.status)) {
           state.renderer.render({flows: [], locations: []});
@@ -437,6 +456,9 @@ $(async () => {
       backToLive();
     }
   });
+  // nothing to show before the first answer: the map waits
+  state.wait = T.starting;
+  applyWait();
   poll(summaryQuery(state.settings));
   // ?debug=1: the diagnostics panel, a separate script that only development packages install
   if (new URLSearchParams(window.location.search).get('debug') === '1' && window.FirewallMapDiagnostics) {

@@ -27,7 +27,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {test} from 'node:test';
-import {problemText, statusParts} from '../src/host.js';
+import {problemText, statusParts, waitText} from '../src/host.js';
 
 // the widget and the map page pass these translations (Metadata/FirewallMap.xml) as the text table
 const xml = fs.readFileSync(new URL('../../src/opnsense/www/js/widgets/Metadata/FirewallMap.xml', import.meta.url), 'utf8');
@@ -64,4 +64,19 @@ test('the status line names the one active ranking profile and an honest bounded
     ['2 active flows', 'Mail &#60;Security&#62; ranking', `the top-ranked of ≈${(120000).toLocaleString()} flows`]);
   // a document without a profile (an older collector) says nothing about one
   assert.deepEqual(statusParts({quality: {ranking: 'exact'}}, shown, {}, text), ['2 active flows']);
+});
+
+test('one wait state: waiting summaries are not problems, and say why the map waits', () => {
+  const text = {starting: 'Starting flow collector…', unavailable: 'unavailable',
+    waiting_restart: translation('waiting_restart'), waiting_profile: translation('waiting_profile')};
+  const profile = {uuid: 'u', name: 'Mail <Security>', fingerprint: 'f', builtin: false};
+  assert.equal(waitText({status: 'waiting', reason: 'start'}, text), text.starting);
+  assert.equal(waitText({status: 'waiting', reason: 'restart', ranking_profile: profile}, text), text.waiting_restart);
+  assert.equal(waitText({status: 'waiting', reason: 'profile', ranking_profile: profile}, text),
+    'Applying the Mail <Security> ranking profile: the map resumes with its first ranked sample');
+  for (const reason of ['start', 'restart', 'profile']) {
+    assert.equal(problemText({status: 'waiting', reason, ranking_profile: profile}, text), null);
+  }
+  assert.equal(waitText({status: 'ok'}, text), null);
+  assert.equal(waitText(undefined, text), null);
 });

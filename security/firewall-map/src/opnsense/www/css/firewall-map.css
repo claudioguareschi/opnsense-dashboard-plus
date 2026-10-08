@@ -319,3 +319,6 @@ body.fwmap-resizing, body.fwmap-resizing * { user-select: none !important; }
     #fwmap-map { flex: none; height: 60vh; }
     #fwmap-toolbar .fwmap-tool-text { display: none; }
 }
+
+/* the map's wait state (host.wait covers the map): the side panel is out of reach meanwhile */
+#fwmap-talkers.fwmap-waiting, #fwmap-details-box.fwmap-waiting { opacity: .45; filter: grayscale(.6); pointer-events: none; }

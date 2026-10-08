@@ -112,6 +112,11 @@ async function loadSnapshots() {
 async function takeSnapshot() {
   const frame = document.getElementById('fwmap-map');
   window.FirewallMapRenderer.host.flash(frame);
+  if (state.wait) {
+    // no current ranking to capture: what the map showed may belong to a previous collector
+    window.FirewallMapRenderer.host.toast(document.getElementById('fwmap-map'), `<span>${escapeHtml(T.snapshot_waiting)}</span>`);
+    return;
+  }
   const $button = $('#fwmap-camera').prop('disabled', true);
   try {
     const result = await postJSON('/api/firewallmap/snapshots/save', {});
@@ -129,7 +134,9 @@ async function takeSnapshot() {
     });
     await loadSnapshots();
   } catch (error) {
-    if (error?.message === 'too_soon') {
+    if (error?.message === 'waiting') {
+      window.FirewallMapRenderer.host.toast(frame, `<span>${escapeHtml(T.snapshot_waiting)}</span>`);
+    } else if (error?.message === 'too_soon') {
       // someone (maybe this viewer) took one seconds ago: that one already shows this moment
       window.FirewallMapRenderer.host.toast(frame, `<span>${escapeHtml(T.snapshot_too_soon)}</span>`);
     } else {
@@ -141,14 +148,23 @@ async function takeSnapshot() {
 }
 
 async function openSnapshot(id) {
+  // the map waits while the capture loads
+  state.loading = T.snapshot_loading;
+  hooks.refresh();
   try {
     const result = await getJSON(`/api/firewallmap/snapshots/get/${encodeURIComponent(id)}?blocks_min=${state.settings?.blockMin ?? 3}`);
     if (result.result !== 'ok') {
       throw new Error(result.error || result.result);
     }
+    state.loading = null;
     enterSnapshotMode(result.snapshot, result.data);
   } catch (error) {
     notifyFailure(error);
+  } finally {
+    if (state.loading) {
+      state.loading = null;
+      hooks.refresh();
+    }
   }
 }
 
@@ -182,9 +198,8 @@ export function backToLive() {
   hooks.setTab(state.tabBeforeSnapshots && state.tabBeforeSnapshots !== 'snapshots' ? state.tabBeforeSnapshots : 'hosts');
   state.tabBeforeSnapshots = null;
   hooks.setFollow(state.follow);
-  if (state.data) {
-    hooks.refresh();
-  }
+  // refresh also puts the live map's wait state back
+  hooks.refresh();
   hooks.renderDetails();
   renderChrome();
 }

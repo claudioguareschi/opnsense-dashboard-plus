@@ -262,6 +262,8 @@
 		data: null,
 		live: null,
 		mode: "live",
+		wait: null,
+		loading: null,
 		frozen: null,
 		snapshots: [],
 		snapshotsKept: {
@@ -1881,6 +1883,10 @@
 	async function takeSnapshot() {
 		const frame = document.getElementById("fwmap-map");
 		window.FirewallMapRenderer.host.flash(frame);
+		if (state.wait) {
+			window.FirewallMapRenderer.host.toast(document.getElementById("fwmap-map"), `<span>${escapeHtml(T.snapshot_waiting)}</span>`);
+			return;
+		}
 		const $button = $("#fwmap-camera").prop("disabled", true);
 		try {
 			const result = await postJSON("/api/firewallmap/snapshots/save", {});
@@ -1893,19 +1899,28 @@
 			});
 			await loadSnapshots();
 		} catch (error) {
-			if (error?.message === "too_soon") window.FirewallMapRenderer.host.toast(frame, `<span>${escapeHtml(T.snapshot_too_soon)}</span>`);
+			if (error?.message === "waiting") window.FirewallMapRenderer.host.toast(frame, `<span>${escapeHtml(T.snapshot_waiting)}</span>`);
+			else if (error?.message === "too_soon") window.FirewallMapRenderer.host.toast(frame, `<span>${escapeHtml(T.snapshot_too_soon)}</span>`);
 			else notifyFailure(error);
 		} finally {
 			$button.prop("disabled", false);
 		}
 	}
 	async function openSnapshot(id) {
+		state.loading = T.snapshot_loading;
+		hooks.refresh();
 		try {
 			const result = await getJSON(`/api/firewallmap/snapshots/get/${encodeURIComponent(id)}?blocks_min=${state.settings?.blockMin ?? 3}`);
 			if (result.result !== "ok") throw new Error(result.error || result.result);
+			state.loading = null;
 			enterSnapshotMode(result.snapshot, result.data);
 		} catch (error) {
 			notifyFailure(error);
+		} finally {
+			if (state.loading) {
+				state.loading = null;
+				hooks.refresh();
+			}
 		}
 	}
 	function enterSnapshotMode(meta, data) {
@@ -1935,7 +1950,7 @@
 		hooks.setTab(state.tabBeforeSnapshots && state.tabBeforeSnapshots !== "snapshots" ? state.tabBeforeSnapshots : "hosts");
 		state.tabBeforeSnapshots = null;
 		hooks.setFollow(state.follow);
-		if (state.data) hooks.refresh();
+		hooks.refresh();
 		hooks.renderDetails();
 		renderChrome();
 	}
@@ -2645,7 +2660,18 @@
 		const seconds = Math.max(0, Math.round((Date.now() - state.updatedAt) / 1e3));
 		$("#fwmap-updated").html(`${escapeHtml(fill(T.last_updated_ago, { time: fill(TEXT.map_seconds, { count: seconds }) }))} <i class="fwmap-live${seconds > 10 ? " stale" : ""}"></i>`);
 	}
+	/**
+	* The map's one wait state (host.wait): while a capture loads, or while the live map waits for
+	* current data, the last picture is covered and the side panel's lists and details are out of
+	* reach, so nothing shown may be acted on. A snapshot on screen never waits for the live collector.
+	*/
+	function applyWait() {
+		const message = state.loading || (state.mode === "live" ? state.wait : null);
+		host().wait(document.getElementById("fwmap-map"), message);
+		$("#fwmap-talkers, #fwmap-details-box").toggleClass("fwmap-waiting", Boolean(message));
+	}
 	function refresh(filterChanged = false) {
+		applyWait();
 		const summary = state.data;
 		if (!summary || summary.status !== "ok") return;
 		if (filterChanged) state.renderer.resetTransitions();
@@ -2679,8 +2705,12 @@
 			try {
 				const summary = await getJSON(`/api/firewallmap/flow/summary${query}`);
 				const problem = host().problemText(summary, T);
+				state.wait = host().waitText(summary, T);
+				applyWait();
 				showGeo(state.mode === "live" ? summary : null);
-				if (problem && state.mode === "live") {
+				if (state.wait) {
+					if (state.mode === "live") $("#fwmap-status").text(state.wait);
+				} else if (problem && state.mode === "live") {
 					if ([
 						"no_database",
 						"too_many_states",
@@ -2955,6 +2985,8 @@
 		$(document).on("keydown", (event) => {
 			if (event.key === "Escape" && state.mode === "snapshot" && !$(".modal.in").length) backToLive();
 		});
+		state.wait = T.starting;
+		applyWait();
 		poll(summaryQuery(state.settings));
 		if (new URLSearchParams(window.location.search).get("debug") === "1" && window.FirewallMapDiagnostics) window.FirewallMapDiagnostics.start({
 			renderer: () => state.renderer,
