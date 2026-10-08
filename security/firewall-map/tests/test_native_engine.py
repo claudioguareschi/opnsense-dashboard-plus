@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src/opnsense/scripts/OPNsense/FirewallMap"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import native  # noqa: E402
-from native_build import compile_worker  # noqa: E402
+from native_build import compile_worker, state_limit  # noqa: E402
 
 LOCAL = {"8.8.8.1", "2001:4860::1"}
 CONTEXT = (LOCAL, [], {}, None)
@@ -134,16 +134,59 @@ class NativeEngineSpecificationTest(unittest.TestCase):
 
     def test_operator_context_over_its_maximum_refuses_the_sample_explicitly(self):
         self.samples(2)
-        too_many = {f"8.8.{n // 256}.{n % 256}" for n in range(300)}
+        too_many = {f"8.{n // 65536}.{n // 256 % 256}.{n % 256}" for n in range(4100)}
         with patch.dict(os.environ, FM_TEST_MODE="one", FM_TEST_COUNT="12", FM_TEST_INTERVAL="2"):
+            # Python refuses before sending: the helper never sees the request
             refused = self.engine.sample(too_many, [], {}, None, snapshot=True)
             self.assertEqual(refused["refused"], {"reason": "refused_context", "kind": "L",
-                                                  "actual": 300, "limit": 256})
-            self.assertEqual(refused["flows"], [])
+                                                  "actual": 4100, "limit": 4096})
             self.assertFalse(self.engine.snapshot_open)
+            # the helper enforces the same maximum on its own
+            rows = "".join(f"L {address}\n" for address in sorted(too_many))
+            text = f"FMCONF2\nBUDGET {native.memory_budget()} 16 20000\n{rows}RUN\n"
+            direct = self.engine._request(text, lambda stream, process: native._decode(stream, process, (), False))
+            self.assertEqual(direct["refused"], {"reason": "refused_context", "kind": "L",
+                                                 "actual": 4100, "limit": 4096})
             # a refusal is not a helper failure, and the next accepted sample is a baseline
             self.assertIsNotNone(self.engine.process)
             recovered = self.engine.sample(*CONTEXT)
+        self.assertTrue(recovered["baseline"])
+        self.assertEqual(self.engine.starts, 1)
+
+    def test_state_admission_preflight_and_backstop(self):
+        memory = 64 << 20
+        limit = state_limit(memory)
+        # preflight: refused before any traversal
+        with patch.dict(os.environ, FM_TEST_MODE="unique", FM_TEST_COUNT=str(limit + 5), FM_TEST_INTERVAL="2",
+                        FM_TEST_PREFLIGHT=str(limit + 5)):
+            refused = self.engine.sample(*CONTEXT, memory=memory)
+        self.assertEqual(refused["refused"], {"reason": "refused_states", "kind": None,
+                                              "actual": limit + 5, "limit": limit})
+        self.assertEqual(refused["telemetry"]["state_limit"], limit)
+        self.assertEqual(refused["telemetry"]["preflight_states"], limit + 5)
+        self.engine.close()
+        # backstop: no preflight; the traversal stops as soon as the count passes the limit
+        with patch.dict(os.environ, FM_TEST_MODE="unique", FM_TEST_COUNT=str(limit + 5), FM_TEST_INTERVAL="2"):
+            refused = self.engine.sample(*CONTEXT, memory=memory)
+            self.assertEqual(refused["refused"]["reason"], "refused_states")
+            self.assertEqual((refused["refused"]["actual"], refused["counts"]["states"]), (limit + 1, limit + 1))
+            # within the limit the same helper accepts, starting with a baseline
+            accepted = self.engine.sample(*CONTEXT, memory=memory + (8 << 20))
+        self.assertIsNone(accepted["refused"])
+        self.assertTrue(accepted["baseline"])
+        self.assertEqual(accepted["counts"]["states"], limit + 5)
+        self.assertLessEqual(accepted["telemetry"]["heap_peak"], memory + (8 << 20))
+        self.assertEqual(self.engine.starts, 2)
+
+    def test_memory_budget_exhaustion_is_a_refusal_not_a_failure(self):
+        with patch.dict(os.environ, FM_TEST_MODE="unique", FM_TEST_COUNT="20000", FM_TEST_INTERVAL="2",
+                        FM_TEST_HEAP_BUDGET=f"{2 << 20}:2"):
+            first = self.engine.sample(*CONTEXT)
+            refused = self.engine.sample(*CONTEXT)
+            recovered = self.engine.sample(*CONTEXT)
+        self.assertIsNone(first["refused"])
+        self.assertEqual(refused["refused"]["reason"], "refused_memory")
+        self.assertEqual(refused["refused"]["limit"], native.memory_budget())
         self.assertTrue(recovered["baseline"])
         self.assertEqual(self.engine.starts, 1)
 

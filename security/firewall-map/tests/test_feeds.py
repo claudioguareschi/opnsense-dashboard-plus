@@ -33,14 +33,21 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from support import BLOCKLISTS, FEEDS  # noqa: E402
 
-SPAMHAUS = "; Spamhaus DROP List\n1.10.16.0/20 ; SBL256894\n2001:db8::/32 ; SBL1\n"
-FIREHOL = "# firehol_level1\n#\n0.0.0.0/8\n192.0.2.7\n192.0.2.7\nnot-a-network\n"
+SPAMHAUS = "; Spamhaus DROP List\n1.10.16.0/20 ; SBL256894\n2a06:e480::/29 ; SBL1\n"
+FIREHOL = "# firehol_level1\n#\n0.0.0.0/8\n203.0.113.7\n45.56.79.53\n45.56.79.53\nnot-a-network\n"
 
 
 class FeedTest(unittest.TestCase):
     def test_parses_comments_networks_and_addresses(self):
-        self.assertEqual(FEEDS.parse_feed(SPAMHAUS), ["1.10.16.0/20", "2001:db8::/32"])
-        self.assertEqual(FEEDS.parse_feed(FIREHOL), ["0.0.0.0/8", "192.0.2.7"])
+        self.assertEqual(FEEDS.parse_feed(SPAMHAUS), (["1.10.16.0/20", "2a06:e480::/29"], 0))
+        # private, bogon and documentation space never names a remote peer: skipped and counted
+        self.assertEqual(FEEDS.parse_feed(FIREHOL), (["45.56.79.53"], 2))
+
+    def test_hostile_lists_are_bounded(self):
+        # a hijacked feed listing (nearly) everything flags nothing
+        self.assertEqual(FEEDS.parse_feed("0.0.0.0/0\n1.0.0.0/7\n::/0\n2000::/3\n8.0.0.0/8\n"), (["8.0.0.0/8"], 4))
+        with self.assertRaises(ValueError):
+            FEEDS.parse_feed("".join(f"45.56.{n // 256}.{n % 256}\n" for n in range(11)), max_entries=10)
 
     def test_feeds_in_use(self):
         chosen = {"threat_lists": "FWMAP_Feodo,Other"}
@@ -81,7 +88,7 @@ class FeedTest(unittest.TestCase):
 
             FEEDS.update(force=True, fetch=broken, now=3000.0, feeds=[feed])
             with open(BLOCKLISTS.feed_file("FWMAP_Spamhaus_DROP")) as handle:
-                self.assertEqual(handle.read().split(), ["1.10.16.0/20", "2001:db8::/32"])
+                self.assertEqual(handle.read().split(), ["1.10.16.0/20", "2a06:e480::/29"])
 
     def test_a_downloaded_feed_counts_without_its_alias(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(BLOCKLISTS, "FEED_DIR", directory):

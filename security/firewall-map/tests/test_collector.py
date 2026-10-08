@@ -862,6 +862,25 @@ class TimingContractTest(CollectorLoopTest):
         self.assertTrue(self.collector.native_engine.baselines[-1])
         self.assertEqual(self.payload(), previous)
 
+    def test_refused_samples_publish_an_explicit_status(self):
+        self.collector.step()  # baseline
+        self.collector.step()
+        for refused, expected in (
+                ({"reason": "refused_states", "kind": None, "actual": 900000, "limit": 400000},
+                 {"status": "too_many_states", "count": 900000, "limit": 400000}),
+                ({"reason": "refused_context", "kind": "N", "actual": 9000, "limit": 8192},
+                 {"status": "refused", "kind": "N", "actual": 9000, "limit": 8192})):
+            result = {"flows": [], "candidates": [], "matches": {}, "threat_remotes": [], "threat_candidates": [],
+                      "threat_summary": False, "telemetry": {"state_limit": 400000, "interval": -1},
+                      "baseline": False, "refused": refused, "counts": {"states": 0, "flows": 0}}
+            with self.subTest(reason=refused["reason"]), \
+                    mock.patch.object(self.collector.native_engine, "sample", return_value=result):
+                self.collector.step()
+                payload = self.payload()
+                self.assertEqual({key: payload[key] for key in expected}, expected)
+                self.assertEqual(payload["flows"], [])
+                self.assertEqual(self.diagnostic()["native"]["refused"], refused)
+
     def test_malformed_log_lines_are_contained_and_counted(self):
         with open(os.path.join(self.directory, "eve.json"), "a") as handle:
             handle.write('{"event_type":"alert","src_ip":["not","an","address"]}\n')

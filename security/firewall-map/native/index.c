@@ -24,15 +24,14 @@
 
 #include "index.h"
 #include "alloc.h"
+#include "siphash.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+static uint8_t hash_key[16];
+void index_set_hash_key(const uint8_t key[16]) { memcpy(hash_key, key, sizeof(hash_key)); }
 static uint64_t hash(const void *data, size_t len) {
-  uint64_t h = UINT64_C(14695981039346656037);
-  const unsigned char *p = data;
-  while (len--)
-    h = (h ^ *p++) * UINT64_C(1099511628211);
-  return h;
+  return siphash13(hash_key, data, len);
 }
 static bool resize(struct map *m, struct fm_error *error) {
   size_t capacity = m->capacity ? m->capacity * 2 : 64;

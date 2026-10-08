@@ -56,7 +56,7 @@ struct telemetry {
   uint32_t pid;
   uint64_t sequence;
   double interval, dump_seconds, processing_seconds, user_cpu, system_cpu;
-  uint64_t max_rss, heap_bytes, heap_peak, heap_blocks, heap_budget,
+  uint64_t max_rss, heap_bytes, heap_peak, heap_blocks, heap_budget, state_limit,
       preflight_states, skipped_af_translation, candidates_omitted,
       threat_remotes_omitted, threat_candidates_omitted, event_history_evicted;
 };
@@ -66,9 +66,10 @@ void protocol_address_put(unsigned char **, struct addr);
 bool protocol_frame(FILE *, const void *, size_t, uint32_t *,
                     struct fm_error *);
 /* FMAGG4 sample response. */
+/* Fills the telemetry's omission counters before writing it. */
 bool protocol_write_ranked(FILE *, const struct aggregate *, const struct ranking *,
                            const struct threat_summary *, const struct event_match *, size_t,
-                           const struct telemetry *, struct fm_error *);
+                           size_t candidates_per_kind, struct telemetry *, struct fm_error *);
 /* FMAGG4 response for a snapshot selection (explicit flows, no threats). */
 bool protocol_write_selected(FILE *, const struct aggregate *,
                              const struct ranked_flow *, size_t,
@@ -78,7 +79,8 @@ bool protocol_write_refusal(FILE *, struct sample_outcome, uint64_t states_seen,
                             const struct telemetry *, struct fm_error *);
 /* FMFAIL1: best effort; the helper exits afterwards. */
 void protocol_write_failure(FILE *, const struct fm_error *);
-/* Devel-only FMAGG2 aggregate dump used by the equivalence tools. */
+/* Devel-only FMAGG2 aggregate dump used by the equivalence tools; defined in
+ * devel/native_fmagg2.c, not in the installed helper. */
 bool protocol_write(FILE *, const struct aggregate *, bool with_deltas,
                     struct fm_error *);
 #endif

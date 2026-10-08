@@ -53,12 +53,22 @@ static struct state make_state(size_t n, unsigned sample, const char *mode) {
     /* "caf\xc3\xa9" cut after the first byte of the two-byte sequence */
     memcpy(s.label, "caf\xc3", 5);
   /* inbound: every state is a remote-initiated port forward (PF direction in) */
-  unsigned kind = !strcmp(mode, "mixed") ? n % 6 : !strcmp(mode, "inbound") ? 1 : 0;
+  /* ports: one remote reaching many inside services (inbound, distinct ports) */
+  unsigned kind = !strcmp(mode, "mixed") ? n % 6 : !strcmp(mode, "inbound") || !strcmp(mode, "ports") ? 1 : 0;
   s.pf_direction = kind == 1 || kind == 5 ? FM_IN : FM_OUT;
   unsigned proto = kind == 4 ? 1 : kind == 5 ? 58 : 6;
   struct endpoint local = {address(kind >= 3 && kind != 4 ? "2001:4860::1" : "8.8.8.1"), (uint16_t)(30000 + n % 20000)};
   struct endpoint remote = {address(kind >= 3 && kind != 4 ? "2001:4860::2" : "9.9.9.9"), 443};
   struct endpoint inside = {address(kind >= 3 && kind != 4 ? "fd00::2" : "10.0.0.2"), local.port};
+  if (!strcmp(mode, "unique")) {
+    /* worst case: every state its own remote, flow, tuple, target and label */
+    char text[64];
+    snprintf(text, sizeof(text), "9.%u.%u.%u", (unsigned)(n >> 16) & 255, (unsigned)(n >> 8) & 255,
+             (unsigned)n & 255);
+    remote.a = address(text);
+    remote.port = (uint16_t)(1024 + n % 60000);
+    snprintf(s.label, sizeof(s.label), "rule %zu", n);
+  }
   if (!strcmp(mode, "many") || !strcmp(mode, "sparse")) {
     unsigned index = !strcmp(mode, "many") ? n % 6000 : (n % 100 ? 1 : 0);
     char text[64]; snprintf(text, sizeof(text), "9.1.%u.%u", index / 256, index % 256);
@@ -72,6 +82,8 @@ static struct state make_state(size_t n, unsigned sample, const char *mode) {
     remote.port = proto == 58 ? 42 : 55000;
     local.port = proto == 58 ? 42 : 443;
     inside.port = proto == 58 ? 42 : 8443;
+    if (!strcmp(mode, "ports"))
+      local.port = inside.port = (uint16_t)(1000 + n % 60000);
     s.key[0].e[0] = remote; s.key[0].e[1] = local;
     s.key[1].e[0] = remote; s.key[1].e[1] = inside;
   }
@@ -82,6 +94,15 @@ static struct state make_state(size_t n, unsigned sample, const char *mode) {
 }
 
 unsigned pf_reader_state_version(void) { return 0; }
+
+/* FM_TEST_PREFLIGHT=<count> simulates PF's GET_STATUS state count. */
+bool pf_reader_state_count(uint64_t *count) {
+  const char *preflight = getenv("FM_TEST_PREFLIGHT");
+  if (!preflight)
+    return false;
+  *count = strtoull(preflight, NULL, 10);
+  return true;
+}
 
 /* FM_TEST_INTERVAL (seconds) makes sample anchors deterministic: sample n is
  * anchored at n * interval; otherwise the real monotonic clock is used. */
@@ -118,14 +139,14 @@ int main(int argc, char **argv) {
   if (argc != 3) return 2;
   size_t count = strtoull(argv[1], NULL, 10);
   const char *mode = argv[2];
-  struct context ctx = {0};
-  ctx.ranges[0] = (struct range){address("0.0.0.0"), address("9.255.255.255"), 1};
-  ctx.ranges[1] = (struct range){address("10.0.0.0"), address("10.255.255.255"), 2};
-  ctx.nr = 2;
-  ctx.local[ctx.nl++] = address("8.8.8.1");
-  struct snapshot_flow flow = {address("8.8.8.1"), address(!strcmp(mode, "sparse") ? "9.1.0.0" : "9.9.9.9"), false};
   struct fm_error error = {0};
-  struct snapshot *s = snapshot_create(&ctx, &flow, 1, FM_SNAPSHOT_BYTES, FM_SNAPSHOT_STATES, 1, time(NULL), &error);
+  struct context *ctx = context_create(&error);
+  if (!ctx || !context_add_range(ctx, (struct range){address("0.0.0.0"), address("9.255.255.255"), 1}, &error) ||
+      !context_add_range(ctx, (struct range){address("10.0.0.0"), address("10.255.255.255"), 2}, &error) ||
+      !context_add_local(ctx, address("8.8.8.1"), &error) || !context_prepare(ctx, &error))
+    return 1;
+  struct snapshot_flow flow = {address("8.8.8.1"), address(!strcmp(mode, "sparse") ? "9.1.0.0" : "9.9.9.9"), false};
+  struct snapshot *s = snapshot_create(ctx, &flow, 1, FM_SNAPSHOT_BYTES, FM_SNAPSHOT_STATES, 1, time(NULL), &error);
   if (!s) return 1;
   clock_t start = clock();
   for (size_t n = 0; n < count; n++) {
@@ -145,6 +166,7 @@ int main(int argc, char **argv) {
 #endif
   printf("states=%zu mode=%s traversal=%.6f output=%ld peak_rss_mib=%.3f\n", count, mode, elapsed, encoded, rss);
   snapshot_destroy(s);
+  context_destroy(ctx);
   return 0;
 }
 #endif

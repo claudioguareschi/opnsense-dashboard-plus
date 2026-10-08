@@ -22,36 +22,18 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef FM_INDEX_H
-#define FM_INDEX_H
-#include "error.h"
+#ifndef FM_SIPHASH_H
+#define FM_SIPHASH_H
+#include <stddef.h>
 #include <stdint.h>
-/* An insertion-ordered hash map of byte-string keys.
- *
- * Ownership: the map owns each item and its copied key. `id` is the item's
- * dense insertion index (0, 1, 2, ...), assigned by the map and never changed;
- * callers that need a dense identity use it. `value`, `count` and `seq` belong
- * to the caller and start as 0, 0 and UINT64_MAX; the map never reads them.
- * Iteration in insertion order goes through order[0..used). */
-struct item {
-  struct item *next;
-  uint64_t hash, seq, count, value;
-  size_t id, len;
-  unsigned char key[];
-};
-struct map {
-  struct item **buckets, **order;
-  size_t capacity, used, allocated;
-};
-/* Keys every map's hash (SipHash-1-3). Keys include network-chosen addresses
- * and ports, so the helper sets a fresh random key once at start (main) before
- * any map is used; nothing hashed outlives the process. Iteration order never
- * depends on the hash, so output is identical under any key. */
-void index_set_hash_key(const uint8_t key[16]);
-struct item *lookup(struct map *, const void *, size_t, bool add,
-                    struct fm_error *);
-/* Lookup without insertion; never fails, never modifies the map. */
-const struct item *map_find(const struct map *, const void *, size_t);
-void map_clear(struct map *);
-size_t map_bytes(const struct map *);
+/* SipHash (Aumasson, Bernstein) with a 128-bit key: a keyed hash whose output
+ * an attacker cannot predict without the key, so network-chosen keys cannot be
+ * arranged to collide. `compression` and `finalization` are the round counts
+ * (1 and 3 for SipHash-1-3, 2 and 4 for the reference SipHash-2-4 vectors). */
+uint64_t siphash(const uint8_t key[16], const void *data, size_t length,
+                 unsigned compression, unsigned finalization);
+static inline uint64_t siphash13(const uint8_t key[16], const void *data,
+                                 size_t length) {
+  return siphash(key, data, length, 1, 3);
+}
 #endif

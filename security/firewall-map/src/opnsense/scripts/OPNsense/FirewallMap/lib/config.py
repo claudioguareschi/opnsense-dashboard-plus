@@ -78,10 +78,14 @@ def readable(path=SETTINGS_FILE):
     return bool(_read(path))
 
 
+HELPER_MEMORY_MIN_MIB = 64
+HELPER_MEMORY_MAX_MIB = 16384
+
+
 def settings(path=SETTINGS_FILE):
     """The plugin's settings, with their defaults."""
     values = {"provider": "auto", "license_key": "", "update_days": 3, "threat_lists": "",
-              "record_threats": "1", "blocklist_aliases": "0"}
+              "record_threats": "1", "blocklist_aliases": "0", "helper_memory": ""}
     general = _read(path).get("general") or {}
     for field in values:
         if str(general.get(field) or "").strip():
@@ -92,6 +96,12 @@ def settings(path=SETTINGS_FILE):
         values["update_days"] = 3
     if values["provider"] not in PROVIDERS:
         values["provider"] = "auto"
+    # MiB, or None for automatic; out-of-range values (the model validates them) fall back to automatic
+    try:
+        memory = int(values["helper_memory"])
+        values["helper_memory"] = memory if HELPER_MEMORY_MIN_MIB <= memory <= HELPER_MEMORY_MAX_MIB else None
+    except ValueError:
+        values["helper_memory"] = None
     return values
 
 

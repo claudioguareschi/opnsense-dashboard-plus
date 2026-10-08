@@ -94,7 +94,7 @@ from lib.pf import (
     _Record, host_info, port_forwards, rule_descriptions,
 )
 from lib import native
-from lib.native import NativeEngine, NativeError, READ_TIMEOUT
+from lib.native import NativeEngine, NativeError, READ_TIMEOUT, memory_budget
 
 
 EXTERNAL_IP_URL = "https://api.ipify.org"
@@ -1116,14 +1116,19 @@ class Collector:
         """The complete native response, or None when the request failed."""
         self._sample_started = (time.time(), time.monotonic())
         self._sample_revision = None
-        self.set_phase("collecting", self._sample_started[0] + READ_TIMEOUT)
+        timeout = getattr(self.native_engine, "read_timeout", READ_TIMEOUT)
+        self.set_phase("collecting", self._sample_started[0] + timeout)
         native_start = time.perf_counter()
+        threat_due = self.recorder.due(started)
+        queries = self.correlator.native_queries(self.local_addresses, self.networks)
         try:
             native = self.native_engine.sample(
                 self.local_addresses, self.networks, self.interface_addresses, self.primary_wan_device,
-                threat_summary=self.recorder.due(started),
-                event_queries=self.correlator.native_queries(self.local_addresses, self.networks),
-                snapshot=not background and self.snapshot_requested())
+                threat_summary=threat_due, event_queries=queries,
+                snapshot=not background and self.snapshot_requested(),
+                memory=memory_budget(self.values.get("helper_memory")),
+                evidence=self.evidence_remotes() if threat_due else (),
+                correlation=bool(queries) or os.path.exists(EVE_LOG))
         except NativeError as error:
             self.native_engine.close()
             self.set_phase("failed")
@@ -1142,13 +1147,33 @@ class Collector:
         self._record_native(native=native)
         return native
 
+    def evidence_remotes(self):
+        """Remotes the threat summary keeps first: IDS, reputation and blocked-attempt evidence."""
+        evidence = set(self.alerts.sources) | {key[3] for key in self.correlator.flows}
+        evidence.update(self.blocks.sources)
+        evidence.update(self.reputation.flagged)
+        return evidence
+
     def _record_native(self, native=None, error=None):
-        """The helper's own view of the last request, for diagnostics."""
+        """The helper's own view of the last request, for diagnostics; logs state changes once."""
         with self._status_lock:
             current = dict(self.collector_status.get("native") or {})
             if native is not None:
-                current.update(helper=native.get("helper"), telemetry=native["telemetry"],
-                               baseline=native["baseline"], refused=native["refused"])
+                telemetry = native["telemetry"] or {}
+                refused = native["refused"]
+                omitted = telemetry.get("threat_remotes_omitted") or 0
+                if refused and refused != current.get("refused"):
+                    log_warning("sample refused: {reason} ({kind}{actual} over the limit of {limit})".format(
+                        reason=refused["reason"], kind=f"{refused['kind']} rows: " if refused["kind"] else "",
+                        actual=refused["actual"], limit=refused["limit"]))
+                elif current.get("refused") and not refused:
+                    log_notice("samples are accepted again")
+                if omitted and not current.get("threat_remotes_omitted"):
+                    log_warning(f"threat recording incomplete: {omitted} remotes over the summary budget")
+                current.update(helper=native.get("helper"), telemetry=telemetry or None,
+                               baseline=native["baseline"], refused=refused,
+                               threat_remotes_omitted=omitted,
+                               state_limit=telemetry.get("state_limit", current.get("state_limit")))
             if error is not None:
                 current.update(last_error=str(error), last_error_class=getattr(error, "failure_class", None),
                                last_error_at=time.time())
@@ -1175,12 +1200,25 @@ class Collector:
         states = native["counts"]["states"]
         refused = native["refused"]
         if refused and not background:
-            self.complete_sample(states, status_document("refused", **refused, collector=None))
+            self.complete_sample(states, self.refusal_document(native))
         elif background or refused or native["baseline"]:
             # a baseline has no rates yet: the previous map stays until it expires or is replaced
             self.complete_sample(states)
         else:
             self.publish_summary(now, timer, states)
+
+    @staticmethod
+    def refusal_document(native):
+        """What the map shows for a refused sample. Too many states and an exhausted memory
+        budget are the same condition for the viewer: the table is larger than this firewall's
+        budget maps (the map's too_many_states message, with the derived limit)."""
+        refused = native["refused"]
+        if refused["reason"] in ("refused_states", "refused_memory"):
+            limit = (native["telemetry"] or {}).get("state_limit") or refused["limit"]
+            count = refused["actual"] if refused["reason"] == "refused_states" else native["counts"]["states"]
+            return status_document("too_many_states", count=count, limit=limit, reason=refused["reason"],
+                                   collector=None)
+        return status_document("refused", **refused, collector=None)
 
     def _post_commit(self, native, now, background, timer):
         self.geo.save()
@@ -1194,6 +1232,9 @@ class Collector:
         if background:
             return max(BACKGROUND_INTERVAL - took, 0.05)
         interval = INTERVAL if requested(REQUEST_MARKER, ACTIVE_VIEWER_SECONDS) else IDLE_INTERVAL
+        with self._status_lock:
+            # samples slower than the interval: the map updates at the rest floor below instead
+            self.collector_status["slow_sampling"] = took > interval
         rest = max(interval - took, took, 0.05)
         if self.failures:
             rest = max(rest, min(MAX_FAILURE_BACKOFF, 2.0 ** self.failures))

@@ -86,6 +86,17 @@
     </field>
     <field>
         <type>header</type>
+        <label>Collector resources</label>
+    </field>
+    <field>
+        <id>firewallmap.general.helper_memory</id>
+        <label>Memory budget (MiB)</label>
+        <type>text</type>
+        <hint>automatic</hint>
+        <help>The most memory the collector's state engine may use per sample. It also sets the largest PF state table the map will process: above it a sample is refused and the map says so, instead of slowing the firewall. Leave empty for 5% of physical memory, at most 1024 MiB. The Status page shows the resulting state limit.</help>
+    </field>
+    <field>
+        <type>header</type>
         <label>Logging</label>
     </field>
     <field>

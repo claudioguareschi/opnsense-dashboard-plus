@@ -34,54 +34,16 @@ void state_flow_key(unsigned char key[FM_FLOW_KEY_SIZE], struct addr local,
   key[17] = remote.af;
   memcpy(key + 18, remote.b, 16);
 }
-bool address_equal(struct addr a, struct addr b) {
-  return a.af == b.af && !memcmp(a.b, b.b, 16);
-}
-unsigned address_flags(const struct context *ctx, struct addr a) {
-  for (size_t n = 0; n < ctx->nr; n++)
-    if (a.af == ctx->ranges[n].lo.af &&
-        memcmp(a.b, ctx->ranges[n].lo.b, 16) >= 0 &&
-        memcmp(a.b, ctx->ranges[n].hi.b, 16) <= 0)
-      return ctx->ranges[n].flags;
-  return 0;
-}
 static bool is_public(const struct context *ctx, struct addr a) {
   return address_flags(ctx, a) & FM_PUBLIC;
 }
 static bool is_private(const struct context *ctx, struct addr a) {
   return address_flags(ctx, a) & FM_PRIVATE;
 }
-static int local(const struct context *ctx, struct addr a) {
-  for (size_t n = 0; n < ctx->nl; n++)
-    if (address_equal(a, ctx->local[n]))
-      return 1;
-  return 0;
-}
-static int prefix(struct addr a, const struct net *n) {
-  if (a.af != n->a.af)
-    return 0;
-  unsigned whole = n->prefix / 8, bits = n->prefix % 8;
-  return !memcmp(a.b, n->a.b, whole) &&
-         (!bits || ((a.b[whole] ^ n->a.b[whole]) & (0xff << (8 - bits))) == 0);
-}
-static const char *device(const struct context *ctx, struct addr a,
-                          const char *excluded) {
-  for (size_t n = 0; n < ctx->nn; n++)
-    if ((!excluded || strcmp(ctx->nets[n].device, excluded)) &&
-        prefix(a, &ctx->nets[n]))
-      return ctx->nets[n].device;
-  return NULL;
-}
 static int inside_address(const struct context *ctx, struct addr a,
                           const char *excluded) {
-  return is_private(ctx, a) || (!local(ctx, a) && device(ctx, a, excluded));
-}
-static int wan_address(const struct context *ctx, struct addr a) {
-  for (size_t n = 0; n < ctx->na; n++)
-    if (!strcmp(ctx->assigned[n].device, ctx->wan) &&
-        address_equal(a, ctx->assigned[n].a))
-      return 1;
-  return 0;
+  return is_private(ctx, a) ||
+         (!context_is_local(ctx, a) && context_device(ctx, a, excluded));
 }
 bool endpoint_equal(struct endpoint a, struct endpoint b) {
   return address_equal(a.a, b.a) && a.port == b.port;
@@ -109,7 +71,7 @@ static int origin(const struct context *ctx, struct addr other,
   int found = 0, preferred = 0;
   for (size_t n = 0; n < ctx->nl; n++)
     if (ctx->local[n].af == other.af) {
-      const char *d = device(ctx, ctx->local[n], NULL);
+      const char *d = ctx->local_device[n];
       int pref = prefer_egress && d && !strcmp(d, egress);
       if (!found || pref > preferred) {
         *out = ctx->local[n];
@@ -182,59 +144,67 @@ bool state_normalize(const struct state *s, const struct context *ctx,
   bool has_nat = v->pf.translated;
   unsigned proto = v->pf.proto;
   int direction = s->pf_direction;
+  /* Each endpoint is classified once (binary search over the ranges). */
+  unsigned src_flags = address_flags(ctx, src.a), dst_flags = address_flags(ctx, dst.a),
+           nat_flags = has_nat ? address_flags(ctx, nat.a) : dst_flags;
   /* Exact parser admission: untranslated private/private headers are skipped.
    */
-  if (!has_nat && !is_public(ctx, src.a) && !is_public(ctx, dst.a))
+  if (!has_nat && !(src_flags & FM_PUBLIC) && !(dst_flags & FM_PUBLIC))
     return true;
   v->retained = true;
   struct endpoint *sides[3];
+  unsigned side_flags[3];
   if (direction == FM_IN) {
-    sides[0] = &dst;
-    sides[1] = has_nat ? &nat : NULL;
-    sides[2] = &src;
+    sides[0] = &dst, side_flags[0] = dst_flags;
+    sides[1] = has_nat ? &nat : NULL, side_flags[1] = nat_flags;
+    sides[2] = &src, side_flags[2] = src_flags;
   } else {
-    sides[0] = has_nat ? &nat : NULL;
-    sides[1] = &src;
-    sides[2] = &dst;
+    sides[0] = has_nat ? &nat : NULL, side_flags[0] = nat_flags;
+    sides[1] = &src, side_flags[1] = src_flags;
+    sides[2] = &dst, side_flags[2] = dst_flags;
   }
+  unsigned inside_flags = 0;
   for (unsigned n = 0; n < 3 && !inside; n++)
-    if (sides[n] && is_private(ctx, sides[n]->a))
+    if (sides[n] && (side_flags[n] & FM_PRIVATE)) {
       inside = sides[n];
+      inside_flags = side_flags[n];
+    }
   if (!inside && s->original_interface[0])
     for (unsigned n = 0; n < 2; n++) {
       struct endpoint *e = n ? &dst : &src;
       if (inside_address(ctx, e->a, s->original_interface)) {
         inside = e;
+        inside_flags = n ? dst_flags : src_flags;
         break;
       }
     }
   struct addr loc, remote;
   int tunnel = 0;
-  if (has_nat && is_public(ctx, nat.a))
+  if (has_nat && (nat_flags & FM_PUBLIC))
     loc = nat.a;
-  else if (local(ctx, src.a))
+  else if (context_is_local(ctx, src.a))
     loc = src.a;
-  else if (local(ctx, dst.a))
+  else if (context_is_local(ctx, dst.a))
     loc = dst.a;
-  else if (has_nat && direction == FM_OUT && is_private(ctx, src.a) &&
-           is_public(ctx, dst.a) && !strcmp(s->original_interface, ctx->wan) &&
-           wan_address(ctx, src.a))
+  else if (has_nat && direction == FM_OUT && (src_flags & FM_PRIVATE) &&
+           (dst_flags & FM_PUBLIC) && !strcmp(s->original_interface, ctx->wan) &&
+           context_is_wan_address(ctx, src.a))
     loc = src.a;
-  else if (has_nat && direction == FM_IN && is_private(ctx, nat.a) &&
-           is_public(ctx, src.a) && !strcmp(s->original_interface, ctx->wan) &&
-           wan_address(ctx, nat.a))
+  else if (has_nat && direction == FM_IN && (nat_flags & FM_PRIVATE) &&
+           (src_flags & FM_PUBLIC) && !strcmp(s->original_interface, ctx->wan) &&
+           context_is_wan_address(ctx, nat.a))
     loc = nat.a;
-  else if (has_nat && is_private(ctx, src.a) && is_public(ctx, dst.a) &&
+  else if (has_nat && (src_flags & FM_PRIVATE) && (dst_flags & FM_PUBLIC) &&
            ctx->nl) {
     if (!origin(ctx, dst.a, s->original_interface, 0, &loc))
       return true;
     remote = dst.a;
     tunnel = 1;
   } else {
-    if (!ctx->nn || !inside || !is_public(ctx, inside->a))
+    if (!ctx->nn || !inside || !(inside_flags & FM_PUBLIC))
       return true;
     struct endpoint *far = inside == &src ? &dst : &src;
-    if (!is_public(ctx, far->a) ||
+    if (!((far == &src ? src_flags : dst_flags) & FM_PUBLIC) ||
         !origin(ctx, far->a, s->original_interface, 1, &loc))
       return true;
     remote = far->a;
@@ -243,7 +213,7 @@ bool state_normalize(const struct state *s, const struct context *ctx,
   if (!tunnel) {
     remote = address_equal(loc, src.a) ? dst.a : src.a;
     if (!is_public(ctx, remote) || address_equal(remote, loc) ||
-        local(ctx, remote))
+        context_is_local(ctx, remote))
       return true;
   }
   bool remote_initiated = address_equal(src.a, remote);

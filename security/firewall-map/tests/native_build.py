@@ -34,7 +34,22 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FLAGS = ("-O2", "-Wall", "-Wextra", "-Werror")
+FLAGS = ("-O2", "-Wall", "-Wextra", "-Werror", "-DFM_TEST_HOOKS")
+
+
+def budget_constant(name):
+    """A numeric #define from native/budget.h (the tests' single source for the budget model)."""
+    import re
+    text = (ROOT / "native" / "budget.h").read_text()
+    match = re.search(rf"#define {name} \(?(?:UINT64_C\((\d+)\) << (\d+)|(\d+))\)?", text)
+    if not match:
+        raise LookupError(name)
+    return int(match.group(1)) << int(match.group(2)) if match.group(1) else int(match.group(3))
+
+
+def state_limit(memory):
+    fixed, per_state = budget_constant("BUDGET_FIXED_BYTES"), budget_constant("BUDGET_BYTES_PER_STATE")
+    return (memory - fixed) // per_state if memory > fixed else 0
 
 
 def compile_worker(output, extra_flags=()):

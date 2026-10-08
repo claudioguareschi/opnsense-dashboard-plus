@@ -118,7 +118,7 @@ class NativeFixture:
         self.process = None
         self.snapshot_open = False
 
-    def sample(self, local, networks, assigned, wan, **options):
+    def sample(self, local, networks, assigned, wan, memory=None, evidence=(), correlation=True, **options):
         """Like the helper: the first sample of a new process is a baseline (no rates)."""
         baseline = self.process is None
         self.baselines.append(baseline)

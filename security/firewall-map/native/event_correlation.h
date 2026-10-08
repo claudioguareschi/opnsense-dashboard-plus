@@ -47,6 +47,10 @@ struct event_history *event_history_create(struct fm_error *);
 void event_history_destroy(struct event_history *);
 bool event_history_update(struct event_history *, const struct aggregate *,
                           double now, struct fm_error *);
+/* Forgets every recent tuple (nothing consumes them while correlation is off). */
+void event_history_clear(struct event_history *);
+/* Recent tuples dropped by the last update because the ring was full. */
+uint64_t event_history_evicted(const struct event_history *);
 size_t event_history_match(const struct event_history *, const struct aggregate *,
                            const struct event_query *, size_t,
                            struct event_match *, size_t, struct fm_error *);

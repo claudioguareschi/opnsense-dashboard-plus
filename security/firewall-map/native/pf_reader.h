@@ -35,7 +35,10 @@ typedef bool (*pf_state_callback)(const struct state *, void *,
  * just before the dump request is sent: the sample's timing anchor. */
 bool pf_reader_live(pf_state_callback, void *, FILE *raw_fixture,
                     double *request_anchor, struct fm_error *);
+/* PF's current state count without traversing (false: unavailable). */
+bool pf_reader_state_count(uint64_t *count);
 /* PF_STATE_VERSION the reader was compiled against (0 without PF headers). */
 unsigned pf_reader_state_version(void);
+/* Devel builds only (FM_DEVEL_TOOLS): replay a saved FMNLLE1 capture. */
 bool pf_reader_wire(const char *, pf_state_callback, void *, struct fm_error *);
 #endif

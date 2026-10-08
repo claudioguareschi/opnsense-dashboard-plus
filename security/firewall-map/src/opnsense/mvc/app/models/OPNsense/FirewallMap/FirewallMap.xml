@@ -57,6 +57,12 @@
                 <MinimumValue>1</MinimumValue>
                 <MaximumValue>31</MaximumValue>
             </update_days>
+            <!-- empty: automatic, 5% of physical memory capped at 1024 MiB -->
+            <helper_memory type="IntegerField">
+                <MinimumValue>64</MinimumValue>
+                <MaximumValue>16384</MaximumValue>
+                <ValidationMessage>The collector memory budget is between 64 and 16384 MiB.</ValidationMessage>
+            </helper_memory>
         </general>
     </items>
 </model>

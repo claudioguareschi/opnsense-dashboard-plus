@@ -39,6 +39,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/param.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -448,6 +449,12 @@ bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
     goto out;
   }
   uint32_t seq = request->nlmsg_seq;
+#ifndef FM_DEVEL_TOOLS
+  if (raw) {
+    fm_error_fail(error, FM_FAILURE_INTERNAL, ENOTSUP, "raw capture requires a devel build");
+    goto out;
+  }
+#else
   if (raw) {
     unsigned char header[16] = "FMNLLE1", *p = header + 8;
     protocol_put(&p, seq, 4);
@@ -457,6 +464,7 @@ bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
       goto out;
     }
   }
+#endif
   buffer = malloc(ss.bufsize);
   if (!buffer) {
     fm_error_set(error, errno, "receive buffer");
@@ -485,8 +493,10 @@ bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
       fm_error_set(error, EPROTO, "non-kernel netlink sender");
       break;
     }
+#ifdef FM_DEVEL_TOOLS
     if (raw && !protocol_frame(raw, buffer, size, NULL, error))
       break;
+#endif
     datagram(&r, buffer, size, seq, family, &done);
   }
   ok = done && !error->code;
@@ -496,6 +506,82 @@ out:
   return ok;
 }
 unsigned pf_reader_state_version(void) { return PF_STATE_VERSION; }
+
+/* PF's current state count without a dump (netlink GET_STATUS, FreeBSD 14.1
+ * and later). Any problem only makes the preflight unavailable: the
+ * traversal backstop still bounds the sample. Pending target validation of
+ * the command and attribute on each supported OPNsense series. */
+#if __FreeBSD_version >= 1401000
+struct status_parse {
+  uint64_t states;
+  bool found;
+};
+static void status_attr(unsigned type, const unsigned char *p, size_t n, void *arg) {
+  struct status_parse *status = arg;
+  if (type != PF_GS_STATES)
+    return;
+  if (n == 4) {
+    uint32_t value;
+    memcpy(&value, p, 4);
+    status->states = value;
+    status->found = true;
+  } else if (n == 8) {
+    memcpy(&status->states, p, 8);
+    status->found = true;
+  }
+}
+bool pf_reader_state_count(uint64_t *count) {
+  struct snl_state ss;
+  if (!snl_init(&ss, NETLINK_GENERIC))
+    return false;
+  bool found = false;
+  struct fm_error ignored = {0};
+  struct reader r = {.error = &ignored};
+  unsigned char *buffer = NULL;
+  struct timeval timeout = {.tv_sec = 2};
+  int family = setsockopt(ss.fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout))
+                   ? 0 : snl_get_genl_family(&ss, PFNL_FAMILY_NAME);
+  struct snl_writer nw;
+  if (family) {
+    snl_init_writer(&ss, &nw);
+    struct nlmsghdr *request = snl_create_genl_msg_request(&nw, family, PFNL_CMD_GET_STATUS);
+    request = request ? snl_finalize_msg(&nw) : NULL;
+    buffer = request && snl_send_message(&ss, request) ? malloc(ss.bufsize) : NULL;
+    ssize_t size = buffer ? recv(ss.fd, buffer, ss.bufsize, 0) : -1;
+    for (unsigned char *p = buffer; size >= (ssize_t)sizeof(struct nlmsghdr);) {
+      struct nlmsghdr *h = (void *)p;
+      if (h->nlmsg_len < sizeof(*h) || h->nlmsg_len > (size_t)size)
+        break;
+      if (h->nlmsg_type == family &&
+          h->nlmsg_len >= sizeof(*h) + sizeof(struct genlmsghdr)) {
+        struct status_parse status = {0};
+        attributes(&r, p + sizeof(*h) + sizeof(struct genlmsghdr),
+                   h->nlmsg_len - sizeof(*h) - sizeof(struct genlmsghdr), status_attr, &status);
+        if (status.found && !ignored.code) {
+          *count = status.states;
+          found = true;
+        }
+        break;
+      }
+      size_t step = NLMSG_ALIGN(h->nlmsg_len);
+      if (step >= (size_t)size)
+        break;
+      p += step;
+      size -= step;
+    }
+  }
+  free(buffer);
+  snl_free(&ss);
+  return found;
+}
+#else
+bool pf_reader_state_count(uint64_t *count) {
+  (void)count;
+  return false;
+}
+#endif
+#ifdef FM_DEVEL_TOOLS
+/* Replays a saved FMNLLE1 capture (devel tools only). */
 bool pf_reader_wire(const char *path, pf_state_callback callback, void *arg,
                     struct fm_error *error) {
   struct reader r = {.callback = callback, .arg = arg, .error = error};
@@ -554,9 +640,14 @@ out:
   fclose(f);
   return ok;
 }
+#endif
 
 #else
 unsigned pf_reader_state_version(void) { return 0; }
+bool pf_reader_state_count(uint64_t *count) {
+  (void)count;
+  return false;
+}
 bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
                     double *request_anchor, struct fm_error *error) {
   (void)callback;
@@ -566,6 +657,7 @@ bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
   return fm_error_set(error, ENOTSUP,
                       "live PF acquisition requires OPNsense/FreeBSD");
 }
+#ifdef FM_DEVEL_TOOLS
 bool pf_reader_wire(const char *path, pf_state_callback callback, void *arg,
                     struct fm_error *error) {
   (void)path;
@@ -574,4 +666,5 @@ bool pf_reader_wire(const char *path, pf_state_callback callback, void *arg,
   return fm_error_set(error, ENOTSUP,
                       "saved PF netlink decoding requires OPNsense headers");
 }
+#endif
 #endif

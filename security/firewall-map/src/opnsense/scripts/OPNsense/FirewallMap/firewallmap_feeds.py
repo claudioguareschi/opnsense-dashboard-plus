@@ -42,8 +42,11 @@ import time
 import urllib.error
 import urllib.request
 
-from lib.blocklists import FEEDS, FEED_DIR, feed_file
-from lib.common import FORCED_REPEAT_SECONDS, STATE_DIR, log_notice, log_warning, read_json, secure_umask, write_json, write_text
+from lib.blocklists import BLOCKLIST_MAX_ENTRIES, FEEDS, FEED_DIR, feed_file
+from lib.common import (
+    FORCED_REPEAT_SECONDS, STATE_DIR, log_notice, log_warning, public_ip, read_json, secure_umask, write_json,
+    write_text,
+)
 from lib.config import aliases, settings
 
 STATUS_FILE = f"{STATE_DIR}/feeds.json"
@@ -62,10 +65,23 @@ def feeds_in_use(values=None):
     return [feed for feed in FEEDS if feed["name"] in chosen]
 
 
-def parse_feed(text):
-    """Addresses and networks, one per line; ';' and '#' start comments (Spamhaus, FireHOL, abuse.ch)."""
+# Sanity limits for downloaded lists: a feed is third-party data. A network wider than these
+# prefixes (a hijacked or broken feed listing 0.0.0.0/0) would flag a large part of the internet;
+# networks without a global address cannot name a remote peer; and more entries than the threat
+# index takes means the download is not the list it claims to be.
+MIN_PREFIX = {4: 8, 6: 16}
+
+
+def parse_feed(text, max_entries=BLOCKLIST_MAX_ENTRIES):
+    """Addresses and networks, one per line; ';' and '#' start comments (Spamhaus, FireHOL, abuse.ch).
+
+    Returns (entries, skipped): entries wider than MIN_PREFIX or entirely outside global address
+    space are skipped and counted. More than max_entries usable entries raise ValueError, so the
+    previous copy stays in use.
+    """
     entries = []
     seen = set()
+    skipped = 0
     for line in text.splitlines():
         value = line.split(";", 1)[0].split("#", 1)[0].strip().split()
         if not value:
@@ -74,11 +90,17 @@ def parse_feed(text):
             network = ipaddress.ip_network(value[0], strict=False)
         except ValueError:
             continue
+        if network.prefixlen < MIN_PREFIX[network.version] or not (
+                public_ip(network.network_address) or public_ip(network.broadcast_address)):
+            skipped += 1
+            continue
         text_value = str(network.network_address) if network.prefixlen == network.max_prefixlen else str(network)
         if text_value not in seen:
             seen.add(text_value)
             entries.append(text_value)
-    return entries
+            if len(entries) > max_entries:
+                raise ValueError(f"list has more than {max_entries} entries")
+    return entries, skipped
 
 
 def download(url):
@@ -109,13 +131,14 @@ def update(force=False, fetch=download, now=None, feeds=None):
             continue
         entry["attempted"] = now
         try:
-            entries = parse_feed(fetch(feed["url"]))
+            entries, skipped = parse_feed(fetch(feed["url"]))
             if not entries:
                 raise ValueError("empty list")
             write_text(feed_file(feed["name"]), "\n".join(entries) + "\n")
-            entry.update({"updated": now, "count": len(entries), "error": None})
+            entry.update({"updated": now, "count": len(entries), "skipped": skipped, "error": None})
             results[feed["name"]] = "ok"
-            log_notice(f"threat feed {feed['label']} downloaded: {len(entries)} entries")
+            log_notice(f"threat feed {feed['label']} downloaded: {len(entries)} entries"
+                       + (f", {skipped} too wide or not global (skipped)" if skipped else ""))
         except urllib.error.HTTPError as error:
             entry["error"] = f"HTTP {error.code}"
             results[feed["name"]] = entry["error"]

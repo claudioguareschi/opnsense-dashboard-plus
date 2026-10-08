@@ -48,17 +48,31 @@ import subprocess
 import time
 import zlib
 
-from . import common
+from . import classification, common
 
 HELPER = "/usr/local/libexec/firewallmap-native"
 BANNER = re.compile(rb"^FMNATIVE5 pf_state_version=(\d+) freebsd_version=(\d+)\n$")
 MAX_FRAME = 4096
+# a response must complete within this; the window grows with the helper's own measured cost
 READ_TIMEOUT = 20
+READ_TIMEOUT_MAX = 120
+READ_TIMEOUT_FACTOR = 3
 PROTO_NUMBERS = {"icmp": 1, "tcp": 6, "udp": 17, "ipv6-icmp": 58, "sctp": 132}
 SNAPSHOT_FLOWS = 5000
 SNAPSHOT_BYTES = 10 * 1024 * 1024
 SNAPSHOT_STATES = 5000
 MAX_EVENT_QUERIES = 2500
+
+# Resource budgets (native/budget.h, PROTOCOL.md): the helper enforces the same maxima.
+RANKED_FLOWS = 150
+CANDIDATES_PER_KIND = 16
+THREAT_REMOTES = 20000
+MEMORY_MIN_MIB, MEMORY_MAX_MIB, MEMORY_AUTO_MAX_MIB = 64, 16384, 1024
+MEMORY_AUTO_SHARE = 0.05
+# operator context maxima: over them a sample is refused, naming the kind (never truncated)
+CONTEXT_MAXIMA = {"L": 4096, "N": 8192, "A": 1024}
+_FLOW_RECORD, _CANDIDATE_RECORD, _THREAT_REMOTE_RECORD, _THREAT_CANDIDATE_RECORD = 163, 100, 54, 92
+_EVENT_RECORD, _FIXED_RECORDS = 198, 4096
 
 # FMAGG4 record kinds
 HEADER, FLOW, CANDIDATE, THREAT_REMOTE, THREAT_CANDIDATE, EVENT_MATCH, TELEMETRY = range(7)
@@ -74,10 +88,10 @@ OMISSION_REASONS = ((1, "encoded_bytes"), (2, "state_count"), (4, "flow_quota"))
 SELECTION_POLICIES = {1: "arrival_incident_first_v1"}
 
 _FLOW = struct.Struct("!I17s17sQQQIIQQQQQQddddd")
-_TELEMETRY = struct.Struct("!IQdddddQQQQQQQQQQQ")
+_TELEMETRY = struct.Struct("!IQdddddQQQQQQQQQQQQ")
 _TELEMETRY_FIELDS = ("pid", "sequence", "interval", "dump_seconds", "processing_seconds", "user_cpu",
                      "system_cpu", "max_rss", "heap_bytes", "heap_peak", "heap_blocks", "heap_budget",
-                     "preflight_states", "skipped_af_translation", "candidates_omitted",
+                     "state_limit", "preflight_states", "skipped_af_translation", "candidates_omitted",
                      "threat_remotes_omitted", "threat_candidates_omitted", "event_history_evicted")
 _FOOTER = struct.Struct("!IIQQQQQQQQQQQI")
 
@@ -98,41 +112,59 @@ def available(path=HELPER):
     return os.path.isfile(path) and os.access(path, os.X_OK)
 
 
-def _classification_rows():
-    rows = []
-    boundaries4 = set()
-    for version, cls in ((4, ipaddress.IPv4Address), (6, ipaddress.IPv6Address)):
-        maximum = 1 << (32 if version == 4 else 128)
-        bounds = {0, maximum}
-        for value in vars(cls._constants).values():
-            for item in value if isinstance(value, (tuple, list)) else (value,):
-                if isinstance(item, (ipaddress.IPv4Network, ipaddress.IPv6Network)) and item.version == version:
-                    bounds.update((int(item.network_address), int(item.broadcast_address) + 1))
-        if version == 4:
-            bounds.update((int(common.CGNAT.network_address), int(common.CGNAT.broadcast_address) + 1))
-            boundaries4 = bounds
-        else:
-            mapped = int(ipaddress.IPv6Address("::ffff:0:0"))
-            bounds.update(mapped + n for n in boundaries4)
-        ordered = sorted(bounds)
-        for low, stop in zip(ordered, ordered[1:]):
-            flags = []
-            for n in (low, (low + stop - 1) // 2, stop - 1):
-                address = str(cls(n))
-                flags.append(int(common.public_ip(address)) | int(common.private_ip(address)) * 2)
-            if len(set(flags)) != 1:
-                raise NativeError("address classification range is not uniform")
-            rows.append(f"R {cls(low)} {cls(stop - 1)} {flags[0]}")
-    return rows
+def memory_budget(setting_mib=None, physical=None):
+    """The helper's memory budget in bytes: the setting, or 5% of RAM capped at 1 GiB."""
+    if setting_mib is not None:
+        return max(MEMORY_MIN_MIB, min(MEMORY_MAX_MIB, int(setting_mib))) << 20
+    if physical is None:
+        try:
+            physical = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+        except (OSError, ValueError, AttributeError):
+            physical = 0
+    automatic = int(physical * MEMORY_AUTO_SHARE) >> 20 if physical > 0 else MEMORY_AUTO_MAX_MIB
+    return max(MEMORY_MIN_MIB, min(MEMORY_AUTO_MAX_MIB, automatic)) << 20
+
+
+def response_byte_limit(candidates_per_kind=CANDIDATES_PER_KIND, threat_remotes=THREAT_REMOTES,
+                        queries=MAX_EVENT_QUERIES):
+    """The largest FMAGG4 response the budgets allow (framing included); more is a helper bug."""
+    flows = RANKED_FLOWS * (_FLOW_RECORD + RULE_LABEL * candidates_per_kind * _CANDIDATE_RECORD)
+    threats = threat_remotes * (_THREAT_REMOTE_RECORD + len(THREAT_CANDIDATE_KINDS) * candidates_per_kind
+                                * _THREAT_CANDIDATE_RECORD)
+    return 8 + flows + threats + queries * _EVENT_RECORD + _FIXED_RECORDS
+
+
+def _context_address(value):
+    """Canonical text of a context address, or None for one that cannot matter: loopback
+    and link-local addresses never take part in a retained state."""
+    try:
+        address = ipaddress.ip_address(str(value).split("%", 1)[0])
+    except ValueError:
+        return None
+    if address.is_loopback or address.is_link_local:
+        return None
+    return str(address)
 
 
 def _context_rows(local_addresses, networks, interface_addresses, primary_wan_device):
-    rows = _classification_rows()
-    rows.extend(f"L {address}" for address in sorted(local_addresses))
-    rows.extend(f"N {network.network_address} {network.prefixlen} {device}"
-                for network, device in networks)
-    rows.extend(f"A {address} {device}" for device, addresses in interface_addresses.items()
-                for address in sorted(addresses))
+    """(rows, refusal): the request's context, deduplicated, or the first maximum it exceeds."""
+    rows = classification.rows()
+    local = sorted({address for address in map(_context_address, local_addresses) if address})
+    seen_networks, network_rows = set(), []
+    for network, device in networks:
+        if network.is_loopback or network.is_link_local or (network, device) in seen_networks:
+            continue
+        seen_networks.add((network, device))
+        network_rows.append(f"N {network.network_address} {network.prefixlen} {device}")
+    assigned = sorted({(device, address) for device, addresses in interface_addresses.items()
+                       for address in map(_context_address, addresses) if address})
+    for kind, count in (("L", len(local)), ("N", len(network_rows)), ("A", len(assigned))):
+        if count > CONTEXT_MAXIMA[kind]:
+            return None, {"reason": "refused_context", "kind": kind, "actual": count,
+                          "limit": CONTEXT_MAXIMA[kind]}
+    rows.extend(f"L {address}" for address in local)
+    rows.extend(network_rows)
+    rows.extend(f"A {address} {device}" for device, address in assigned)
     if primary_wan_device:
         rows.append(f"W {primary_wan_device}")
     groups = {}
@@ -145,7 +177,7 @@ def _context_rows(local_addresses, networks, interface_addresses, primary_wan_de
                 raise NativeError(f"unsupported service protocol {protocol}") from error
         groups.setdefault(name, len(groups) + 2)
         rows.append(f"S {number} {port} {groups[name]}")
-    return rows
+    return rows, None
 
 
 def _address(data):
@@ -216,9 +248,10 @@ def _magic(stream, process, deadline, expected):
         raise NativeError("native helper protocol version mismatch")
 
 
-def _decode(stream, process, query_keys, require_threat_summary, flow_limit=150, byte_limit=None):
+def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANKED_FLOWS, byte_limit=None,
+            timeout=None):
     """Read one complete FMAGG4 response."""
-    deadline = time.monotonic() + READ_TIMEOUT
+    deadline = time.monotonic() + (timeout or READ_TIMEOUT)
     _magic(stream, process, deadline, b"FMAGG4\0\0")
     checksum, threats_present, telemetry, footer, previous_kind = 0, None, None, None, HEADER
     flows, candidates, matches = [], [], {}
@@ -378,6 +411,7 @@ class NativeEngine:
         self.metadata = None
         self.starts = 0
         self.last_error = None
+        self.read_timeout = READ_TIMEOUT
 
     def _start(self):
         if not available(self.path):
@@ -420,13 +454,28 @@ class NativeEngine:
             raise
 
     def sample(self, local_addresses, networks, interface_addresses, primary_wan_device,
-               threat_summary=False, event_queries=(), snapshot=False):
+               threat_summary=False, event_queries=(), snapshot=False, memory=None, evidence=(),
+               correlation=True):
+        """One complete sample. memory: the budget in bytes (default: automatic); evidence:
+        remotes the threat summary must keep first; correlation: whether anything consumes
+        IDS/block tuple matching (it is skipped otherwise)."""
+        rows, refused = _context_rows(local_addresses, networks, interface_addresses, primary_wan_device)
+        if refused:
+            # Python's own check; the helper would refuse the same request
+            return {"flows": [], "candidates": [], "matches": {}, "threat_remotes": [], "threat_candidates": [],
+                    "threat_summary": False, "telemetry": None, "baseline": False, "refused": refused,
+                    "counts": {"states": 0, "retained": 0, "mapped": 0, "flows": 0, "captured_flows": 0,
+                               "candidates": 0, "matches": 0, "threat_remotes": 0, "threat_candidates": 0},
+                    "helper": dict(self.metadata or {}, starts=self.starts)}
         if self.process is None or self.process.poll() is not None:
             self.close()
             self._start()
-        rows = _context_rows(local_addresses, networks, interface_addresses, primary_wan_device)
+        rows.append(f"BUDGET {memory or memory_budget()} {CANDIDATES_PER_KIND} {THREAT_REMOTES}")
+        rows.append(f"CORRELATION {int(bool(correlation or event_queries))}")
         if threat_summary:
             rows.append("THREATS")
+            evidence_rows = sorted({address for address in map(_context_address, evidence) if address})
+            rows.extend(f"EVIDENCE {address}" for address in evidence_rows[:THREAT_REMOTES])
         if snapshot:
             rows.append("SNAPSHOT")
         query_keys = []
@@ -441,8 +490,14 @@ class NativeEngine:
             rows.append(f"Q {len(query_keys) - 1} {number} {public} {int(public_port or 0)} "
                         f"{remote} {int(remote_port or 0)}")
         text = "FMCONF2\n%sRUN\n" % "".join(row + "\n" for row in rows)
+        limit = response_byte_limit(queries=len(query_keys))
         result = self._request(text, lambda stream, process: _decode(stream, process, query_keys,
-                                                                     threat_summary))
+                                                                     threat_summary, byte_limit=limit,
+                                                                     timeout=self.read_timeout))
+        telemetry = result["telemetry"]
+        # the next response may take as long as this one did, with a margin
+        self.read_timeout = min(READ_TIMEOUT_MAX, max(READ_TIMEOUT, READ_TIMEOUT_FACTOR * (
+            telemetry["dump_seconds"] + telemetry["processing_seconds"])))
         self.snapshot_open = snapshot and not result["refused"]
         self.snapshot_generation = result["telemetry"]["sequence"] if self.snapshot_open else None
         result["helper"] = dict(self.metadata or {}, starts=self.starts)
@@ -452,7 +507,8 @@ class NativeEngine:
         """Bounded identity/score pages, not raw states or per-flow candidate lists."""
         offset, active = 0, None
         while True:
-            page = self._request(f"FMSNAP1 PAGE {offset}\n", _decode_page)
+            page = self._request(f"FMSNAP1 PAGE {offset}\n",
+                                 lambda stream, process: _decode_page(stream, process, self.read_timeout))
             changed = page["offset"] != offset or page["generation"] != self.snapshot_generation
             changed = changed or (active is not None and page["active"] != active)
             if changed:
@@ -468,7 +524,8 @@ class NativeEngine:
         text = f"FMSNAP1 SELECT {self.snapshot_generation} {len(identities)}\n"
         text += _identity_rows(identities)
         result = self._request(text, lambda stream, process: _decode(
-            stream, process, (), False, flow_limit=SNAPSHOT_FLOWS, byte_limit=SNAPSHOT_BYTES))
+            stream, process, (), False, flow_limit=SNAPSHOT_FLOWS, byte_limit=SNAPSHOT_BYTES,
+            timeout=self.read_timeout))
         if [row["key"] for row in result["flows"]] != [tuple(item[:2]) for item in identities]:
             self.close()
             raise NativeError("native snapshot selection identity mismatch")
@@ -482,7 +539,7 @@ class NativeEngine:
         generation = self.snapshot_generation
         self.snapshot_open = False  # the session ends with this command, whatever its outcome
         return self._request(text, lambda stream, process: _decode_detail(
-            stream, process, identities, generation, byte_limit, state_limit))
+            stream, process, identities, generation, byte_limit, state_limit, self.read_timeout))
 
     def snapshot_cancel(self):
         """End an open session; a helper that cannot take the command is closed."""
@@ -528,8 +585,8 @@ def _identity_rows(identities):
     return "".join(rows) + "RUN\n"
 
 
-def _snapshot_frames(stream, process, magic, byte_limit):
-    deadline = time.monotonic() + READ_TIMEOUT
+def _snapshot_frames(stream, process, magic, byte_limit, timeout=None):
+    deadline = time.monotonic() + (timeout or READ_TIMEOUT)
     _magic(stream, process, deadline, magic)
     checksum = 0
     for size, data in _frames(stream, process, deadline, byte_limit):
@@ -538,9 +595,9 @@ def _snapshot_frames(stream, process, magic, byte_limit):
         yield data, checksum
 
 
-def _decode_page(stream, process):
+def _decode_page(stream, process, timeout=None):
     header, flows, seen = None, [], set()
-    for data, checksum in _snapshot_frames(stream, process, b"FMPAGE1\0", 16384):
+    for data, checksum in _snapshot_frames(stream, process, b"FMPAGE1\0", 16384, timeout):
         if data[0] == 0 and header is None and len(data) == 33:
             version, generation, active, offset, count = struct.unpack("!IQQQI", data[1:])
             if version != 1 or not 0 <= count <= 150 or not offset + count <= active:
@@ -571,12 +628,12 @@ def _omission_reasons(bits):
     return [name for bit, name in OMISSION_REASONS if bits & bit]
 
 
-def _decode_detail(stream, process, identities, generation, byte_limit, state_limit):
+def _decode_detail(stream, process, identities, generation, byte_limit, state_limit, timeout=None):
     started, rows, seen, actual_bytes, totals = False, {}, set(), 0, {}
     captured_by_flow = [0] * len(identities)
     # JSON rows dominate the stream; allow fixed framing, totals and completion overhead.
     ceiling = byte_limit + state_limit * 9 + len(identities) * (_FLOW_TOTALS.size + 5) + 128
-    for data, checksum in _snapshot_frames(stream, process, b"FMSTATE2", ceiling):
+    for data, checksum in _snapshot_frames(stream, process, b"FMSTATE2", ceiling, timeout):
         if data[0] == 0 and not started and len(data) == 13:
             version, received_generation = struct.unpack("!IQ", data[1:])
             if version != 2 or received_generation != generation:

@@ -50,8 +50,9 @@ class SettingsFileTest(unittest.TestCase):
                 "interfaces": {"igb1": "WAN", "vlan01": "LAN"},
                 "topology": {"primary_wan_device": "igb1"},
             })
-            self.assertEqual(CONFIG.settings(path), {"provider": "dbip", "license_key": "", "update_days": 7,
-                             "threat_lists": "", "record_threats": "1", "blocklist_aliases": "0"})
+            expected = {"provider": "dbip", "license_key": "", "update_days": 7, "threat_lists": "",
+                        "record_threats": "1", "blocklist_aliases": "0", "helper_memory": None}
+            self.assertEqual(CONFIG.settings(path), expected)
             self.assertEqual(CONFIG.abuseipdb_key(path), "key")
             self.assertEqual([alias["name"] for alias in CONFIG.aliases(path)], ["Drop"])
             self.assertEqual(CONFIG.interface_names(path), {"igb1": "WAN", "vlan01": "LAN"})
@@ -61,6 +62,11 @@ class SettingsFileTest(unittest.TestCase):
             self.write(path, {"general": {"provider": "nonsense", "update_days": "x"}})
             os.utime(path, ns=(1, 2))
             self.assertEqual((CONFIG.settings(path)["provider"], CONFIG.settings(path)["update_days"]), ("auto", 3))
+            for stamp, (memory, expected) in enumerate((("512", 512), ("63", None), ("16385", None),
+                                                        ("lots", None), ("", None)), start=10):
+                self.write(path, {"general": {"helper_memory": memory}})
+                os.utime(path, ns=(stamp, stamp))  # a distinct mtime: the reader caches by it
+                self.assertEqual(CONFIG.settings(path)["helper_memory"], expected)
 
     def test_a_file_being_written_keeps_the_last_good_values(self):
         with tempfile.TemporaryDirectory() as directory:

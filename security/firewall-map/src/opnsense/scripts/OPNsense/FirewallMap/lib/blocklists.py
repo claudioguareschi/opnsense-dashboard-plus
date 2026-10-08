@@ -34,7 +34,9 @@ import threading
 from array import array
 from bisect import bisect_left
 
-from .common import ABUSEIPDB_BLACKLIST, PFCTL, REPUTATION_KIND, REPUTATION_MAX_AGE, STATE_DIR, ip_object, log_warning
+from .common import (
+    ABUSEIPDB_BLACKLIST, PFCTL, REPUTATION_KIND, REPUTATION_MAX_AGE, STATE_DIR, ip_object, log_warning, public_ip,
+)
 from .config import aliases as configured_aliases
 from .pf import blocked_rule_tables, pf_tables
 
@@ -313,7 +315,11 @@ class BlocklistIndex:
 
 def threat_lists_for(address, blocklists, reputation, ids_evidence=None):
     """The threat lists an address is on: chosen lists, the AbuseIPDB verdict and, with
-    `ids_evidence` (anything with flags(address): the Correlator, an AlertTracker), IDS alerts."""
+    `ids_evidence` (anything with flags(address): the Correlator, an AlertTracker), IDS alerts.
+    Only globally reachable addresses can be threats: lists that also name private or bogon
+    space (FireHOL level 1 does) must not flag the site's own or CGNAT/VPN peers."""
+    if not public_ip(address):
+        return []
     lists = blocklists.lookup(address) if blocklists else []
     if reputation is not None and address in reputation.flagged:
         lists = lists + [REPUTATION_LIST]

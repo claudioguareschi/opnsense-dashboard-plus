@@ -11,6 +11,7 @@
         "license_key": {{ general.license_key | default('', true) | tojson }},
         "abuseipdb_key": {{ general.abuseipdb_key | default('', true) | tojson }},
         "update_days": {{ general.update_days | default('3', true) | tojson }},
+        "helper_memory": {{ general.helper_memory | default('', true) | tojson }},
         "threat_lists": {{ general.threat_lists | default('', true) | tojson }},
         "record_threats": {{ general.record_threats | default('1', true) | tojson }},
         "blocklist_aliases": {{ general.blocklist_aliases | default('0', true) | tojson }}

@@ -67,7 +67,37 @@ monotonic time it sent its PF dump request.
 Context maxima (`L` 4096, `N` 8192, `A` 1024, `R` 1024, `S` 1024, `EVIDENCE`
 = threat_remotes, `Q` 2500) are enforced on both sides. Exceeding an operator
 context maximum (L, N, A) refuses the sample (outcome 2); any other malformed
-or excessive row is a request failure.
+or excessive row is a request failure. `R` rows come from the plugin's own
+classification table (lib/classification.py) and must be sorted and disjoint;
+`N` rows must be most specific first (equal prefixes in interface order, which
+breaks ties); `S` rows must be unique. Python drops loopback and link-local
+addresses and networks and duplicates before sending: they never take part in
+a retained state.
+
+## Resource budgets
+
+Two controls bound the helper (native/budget.h):
+
+* **Memory budget** (`BUDGET` memory, default 256 MiB; Python sends 5% of
+  physical memory, at most 1 GiB, or the configured value, 64 to 16384 MiB).
+  Every engine allocation is accounted against it. Because every per-sample
+  structure grows at most linearly with the PF states traversed, it also
+  derives the **state admission limit**: (budget - 24 MiB) / 2816 bytes. A
+  sample over the limit is refused before traversal when PF's state count is
+  available (netlink GET_STATUS) and otherwise as soon as the traversal passes
+  it; an allocation the budget refuses also refuses the sample. Refusals are
+  outcomes, not failures: the helper answers and stays, and the next accepted
+  sample is a baseline.
+* **Output budget**: at most 150 ranked flows; per (flow, kind) and per
+  (threat remote, kind) the `candidates_per_kind` heaviest candidates (16);
+  at most `threat_remotes` remotes in a threat summary (20000): evidence
+  remotes first, then remotes this site initiated traffic with by bytes, then
+  remote-only peers by bytes and recency; one match per event query (2500).
+  Omissions are counted in the telemetry. The response size follows from
+  these; Python rejects a larger response as a helper bug.
+
+`CORRELATION 0` (no IDS log and no queries) skips outside-tuple correlation
+and clears the recent-tuple history, which nothing would consume.
 
 ## Sample response (FMAGG4)
 
@@ -100,6 +130,7 @@ Telemetry record (kind 6):
     f64 dump seconds, f64 processing seconds, f64 helper user CPU seconds,
     f64 helper system CPU seconds, u64 max RSS bytes, u64 heap bytes,
     u64 heap peak bytes (this sample), u64 heap blocks, u64 heap budget bytes,
+    u64 PF state admission limit (derived from the budget),
     u64 preflight state count (0 when unavailable),
     u64 skipped states (unsupported address-family translation),
     u64 candidates omitted, u64 threat remotes omitted,

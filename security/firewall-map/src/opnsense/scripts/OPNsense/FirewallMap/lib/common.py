@@ -39,6 +39,8 @@ import syslog
 import tempfile
 import time
 
+from . import classification
+
 # ephemeral files (the snapshot, markers) and state that outlives a reboot (caches, threat history)
 RUN_DIR = "/var/run/firewallmap"
 STATE_DIR = "/var/db/firewallmap"
@@ -162,24 +164,15 @@ def ip_object(value):
     return ipaddress.ip_address(value)
 
 
-@functools.lru_cache(maxsize=65536)
 def public_ip(value):
-    try:
-        address = ipaddress.ip_address(value)
-    except (TypeError, ValueError):
-        return False
-    # multicast (e.g. CARP advertisements to 224.0.0.18) counts as global in ipaddress, not here
-    return address.is_global and not address.is_multicast
+    """Globally reachable unicast (lib/classification.py: the plugin's own table)."""
+    return classification.address_flags(value) == classification.PUBLIC
 
 
-@functools.lru_cache(maxsize=65536)
 def private_ip(value):
-    try:
-        address = ipaddress.ip_address(value)
-    except (TypeError, ValueError):
-        return False
-    # carrier-grade NAT space (Tailscale, some VPN tunnels) is inside space too
-    return (address.is_private or (address.version == 4 and address in CGNAT)) and not address.is_loopback
+    """Site-internal: not globally reachable, or shared address space (CGNAT, Tailscale and
+    other VPN overlays); loopback is neither (lib/classification.py)."""
+    return classification.address_flags(value) == classification.PRIVATE
 
 
 @functools.lru_cache(maxsize=65536)

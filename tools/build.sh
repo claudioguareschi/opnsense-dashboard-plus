@@ -67,8 +67,10 @@ for PLUGIN in ${PLUGINS}; do
             exit 1
         fi
         mkdir -p "${WORK}/${PLUGIN}/src/libexec"
-        ${NATIVE_CC:-cc} ${NATIVE_CFLAGS:--O2 -Wall -Wextra -Werror} \
+        # hardened by default: stack protector, fortified libc calls, PIE, full RELRO
+        ${NATIVE_CC:-cc} ${NATIVE_CFLAGS:--O2 -Wall -Wextra -Werror -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE} \
             -I"${WORK}/${PLUGIN}/native" "${WORK}/${PLUGIN}"/native/*.c -lm \
+            ${NATIVE_LDFLAGS:--pie -Wl,-z,relro -Wl,-z,now} \
             -o "${WORK}/${PLUGIN}/src/libexec/firewallmap-native"
         chmod 0755 "${WORK}/${PLUGIN}/src/libexec/firewallmap-native"
     fi

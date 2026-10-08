@@ -28,8 +28,10 @@
  * across requests; the sample interval is measured here, never supplied. */
 #include "aggregate.h"
 #include "alloc.h"
+#include "budget.h"
 #include "event_correlation.h"
 #include "history.h"
+#include "index.h"
 #include "pf_reader.h"
 #include "protocol.h"
 #include "ranking.h"
@@ -54,14 +56,10 @@
 #define BUILD_FREEBSD_VERSION 0
 #endif
 
-/* Live ranking policy: the map shows at most this many flows; a flow fades
- * over this many seconds once its counters stop; rates are smoothed with
- * this weight on the newest interval. */
-#define RANKED_FLOWS 150
+/* Live ranking policy: a flow fades over this many seconds once its counters
+ * stop; rates are smoothed with this weight on the newest interval. */
 #define FADE_SECONDS 20.0
 #define RATE_SMOOTHING 0.5
-/* Request row maxima beyond the context arrays (PROTOCOL.md). */
-#define MAX_EVIDENCE_ROWS 20000
 
 struct engine {
   struct history *history;
@@ -84,6 +82,8 @@ struct sample {
   struct history *history;
   double anchor;
   bool begun;
+  uint64_t states, state_limit;
+  bool over_limit;
 };
 
 static bool request_error(struct fm_error *error, const char *message) {
@@ -98,15 +98,12 @@ static bool parse_address(const char *text, struct addr *out,
   return true;
 }
 /* Operator context beyond its maximum refuses the sample; nothing is ever
- * silently dropped. The first overflowing kind is reported. */
-static bool context_slot(struct request *r, char kind, size_t *used, size_t limit) {
-  if (*used < limit)
-    return true;
+ * silently dropped. The first overflowing kind is reported with its count. */
+static void context_overflow(struct request *r, char kind, size_t limit) {
   if (!r->refusal.code)
-    r->refusal = (struct sample_outcome){OUTCOME_REFUSED_CONTEXT, (uint32_t)kind, 0, limit};
+    r->refusal = (struct sample_outcome){OUTCOME_REFUSED_CONTEXT, (uint32_t)kind, limit, limit};
   if (r->refusal.context_kind == (uint32_t)kind)
-    r->refusal.actual = r->refusal.actual ? r->refusal.actual + 1 : limit + 1;
-  return false;
+    r->refusal.actual++;
 }
 static bool keyword(const char *line, const char *word, bool *seen,
                     struct fm_error *error) {
@@ -145,7 +142,8 @@ static bool read_request(struct request *r, bool *clean_eof, struct fm_error *er
       r->snapshot = true;
     } else if (keyword(line, "BUDGET", &seen_budget, error)) {
       if (sscanf(line, "BUDGET %llu %llu %llu %c", &memory, &candidates, &remotes, &extra) != 3 ||
-          !candidates || remotes > MAX_EVIDENCE_ROWS)
+          memory < BUDGET_MEMORY_MIN || memory > BUDGET_MEMORY_MAX || !candidates ||
+          candidates > BUDGET_CANDIDATES_MAX || remotes > BUDGET_THREAT_REMOTES_MAX)
         request_error(error, "BUDGET row");
       r->memory_budget = memory;
       r->candidates_per_kind = candidates;
@@ -155,11 +153,13 @@ static bool read_request(struct request *r, bool *clean_eof, struct fm_error *er
         request_error(error, "CORRELATION row");
       r->correlation = x;
     } else if (!strncmp(line, "EVIDENCE ", 9)) {
-      if (sscanf(line, "EVIDENCE %63s %c", a, &extra) != 1 || r->evidence_count >= MAX_EVIDENCE_ROWS) {
+      if (sscanf(line, "EVIDENCE %63s %c", a, &extra) != 1 ||
+          r->evidence_count >= BUDGET_THREAT_REMOTES_MAX) {
         request_error(error, "EVIDENCE row");
         break;
       }
-      if (!r->evidence && !(r->evidence = fm_calloc(MAX_EVIDENCE_ROWS, sizeof(*r->evidence)))) {
+      if (!r->evidence &&
+          !(r->evidence = fm_calloc(BUDGET_THREAT_REMOTES_MAX, sizeof(*r->evidence)))) {
         fm_error_set(error, errno, "evidence allocation");
         break;
       }
@@ -180,40 +180,34 @@ static bool read_request(struct request *r, bool *clean_eof, struct fm_error *er
         query->key.remote.port = remote_port;
       }
     } else if (line[0] == 'R' && sscanf(line, "R %63s %63s %u %c", a, b, &x, &extra) == 3) {
-      if (ctx->nr >= sizeof(ctx->ranges) / sizeof(*ctx->ranges)) {
+      struct range range = {.flags = x};
+      if (parse_address(a, &range.lo, error) && parse_address(b, &range.hi, error) &&
+          !context_add_range(ctx, range, error) && !error->code)
         request_error(error, "classification range capacity");
-        break;
-      }
-      if (parse_address(a, &ctx->ranges[ctx->nr].lo, error) &&
-          parse_address(b, &ctx->ranges[ctx->nr].hi, error))
-        ctx->ranges[ctx->nr++].flags = x;
     } else if (line[0] == 'L' && sscanf(line, "L %63s %c", a, &extra) == 1) {
-      if (context_slot(r, 'L', &ctx->nl, sizeof(ctx->local) / sizeof(*ctx->local)))
-        parse_address(a, &ctx->local[ctx->nl++], error);
+      struct addr local;
+      if (parse_address(a, &local, error) && !context_add_local(ctx, local, error) && !error->code)
+        context_overflow(r, 'L', CONTEXT_MAX_LOCAL);
     } else if (line[0] == 'N' && sscanf(line, "N %63s %u %15s %c", a, &x, device, &extra) == 3) {
-      if (context_slot(r, 'N', &ctx->nn, sizeof(ctx->nets) / sizeof(*ctx->nets))) {
-        struct net *n = &ctx->nets[ctx->nn];
-        if (parse_address(a, &n->a, error) && x > (n->a.af == 4 ? 32u : 128u))
-          request_error(error, "network prefix");
-        n->prefix = x;
-        strcpy(n->device, device);
-        ctx->nn++;
-      }
+      struct net net = {.prefix = x};
+      strcpy(net.device, device);
+      if (parse_address(a, &net.a, error) && x > (net.a.af == 4 ? 32u : 128u))
+        request_error(error, "network prefix");
+      else if (!error->code && !context_add_net(ctx, net, error) && !error->code)
+        context_overflow(r, 'N', CONTEXT_MAX_NETWORKS);
     } else if (line[0] == 'A' && sscanf(line, "A %63s %15s %c", a, device, &extra) == 2) {
-      if (context_slot(r, 'A', &ctx->na, sizeof(ctx->assigned) / sizeof(*ctx->assigned))) {
-        struct assigned *v = &ctx->assigned[ctx->na];
-        parse_address(a, &v->a, error);
-        strcpy(v->device, device);
-        ctx->na++;
-      }
+      struct assigned assigned;
+      strcpy(assigned.device, device);
+      if (parse_address(a, &assigned.a, error) && !context_add_assigned(ctx, assigned, error) &&
+          !error->code)
+        context_overflow(r, 'A', CONTEXT_MAX_ASSIGNED);
     } else if (line[0] == 'W' && sscanf(line, "W %15s %c", device, &extra) == 1) {
       strcpy(ctx->wan, device);
     } else if (line[0] == 'S' && sscanf(line, "S %u %u %u %c", &x, &y, &z, &extra) == 3) {
-      if (ctx->ns >= sizeof(ctx->services) / sizeof(*ctx->services) || x > 255 || y > 65535) {
+      if (x > 255 || y > 65535)
         request_error(error, "service row");
-        break;
-      }
-      ctx->services[ctx->ns++] = (struct service){x, y, z};
+      else if (!context_add_service(ctx, (struct service){x, y, z}, error) && !error->code)
+        request_error(error, "service row capacity");
     } else
       request_error(error, "configuration row");
   }
@@ -224,7 +218,7 @@ static bool read_request(struct request *r, bool *clean_eof, struct fm_error *er
   }
   if (!error->code && !run)
     request_error(error, "incomplete configuration request");
-  return !error->code;
+  return !error->code && (r->refusal.code || context_prepare(ctx, error));
 }
 
 static bool begin(struct sample *s, struct fm_error *error) {
@@ -234,10 +228,16 @@ static bool begin(struct sample *s, struct fm_error *error) {
   return history_begin(s->history, s->anchor, error);
 }
 /* The reader writes the anchor before sending its dump request, so it is
- * known by the first state callback; an empty table begins after the read. */
+ * known by the first state callback; an empty table begins after the read.
+ * The admission backstop stops the traversal as soon as the state count
+ * passes the limit (the count can grow after the preflight). */
 static bool add_state(const struct state *state, void *arg,
                       struct fm_error *error) {
   struct sample *s = arg;
+  if (++s->states > s->state_limit) {
+    s->over_limit = true;
+    return fm_error_fail(error, FM_FAILURE_RESOURCES, ECANCELED, "PF state admission backstop");
+  }
   return begin(s, error) && aggregate_add(s->aggregate, state, error);
 }
 
@@ -263,7 +263,7 @@ static void measure_process(struct telemetry *t) {
   t->heap_budget = heap.budget_bytes;
 }
 
-static bool refuse(struct engine *e, const struct request *r,
+static bool refuse(struct engine *e, struct sample_outcome refusal, uint64_t seen,
                    struct telemetry *telemetry, struct fm_error *error) {
   /* A refused sample is not a helper failure; the next accepted one is a
    * baseline because the counters in between were never observed. */
@@ -273,7 +273,7 @@ static bool refuse(struct engine *e, const struct request *r,
   struct response response;
   if (!response_begin(&response, error))
     return false;
-  if (!protocol_write_refusal(response.stream, r->refusal, 0, telemetry, error)) {
+  if (!protocol_write_refusal(response.stream, refusal, seen, telemetry, error)) {
     response_discard(&response);
     return false;
   }
@@ -281,18 +281,34 @@ static bool refuse(struct engine *e, const struct request *r,
 }
 
 static bool run_sample(struct engine *e, struct request *r, struct fm_error *error) {
+  uint64_t state_limit = budget_state_limit(r->memory_budget);
   struct telemetry telemetry = {.pid = (uint32_t)getpid(), .sequence = ++e->sequence,
-                                .interval = -1};
+                                .interval = -1, .state_limit = state_limit};
+  fm_heap_set_budget(r->memory_budget);
+#ifdef FM_TEST_HOOKS
+  /* FM_TEST_HEAP_BUDGET=<bytes>:<sequence> exhausts the heap below the
+   * derived state limit for that one request */
+  unsigned long long test_budget, test_sequence;
+  const char *hook = getenv("FM_TEST_HEAP_BUDGET");
+  if (hook && sscanf(hook, "%llu:%llu", &test_budget, &test_sequence) == 2 &&
+      test_sequence == e->sequence)
+    fm_heap_set_budget(test_budget);
+#endif
   fm_heap_reset_peak();
+  uint64_t refused_before = fm_heap_usage().refused;
   if (r->refusal.code)
-    return refuse(e, r, &telemetry, error);
-  struct sample sample = {.history = e->history};
-  sample.aggregate = aggregate_create(r->ctx, e->history, error);
-  if (!sample.aggregate)
-    return false;
+    return refuse(e, r->refusal, 0, &telemetry, error);
+  if (pf_reader_state_count(&telemetry.preflight_states) &&
+      telemetry.preflight_states > state_limit)
+    return refuse(e, (struct sample_outcome){OUTCOME_REFUSED_STATES, 0,
+                                             telemetry.preflight_states, state_limit},
+                  0, &telemetry, error);
+  struct sample sample = {.history = e->history, .state_limit = state_limit};
+  sample.aggregate = aggregate_create(r->ctx, e->history, r->correlation, error);
   struct timespec wall = {0};
-  bool ok = !r->snapshot || !clock_gettime(CLOCK_REALTIME, &wall) ||
-            fm_error_fail(error, FM_FAILURE_INTERNAL, errno, "sample clock");
+  bool ok = sample.aggregate &&
+            (!r->snapshot || !clock_gettime(CLOCK_REALTIME, &wall) ||
+             fm_error_fail(error, FM_FAILURE_INTERNAL, errno, "sample clock"));
   ok = ok && pf_reader_live(add_state, &sample, NULL, &sample.anchor, error) &&
        begin(&sample, error) && aggregate_finish(sample.aggregate, error);
   double read_done = monotonic_seconds();
@@ -300,13 +316,18 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   telemetry.interval = ok ? history_interval(e->history) : -1;
   ok = ok && ranking_update(e->ranking, sample.aggregate, sample.anchor,
                             telemetry.interval, error);
+  struct threat_limits limits = {r->evidence, r->evidence_count, r->threat_remotes,
+                                 r->candidates_per_kind};
   struct threat_summary *threats =
-      ok && r->threats ? threat_summary_create(sample.aggregate, error) : NULL;
+      ok && r->threats ? threat_summary_create(sample.aggregate, limits, error) : NULL;
   ok = ok && (!r->threats || threats);
   struct event_match *matches =
       ok && r->query_count ? fm_calloc(r->query_count, sizeof(*matches)) : NULL;
   ok = ok && (!r->query_count || matches || fm_error_set(error, errno, "event matches"));
-  ok = ok && event_history_update(e->events, sample.aggregate, sample.anchor, error);
+  if (ok && r->correlation)
+    ok = event_history_update(e->events, sample.aggregate, sample.anchor, error);
+  else if (ok)
+    event_history_clear(e->events); /* nothing consumes it: no IDS, no queries */
   size_t match_count = ok ? event_history_match(e->events, sample.aggregate, r->queries,
                                                 r->query_count, matches, r->query_count,
                                                 error)
@@ -315,10 +336,12 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   struct response response = {0};
   if (ok) {
     telemetry.processing_seconds = monotonic_seconds() - read_done;
+    telemetry.event_history_evicted = event_history_evicted(e->events);
     measure_process(&telemetry);
     ok = response_begin(&response, error);
     if (ok && !protocol_write_ranked(response.stream, sample.aggregate, e->ranking, threats,
-                                     matches, match_count, &telemetry, error)) {
+                                     matches, match_count, r->candidates_per_kind, &telemetry,
+                                     error)) {
       response_discard(&response);
       ok = false;
     } else if (ok)
@@ -330,6 +353,20 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
     history_commit(e->history);
   else if (sample.begun)
     history_abort(e->history);
+  /* A budget refusal (state backstop or refused allocation) is an outcome,
+   * not a failure: the helper answers it and stays. */
+  bool over_memory = !ok && error->failure_class == FM_FAILURE_RESOURCES &&
+                     fm_heap_usage().refused > refused_before;
+  if (!ok && (sample.over_limit || over_memory)) {
+    uint64_t heap_peak = fm_heap_usage().peak_bytes;
+    aggregate_destroy(sample.aggregate);
+    memset(error, 0, sizeof(*error));
+    struct sample_outcome refusal =
+        sample.over_limit
+            ? (struct sample_outcome){OUTCOME_REFUSED_STATES, 0, sample.states, state_limit}
+            : (struct sample_outcome){OUTCOME_REFUSED_MEMORY, 0, heap_peak, r->memory_budget};
+    return refuse(e, refusal, sample.states, &telemetry, error);
+  }
   if (ok && r->snapshot)
     ok = snapshot_session(stdin, stdout, r->ctx, sample.aggregate, e->ranking, e->sequence,
                           wall.tv_sec + wall.tv_nsec / 1e9, &telemetry, error);
@@ -343,12 +380,31 @@ static void close_engine(struct engine *e) {
   event_history_destroy(e->events);
 }
 
+/* A fresh 128-bit hash key per helper process (arc4random_buf cannot fail).
+ * Test builds (FM_TEST_HOOKS) may fix it with FM_TEST_HASH_KEY=<32 hex digits>
+ * to prove outputs do not depend on it. */
+static void seed_hash(void) {
+  uint8_t key[16];
+  arc4random_buf(key, sizeof(key));
+#ifdef FM_TEST_HOOKS
+  const char *fixed = getenv("FM_TEST_HASH_KEY");
+  for (unsigned n = 0; fixed && n < sizeof(key); n++) {
+    unsigned byte;
+    if (sscanf(fixed + 2 * n, "%2x", &byte) != 1)
+      break;
+    key[n] = (uint8_t)byte;
+  }
+#endif
+  index_set_hash_key(key);
+}
+
 int main(void) {
   umask(0077);
+  seed_hash();
   struct fm_error error = {0};
   struct engine engine = {
       .history = history_create(&error),
-      .ranking = ranking_create(RANKED_FLOWS, FADE_SECONDS, RATE_SMOOTHING, &error),
+      .ranking = ranking_create(BUDGET_RANKED_FLOWS, FADE_SECONDS, RATE_SMOOTHING, &error),
       .events = event_history_create(&error)};
   if (!engine.history || !engine.ranking || !engine.events) {
     fprintf(stderr, "firewallmap-native: %s\n", error.message);
@@ -364,16 +420,23 @@ int main(void) {
   int status = 0;
   for (;;) {
     memset(&error, 0, sizeof(error));
+    /* parsing is bounded by the row maxima; each sample sets its own budget */
+    fm_heap_set_budget(0);
     bool clean_eof = false;
     struct request *request = fm_calloc(1, sizeof(*request));
-    if (request)
-      request->ctx = fm_calloc(1, sizeof(*request->ctx));
+    if (request) {
+      request->ctx = context_create(&error);
+      request->memory_budget = BUDGET_MEMORY_DEFAULT;
+      request->candidates_per_kind = BUDGET_CANDIDATES_DEFAULT;
+      request->threat_remotes = BUDGET_THREAT_REMOTES_DEFAULT;
+      request->correlation = true;
+    }
     bool ok = request && request->ctx && read_request(request, &clean_eof, &error) &&
               run_sample(&engine, request, &error);
     if (!request || !request->ctx)
       fm_error_set(&error, ENOMEM, "request allocation");
     if (request) {
-      fm_free(request->ctx);
+      context_destroy(request->ctx);
       fm_free(request->evidence);
     }
     fm_free(request);

@@ -42,6 +42,7 @@ struct saved {
 struct event_history {
   struct saved rows[RECENT_LIMIT];
   size_t count;
+  uint64_t evicted;
   struct map index;
 };
 
@@ -59,7 +60,7 @@ static size_t encode(unsigned char out[39], struct outside_key key) {
 }
 
 static void append(struct saved rows[RECENT_LIMIT], size_t *head,
-                   size_t *count, struct saved value) {
+                   size_t *count, uint64_t *evicted, struct saved value) {
   size_t slot;
   if (*count < RECENT_LIMIT) {
     slot = (*head + *count) % RECENT_LIMIT;
@@ -67,6 +68,7 @@ static void append(struct saved rows[RECENT_LIMIT], size_t *head,
   } else {
     slot = *head;
     *head = (*head + 1) % RECENT_LIMIT;
+    (*evicted)++;
   }
   rows[slot] = value;
 }
@@ -89,6 +91,7 @@ bool event_history_update(struct event_history *history,
   struct saved *next = fm_calloc(RECENT_LIMIT, sizeof(*next));
   if (!next) return fm_error_set(error, errno, "event history sample");
   size_t count = 0, head = 0;
+  uint64_t evicted = 0;
   /* Keep recent keys that are not in the current sample, then append current
    * keys in PF insertion order. This matches the Python recent-entry order. */
   for (size_t n = 0; n < history->count; n++) {
@@ -96,7 +99,7 @@ bool event_history_update(struct event_history *history,
     struct correlation_value current;
     if (now - old.seen <= RECENT_SECONDS &&
         !aggregate_correlation_lookup(aggregate, old.key, &current))
-      append(next, &head, &count, old);
+      append(next, &head, &count, &evicted, old);
   }
   for (size_t n = 0; n < aggregate_correlation_count(aggregate); n++) {
     struct outside_key key;
@@ -105,11 +108,12 @@ bool event_history_update(struct event_history *history,
       fm_free(next);
       return fm_error_set(error, EINVAL, "event history current key");
     }
-    append(next, &head, &count, (struct saved){key, value, now});
+    append(next, &head, &count, &evicted, (struct saved){key, value, now});
   }
   for (size_t n = 0; n < count; n++)
     history->rows[n] = next[(head + n) % RECENT_LIMIT];
   history->count = count;
+  history->evicted = evicted;
   fm_free(next);
   map_clear(&history->index);
   for (size_t n = 0; n < count; n++) {
@@ -121,6 +125,13 @@ bool event_history_update(struct event_history *history,
   }
   return true;
 }
+
+void event_history_clear(struct event_history *history) {
+  map_clear(&history->index);
+  history->count = 0;
+  history->evicted = 0;
+}
+uint64_t event_history_evicted(const struct event_history *history) { return history->evicted; }
 
 size_t event_history_match(const struct event_history *history,
                            const struct aggregate *aggregate,

@@ -43,7 +43,7 @@ struct aggregate {
   label_slot *lan_labels;
   size_t lan_label_capacity;
   uint64_t seen, retained, mapped;
-  bool finished;
+  bool finished, correlate;
 };
 static void put32(unsigned char **p, uint32_t value) {
   for (unsigned n = 4; n; n--)
@@ -65,7 +65,7 @@ static bool add_count(uint64_t *dest, uint64_t value, struct fm_error *error) {
   return true;
 }
 struct aggregate *aggregate_create(const struct context *ctx,
-                                   struct history *history,
+                                   struct history *history, bool correlate,
                                    struct fm_error *error) {
   struct aggregate *a = fm_calloc(1, sizeof(*a));
   if (!a) {
@@ -74,6 +74,7 @@ struct aggregate *aggregate_create(const struct context *ctx,
   }
   a->ctx = ctx;
   a->history = history;
+  a->correlate = correlate;
   a->correlation = correlation_create(error);
   if (!a->correlation) {
     fm_free(a);
@@ -188,11 +189,7 @@ static bool service_candidate(struct aggregate *a, uint32_t flow,
                               uint64_t seq, struct fm_error *error) {
   /* Group 0: ungrouped (protocol/port kept); 1: ICMP; Python's service names
    * start at 2. */
-  unsigned group = 0;
-  for (size_t n = 0; n < a->ctx->ns; n++)
-    if (a->ctx->services[n].proto == v->pf.proto &&
-        a->ctx->services[n].port == v->service_port)
-      group = a->ctx->services[n].group;
+  unsigned group = context_service_group(a->ctx, v->pf.proto, v->service_port);
   if (state_is_icmp(v->pf.proto))
     group = 1;
   unsigned char value[7], *p = value;
@@ -325,7 +322,7 @@ bool aggregate_add(struct aggregate *a, const struct state *s,
                                              : &f->local_initiated_weight,
                  weight, error))
     return false;
-  if (!add_correlation(a, s, &v, error))
+  if (a->correlate && !add_correlation(a, s, &v, error))
     return false;
   f->states++;
   if (!add_count(v.apparent_remote_initiated ? &f->remote_initiated_states

@@ -25,6 +25,7 @@
 /* Development driver. Link this file with all native modules and libm. */
 #include "../native/aggregate.h"
 #include "../native/pf_reader.h"
+#include "../native/budget.h"
 #include "../native/protocol.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -99,34 +100,38 @@ static bool read_context(const char *path, struct context *ctx,
   char line[512], a[64], b[64], device[FM_INTERFACE_SIZE];
   unsigned x, y, z;
   while (fgets(line, sizeof(line), f)) {
-    if (line[0] == 'R' && sscanf(line, "R %63s %63s %u", a, b, &x) == 3 &&
-        ctx->nr < 512) {
-      if (!parse_address(a, &ctx->ranges[ctx->nr].lo, error) ||
-          !parse_address(b, &ctx->ranges[ctx->nr].hi, error)) goto fail;
-      ctx->ranges[ctx->nr++].flags = x;
-    } else if (line[0] == 'L' && sscanf(line, "L %63s", a) == 1 && ctx->nl < 256) {
-      if (!parse_address(a, &ctx->local[ctx->nl++], error)) goto fail;
-    } else if (line[0] == 'N' && sscanf(line, "N %63s %u %15s", a, &x, device) == 3 && ctx->nn < 512) {
-      struct net *n = &ctx->nets[ctx->nn];
-      if (!parse_address(a, &n->a, error) || x > (n->a.af == 4 ? 32u : 128u)) goto fail;
-      n->prefix = x; strcpy(n->device, device); ctx->nn++;
-    } else if (line[0] == 'A' && sscanf(line, "A %63s %15s", a, device) == 2 && ctx->na < 512) {
-      struct assigned *v = &ctx->assigned[ctx->na];
-      if (!parse_address(a, &v->a, error)) goto fail;
-      strcpy(v->device, device); ctx->na++;
+    bool ok = false;
+    if (line[0] == 'R' && sscanf(line, "R %63s %63s %u", a, b, &x) == 3) {
+      struct range r = {.flags = x};
+      ok = parse_address(a, &r.lo, error) && parse_address(b, &r.hi, error) &&
+           context_add_range(ctx, r, error);
+    } else if (line[0] == 'L' && sscanf(line, "L %63s", a) == 1) {
+      struct addr local;
+      ok = parse_address(a, &local, error) && context_add_local(ctx, local, error);
+    } else if (line[0] == 'N' && sscanf(line, "N %63s %u %15s", a, &x, device) == 3) {
+      struct net n = {.prefix = x};
+      strcpy(n.device, device);
+      ok = parse_address(a, &n.a, error) && x <= (n.a.af == 4 ? 32u : 128u) &&
+           context_add_net(ctx, n, error);
+    } else if (line[0] == 'A' && sscanf(line, "A %63s %15s", a, device) == 2) {
+      struct assigned v;
+      strcpy(v.device, device);
+      ok = parse_address(a, &v.a, error) && context_add_assigned(ctx, v, error);
     } else if (line[0] == 'W' && sscanf(line, "W %15s", device) == 1) {
       strcpy(ctx->wan, device);
-    } else if (line[0] == 'S' && sscanf(line, "S %u %u %u", &x, &y, &z) == 3 &&
-               ctx->ns < 256 && x <= 255 && y <= 65535) {
-      ctx->services[ctx->ns++] = (struct service){x, y, z};
-    } else {
+      ok = true;
+    } else if (line[0] == 'S' && sscanf(line, "S %u %u %u", &x, &y, &z) == 3 && x <= 255 &&
+               y <= 65535) {
+      ok = context_add_service(ctx, (struct service){x, y, z}, error);
+    }
+    if (!ok) {
       fm_error_set(error, EPROTO, "invalid context row or capacity");
       goto fail;
     }
   }
   if (ferror(f)) { fm_error_set(error, EIO, "read context"); goto fail; }
   fclose(f);
-  return true;
+  return context_prepare(ctx, error);
 fail:
   fclose(f);
   return false;
@@ -218,7 +223,7 @@ static bool process_fixture(const char *input, const char *output_path,
                             double elapsed, bool deltas,
                             struct fm_error *error) {
   if (!begin_with_elapsed(history, elapsed, error)) return false;
-  struct aggregate *aggregate = aggregate_create(ctx, history, error);
+  struct aggregate *aggregate = aggregate_create(ctx, history, true, error);
   if (!aggregate) { history_abort(history); return false; }
   struct sample sample = {.aggregate = aggregate};
   if (!read_fixture(input, &sample, error) ||
@@ -281,7 +286,7 @@ static bool read_queries(const char *path,
 static int correlate_fixture(const char *context_path, const char *input_path,
                              const char *query_path, const char *output_path,
                              struct fm_error *error) {
-  struct context *context = calloc(1, sizeof(*context));
+  struct context *context = context_create(error);
   struct history *history = history_create(error);
   struct ranking *ranking = ranking_create(150, 20.0, 0.5, error);
   struct event_history *events = event_history_create(error);
@@ -289,7 +294,7 @@ static int correlate_fixture(const char *context_path, const char *input_path,
       !read_context(context_path, context, error) ||
       !begin_with_elapsed(history, -1, error))
     goto fail;
-  struct aggregate *aggregate = aggregate_create(context, history, error);
+  struct aggregate *aggregate = aggregate_create(context, history, true, error);
   if (!aggregate)
     goto fail_history;
   struct sample sample = {.aggregate = aggregate};
@@ -317,7 +322,8 @@ static int correlate_fixture(const char *context_path, const char *input_path,
   FILE *output = fopen(output_path, "wb");
   struct telemetry telemetry = {.interval = -1};
   bool ok = output && protocol_write_ranked(output, aggregate, ranking, NULL,
-                                             matches, match_count, &telemetry, error);
+                                             matches, match_count, BUDGET_CANDIDATES_DEFAULT,
+                                             &telemetry, error);
   if (output && fclose(output) && !error->code)
     fm_error_set(error, errno, "close event match fixture");
   aggregate_destroy(aggregate);
@@ -327,7 +333,7 @@ static int correlate_fixture(const char *context_path, const char *input_path,
   history_destroy(history);
   ranking_destroy(ranking);
   event_history_destroy(events);
-  free(context);
+  context_destroy(context);
   return 0;
 
 fail_history:
@@ -336,7 +342,7 @@ fail:
   history_destroy(history);
   ranking_destroy(ranking);
   event_history_destroy(events);
-  free(context);
+  context_destroy(context);
   return report_error(error);
 }
 
@@ -350,7 +356,7 @@ int main(int argc, char **argv) {
     return correlate_fixture(argv[2], argv[3], argv[4], argv[5], &error);
   if (!strcmp(argv[1], "sequence")) {
     if (argc < 8 || (argc - 4) % 2) return 2;
-    struct context *ctx = calloc(1, sizeof(*ctx));
+    struct context *ctx = context_create(&error);
     struct history *history = history_create(&error);
     if (!ctx || !history || !read_context(argv[2], ctx, &error))
       return report_error(&error);
@@ -370,7 +376,7 @@ int main(int argc, char **argv) {
       if (!process_fixture(argv[arg], path, ctx, history, elapsed, true,
                            &error)) break;
     }
-    history_destroy(history); free(ctx);
+    history_destroy(history); context_destroy(ctx);
     return error.code ? report_error(&error) : 0;
   }
   if (!strcmp(argv[1], "reader") || !strcmp(argv[1], "wire")) {
@@ -392,25 +398,25 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (argc != 5 || (strcmp(argv[1], "live") && strcmp(argv[1], "fixture"))) return 2;
-  struct context *ctx = calloc(1, sizeof(*ctx));
+  struct context *ctx = context_create(&error);
   if (!ctx || !read_context(argv[2], ctx, &error)) return report_error(&error);
   struct history *history = history_create(&error);
   if (!history || !begin_with_elapsed(history, -1, &error)) return report_error(&error);
-  struct aggregate *aggregate = aggregate_create(ctx, history, &error);
+  struct aggregate *aggregate = aggregate_create(ctx, history, true, &error);
   if (!aggregate) return report_error(&error);
   struct sample sample = {.aggregate = aggregate};
   bool ok = !strcmp(argv[1], "live")
                 ? pf_reader_live(state_callback, &sample, NULL, NULL, &error)
                 : read_fixture(argv[4], &sample, &error);
   if (!ok || !aggregate_finish(aggregate, &error)) {
-    history_abort(history); aggregate_destroy(aggregate); free(ctx);
+    history_abort(history); aggregate_destroy(aggregate); context_destroy(ctx);
     history_destroy(history); return report_error(&error);
   }
   history_commit(history);
   FILE *output = fopen(argv[3], "wb");
   if (!output || !protocol_write(output, aggregate, false, &error)) {
     if (output) fclose(output);
-    aggregate_destroy(aggregate); history_destroy(history); free(ctx);
+    aggregate_destroy(aggregate); history_destroy(history); context_destroy(ctx);
     return report_error(&error);
   }
   fclose(output);
@@ -429,6 +435,6 @@ int main(int argc, char **argv) {
           (unsigned long long)counts.mapped, counts.flows, counts.candidates,
           aggregate_correlation_count(aggregate), history_bytes(history),
           aggregate_bytes(aggregate), rss_kib, elapsed_ms);
-  aggregate_destroy(aggregate); history_destroy(history); free(ctx);
+  aggregate_destroy(aggregate); history_destroy(history); context_destroy(ctx);
   return 0;
 }

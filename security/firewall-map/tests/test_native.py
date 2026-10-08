@@ -77,8 +77,8 @@ def event(query=0, protocol=6, flags=b"\x01\x01"):
 
 
 def telemetry(interval=2.0):
-    values = (42, 7, interval, 0.01, 0.002, 1.0, 0.5, 1 << 20, 4096, 8192, 10, 0, 0, 0, 0, 0, 0, 0)
-    return b"\x06" + struct.pack("!IQdddddQQQQQQQQQQQ", *values)
+    values = (42, 7, interval, 0.01, 0.002, 1.0, 0.5, 1 << 20, 4096, 8192, 10, 0, 100000, 0, 0, 0, 0, 0, 0)
+    return b"\x06" + struct.pack("!IQdddddQQQQQQQQQQQQ", *values)
 
 
 def response(records, outcome=(0, 0, 0, 0), counts=None, corrupt=0, magic=b"FMAGG4\0\0", footer=True):

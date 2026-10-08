@@ -60,8 +60,10 @@ struct aggregate_counts {
 };
 /* Context and history are borrowed for the lifetime of this single sample.
  * Returned flow/candidate views remain valid until aggregate_destroy(). */
+/* correlate: record outside tuples for IDS/block event matching (skipped
+ * when nothing consumes them). */
 struct aggregate *aggregate_create(const struct context *, struct history *,
-                                   struct fm_error *);
+                                   bool correlate, struct fm_error *);
 void aggregate_destroy(struct aggregate *);
 bool aggregate_add(struct aggregate *, const struct state *, struct fm_error *);
 bool aggregate_finish(struct aggregate *, struct fm_error *);

@@ -26,14 +26,11 @@
 #define FM_STATE_H
 #include "error.h"
 #include <stdint.h>
-#define FM_INTERFACE_SIZE 16
+#include "context.h"
 #define FM_LABEL_SIZE 64
 /* PF state direction (PF_IN/PF_OUT); pf_reader.c asserts the values match. */
 #define FM_IN 1
 #define FM_OUT 2
-/* Address classification bits supplied by Python's R rows. */
-#define FM_PUBLIC 1
-#define FM_PRIVATE 2
 /* PF keeps two keys per state. The wire key holds the addresses as they
  * appear on the interface the state was created on; the stack key holds the
  * addresses as the host stack sees them. They differ only under translation. */
@@ -43,9 +40,6 @@
  * creation: forward is initiator -> responder, reverse the replies. */
 #define FM_PF_FORWARD 0
 #define FM_PF_REVERSE 1
-struct addr {
-  unsigned char af, b[16];
-};
 struct endpoint {
   struct addr a;
   uint16_t port;
@@ -62,37 +56,6 @@ struct state {
   char interface[FM_INTERFACE_SIZE], original_interface[FM_INTERFACE_SIZE],
       label[FM_LABEL_SIZE];
   struct key key[2];
-};
-struct range {
-  struct addr lo, hi;
-  unsigned flags;
-};
-struct net {
-  struct addr a;
-  unsigned prefix;
-  char device[FM_INTERFACE_SIZE];
-};
-struct assigned {
-  struct addr a;
-  char device[FM_INTERFACE_SIZE];
-};
-struct service {
-  unsigned proto, port, group;
-};
-/* Python supplies classification ranges, lexical local-address order and
- * specificity-ordered networks; C never parses OPNsense configuration. */
-struct context {
-  struct range ranges[512];
-  size_t nr;
-  struct addr local[256];
-  size_t nl;
-  struct net nets[512];
-  size_t nn;
-  struct assigned assigned[512];
-  size_t na;
-  struct service services[256];
-  size_t ns;
-  char wan[FM_INTERFACE_SIZE];
 };
 /* PF orientation of one state, before any map semantics.
  * initiator/responder: the endpoints of the packet that created the state, as
@@ -124,9 +87,7 @@ struct state_view {
 bool state_orient(const struct state *, struct orientation *, struct fm_error *);
 bool state_normalize(const struct state *, const struct context *,
                      struct state_view *, struct fm_error *);
-bool address_equal(struct addr, struct addr);
 bool endpoint_equal(struct endpoint, struct endpoint);
-unsigned address_flags(const struct context *, struct addr);
 bool state_is_icmp(unsigned);
 #define FM_TUPLE_SIZE 39
 size_t state_tuple(unsigned char *, unsigned, struct endpoint, struct endpoint);
