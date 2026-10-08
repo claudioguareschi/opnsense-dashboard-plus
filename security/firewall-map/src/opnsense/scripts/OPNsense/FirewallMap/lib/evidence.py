@@ -59,6 +59,36 @@ def facts(blocked_hits=0, ids_alerts=0, ids_severity=0, reputation=False):
     return mask, blocked_hits, ids_alerts, ids_severity
 
 
+# block-only and other flow-less security objects in one map document, at most
+MAX_SECURITY_OBJECTS = 300
+CLASS_ORDER = {"S3": 3, "S2": 2, "S1": 1, "S0": 0}
+
+
+def names(mask):
+    """The evidence facts of a mask, by name, in bit order."""
+    return [name for bit, name in sorted(NAMES.items()) if mask & bit]
+
+
+def security_objects(facts, remotes, shown, limit=MAX_SECURITY_OBJECTS):
+    """Remotes with security evidence and no flow on the map (block-only attackers, alerting or
+    reputation-flagged addresses whose connections ended), strongest first: (objects, omitted).
+
+    `facts` are this sample's EVIDENCE facts, `remotes` the collector's per-address answer (its
+    evidence with the threat-list fact, its security class, the remote's PF states in tracked
+    flows); an address the collector did not answer for is left out."""
+    objects = []
+    for address, (_mask, blocked, alerts, severity) in facts.items():
+        remote = remotes.get(address)
+        if address in shown or remote is None or not remote["evidence"]:
+            continue
+        objects.append({"address": address, "security_class": remote["security_class"],
+                        "evidence": names(remote["evidence"]), "blocked_hits": blocked, "ids_alerts": alerts,
+                        "ids_severity": severity or None, "permitted_states": remote["states"]})
+    objects.sort(key=lambda item: (-CLASS_ORDER[item["security_class"]], -item["blocked_hits"],
+                                   -item["ids_alerts"], item["address"]))
+    return objects[:limit], max(0, len(objects) - limit)
+
+
 def gather(alerts=None, correlator=None, blocks=None, reputation=None):
     """{remote: facts} for every public remote with evidence."""
     blocked, ids = {}, {}

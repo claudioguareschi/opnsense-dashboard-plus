@@ -587,7 +587,6 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   struct tracker_report report = {0};
   ok = ok && tracker_finish(e->tracker, sample.aggregate, e->ranking, sample.anchor,
                             telemetry.interval, &hints, &report, error);
-  map_clear(&evidence);
   if (ok) {
     telemetry_track(&telemetry, &report, aggregate_counts(sample.aggregate));
     struct aggregate_usage usage = aggregate_usage(sample.aggregate);
@@ -621,7 +620,9 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
     telemetry.event_history_evicted = event_history_evicted(e->events);
     measure_process(&telemetry);
     ok = response_begin(&response, error);
-    struct class_report classes = {e->classifier, r->classify, r->classify_count};
+    struct class_report classes = {e->classifier, r->classify, r->classify_count, sample.aggregate,
+                                   &evidence, r->evidence_facts,
+                                   classifier_category(e->classifier, 'T')};
     struct ranked_output ranked = {selected, hints.selected_count, e->profiles, position};
     if (ok && !protocol_write_ranked(response.stream, sample.aggregate, &ranked, threats,
                                      matches, match_count, &classes, r->candidates_per_kind,
@@ -634,6 +635,7 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   fm_free(matches);
   fm_free(selected);
   fm_free(position);
+  map_clear(&evidence);
   threat_summary_destroy(threats);
   if (ok)
     history_commit(e->history);

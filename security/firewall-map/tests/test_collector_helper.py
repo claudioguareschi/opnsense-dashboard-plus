@@ -78,8 +78,8 @@ def event(query=0, protocol=6, flags=b"\x01\x01"):
         flags, b"igb0".ljust(16, b"\0"), b"rule-label".ljust(64, b"\0")))
 
 
-def classified(value="203.0.113.3", mask=1):
-    return b"\x07" + address(value) + struct.pack("!Q", mask)
+def classified(value="203.0.113.3", mask=1, evidence=0, security_class=0, states=0):
+    return b"\x07" + address(value) + struct.pack("!QBBQ", mask, evidence, security_class, states)
 
 
 def class_set(set_id=0, category="T", status=0, entries=12):
@@ -202,6 +202,8 @@ class CollectorProtocolTest(unittest.TestCase):
         self.assertEqual(result["flows"][0]["classes"], 2)
         self.assertEqual(result["threat_remotes"][0]["classes"], 3)
         self.assertEqual(result["classified"], {"203.0.113.3": 3})
+        self.assertEqual(result["remotes"], {"203.0.113.3": {"classes": 3, "evidence": 0, "security_class": "S0",
+                                                             "states": 0}})
         self.assertEqual(result["class_sets"], [
             {"id": 0, "category": "T", "status": "ok", "entries": 12},
             {"id": 1, "category": "C", "status": "missing", "entries": 0}])
@@ -212,7 +214,10 @@ class CollectorProtocolTest(unittest.TestCase):
             "flow mask outside the sets": [header(), flow(classes=4), *sets, telemetry()],
             "threat mask outside the sets": [header(True), threat_remote(classes=8), *sets, telemetry()],
             "address not asked": [header(), classified("198.51.100.9"), *sets, telemetry()],
-            "zero mask": [header(), classified(mask=0), *sets, telemetry()],
+            "nothing set": [header(), classified(mask=0), *sets, telemetry()],
+            "class without evidence": [header(), classified(security_class=2), *sets, telemetry()],
+            "evidence without class": [header(), classified(evidence=2), *sets, telemetry()],
+            "unknown evidence bit": [header(), classified(evidence=64, security_class=1), *sets, telemetry()],
             "duplicate address": [header(), classified(), classified(), *sets, telemetry()],
             "set order": [header(), class_set(1, "C"), class_set(0, "T"), telemetry()],
             "set category": [header(), class_set(0, "C"), telemetry()],

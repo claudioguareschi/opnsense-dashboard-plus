@@ -659,8 +659,11 @@ class Collector:
         # per-source counts of log lines rejected by per-line containment, and the last reason
         self.ingest_rejected = {"filterlog": 0, "eve": 0}
         self.ingest_last_rejection = None
-        # evidence remotes over the request's cap in the last sample (the strongest are sent)
+        # evidence remotes over the request's cap in the last sample (the strongest are sent), the
+        # facts last sent and the collector's per-address answer (security objects)
         self.evidence_omitted = 0
+        self.sent_evidence = {}
+        self.remote_answers = {}
         # the last sample's timings (SampleTimer.report) and when they were last written
         self.timings = None
         self.timings_written = None
@@ -847,6 +850,8 @@ class Collector:
             # Keep address-alert evidence independently of ordinary flow byte selection.
             shown = {block["source"] for block in payload["blocks"]}
         payload["alerts"] = alert_summary(self.alerts, geo, origin, shown, self.blocklists, self.reputation)
+        if not snapshot:
+            self.add_security_objects(payload, geo)
         payload["ids_flows"] = self.correlator.summary(geo, origin, self.host_names(), self.networks, self.interfaces,
                                                        self.blocklists, self.reputation)
         # which lists are consulted, so the details can show "not listed" per list
@@ -869,6 +874,20 @@ class Collector:
             # complete for everything else
             payload["incomplete"] = {"skipped_states": dict(self.sample_skipped)}
         return payload
+
+    def add_security_objects(self, payload, geo):
+        """Security objects without a flow on the map (lib/evidence.py): each evidence source as
+        its own fact, the collector's security class, and the remote's permitted PF states."""
+        objects, omitted = evidence_facts.security_objects(
+            self.sent_evidence, self.remote_answers, {flow["dest"] for flow in payload["flows"]})
+        geo.resolve([item["address"] for item in objects])
+        for item in objects:
+            location = geo.get(item["address"]) or {}
+            item["lists"] = threat_lists_for(item["address"], self.blocklists, self.reputation)
+            item.update({key: location.get(source) for key, source in (
+                ("lat", "lat"), ("lon", "lon"), ("country", "country_name"), ("country_code", "country"))})
+        payload["security"] = objects
+        payload["security_omitted"] = omitted
 
     def add_focus(self, payload):
         """Each enabled profile's selection as positions in the payload's flows (their union):
@@ -1243,6 +1262,8 @@ class Collector:
                     f"{count} {reason.replace('_', ' ')}" for reason, count in skipped.items()))
             self.sample_skipped = skipped
         self.blocklists.observe(sample)
+        if not sample["refused"]:
+            self.remote_answers = sample.get("remotes") or {}
         self._record_collector(sample=sample)
         return sample
 
@@ -1251,6 +1272,7 @@ class Collector:
         collector's ranking, forced tracking and threat summary."""
         facts = evidence_facts.gather(self.alerts, self.correlator, self.blocks, self.reputation)
         self.evidence_omitted = max(0, len(facts) - state_collector.THREAT_REMOTES)
+        self.sent_evidence = facts
         return facts
 
     def evidence_remotes(self):

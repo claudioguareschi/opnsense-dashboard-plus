@@ -82,6 +82,12 @@ struct class_report {
   const struct classifier *classifier;
   const struct addr *addresses;
   size_t address_count;
+  /* each address's evidence (the sample's EVIDENCE facts, the threat sets)
+   * and its PF states in tracked flows (optional: NULL aggregate) */
+  const struct aggregate *aggregate;
+  const struct map *evidence;
+  const struct evidence *facts;
+  uint64_t threat_mask;
 };
 void protocol_put(unsigned char **, uint64_t, unsigned);
 uint64_t protocol_get(const unsigned char **, unsigned);

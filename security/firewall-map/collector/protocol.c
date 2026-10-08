@@ -121,7 +121,7 @@ bool protocol_frame(FILE *f, const void *data, size_t len, uint32_t *checksum,
 #define EVENT_RECORD_SIZE 194
 #define TELEMETRY_RECORD_SIZE 365
 #define FOOTER_RECORD_SIZE 117
-#define CLASSIFIED_RECORD_SIZE 26
+#define CLASSIFIED_RECORD_SIZE 36
 #define CLASS_SET_RECORD_SIZE 12
 
 struct sent {
@@ -430,19 +430,60 @@ static struct aggregate_counts footer_counts(const struct aggregate *a, const st
 }
 
 /* Masks of the requested addresses (nonzero only), then every set's status. */
+static size_t address_key(unsigned char key[17], struct addr a) {
+  key[0] = a.af;
+  memcpy(key + 1, a.b, 16);
+  return 17;
+}
+/* Per requested address: its set mask, its evidence (facts and the derived
+ * security class: the one policy, evidence.h) and its PF states in tracked
+ * flows, when any of them is set. */
 static bool write_classification(FILE *f, const struct class_report *report,
                                  uint32_t *checksum, struct sent *sent,
                                  struct fm_error *error) {
-  for (size_t n = 0; n < report->address_count; n++) {
+  struct map asked = {0};
+  uint64_t *states = report->address_count && report->aggregate
+                         ? fm_calloc(report->address_count, sizeof(*states)) : NULL;
+  bool ok = !(report->address_count && report->aggregate && !states) ||
+            fm_error_set(error, errno, "classified states");
+  /* states per asked address: one pass over the tracked flows */
+  for (size_t n = 0; ok && states && n < report->address_count; n++) {
+    unsigned char key[17];
+    struct item *item = lookup(&asked, key, address_key(key, report->addresses[n]), true, error);
+    if (!(ok = item != NULL)) break;
+    item->value = n;
+  }
+  size_t flows = ok && states ? aggregate_counts(report->aggregate).flows : 0;
+  for (size_t n = 0; n < flows; n++) {
+    const struct flow *flow = aggregate_flow(report->aggregate, n);
+    unsigned char key[17];
+    const struct item *item = map_find(&asked, key, address_key(key, flow->remote));
+    if (item) states[item->value] += flow->states;
+  }
+  for (size_t n = 0; ok && n < report->address_count; n++) {
     uint64_t mask = classifier_lookup(report->classifier, report->addresses[n]);
-    if (!mask) continue;
+    struct evidence facts = {0};
+    if (report->evidence) {
+      unsigned char key[17];
+      const struct item *item = map_find(report->evidence, key, address_key(key, report->addresses[n]));
+      if (item) facts = report->facts[item->value];
+    }
+    if (mask & report->threat_mask) facts.mask |= EVIDENCE_THREAT_LIST;
+    uint64_t count = states ? states[n] : 0;
+    if (!mask && !facts.mask && !count) continue;
     unsigned char b[CLASSIFIED_RECORD_SIZE], *p = b;
     *p++ = RECORD_CLASSIFIED;
     protocol_address_put(&p, report->addresses[n]);
     protocol_put(&p, mask, 8);
-    if (!protocol_frame(f, b, p - b, checksum, error)) return false;
+    *p++ = facts.mask;
+    *p++ = (unsigned char)security_class(&facts);
+    protocol_put(&p, count, 8);
+    if (!(ok = protocol_frame(f, b, p - b, checksum, error))) break;
     sent->classified++;
   }
+  map_clear(&asked);
+  fm_free(states);
+  if (!ok) return false;
   size_t sets = report->classifier ? classifier_set_count(report->classifier) : 0;
   for (size_t n = 0; n < sets; n++) {
     const struct class_set *set = classifier_set(report->classifier, n);

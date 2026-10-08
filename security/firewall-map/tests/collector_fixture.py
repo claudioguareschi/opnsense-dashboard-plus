@@ -166,6 +166,8 @@ class CollectorFixture:
         for remote in result["threat_remotes"]:
             remote["classes"] = mask(remote["address"])
         result["classified"] = {address: mask(address) for address in addresses if mask(address)}
+        result["remotes"] = {address: {"classes": mask(address), "evidence": 0, "security_class": "S0", "states": 0}
+                             for address in addresses if mask(address)}
         result["class_sets"] = [{"id": bit, "category": category,
                                  "status": "ok" if table in self.tables else "missing",
                                  "entries": len(self.tables.get(table, ()))}

@@ -429,7 +429,7 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
     checksum, threats_present, telemetry, footer, previous_kind = 0, None, None, None, HEADER
     flows, candidates, matches = [], [], {}
     threat_remotes, threat_candidates = [], []
-    classified, class_sets, selections = {}, [], []
+    classified, class_sets, selections, remotes = {}, [], [], {}
     for size, data in _frames(stream, process, deadline, byte_limit):
         kind = data[0]
         if kind != FOOTER:
@@ -520,12 +520,18 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
                 raise CollectorError("FMAGG4 duplicate event match")
             matches[key] = match
         elif kind == CLASSIFIED:
-            if len(data) != 26:
+            if len(data) != 36:
                 raise CollectorError("invalid FMAGG4 classified address")
-            address, mask = _address(data[1:18]), struct.unpack_from("!Q", data, 18)[0]
-            if address not in asked or address in classified or not mask:
+            address = _address(data[1:18])
+            mask, evidence_mask, security_class, states = struct.unpack_from("!QBBQ", data, 18)
+            if address not in asked or address in remotes or not (mask or evidence_mask or states) \
+                    or evidence_mask & ~(evidence_facts.REQUEST_BITS | evidence_facts.THREAT_LIST) \
+                    or security_class >= len(SECURITY_CLASSES) or bool(security_class) != bool(evidence_mask):
                 raise CollectorError("invalid FMAGG4 classified address identity")
-            classified[address] = _class_mask(mask, categories)
+            remotes[address] = {"classes": _class_mask(mask, categories), "evidence": evidence_mask,
+                                "security_class": SECURITY_CLASSES[security_class], "states": states}
+            if mask:
+                classified[address] = mask
         elif kind == CLASS_SET:
             if len(data) != 12:
                 raise CollectorError("invalid FMAGG4 classification set")
@@ -554,7 +560,7 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
         raise CollectorError("incomplete FMAGG4 response")
     (outcome, context_kind, actual, limit, seen, retained, mapped, flow_total, flows_sent, candidates_sent,
      matches_sent, remotes_sent, remote_candidates_sent, classified_sent, class_sets_sent, expected) = footer
-    records = (flows, candidates, matches, threat_remotes, threat_candidates, classified, class_sets)
+    records = (flows, candidates, matches, threat_remotes, threat_candidates, remotes, class_sets)
     if expected != checksum or outcome not in OUTCOMES \
             or (flows_sent, candidates_sent, matches_sent, remotes_sent, remote_candidates_sent, classified_sent,
                 class_sets_sent) != tuple(map(len, records)) \
@@ -576,6 +582,9 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
             "threat_remotes": threat_remotes, "threat_candidates": threat_candidates,
             "threat_summary": threats_present, "telemetry": telemetry,
             "classified": classified, "class_sets": class_sets, "selections": selections,
+            # per requested address: set mask, evidence, the collector's security class and its PF
+            # states in tracked flows (whenever one of them is set)
+            "remotes": remotes,
             "baseline": telemetry["interval"] < 0,
             "refused": refused and {"reason": refused, "kind": chr(context_kind) if context_kind else None,
                                     "actual": actual, "limit": limit},
@@ -727,7 +736,7 @@ class CollectorEngine:
         if refused:
             # Python's own check; the helper would refuse the same request
             return {"flows": [], "candidates": [], "matches": {}, "threat_remotes": [], "threat_candidates": [],
-                    "classified": {}, "class_sets": [], "selections": [],
+                    "classified": {}, "class_sets": [], "selections": [], "remotes": {},
                     "threat_summary": False, "telemetry": None, "baseline": False, "refused": refused,
                     "counts": {"states": 0, "retained": 0, "mapped": 0, "flows": 0, "captured_flows": 0,
                                "candidates": 0, "matches": 0, "threat_remotes": 0, "threat_candidates": 0},

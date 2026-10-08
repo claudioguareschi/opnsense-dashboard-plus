@@ -103,6 +103,31 @@ class EvidenceFactsTest(unittest.TestCase):
         self.assertEqual(gathered["45.56.79.10"], (evidence.IDS | evidence.IDS_HIGH, 0, 4, 1))
 
 
+class SecurityObjectsTest(unittest.TestCase):
+    def test_flowless_remotes_with_evidence_strongest_first(self):
+        facts = {"45.56.79.1": evidence.facts(4200, 2, 3), "45.56.79.2": evidence.facts(ids_alerts=1, ids_severity=1),
+                 "45.56.79.3": evidence.facts(reputation=True), "45.56.79.4": evidence.facts(5),
+                 "45.56.79.5": evidence.facts(9), "45.56.79.6": evidence.facts(1)}
+        remotes = {
+            "45.56.79.1": {"evidence": evidence.PF_BLOCKED | evidence.IDS | evidence.THREAT_LIST,
+                           "security_class": "S2", "states": 3, "classes": 1},
+            "45.56.79.2": {"evidence": evidence.IDS | evidence.IDS_HIGH, "security_class": "S3", "states": 0,
+                           "classes": 0},
+            "45.56.79.3": {"evidence": evidence.REPUTATION, "security_class": "S1", "states": 0, "classes": 0},
+            "45.56.79.4": {"evidence": evidence.PF_BLOCKED, "security_class": "S1", "states": 0, "classes": 0},
+            "45.56.79.5": {"evidence": evidence.PF_BLOCKED, "security_class": "S1", "states": 0, "classes": 0},
+        }
+        # 45.56.79.4 has a flow on the map; 45.56.79.6 got no answer (over a cap): both left out
+        objects, omitted = evidence.security_objects(facts, remotes, {"45.56.79.4"}, limit=3)
+        self.assertEqual([item["address"] for item in objects], ["45.56.79.2", "45.56.79.1", "45.56.79.5"])
+        self.assertEqual(omitted, 1)
+        attacker = objects[1]
+        # the plan's example object: blocked attempts, permitted states, the list, the alerts
+        self.assertEqual((attacker["evidence"], attacker["blocked_hits"], attacker["permitted_states"],
+                          attacker["ids_alerts"], attacker["security_class"]),
+                         (["threat_list", "pf_blocked", "ids"], 4200, 3, 2, "S2"))
+
+
 class EvidenceRowsTest(unittest.TestCase):
     def test_rows_carry_the_facts(self):
         rows = collector._evidence_rows({"45.56.79.9": evidence.facts(40, 7, 2, True)})

@@ -257,6 +257,19 @@ class CollectorScaleTest(unittest.TestCase):
                 self.assertIn(remote, flows)
                 self.assertEqual((flows[remote]["evidence"], flows[remote]["security_class"]), (facts_seen, security))
 
+    def test_the_collector_answers_for_flowless_evidence_remotes(self):
+        """A remote with evidence and no PF state, and one with both: the collector derives the
+        class and counts the permitted states, so Python never re-implements the policy."""
+        facts = {"45.56.79.53": evidence.facts(4200, 2, 3), "9.0.0.5": evidence.facts(40)}
+        (_, last), _ = self.run_mode("unique", 1000, evidence=facts, classify=list(facts),
+                                     classification=("some", [("T", "threats_some")]))
+        self.assertEqual(last["remotes"]["45.56.79.53"],
+                         {"classes": 0, "evidence": evidence.PF_BLOCKED | evidence.IDS, "security_class": "S2",
+                          "states": 0})
+        self.assertEqual(last["remotes"]["9.0.0.5"],
+                         {"classes": 1, "evidence": evidence.PF_BLOCKED | evidence.THREAT_LIST,
+                          "security_class": "S2", "states": 1})
+
     def test_security_floors_are_minimums_per_class(self):
         def run(rows, facts):
             (_, last), _ = self.run_mode("unique", 1000, profiles=["PROFILE 0 classic"] + rows, evidence=facts)
