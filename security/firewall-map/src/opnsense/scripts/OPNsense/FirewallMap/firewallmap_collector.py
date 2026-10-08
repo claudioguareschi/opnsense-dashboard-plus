@@ -24,19 +24,19 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Persistent PF state sampler for Firewall Map+.
+"""Persistent native PF collector orchestrator for Firewall Map+.
 
-Samples the PF state table every 2 seconds, keeps per-state byte/packet counters
-between samples and aggregates counter deltas into public (firewall, remote)
-flows. Only a compact, capped, geo-enriched summary is written to disk for the
-dashboard API to read; the browser never triggers a PF walk or a GeoIP lookup.
+The required native worker samples PF, keeps counter history, aggregates and
+ranks flows, and returns only bounded mechanical results. Python applies policy
+and enrichment, then writes a compact, capped summary for the dashboard API;
+the browser never triggers a PF walk or a GeoIP lookup.
 
 A flow is active only while its counters advance. Idle flows fade out over
 FADE_SECONDS and a flow is dropped as soon as its last PF state disappears.
 All geolocation lookups are local: the installed MaxMind or DB-IP database, read in process (lib/mmdb.py).
 
-This module is the orchestrator; parsing, caches, threat lists, names, blocks and
-Suricata correlation live in the lib/ modules next to it.
+This module is the orchestrator; caches, threat lists, names, blocks and
+Suricata policy live in the lib/ modules next to it.
 
     firewallmap_collector.py           run the collector (started by rc.d/firewallmap)
     firewallmap_collector.py tables    JSON threat list candidates for the settings page
@@ -74,7 +74,7 @@ from lib.blocks import BlockTracker, FilterLogTail, block_event_time, block_summ
 from lib.cache import GEO_LOOKUPS_PER_SAMPLE, CacheStore, GeoCache
 from lib.common import (
     COLLECTOR_TIMINGS, HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, SNAPSHOT_DIR,
-    SNAPSHOT_REQUEST_DIR, connection_target, host_port, log_error, log_notice, log_warning, private_ip, public_ip,
+    SNAPSHOT_REQUEST_DIR, connection_target, log_error, log_notice, log_warning, private_ip, public_ip,
     protocol_name, requested, secure_umask, service_name, service_port_label, write_json,
     write_text,
 )
@@ -91,9 +91,9 @@ from firewallmap_snapshots import (
     MAX_DOCUMENT_BYTES, DocumentBudget, SnapshotTooLarge, json_size, valid_id as snapshot_valid_id,
 )
 from lib.pf import (
-    SAMPLE_TIMEOUT, StateFacts, TooManyStates, _Record, flow_endpoints, host_info, port_forwards, rule_descriptions, sample_states,
+    _Record, host_info, port_forwards, rule_descriptions,
 )
-from lib.native import NativeEngine, NativeError, available as native_available
+from lib.native import NativeEngine, NativeError, READ_TIMEOUT
 
 
 EXTERNAL_IP_URL = "https://api.ipify.org"
@@ -126,10 +126,6 @@ BACKGROUND_INTERVAL = 20.0
 THREAT_RECORD_SECONDS = 20.0
 THREAT_PRUNE_SECONDS = 3600.0
 MAX_FAILURE_BACKOFF = 30.0
-# While the table is too large to walk, only the cheap ``pfctl -si`` count runs. Refresh its
-# status before flow_summary.sh's nine-second fast-summary window expires, or viewers see a
-# misleading "Starting flow collector…" between honest too-many-states notices.
-TOO_MANY_STATES_INTERVAL = 5.0
 COLLECTOR_LOCK = f"{RUN_DIR}/collector.lock"
 # the last sample's timings are written at most this often
 TIMINGS_WRITE_SECONDS = 10.0
@@ -143,12 +139,10 @@ SETTINGS_REFRESH_SECONDS = 30
 INTERVAL = 2.0
 FADE_SECONDS = 20.0
 MAX_FLOWS = 150
-RATE_SMOOTHING = 0.5
 HOST_REFRESH_SECONDS = 30.0
 MAX_SERVICES = 4
 MAX_INSIDE = 3
 # PF states kept with a saved snapshot, per remote address and in all
-SNAPSHOT_STATES_PER_ADDRESS = 50
 SNAPSHOT_STATES_TOTAL = 5000
 # Snapshot-specific budgets: neither live visualization nor PF admission limits.
 SNAPSHOT_FLOWS = 5000
@@ -173,7 +167,7 @@ class _Flow(_Record):
         self.rate = self.rate_in = self.rate_out = self.packet_rate = 0.0
         self.last_active = None
         self.first_seen = first_seen
-        # The remaining slots are filled by _update_flow() before the flow is read.
+        # Remaining presentation fields are filled by update_aggregate().
 
 
 class _FlowTotals(_Record):
@@ -202,141 +196,16 @@ def _native_address(value):
 
 
 class FlowTracker:
-    """Turn successive PF state samples into per-flow byte rates with activity fading."""
+    """Adapt native-selected aggregates to the existing bounded flow presentation."""
 
-    def __init__(self, fade_seconds=FADE_SECONDS, smoothing=RATE_SMOOTHING):
+    def __init__(self, fade_seconds=FADE_SECONDS):
         self.fade_seconds = fade_seconds
-        self.smoothing = smoothing
-        self.counters = {}
         self.flows = {}
-        self.sampled_at = None
         self.total_flows = 0
-        self.native_visible = None
+        self.native_visible = []
 
-    def _totals(self, records, local_addresses, elapsed, networks=None, sample=None,
-                interface_addresses=None, primary_wan_device=None):
-        """{(local, remote): totals} for this sample, and the counters to diff the next one against.
-
-        sample: StateFacts.view() of these records, when the caller already has it. This runs for
-        every state of every sample, so each state is folded into its flow's totals in place.
-        """
-        counters = {}
-        totals = {}
-        previous_counters = self.counters
-        views, lan_rules = sample if sample is not None else StateFacts().view(
-            records, local_addresses, networks, interface_addresses, primary_wan_device)
-        for record, facts in views:
-            pair = facts.pair
-            state_id = record.id
-            if pair is None or state_id is None:
-                continue
-            if facts.src_is_remote:
-                toward, away = record.bytes_in, record.bytes_out
-            else:
-                toward, away = record.bytes_out, record.bytes_in
-            packets = record.packets_in + record.packets_out
-            counters[state_id] = current = (toward, away, packets)
-            age = record.age
-            # what the state moved since the previous sample
-            previous = previous_counters.get(state_id)
-            if previous is not None:
-                delta = (max(0, toward - previous[0]), max(0, away - previous[1]), max(0, packets - previous[2]))
-            elif elapsed is not None and age is not None and age <= 2 * elapsed:
-                # a state created since the previous sample: everything it counted is new
-                delta = current
-            else:
-                delta = (0, 0, 0)
-            total = totals.get(pair)
-            if total is None:
-                total = totals[pair] = _FlowTotals()
-            # PF counts initiator->responder first; src is the initiator in parse_states()
-            weight = delta[0] + delta[1] + 1
-            if facts.remote_started:
-                total.remote_started += weight
-                # what the remote side connected to: a port-forward target or the firewall itself
-                counts, key = total.targets, facts.target
-                counts[key] = counts.get(key, 0) + weight
-            else:
-                total.local_started += weight
-            if facts.inside:
-                counts, key = total.inside, facts.inside.address
-                counts[key] = counts.get(key, 0) + weight
-            key = record.origif
-            if key:
-                counts = total.egress
-                counts[key] = counts.get(key, 0) + weight
-            service = facts.service
-            counts = total.services
-            counts[service] = counts.get(service, 0) + weight
-            total.ports.setdefault(service, facts.port_label)
-            if age is not None and age > total.oldest:
-                total.oldest = age
-            # bytes moved so far by the connections open now, and the rules that let them through
-            total.bytes_toward += toward
-            total.bytes_away += away
-            rule = (lan_rules.get(facts.rule_key) if facts.rule_key is not None and lan_rules else None) \
-                or record.rule
-            if rule:
-                counts = total.rules
-                counts[rule] = counts.get(rule, 0) + 1
-            total.toward += delta[0]
-            total.away += delta[1]
-            total.packets += delta[2]
-            total.states += 1
-            total.protocols.add(record.protocol)
-        return totals, counters
-
-    def _update_flow(self, flow, total, elapsed, now):
-        if isinstance(flow, dict):
-            # Some callers inject dict-shaped flows. Keep their object and mutate it as before;
-            # production flows use attributes directly, without a per-field adapter.
-            compact = _Flow(flow["first_seen"])
-            for key in compact.keys():
-                if key in flow:
-                    compact[key] = flow[key]
-            self._update_flow(compact, total, elapsed, now)
-            flow.update(dict(compact))
-            return
-        flow.rate_in = self.smoothing * (total.toward / elapsed if elapsed else 0.0) + (1 - self.smoothing) * flow.rate_in
-        flow.rate_out = self.smoothing * (total.away / elapsed if elapsed else 0.0) + (1 - self.smoothing) * flow.rate_out
-        flow.packet_rate = self.smoothing * (total.packets / elapsed if elapsed else 0.0) + (1 - self.smoothing) * flow.packet_rate
-        flow.rate = flow.rate_in + flow.rate_out
-        flow.states = total.states
-        flow.protocols = sorted(total.protocols)
-        flow.services = _ranked(total.services, MAX_SERVICES)
-        flow.service_ports = {name: total.ports[name] for name in flow.services if total.ports.get(name)}
-        # how long the oldest connection behind this flow has been open
-        flow.age = total.oldest
-        flow.transferred = (total.bytes_toward, total.bytes_away)
-        flow.rule = (_ranked(total.rules, 1) or [None])[0]
-        flow.inside = _ranked(total.inside, MAX_INSIDE)
-        flow.egress = (_ranked(total.egress, 1) or [None])[0]
-        started = total.remote_started + total.local_started
-        share = total.remote_started / started if started else 0.0
-        flow.initiated = "remote" if share >= 0.75 else "local" if share <= 0.25 else "both"
-        flow.targets = _ranked(total.targets, MAX_INSIDE)
-        if total.toward + total.away > 0:
-            flow.last_active = now
-
-    def update(self, records, local_addresses, now, networks=None, sample=None,
-               interface_addresses=None, primary_wan_device=None):
-        elapsed = (now - self.sampled_at) if self.sampled_at is not None else None
-        totals, self.counters = self._totals(records, local_addresses, elapsed, networks, sample,
-                                             interface_addresses, primary_wan_device)
-        self.sampled_at = now
-        self.total_flows = len(totals)
-        self.native_visible = None
-        # a flow disappears together with its last PF state
-        for pair in list(self.flows):
-            if pair not in totals:
-                del self.flows[pair]
-        for pair, total in totals.items():
-            flow = self.flows.setdefault(pair, _Flow(now))
-            self._update_flow(flow, total, elapsed, now)
-
-    def update_aggregate(self, aggregate, now, reset_history=False):
+    def update_aggregate(self, aggregate, now):
         """Ingest only the native top-K aggregates; rates and ordering are already final."""
-        self.counters = {}
         totals = {}
         rows_by_pair = {}
         protocols = {1: "icmp", 6: "tcp", 17: "udp", 58: "ipv6-icmp", 132: "sctp"}
@@ -385,7 +254,6 @@ class FlowTracker:
             elif kind == 6:
                 rule = value.decode("utf-8")
                 total.rules[rule] = total.rules.get(rule, 0) + weight
-        self.sampled_at = now
         previous_flows = self.flows
         current_flows = {}
         visible = []
@@ -414,23 +282,6 @@ class FlowTracker:
         self.flows = current_flows
         # The native order is already the stable FlowTracker ranking. No Python re-sort.
         self.native_visible = visible
-
-    def activity(self, flow, now):
-        last_active = flow.last_active if isinstance(flow, _Flow) else flow["last_active"]
-        if last_active is None:
-            return 0.0
-        return max(0.0, 1.0 - (now - last_active) / self.fade_seconds)
-
-    def visible(self, now, limit=MAX_FLOWS):
-        """Active or fading flows, strongest first, capped before they reach the browser (None: all)."""
-        ranked = []
-        for (local, remote), flow in self.flows.items():
-            activity = self.activity(flow, now)
-            if activity > 0:
-                rate = flow.rate if isinstance(flow, _Flow) else flow["rate"]
-                ranked.append((max(rate, 1.0) * activity, local, remote, flow, activity))
-        ranked.sort(key=lambda item: item[0], reverse=True)
-        return ranked if limit is None else ranked[:limit]
 
 
 def _flow_entry(local, remote, flow, activity, local_addresses, context, wall_time):
@@ -492,8 +343,8 @@ def summarize_flows(tracker, geo, local_addresses, role, now, wall_time, hostnam
                     anchor=None, visible=None):
     context = context or {}
     if visible is None:
-        visible = tracker.visible(now, limit)
-        geo.resolve([address for _, local, remote, _, _ in visible for address in (remote, local) if public_ip(address)])
+        visible = tracker.native_visible
+        geo.resolve(address for _, local, remote, _, _ in visible for address in (remote, local) if public_ip(address))
     # Explicit candidates are already resolved by snapshot selection. Do not trigger a cache
     # eviction between counting their geographic availability and serializing those flows.
     flows = []
@@ -577,8 +428,8 @@ class ThreatRecorder:
             "city": location.get("city"),
         }.items() if value}
 
-    def update(self, records, collector, now, sample=None, native=None):
-        """sample: StateFacts.view() of records, when the caller already has it."""
+    def update(self, native, collector, now):
+        """Record native mechanical summaries using Python threat policy."""
         if not self.due(now):
             return
         self.recorded = now
@@ -590,8 +441,7 @@ class ThreatRecorder:
             def lists_for(address):
                 return threat_lists_for(address, blocklists, reputation, correlator)
 
-            seen = threats.observe_aggregates(native, lists_for) if native is not None else threats.observe(
-                records, lists_for, collector.local_addresses, collector.networks, sample)
+            seen = threats.observe_aggregates(native, lists_for)
             seen.update(ips_drops(correlator, seen, self.last_wall, blocklists, reputation))
             seen.update(firewall_blocks(correlator, seen, self.last_wall, blocklists, reputation))
             if collector.geo is not None and seen:
@@ -736,12 +586,8 @@ class Collector:
         self.blocklists = BlocklistIndex()
         self.reputation = Reputation(self.store)
         self.recorder = ThreatRecorder()
-        self.facts = StateFacts()
         self.native_engine = NativeEngine()
-        self.engine_mode = None
         self.native_last_at = None
-        self.native_visible = False
-        self.native_failure_logged = False
         # the last sample's timings (SampleTimer.report) and when they were last written
         self.timings = None
         self.timings_written = None
@@ -772,7 +618,6 @@ class Collector:
         self.geo = None
         self.problem = None
         self.failures = 0
-        self.too_many_states = False
         self.background = False
         self.checked = {"host": None, "settings": None, "metadata": None, "blocklists": None}
         self.reload_seen = reload_token()
@@ -823,9 +668,8 @@ class Collector:
                 self.checked["blocklists"] = now
         self.reputation.refresh(now)
 
-    def ingest(self, records, now, wall, foreground, sample=None, native=None):
-        """Feed one sample to the trackers: states, blocked attempts from the log, Suricata alerts.
-        sample: StateFacts.view() of records, when the caller already has it."""
+    def ingest(self, native, now, wall, foreground):
+        """Feed native matches, blocked attempts and Suricata alerts to Python policy."""
         lines = self.log.lines()
         if foreground and not self.backlog_loaded:
             # the 10-minute hit window starts full
@@ -844,19 +688,13 @@ class Collector:
                 self.blocks.add(event, at)
             # blocked attempts stay matchable for late alerts even with no map open
             self.correlator.observe_block(event, wall, self.descriptions)
-        if native is None:
-            self.correlator.observe_states(records, self.local_addresses, wall, self.descriptions, self.networks, sample)
-        else:
-            self.correlator.observe_native_matches(native["matches"], wall, self.descriptions)
+        self.correlator.observe_native_matches(native["matches"], wall, self.descriptions)
         if foreground and not self.eve_loaded:
             self.eve_loaded = True
             # older alerts can only be address history: their connections are not indexed yet
             self.alerts.feed(self.eve.backlog(ALERT_BACKLOG_BYTES), self.local_addresses, networks=self.networks)
         self.alerts.feed(self.eve.lines(), self.local_addresses, self.correlator, wall, self.networks)
-        if native is None:
-            self.correlator.resolve(self.local_addresses, wall, self.networks)
-        else:
-            self.correlator.resolve_native(native["matches"], self.local_addresses, wall, self.networks)
+        self.correlator.resolve_native(native["matches"], self.local_addresses, wall, self.networks)
         self.alerts.expire(wall)
 
     def map_anchor(self, now):
@@ -896,7 +734,7 @@ class Collector:
         """The map document: flows (the strongest `limit`, None for all), blocked sources, alerts."""
         resolver = self.hostnames if requested(HOSTNAME_MARKER, HOSTNAME_REQUEST_SECONDS) else None
         geo = self.geo
-        if visible is None and not snapshot and self.engine_mode == "native" and self.tracker.native_visible is not None:
+        if visible is None and not snapshot:
             visible = self.tracker.native_visible
             geo.resolve(address for _, local, remote, _, _ in visible for address in (remote, local)
                         if public_ip(address))
@@ -1013,103 +851,44 @@ class Collector:
                 self._diagnostic_timings = self.timings
                 self.timings_written = now
 
-    def state_rows(self, records, remotes, coverage=None, budget=None):
-        """The PF states behind the given remote addresses, as the map page's States dialog lists them."""
-        rows, total = {}, 0
-        for record in records:
-            if total >= SNAPSHOT_STATES_TOTAL and coverage is None:
-                break
-            pair = flow_endpoints(record, self.local_addresses, self.networks, self.interface_addresses,
-                                  self.primary_wan_device)
-            if pair is None or pair[1] not in remotes:
-                continue
-            if coverage is not None:
-                coverage["available"] += 1
-            listed = rows.get(pair[1], [])
-            if total >= SNAPSHOT_STATES_TOTAL or len(listed) >= SNAPSHOT_STATES_PER_ADDRESS:
-                continue
-            nat = record.get("nat")
-            row = {
-                "interface": self.interfaces.get(record.get("interface"), record.get("interface")),
-                "proto": record.get("protocol"),
-                "src_addr": record["src"]["address"], "src_port": record["src"]["port"],
-                "dst_addr": record["dst"]["address"], "dst_port": record["dst"]["port"],
-                "nat": host_port(nat["address"], nat["port"]) if nat and nat.get("address") else None,
-                "state": record.get("state"),
-                "bytes": (record.get("bytes_in") or 0) + (record.get("bytes_out") or 0),
-                "age": record.get("age"),
-            }
-            if budget is not None and not budget.take({pair[1]: [row]}):
-                coverage["omitted_bytes"] += 1
-                continue
-            rows.setdefault(pair[1], []).append(row)
-            total += 1
-        if coverage is not None:
-            coverage["captured"] = total
-            coverage["truncated"] = total < coverage["available"]
-        return rows
-
-    def build_snapshot_payload(self, records, now):
+    def build_snapshot_payload(self, now):
         """Bounded incident-first detail. Scan candidates, but never build an uncapped document."""
-        native_snapshot = records is None and self.engine_mode == "native"
-        # Resolve through the existing per-sample lookup budget, without an O(F) address list.
-        if not native_snapshot:
-            self.geo.resolve(address for (local, remote), flow in self.tracker.flows.items()
-                             if self.tracker.activity(flow, now) > 0
-                             for address in (remote, local) if public_ip(address))
         evidence = set(self.alerts.sources) | {key[3] for key in self.correlator.flows}
         coverage = {"candidates": 0, "available": 0, "captured": 0, "limit": SNAPSHOT_FLOWS,
                     "selection": "incident_then_traffic_v1", "omitted_limit": 0, "omitted_bytes": 0, "omitted_geo": 0}
 
-        def candidates():
-            for (local, remote), flow in self.tracker.flows.items():
-                activity = self.tracker.activity(flow, now)
-                if activity <= 0:
-                    continue
-                coverage["candidates"] += 1
-                if self.geo.get(remote) is None:
-                    coverage["omitted_geo"] += 1
-                    continue
-                coverage["available"] += 1
-                incident = remote in evidence or bool(threat_lists_for(remote, self.blocklists, self.reputation))
-                rank = max(flow["rate"], 1.0) * activity
-                yield incident, rank, local, remote, flow, activity
+        evidence.update(self.blocks.sources)
 
-        if native_snapshot:
-            evidence.update(self.blocks.sources)
+        def native_candidates():
+            required, lookup_budget = 0, GEO_LOOKUPS_PER_SAMPLE
+            for page in self.native_engine.snapshot_pages():
+                addresses = list(dict.fromkeys(address for local, remote, _rank, _order in page
+                                               for address in (remote, local) if public_ip(address)))
+                unknown = sum(address not in self.geo.entries for address in addresses)
+                if lookup_budget:
+                    self.geo.resolve(addresses, budget=lookup_budget)
+                    lookup_budget -= min(lookup_budget, unknown)
+                for local, remote, rank, order in page:
+                    incident = remote in evidence or bool(threat_lists_for(remote, self.blocklists, self.reputation))
+                    if rank <= 0 and not incident:
+                        continue
+                    coverage["candidates"] += 1
+                    if self.geo.get(remote) is None:
+                        coverage["omitted_geo"] += 1
+                        continue
+                    coverage["available"] += 1
+                    required += int(incident)
+                    if required > SNAPSHOT_FLOWS:
+                        raise SnapshotTooLarge("required incident flows exceed snapshot flow ceiling")
+                    yield incident, rank, order, local, remote
 
-            def native_candidates():
-                required, lookup_budget = 0, GEO_LOOKUPS_PER_SAMPLE
-                for page in self.native_engine.snapshot_pages():
-                    addresses = list(dict.fromkeys(address for local, remote, _rank, _order in page
-                                                   for address in (remote, local) if public_ip(address)))
-                    unknown = sum(address not in self.geo.entries for address in addresses)
-                    if lookup_budget:
-                        self.geo.resolve(addresses, budget=lookup_budget)
-                        lookup_budget -= min(lookup_budget, unknown)
-                    for local, remote, rank, order in page:
-                        incident = remote in evidence or bool(threat_lists_for(remote, self.blocklists, self.reputation))
-                        if rank <= 0 and not incident:
-                            continue
-                        coverage["candidates"] += 1
-                        if self.geo.get(remote) is None:
-                            coverage["omitted_geo"] += 1
-                            continue
-                        coverage["available"] += 1
-                        required += int(incident)
-                        if required > SNAPSHOT_FLOWS:
-                            raise SnapshotTooLarge("required incident flows exceed snapshot flow ceiling")
-                        yield incident, rank, order, local, remote
-
-            identities = nsmallest(SNAPSHOT_FLOWS, native_candidates(),
-                                   key=lambda item: (not item[0], -item[1], item[2]))
-            aggregate = self.native_engine.snapshot_selection([(local, remote, incident)
-                                                               for incident, _rank, _order, local, remote in identities])
-            tracker = FlowTracker()
-            tracker.update_aggregate(aggregate, now)
-            selected = [(identity[0], *row) for identity, row in zip(identities, tracker.native_visible)]
-        else:
-            selected = nsmallest(SNAPSHOT_FLOWS, candidates(), key=lambda item: (not item[0], -item[1]))
+        identities = nsmallest(SNAPSHOT_FLOWS, native_candidates(),
+                               key=lambda item: (not item[0], -item[1], item[2]))
+        aggregate = self.native_engine.snapshot_selection([(local, remote, incident)
+                                                           for incident, _rank, _order, local, remote in identities])
+        tracker = FlowTracker()
+        tracker.update_aggregate(aggregate, now)
+        selected = [(identity[0], *row) for identity, row in zip(identities, tracker.native_visible)]
         coverage["omitted_limit"] = coverage["available"] - len(selected)
         visible = [item[1:] for item in selected]
         payload = self.build_payload(now, visible=visible, snapshot=True)
@@ -1118,12 +897,8 @@ class Collector:
         payload["locations"] = [location for location in locations if location["local"]]
         payload["hostnames"] = {}
         payload["states"], payload["full"] = {}, True
-        states = {"scope": "captured_flow_block_and_ids_remotes", "available": 0, "captured": 0,
-                  "per_remote_limit": SNAPSHOT_STATES_PER_ADDRESS, "total_limit": SNAPSHOT_STATES_TOTAL,
-                  "omitted_bytes": 0, "truncated": False}
-        if native_snapshot:
-            states = {"scope": "retained_logical_flows", "available": 0, "captured": 0,
-                      "total_limit": SNAPSHOT_STATES_TOTAL, "truncated": False, "complete": False}
+        states = {"scope": "retained_logical_flows", "available": 0, "captured": 0,
+                  "total_limit": SNAPSHOT_STATES_TOTAL, "truncated": False, "complete": False}
         payload["capture"] = {"version": 1, "source": "collector", "detail_status": "complete",
                               "encoded_limit": SNAPSHOT_BYTES, "flows": coverage, "states": states}
         budget = DocumentBudget(payload, SNAPSHOT_BYTES)
@@ -1138,7 +913,7 @@ class Collector:
                          if address in names and address not in payload["hostnames"]}
             # The wrapper overhead is conservative; no full document is encoded to test a fit.
             if not budget.take({"flow": flow, "locations": places, "hostnames": hostnames}):
-                if native_snapshot and (flow["origin"], flow["dest"]) in required_pairs:
+                if (flow["origin"], flow["dest"]) in required_pairs:
                     raise SnapshotTooLarge("required incident flow evidence exceeds snapshot byte ceiling")
                 coverage["omitted_bytes"] += 1
                 continue
@@ -1148,24 +923,19 @@ class Collector:
             payload["hostnames"].update(hostnames)
         payload["locations"].sort(key=lambda location: location["id"])
         coverage["captured"] = len(payload["flows"])
-        remotes = {flow["dest"] for flow in payload["flows"]} | {block["source"] for block in payload["blocks"]}
-        remotes.update(flow["dest"] for flow in payload["ids_flows"])
-        if native_snapshot:
-            identities = [(flow["origin"], flow["dest"], (flow["origin"], flow["dest"]) in required_pairs)
-                          for flow in payload["flows"]]
-            payload["states"], states = self.native_engine.snapshot_detail(
-                identities, max(0, budget.remaining), SNAPSHOT_STATES_TOTAL)
-            payload["capture"]["states"] = states
-            payload["capture"]["source"] = "native_collector"
-        else:
-            payload["states"] = self.state_rows(records, remotes, states, budget)
+        identities = [(flow["origin"], flow["dest"], (flow["origin"], flow["dest"]) in required_pairs)
+                      for flow in payload["flows"]]
+        payload["states"], states = self.native_engine.snapshot_detail(
+            identities, max(0, budget.remaining), SNAPSHOT_STATES_TOTAL)
+        payload["capture"]["states"] = states
+        payload["capture"]["source"] = "native_collector"
         if coverage["captured"] < coverage["candidates"] or states["truncated"]:
             payload["capture"]["detail_status"] = "truncated"
         if json_size(payload, SNAPSHOT_BYTES) > SNAPSHOT_BYTES:
             raise SnapshotTooLarge("snapshot exceeds byte limit")
         return payload
 
-    def save_requested_snapshots(self, records, now):
+    def save_requested_snapshots(self, now):
         """Write a full snapshot for each camera request waiting in SNAPSHOT_REQUEST_DIR."""
         try:
             names = sorted(os.listdir(SNAPSHOT_REQUEST_DIR))
@@ -1175,13 +945,14 @@ class Collector:
         if not requests:
             return
         try:
-            payload = self.build_snapshot_payload(records, now)
+            payload = self.build_snapshot_payload(now)
         except SnapshotTooLarge as error:
-            if records is None:
-                self.native_engine.close()
+            self.native_engine.close()
+            self.native_last_at = None
             payload = {"status": "snapshot_too_large", "error": str(error)}
         except NativeError as error:
             self.native_engine.close()
+            self.native_last_at = None
             payload = {"status": "snapshot_failed", "error": str(error)}
         for snapshot_id in requests:
             if snapshot_valid_id(snapshot_id):
@@ -1201,7 +972,7 @@ class Collector:
     def rest_status(self, rest, failed=False):
         """Describe the already chosen rest, without changing the scheduler's decision."""
         wall = time.time()
-        phase = "retrying" if failed or self.failures or self.too_many_states or self.problem else (
+        phase = "retrying" if failed or self.failures or self.problem else (
             "background" if self.background else "sleeping")
         self.set_phase(phase, wall + rest, next_due=wall + rest)
 
@@ -1249,115 +1020,60 @@ class Collector:
             return self._rest(started, background)
         self.refresh_metadata(started)
         timer.phase("metadata")
-        walk_cpu = time.process_time()
         self._sample_started = (time.time(), time.monotonic())
         self._sample_revision = None
-        self.set_phase("collecting", self._sample_started[0] + SAMPLE_TIMEOUT + 10)
+        self.set_phase("collecting", self._sample_started[0] + READ_TIMEOUT)
         try:
-            native = None
-            records = None
-            engine = "python"
-            reset_history = self.engine_mode != "native" or self.native_last_at is None
-            if native_available():
-                try:
-                    native_start = time.perf_counter()
-                    elapsed = -1 if reset_history or self.native_last_at is None else started - self.native_last_at
-                    native = self.native_engine.sample(
-                        self.local_addresses, self.networks, self.interface_addresses,
-                        self.primary_wan_device, elapsed, threat_summary=self.recorder.due(started),
-                        event_queries=self.correlator.native_queries(self.local_addresses, self.networks),
-                        snapshot=not background and self.snapshot_requested())
-                    timer.phases["native"] = time.perf_counter() - native_start
-                    engine = "native"
-                    self.native_failure_logged = False
-                except NativeError as error:
-                    self.native_engine.close()
-                    self.native_last_at = None
-                    reset_history = True
-                    if not self.native_failure_logged:
-                        log_warning(f"native PF sample failed; using pfctl fallback: {error}")
-                        self.native_failure_logged = True
-            if native is None:
-                if self.engine_mode == "native":
-                    self.tracker.counters = {}
-                    self.tracker.sampled_at = None
-                self.native_engine.close()
-                self.native_last_at = None
-                records = sample_states()
-        except TooManyStates as error:
-            self.set_phase("failed")
-            if not background:
-                write_json(OUTPUT_FILE, status_document("too_many_states", count=error.count, limit=error.limit,
-                                                        slow=error.slow, collector=self.timing_status()))
-            if not self.too_many_states:
-                log_warning(f"sampling paused: {error}")
-            self.too_many_states = True
-            return TOO_MANY_STATES_INTERVAL
-        except (OSError, subprocess.TimeoutExpired, RuntimeError) as error:
+            native_start = time.perf_counter()
+            # A dead/closed worker owns no history, including after snapshot failure.
+            process = self.native_engine.process
+            fresh_worker = process is None or process.poll() is not None
+            elapsed = -1 if fresh_worker or self.native_last_at is None else started - self.native_last_at
+            native = self.native_engine.sample(
+                self.local_addresses, self.networks, self.interface_addresses,
+                self.primary_wan_device, elapsed, threat_summary=self.recorder.due(started),
+                event_queries=self.correlator.native_queries(self.local_addresses, self.networks),
+                snapshot=not background and self.snapshot_requested())
+            timer.phases["native"] = time.perf_counter() - native_start
+        except NativeError as error:
+            self.native_engine.close()
+            self.native_last_at = None
             self.set_phase("failed")
             if not self.failures:
                 log_error(f"reading the firewall states failed: {error}")
             self.failures += 1
-            if not background:
-                write_json(OUTPUT_FILE, status_document("failed", error=str(error), collector=self.timing_status()))
+            # Preserve the last successful document and its mtime. Existing API
+            # freshness expires it naturally; liveness diagnostics report failure.
             return self._rest(started, background)
-        if self.failures:
-            log_notice(f"reading the firewall states works again, after {self.failures} failed attempts")
-        if self.too_many_states:
-            log_notice("sampling resumed: the state table is below the limit again")
-        self.failures = 0
-        self.too_many_states = False
-        if records is not None:
-            # pfctl output is parsed as it is read; this includes the parser's CPU time.
-            timer.phases["parse"] = time.process_time() - walk_cpu
         timer.phase("walk")
         self.set_phase("processing")
         now = time.monotonic()
         wall = time.time()
-        sample = None
-        if records is not None:
-            sample = self.facts.view(records, self.local_addresses, self.networks, self.interface_addresses,
-                                     self.primary_wan_device)
-            timer.phase("facts")
         if not background:
-            if native is not None:
-                self.tracker.update_aggregate(native, now, reset_history)
-            else:
-                self.tracker.update(records, self.local_addresses, now, self.networks, sample,
-                                    self.interface_addresses, self.primary_wan_device)
+            self.tracker.update_aggregate(native, now)
             timer.phase("tracker")
-        self.ingest(records, now, wall, foreground=not background, sample=sample, native=native)
+        self.ingest(native, now, wall, foreground=not background)
         timer.phase("ingest")
-        # while the map is open the queue is always fed; the setting and the widget only decide
-        # whether recording continues in the background
-        self.recorder.update(records, self, now, sample, native=native)
+        self.recorder.update(native, self, now)
         timer.phase("threats")
-        state_count = native["counts"]["states"] if native is not None else len(records)
+        state_count = native["counts"]["states"]
         with self._status_lock:
-            self.collector_status["engine"] = engine
-        if engine == "native":
-            self.engine_mode = "native"
-            # Rate deltas span sample starts, avoiding dependence on the previous
-            # sample's PF dump duration when the current dump has not completed yet.
-            self.native_last_at = started
-            self.native_visible = not background
-        else:
-            self.engine_mode = "python"
-            self.native_visible = False
+            self.collector_status["engine"] = "native"
+        self.native_last_at = started
+        if self.failures:
+            log_notice(f"reading the firewall states works again, after {self.failures} failed attempts")
+        self.failures = 0
         if not background:
             self.publish_summary(now, timer, state_count)
-            if records is not None or self.native_engine.snapshot_open:
-                self.save_requested_snapshots(records, now)
-            if native is not None:
-                self.native_engine.snapshot_cancel()
+            if self.native_engine.snapshot_open:
+                self.save_requested_snapshots(now)
+            self.native_engine.snapshot_cancel()
         else:
             self.complete_sample(state_count)
-        # locations resolved for the queue in the background are saved too (at most once a minute)
         self.geo.save()
         timer.phase("other")
-        if native is not None:
-            timer.phases["native_states"] = native["counts"]["states"]
-            timer.phases["native_flows"] = native["counts"]["flows"]
+        timer.phases["native_states"] = native["counts"]["states"]
+        timer.phases["native_flows"] = native["counts"]["flows"]
         self.save_timings(timer, state_count, background, now)
         return self._rest(started, background)
 
@@ -1365,11 +1081,7 @@ class Collector:
         took = time.monotonic() - started
         if background:
             return max(BACKGROUND_INTERVAL - took, 0.05)
-        # a viewer polls every 2 s; when polls stop (background tab, closed page) sample slowly
-        # until the collector's idle timeout ends it
         interval = INTERVAL if requested(REQUEST_MARKER, ACTIVE_VIEWER_SECONDS) else IDLE_INTERVAL
-        # never run back to back: rest at least as long as a slow sample took, and back off
-        # exponentially while sampling keeps failing
         rest = max(interval - took, took, 0.05)
         if self.failures:
             rest = max(rest, min(MAX_FAILURE_BACKOFF, 2.0 ** self.failures))
@@ -1380,13 +1092,14 @@ class Collector:
         if self._heartbeat_thread is not None:
             self._heartbeat_thread.join()
         self.native_engine.close()
+        self.native_last_at = None
         self.set_phase("stopped")
         if self.geo is not None:
             self.geo.save(force=True)
 
 
 def sleep_until_viewer(seconds):
-    """Sleep, but wake at once when a viewer opens the map (not at the end of a slow interval)."""
+    """Sleep, but wake at once when a viewer opens the map."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         if requested(REQUEST_MARKER, 2):
@@ -1402,7 +1115,6 @@ def run():
     lock = acquire_lock()
     if lock is None:
         return
-    # the service stop (SIGTERM) ends the loop through its finally, which saves the caches
     signal.signal(signal.SIGTERM, stop_on_signal)
     log_notice("collector started: " + ("a map is open" if requested(REQUEST_MARKER, IDLE_SECONDS)
                                         else "recording threats in the background"))
@@ -1417,8 +1129,6 @@ def run():
                     log_notice(f"collector works again, after {errors} failed iterations")
                 errors = 0
             except Exception:
-                # any bug in one iteration is logged (once, with its traceback) and retried with
-                # backoff; the daemon must not die silently and stop recording threats
                 if not errors:
                     log_error("collector iteration failed: " + " | ".join(traceback.format_exc().strip().splitlines()))
                 errors += 1
@@ -1441,7 +1151,6 @@ def main(arguments):
     if arguments == ["tables"]:
         print(json.dumps(tables_report()))
     elif arguments == ["ensure"]:
-        # periodic (cron) and after boot: keep threat history fed while the widget is in use
         if recording_wanted():
             subprocess.run([RC_SCRIPT, "onestart"], capture_output=True, check=False, timeout=10)
     elif arguments == ["reload"]:

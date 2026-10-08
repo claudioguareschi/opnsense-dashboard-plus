@@ -29,14 +29,12 @@ import ipaddress
 import os
 import sys
 import tempfile
-import time
 import unittest
 import weakref
-from datetime import datetime
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from support import BLOCKLISTS, CACHE, COLLECTOR, COMMON, LEASES, PF, THREATS, NAT_OUT, nat_state  # noqa: E402
+from support import REFERENCE, REFERENCE_THREATS, BLOCKLISTS, CACHE, COMMON, LEASES, PF, NAT_OUT, nat_state  # noqa: E402
 
 
 class ParseTest(unittest.TestCase):
@@ -306,7 +304,7 @@ vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
                                                 {"vlan03": "VLAN30_IOT"})["interface"], "VLAN30_IOT")
 
     def test_tracker_reports_inside_hosts_and_egress(self):
-        tracker = COLLECTOR.FlowTracker(smoothing=1.0)
+        tracker = REFERENCE.FlowTracker(smoothing=1.0)
         records = PF.parse_states(self.NAT_OUT)
         tracker.update(records, {"1.2.3.163"}, now=0.0)
         flow = tracker.flows[("1.2.3.163", "34.209.15.107")]
@@ -327,13 +325,13 @@ vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
         self.assertEqual(PF.state_outside(record, pair),
                          ("tcp", "2606:4700:4701::20", "52114", "2001:4860:4860::8888", "443"))
 
-        tracker = COLLECTOR.FlowTracker(smoothing=1.0)
+        tracker = REFERENCE.FlowTracker(smoothing=1.0)
         tracker.update([record], local, now=0.0, networks=networks)
         flow = tracker.flows[pair]
         self.assertEqual((flow["inside"], flow["initiated"]), (["2606:4700:4701::20"], "local"))
 
-        seen = THREATS.observe([record], lambda address: ["IPv6 test"] if address == pair[1] else [],
-                               local, networks)
+        seen = REFERENCE_THREATS.observe([record], lambda address: ["IPv6 test"] if address == pair[1] else [],
+                                         local, networks)
         self.assertEqual(seen[pair[1]]["inside"], ["2606:4700:4701::20"])
 
     def test_reads_kea_and_dnsmasq_leases(self):
@@ -377,7 +375,7 @@ class InitiatorTest(unittest.TestCase):
                "   age 00:00:01, expires in 23:59:37, 5:9 pkts, 400:9000 bytes\n   id: 0a creatorid: 01\n   origif: ix0\n")
 
     def test_inbound_port_forward_reports_initiator_and_target(self):
-        tracker = COLLECTOR.FlowTracker(smoothing=1.0)
+        tracker = REFERENCE.FlowTracker(smoothing=1.0)
         tracker.update([], {"1.2.3.163"}, now=0.0)
         tracker.update(PF.parse_states(self.INBOUND), {"1.2.3.163"}, now=2.0)
         flow = tracker.flows[("1.2.3.163", "94.154.43.203")]
@@ -397,7 +395,7 @@ class InitiatorTest(unittest.TestCase):
         self.assertEqual(pair, ("192.168.0.2", "94.154.43.203"))
         self.assertEqual(PF.state_outside(record, pair),
                          ("tcp", "192.168.0.2", "443", "94.154.43.203", "51234"))
-        tracker = COLLECTOR.FlowTracker(smoothing=1.0)
+        tracker = REFERENCE.FlowTracker(smoothing=1.0)
         tracker.update([], set(), now=0.0, interface_addresses=topology, primary_wan_device="igb1")
         tracker.update([record], set(), now=2.0, interface_addresses=topology, primary_wan_device="igb1")
         flow = tracker.flows[pair]
@@ -406,7 +404,7 @@ class InitiatorTest(unittest.TestCase):
     def test_inbound_udp_to_the_firewall_keeps_its_protocol(self):
         states = ("all udp 1.2.3.163:51820 <- 94.154.43.203:51234       MULTIPLE:MULTIPLE\n"
                   "   age 00:00:01, expires in 00:00:59, 5:9 pkts, 400:900 bytes\n   id: 0b creatorid: 01\n")
-        tracker = COLLECTOR.FlowTracker(smoothing=1.0)
+        tracker = REFERENCE.FlowTracker(smoothing=1.0)
         tracker.update([], {"1.2.3.163"}, now=0.0)
         tracker.update(PF.parse_states(states), {"1.2.3.163"}, now=2.0)
         flow = tracker.flows[("1.2.3.163", "94.154.43.203")]
@@ -415,7 +413,7 @@ class InitiatorTest(unittest.TestCase):
         self.assertEqual((target["name"], target["service"]), ("firewall", "WireGuard"))
 
     def test_outbound_flows_are_local(self):
-        tracker = COLLECTOR.FlowTracker(smoothing=1.0)
+        tracker = REFERENCE.FlowTracker(smoothing=1.0)
         tracker.update(PF.parse_states(NAT_OUT), {"1.2.3.163"}, now=0.0)
         self.assertEqual(tracker.flows[("1.2.3.163", "34.209.15.107")]["initiated"], "local")
 
@@ -447,52 +445,6 @@ class StateRecordTest(unittest.TestCase):
 
     def test_lines_can_be_parsed_as_they_arrive(self):
         self.assertEqual(PF.parse_states(iter(self.OUTPUT.splitlines(keepends=True))), PF.parse_states(self.OUTPUT))
-
-
-class StateGuardTest(unittest.TestCase):
-    def test_a_huge_state_table_is_not_walked(self):
-        walked = []
-        with mock.patch.object(PF, "physical_memory", lambda: 4 * 1024 ** 3), \
-                mock.patch.object(PF, "state_count", lambda: 100001), \
-                mock.patch.object(PF.subprocess, "run", lambda *a, **k: walked.append(a)):
-            with self.assertRaises(PF.TooManyStates):
-                PF.sample_states()
-        self.assertEqual(walked, [])
-
-    def test_the_walk_stops_past_the_limit(self):
-        three = NAT_OUT * 3
-        self.assertEqual(len(PF.parse_states(three, limit=3)), 3)
-        with self.assertRaises(PF.TooManyStates) as raised:
-            PF.parse_states(three, limit=2)
-        self.assertEqual(raised.exception.limit, 2)
-
-    def test_a_slow_walk_is_stopped(self):
-        with tempfile.TemporaryDirectory() as directory:
-            pfctl = os.path.join(directory, "pfctl")
-            with open(pfctl, "w") as handle:
-                handle.write("#!/bin/sh\nexec sleep 5\n")
-            os.chmod(pfctl, 0o755)
-            with mock.patch.object(PF, "PFCTL", pfctl), mock.patch.object(PF, "SAMPLE_TIMEOUT", 0.2), \
-                    mock.patch.object(PF, "state_count", lambda: 30000):
-                started = time.monotonic()
-                with self.assertRaises(PF.TooManyStates) as raised:
-                    PF.sample_states(limit=35000)
-        self.assertTrue(raised.exception.slow)
-        self.assertEqual(raised.exception.count, 30000)
-        self.assertLess(time.monotonic() - started, 3)
-
-    def test_the_limit_follows_the_firewalls_memory(self):
-        gigabyte = 1024 ** 3
-        self.assertEqual(PF.state_limit(4 * gigabyte), 35000)
-        self.assertEqual(PF.state_limit(8 * gigabyte), 70000)
-        # a small box keeps a floor, a big one a ceiling (a sample must stay quick)
-        self.assertEqual(PF.state_limit(gigabyte // 2), PF.MIN_SAMPLED_STATES)
-        self.assertEqual(PF.state_limit(64 * gigabyte), PF.MAX_SAMPLED_STATES)
-
-    def test_reads_the_state_count(self):
-        output = "State Table                          Total             Rate\n  current entries                     1246               \n"
-        with mock.patch.object(PF.subprocess, "run", lambda *a, **k: mock.Mock(stdout=output)):
-            self.assertEqual(PF.state_count(), 1246)
 
 
 class SampleCacheTest(unittest.TestCase):

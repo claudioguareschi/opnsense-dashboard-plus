@@ -30,14 +30,12 @@ import os
 import sqlite3
 import sys
 import tempfile
-import time
 import unittest
-from datetime import datetime
 from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from support import CACHE, COMMON, PF, THREATS, NAT_OUT  # noqa: E402
+from support import REFERENCE_THREATS, COMMON, PF, THREATS, NAT_OUT  # noqa: E402
 
 
 class ThreatQueueTest(unittest.TestCase):
@@ -48,7 +46,7 @@ class ThreatQueueTest(unittest.TestCase):
 
     def observe(self, states):
         lists = {"108.188.77.155": ["AbuseIPDB blacklist"]}
-        return THREATS.observe(PF.parse_states(states), lambda address: lists.get(address, []), {"1.2.3.163"})
+        return REFERENCE_THREATS.observe(PF.parse_states(states), lambda address: lists.get(address, []), {"1.2.3.163"})
 
     def test_attribution_matches_ordered_list_accumulation(self):
         views = []
@@ -65,7 +63,7 @@ class ThreatQueueTest(unittest.TestCase):
                     expected[field].append(value)
             expected["service_ports"].setdefault(service, f"{number}/tcp")
         lists_for = mock.Mock(return_value=["Test list"])
-        entry = THREATS.observe([], lists_for, {"1.2.3.163"}, sample=(views, {}))["34.1.1.1"]
+        entry = REFERENCE_THREATS.observe([], lists_for, {"1.2.3.163"}, sample=(views, {}))["34.1.1.1"]
         for field, value in expected.items():
             self.assertEqual(entry[field], value)
         self.assertEqual((entry["inbound"], entry["outbound"], entry["bytes"]), (len(views), 0, len(views) * 3))
@@ -112,7 +110,7 @@ class ThreatQueueTest(unittest.TestCase):
         def lists(_address):
             return ["AbuseIPDB blacklist"]
 
-        expected = THREATS.observe(records, lists, {"1.2.3.163"})
+        expected = REFERENCE_THREATS.observe(records, lists, {"1.2.3.163"})
         actual = THREATS.observe_aggregates(native, lists)
         self.assertEqual(actual, expected)
 
@@ -132,7 +130,7 @@ class ThreatQueueTest(unittest.TestCase):
                                     inside=SimpleNamespace(address=CountedText(f"10.0.{number // 256}.{number % 256}")),
                                     service=CountedText(f"TCP/{number}"), service_port=str(number))
             views.append((SimpleNamespace(age=1, protocol="tcp", bytes_in=1, bytes_out=2), facts))
-        entry = THREATS.observe([], lambda address: ["Test list"], {}, sample=(views, {}))["34.1.1.1"]
+        entry = REFERENCE_THREATS.observe([], lambda address: ["Test list"], {}, sample=(views, {}))["34.1.1.1"]
         self.assertLess(CountedText.comparisons, len(views) * 10)
         self.assertEqual(len(entry["inside"]), len(views))
 

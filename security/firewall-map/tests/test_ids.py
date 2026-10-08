@@ -29,13 +29,13 @@ import ipaddress
 import os
 import sys
 import tempfile
-import time
 import unittest
-from datetime import datetime
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from support import BLOCKLISTS, BLOCKS, COMMON, IDS, PF, THREATS, BLOCK_LINE, Geo  # noqa: E402
+from support import BLOCKLISTS, BLOCKS, COMMON, IDS as PRODUCTION_IDS, PF, THREATS, BLOCK_LINE  # noqa: E402
+
+from reference import ids as IDS  # noqa: E402
 
 
 class AlertTest(unittest.TestCase):
@@ -293,8 +293,8 @@ class CorrelationTest(unittest.TestCase):
     def test_flagged_firewall_block_has_its_own_disposition(self):
         correlator = IDS.Correlator()
         correlator.observe_block(BLOCKS.parse_block(BLOCK_LINE), 1000.0)
-        with mock.patch.object(IDS, "threat_lists_for", return_value=["AbuseIPDB blacklist"]):
-            entries = IDS.firewall_blocks(correlator, {}, 900.0)
+        with mock.patch.object(PRODUCTION_IDS, "threat_lists_for", return_value=["AbuseIPDB blacklist"]):
+            entries = PRODUCTION_IDS.firewall_blocks(correlator, {}, 900.0)
         entry = entries["45.56.79.53"]
         self.assertEqual(entry["disposition"], "firewall_blocked")
         self.assertEqual(entry["targets"], ["tcp|1.2.3.163|23"])
@@ -420,16 +420,31 @@ class CorrelationExpiryTest(unittest.TestCase):
         self.assertLessEqual(correlator.recent.iterations, 1)
         self.assertEqual(list(correlator.recent), list(range(50000, size)))
 
+    def test_production_correlator_expires_blocked_attempts_and_evidence(self):
+        correlator = PRODUCTION_IDS.Correlator()
+        key = ("tcp", "1.2.3.163", "443", "94.154.43.203", "51234")
+        connection = PRODUCTION_IDS.make_connection(key, seen=1000.0)
+        correlator.blocked[key] = connection
+        correlator._seen(1000.0)
+        alert = {"time": 1000.0, "sid": 1, "signature": "test", "category": "",
+                 "severity": 2, "action": "allowed", "flow_id": 1}
+        correlator._attach(key, "blocked", connection, alert, 1000.0)
+
+        correlator._expire(1000.0 + PRODUCTION_IDS.ALERT_WINDOW_SECONDS + 1)
+
+        self.assertEqual(correlator.blocked, {})
+        self.assertEqual(correlator.flows, {})
+
 
 class ConnectionSelectionTest(unittest.TestCase):
     def test_bounded_selection_matches_stable_full_ranking(self):
         for size in (0, 3, 6, 100):
             with self.subTest(size=size):
-                correlator = IDS.Correlator()
+                correlator = PRODUCTION_IDS.Correlator()
                 for number in range(size):
                     key = ("tcp", "1.2.3.163", str(number), "34.1.1.1", "443")
-                    connection = IDS.make_connection(key, bytes_in=(number % 4) * 100,
-                                                     bytes_out=None, age=10)
+                    connection = PRODUCTION_IDS.make_connection(key, bytes_in=(number % 4) * 100,
+                                                                bytes_out=None, age=10)
                     # Include current, historical IDS, and blocked connections, and tied rates.
                     if number % 3 == 0:
                         correlator.current[key] = connection
@@ -442,12 +457,12 @@ class ConnectionSelectionTest(unittest.TestCase):
                             "1": {"1": {"sid": 1, "signature": "test", "severity": 2, "count": 1,
                                         "action": "allowed", "query": None}}}}
                 # Asking for every row gives the stable sorted reference, including all fields.
-                with mock.patch.object(IDS, "MAX_SNAPSHOT_CONNECTIONS", max(1, size)):
-                    complete = IDS.connection_summary("34.1.1.1", correlator, {}, {}, wall=1000.0)
-                order = IDS.connection_keys(correlator).get("34.1.1.1", [])
+                with mock.patch.object(PRODUCTION_IDS, "MAX_SNAPSHOT_CONNECTIONS", max(1, size)):
+                    complete = PRODUCTION_IDS.connection_summary("34.1.1.1", correlator, {}, {}, wall=1000.0)
+                order = PRODUCTION_IDS.connection_keys(correlator).get("34.1.1.1", [])
                 ranked = sorted(order, key=lambda key: (int(key[2]) % 5 != 0, -(int(key[2]) % 4) * 100))
                 self.assertEqual([item["key"] for item in complete], ["|".join(key) for key in ranked])
-                actual = IDS.connection_summary("34.1.1.1", correlator, {}, {}, wall=1000.0)
+                actual = PRODUCTION_IDS.connection_summary("34.1.1.1", correlator, {}, {}, wall=1000.0)
                 self.assertEqual(actual, complete[:6])
 
 

@@ -27,7 +27,6 @@
 """Suricata alerts for Firewall Map+: EVE parsing, per-address history and connection matching."""
 
 import json
-import socket
 import time
 from collections import deque
 from datetime import datetime
@@ -39,7 +38,7 @@ from .blocks import MAX_BLOCK_SOURCES
 from .common import (connection_target, host_port, location_fields, normalize_ip, public_ip,
                      service_name, service_port_label, split_host_port)
 from .leases import describe_inside
-from .pf import StateFacts, _Record, forward_target, inside_address, outside_key
+from .pf import forward_target, inside_address, outside_key
 
 
 # Suricata's alert log (EVE JSON); read locally, only alert events
@@ -107,30 +106,6 @@ def make_connection(key, **fields):
     return connection
 
 
-class _StateConnection(_Record):
-    """A state-derived connection; recent and IDS evidence share this sample's record."""
-    __slots__ = ("key", "protocol", "public", "remote", "inside", "remote_started", "bytes_in", "bytes_out",
-                 "age", "rule", "rule_description", "interface", "state", "decision", "source", "seen")
-
-    def __init__(self, key, facts, record, rule, description, now):
-        self.key = key
-        self.protocol = key[0]
-        self.public = facts.public
-        self.remote = facts.remote
-        self.inside = facts.inside_text
-        self.remote_started = facts.remote_started
-        self.bytes_in = record.bytes_in
-        self.bytes_out = record.bytes_out
-        self.age = record.age
-        self.rule = rule
-        self.rule_description = description
-        self.interface = record.origif
-        self.state = record.state
-        self.decision = "pass"
-        self.source = "state"
-        self.seen = now
-
-
 class Correlator:
     """Joins Suricata alerts to the exact connection that raised them.
 
@@ -142,7 +117,6 @@ class Correlator:
 
     def __init__(self):
         self.current = {}
-        self.recent = {}   # key -> connection, most recently seen last
         self.blocked = {}  # key -> blocked attempt, most recent last
         # alerts waiting for their connection to show up; the oldest drop out first
         self.pending = deque(maxlen=MAX_PENDING_ALERTS)
@@ -154,7 +128,7 @@ class Correlator:
                       "ambiguous": 0, "no_ports": 0, "pending": 0}
         self.unmatched_samples = []
         self.forwards = []
-        # recent and blocked are kept in the order they were seen as long as the clock never went
+        # Blocked attempts are kept in the order they were seen as long as the clock never went
         # back: expiring them then stops at the first entry still fresh
         self._newest = None
         self._in_order = True
@@ -163,35 +137,6 @@ class Correlator:
         if self._newest is not None and at < self._newest:
             self._in_order = False
         self._newest = at if self._newest is None else max(self._newest, at)
-
-    def observe_states(self, records, local_addresses, now, descriptions=None, networks=None, sample=None):
-        """Index this sample's states by their outside tuple. sample: StateFacts.view() of records,
-        when the caller already has it."""
-        current = {}
-        ambiguous = set()
-        views, lan_rules = sample if sample is not None else StateFacts().view(records, local_addresses, networks)
-        descriptions = descriptions or {}
-        for record, facts in views:
-            if facts.pair is None:
-                continue
-            key = facts.outside
-            if key is None:
-                continue
-            rule = facts.rule_of(record, lan_rules)
-            # make_connection()'s shape in one step: this runs for every state of every sample
-            connection = _StateConnection(key, facts, record, rule, descriptions.get(rule or "", ""), now)
-            previous = current.get(key)
-            if previous and previous.inside != connection.inside:
-                ambiguous.add(key)
-            current[key] = connection
-        self.current = current
-        self.ambiguous_keys = ambiguous
-        if current:
-            self._seen(now)
-        for key, connection in current.items():
-            self.recent.pop(key, None)
-            self.recent[key] = connection
-        self._expire(now)
 
     def native_queries(self, local_addresses, networks=None, limit=2500):
         """Only tuples needed for pending or already-correlated IDS evidence cross the IPC boundary."""
@@ -270,7 +215,7 @@ class Correlator:
 
     def _expire(self, now):
         self._flagged = None
-        for store in (self.recent, self.blocked):
+        for store in (self.blocked,):
             expired = []
             for key, item in store.items():
                 if now - item.get("seen", item.get("time", now)) > CORRELATION_SECONDS:
@@ -321,34 +266,6 @@ class Correlator:
             return None
         self.pending.append((now, alert))
         return None
-
-    def resolve(self, local_addresses, now, networks=None):
-        """Try pending alerts against what PF and the firewall log have shown; give up after a while."""
-        still = []
-        for received, alert in self.pending:
-            key = self.alert_key(alert, local_addresses, networks)
-            if key in self.current:
-                kind = "ambiguous" if key in self.ambiguous_keys else "current"
-                connection = self.current[key]
-            elif key in self.recent:
-                kind, connection = "recent", self.recent[key]
-            elif key in self.blocked:
-                kind, connection = "blocked", self.blocked[key]
-            elif now - received < CORRELATION_RETRY_SECONDS:
-                still.append((received, alert))
-                continue
-            else:
-                # no firewall state or log entry: Suricata's own record is the connection (an IPS drop
-                # never reaches the firewall); a port forward still names the inside target
-                self.stats["unmatched"] += 1
-                self.unmatched_samples = (self.unmatched_samples + [{
-                    "time": alert["time"], "key": list(key), "signature": alert["signature"]}])[-20:]
-                kind, connection = "alert", self.alert_connection(key, alert, now)
-            if kind != "alert":
-                self.stats[kind] += 1
-            self._attach(key, kind, connection, alert, now)
-        self.pending = deque(still, maxlen=MAX_PENDING_ALERTS)
-        self.stats["pending"] = len(still)
 
     def _attach(self, key, kind, connection, alert, now):
         self._flagged = None
@@ -457,7 +374,7 @@ class Correlator:
         decided = matched + stats["unmatched"] + stats["ambiguous"]
         stats["correlated_share"] = round(matched / decided, 3) if decided else None
         stats["ids_flows"] = len(self.flows)
-        stats["index"] = {"current": len(self.current), "recent": len(self.recent), "blocked": len(self.blocked)}
+        stats["index"] = {"current": len(self.current), "blocked": len(self.blocked)}
         stats["unmatched_samples"] = self.unmatched_samples[-5:]
         return stats
 

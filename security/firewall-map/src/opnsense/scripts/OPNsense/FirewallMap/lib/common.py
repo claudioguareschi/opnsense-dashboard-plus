@@ -286,19 +286,6 @@ def connection_target(protocol, address, port):
     return f"{protocol}|{address}|{'' if is_icmp(protocol) else port or ''}"
 
 
-def remote_target(record, remote, local, inside, service_port):
-    """The target of a state the remote side started.
-
-    A reply state (the remote is not the source) is keyed by the server's own port; otherwise
-    by the port the remote aimed at, which for a port forward is the inside host's port.
-    """
-    if record["src"]["address"] != remote:
-        port = service_port
-    else:
-        port = (inside or record["dst"])["port"]
-    return connection_target(record["protocol"], inside["address"] if inside else local, port)
-
-
 def location_fields(location):
     """The geolocation fields every map entry carries for an address."""
     return {

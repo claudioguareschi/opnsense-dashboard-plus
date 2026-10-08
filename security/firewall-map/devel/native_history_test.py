@@ -158,7 +158,9 @@ def correlation_test(directory, helper, pf, common):
         expected[key] = value
     for key in ambiguous:
         expected[key]['ambiguous'] = True
-    if actual != expected:
+    comparable = {key: {field: value[field] for field in expected[key]}
+                  for key, value in actual.items() if key in expected}
+    if set(actual) != set(expected) or comparable != expected:
         raise AssertionError('native outside-tuple index differs from Python')
     if not any(row['ambiguous'] for row in actual.values()):
         raise AssertionError('duplicate outside tuple did not set ambiguity')
@@ -173,8 +175,9 @@ def main():
     parser.add_argument('--dir', type=Path, required=True)
     args = parser.parse_args()
     sys.path.insert(0, str(args.src.resolve()))
-    from lib import common, pf
-    import firewallmap_collector as collector
+    from lib import common
+    from reference import pf
+    from reference import tracker as collector
     args.dir.mkdir(exist_ok=True)
     history_test(args.dir, args.helper, pf, collector, common)
     correlation_test(args.dir, args.helper, pf, common)

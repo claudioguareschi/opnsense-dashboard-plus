@@ -53,7 +53,8 @@ from lib import common as COMMON  # noqa: E402,F401
 from lib import config as CONFIG  # noqa: E402,F401
 from lib import ids as IDS  # noqa: E402,F401
 from lib import leases as LEASES  # noqa: E402,F401
-from lib import pf as PF  # noqa: E402,F401
+sys.path.insert(0, str(SCRIPTS.parents[4] / "devel"))
+from reference import pf as PF, tracker as REFERENCE, threats as REFERENCE_THREATS  # noqa: E402,F401
 
 NAT_STATE = """all tcp 1.2.3.163:443 (192.168.1.2:443) <- 45.56.79.53:35799       ESTABLISHED:ESTABLISHED
    [123 + 456] wscale 9  [789 + 101112] wscale 6

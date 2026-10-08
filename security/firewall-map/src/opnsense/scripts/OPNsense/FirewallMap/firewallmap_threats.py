@@ -44,10 +44,9 @@ import sqlite3
 import sys
 import time
 
-from lib.common import (CACHE_DB, THREATS_DB, connection_target, is_icmp, log_error, protocol_name,
+from lib.common import (CACHE_DB, THREATS_DB, connection_target, log_error, protocol_name,
                         secure_umask, service_name, service_port_label)
 from lib.leases import host_names
-from lib.pf import StateFacts
 
 DATABASE = THREATS_DB
 STATUSES = ("new", "reviewed", "dismissed", "blocked")
@@ -137,52 +136,6 @@ def merge(old, new):
         if item not in result:
             result.append(item)
     return result[:MAX_ITEMS]
-
-
-def observe(records, lists_for, local_addresses, networks=None, sample=None):
-    """Group the current states that touch a flagged address: {remote: summary}. sample:
-    StateFacts.view() of records, when the caller already has it."""
-    seen = {}
-    # an address appears in many states: ask the lists once per address and sample
-    verdicts = {}
-    views, _ = sample if sample is not None else StateFacts().view(records, local_addresses, networks)
-    for record, facts in views:
-        pair = facts.pair
-        if pair is None:
-            continue
-        remote = pair[1]
-        if remote not in verdicts:
-            verdicts[remote] = lists_for(remote)
-        lists = verdicts[remote]
-        if not lists:
-            continue
-        entry = seen.setdefault(remote, {
-            "lists": lists, "inbound": 0, "outbound": 0, "targets": {}, "inside": {}, "services": {}, "bytes": 0,
-            "youngest": None, "service_ports": {},
-        })
-        if record.age is not None:
-            entry["youngest"] = record.age if entry["youngest"] is None else min(entry["youngest"], record.age)
-        inside, service_port = facts.inside, facts.service_port
-        if facts.remote_started:
-            entry["inbound"] += 1
-            if facts.target not in entry["targets"]:
-                entry["targets"][facts.target] = None
-        else:
-            entry["outbound"] += 1
-        if inside and inside.address not in entry["inside"]:
-            entry["inside"][inside.address] = None
-        service = facts.service
-        if service not in entry["services"]:
-            entry["services"][service] = None
-            if not is_icmp(record.protocol) and service_port:
-                entry["service_ports"][service] = f"{service_port}/{record.protocol}"
-        entry["bytes"] += record.bytes_in + record.bytes_out
-    # Dict membership is constant-time; convert the first-seen ordering back to the
-    # existing list-shaped document only once, after the complete sample.
-    for entry in seen.values():
-        for field in ("targets", "inside", "services"):
-            entry[field] = list(entry[field])
-    return seen
 
 
 _NATIVE_PROTOCOLS = {1: "icmp", 6: "tcp", 17: "udp", 58: "ipv6-icmp", 132: "sctp"}

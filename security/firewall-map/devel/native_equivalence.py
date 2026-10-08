@@ -369,7 +369,9 @@ def read_aggregates(path, common):
 
 
 def normalize(r):
-    return {k: sorted(v) if k == 'protocols' else list(v.items()) if isinstance(v, dict) else v for k, v in r.items()}
+    # The retired Python engine did not retain the native-only youngest-state age.
+    return {k: sorted(v) if k == 'protocols' else list(v.items()) if isinstance(v, dict) else v
+            for k, v in r.items() if k != 'youngest'}
 
 
 def synthetic(path):
@@ -622,7 +624,8 @@ def main():
     parser.add_argument('--dir', type=Path, required=True)
     args = parser.parse_args()
     sys.path.insert(0, str(args.src.resolve()))
-    from lib import common, pf
+    from lib import common
+    from reference import pf
     directory = args.dir
     directory.mkdir(exist_ok=True)
     if args.mode == 'readercheck':
@@ -645,7 +648,7 @@ def main():
                           'objects': len(result)}))
         return
     if args.mode == 'reference':
-        import firewallmap_collector as collector
+        from reference import tracker as collector
         values = json.loads((directory / 'context.json').read_text())
         local = set(values['local'])
         networks = [(ipaddress.ip_network(n), d) for n, d in values['networks']]
@@ -682,7 +685,7 @@ def main():
         mode = 'live' if args.mode == 'live' else 'fixture'
         subprocess.run([str(args.helper.resolve()), mode, str(directory / 'context.txt'),
                         str(directory / 'aggregates.bin'), str(directory / 'captured.bin')], check=True)
-    import firewallmap_collector as collector
+    from reference import tracker as collector
     if args.mode == 'ordering':
         ordering_checks(directory, args.helper, pf, collector, common)
         return
