@@ -55,7 +55,7 @@ class TrackerTest(unittest.TestCase):
             "last_active": 102.0, "first_seen": 100.0, "states": 1, "protocols": ["tcp"],
             "services": ["HTTPS"], "service_ports": {"HTTPS": "443/tcp"}, "age": 605,
             "transferred": (1600, 1100), "rule": None, "inside": ["192.168.1.2"],
-            "egress": "vlan01", "initiated": "remote", "targets": ["tcp|192.168.1.2|443"], "security": None,
+            "egress": "vlan01", "initiated": "remote", "targets": ["tcp|192.168.1.2|443"],
             "presence": "traffic", "attempts": 0,
         })
         entry = COLLECTOR._flow_entry(*self.PAIR, flow, 1.0, self.LOCAL, {}, 1002.0)
