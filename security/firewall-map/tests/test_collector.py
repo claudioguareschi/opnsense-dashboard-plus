@@ -392,22 +392,35 @@ class CollectorLoopTest(unittest.TestCase):
         self.assertEqual(payload["flows"][0]["lists"], ["Test_list"])
         self.assertEqual(self.queued(), [self.REMOTE])
 
-    def test_the_map_document_carries_every_focus(self):
-        """One document for all viewers: the union of the profiles' flows and, per profile, its
-        selection as positions (the API returns only the Focus asked for)."""
+    def test_the_map_document_names_the_active_ranking_profile(self):
+        """One ranked population for every viewer: the document names the profile that ranked it and
+        carries no per-profile or per-viewer selection."""
         self.collector.step()
         self.bytes = 5000
         self.collector.step()
         with open(self.output) as handle:
             payload = json.load(handle)
-        keys = [profile["key"] for profile in payload["profiles"]]
-        self.assertEqual(keys, COLLECTOR.ranking_profiles.KEYS)
-        self.assertEqual(set(payload["focus"]), set(keys))
-        self.assertEqual(payload["focus_default"], "classic")
-        for positions in payload["focus"].values():
-            self.assertTrue(all(0 <= position < len(payload["flows"]) for position in positions))
-        self.assertEqual([payload["flows"][position]["dest"] for position in payload["focus"]["classic"]],
-                         [self.REMOTE])
+        balanced = COLLECTOR.ranking_profiles.BY_UUID[COLLECTOR.ranking_profiles.BALANCED]
+        self.assertEqual(payload["ranking_profile"], COLLECTOR.ranking_profiles.descriptor(balanced))
+        self.assertFalse({"focus", "focus_default", "profiles", "selections"} & set(payload))
+        # the helper was started with the active profile's definition
+        self.assertEqual(self.collector.collector_engine.profile, COLLECTOR.ranking_profiles.definition(balanced))
+
+    def test_a_ranking_profile_change_restarts_the_collector(self):
+        self.collector.step()
+        engine = self.collector.collector_engine
+        security = COLLECTOR.ranking_profiles.SECURITY
+        with mock.patch.object(COLLECTOR, "settings", lambda: {"provider": "dbip", "ranking_profile": security}):
+            self.collector.checked["settings"] = None
+            self.collector.step()
+        self.assertEqual(engine.profile,
+                         COLLECTOR.ranking_profiles.definition(COLLECTOR.ranking_profiles.BY_UUID[security]))
+        self.assertEqual(engine.restarts, 1)
+        # the same profile again changes nothing
+        with mock.patch.object(COLLECTOR, "settings", lambda: {"provider": "dbip", "ranking_profile": security}):
+            self.collector.checked["settings"] = None
+            self.collector.step()
+        self.assertEqual(engine.restarts, 1)
 
     def test_camera_request_saves_every_flow_and_its_states(self):
         snapshots = os.path.join(self.directory, "snapshots")
@@ -431,6 +444,13 @@ class CollectorLoopTest(unittest.TestCase):
         self.assertEqual((state["proto"], state["src_addr"], state["state"]), ("tcp", self.REMOTE, "ESTABLISHED:ESTABLISHED"))
         self.assertEqual(state["nat"], "192.168.1.2:443")
         self.assertFalse(os.listdir(requests))
+        # a new capture names the policy it was ranked under, and nothing per profile or viewer
+        context = saved["capture"]["context"]
+        balanced = COLLECTOR.ranking_profiles.BY_UUID[COLLECTOR.ranking_profiles.BALANCED]
+        self.assertEqual((saved["capture"]["version"], context["ranking_profile"]),
+                         (2, COLLECTOR.ranking_profiles.descriptor(balanced)))
+        self.assertFalse({"focus", "focus_default", "profiles"} & set(saved))
+        self.assertNotIn("profiles", context)
 
     def test_background_feeds_the_queue_without_a_map(self):
         self.idle = True

@@ -64,7 +64,7 @@ function countsText(meta) {
 /** Coverage is separate from legacy full/partial: old captures have unknown completeness. */
 export function captureText(meta) {
   const capture = meta.capture;
-  // version 1 (selected from every flow) and 2 (evidence and the profiles' selections) read alike
+  // version 1 (selected from every flow) and 2 (evidence, then the ranked flows) read alike
   if (!capture || ![1, 2].includes(capture.version) || !['complete', 'truncated'].includes(capture.detail_status)) {
     return T.snapshot_unknown;
   }
@@ -142,8 +142,7 @@ async function takeSnapshot() {
 
 async function openSnapshot(id) {
   try {
-    const focus = state.settings?.focus ? `&focus=${encodeURIComponent(state.settings.focus)}` : '';
-    const result = await getJSON(`/api/firewallmap/snapshots/get/${encodeURIComponent(id)}?blocks_min=${state.settings?.blockMin ?? 3}${focus}`);
+    const result = await getJSON(`/api/firewallmap/snapshots/get/${encodeURIComponent(id)}?blocks_min=${state.settings?.blockMin ?? 3}`);
     if (result.result !== 'ok') {
       throw new Error(result.error || result.result);
     }

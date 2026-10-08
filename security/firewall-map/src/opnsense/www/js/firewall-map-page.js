@@ -104,10 +104,8 @@
 		blocks: true,
 		blockMin: 3,
 		colorMode: "initiator",
-		follow: false,
-		focus: ""
+		follow: false
 	};
-	var FOCUS_KEY$1 = /^[a-z0-9_-]{1,32}$/;
 	/** The options dialog's values ("5", "0", "1") as renderer settings, defaults for anything unset. */
 	function parseSettings(config = {}) {
 		const number = (value, fallback) => {
@@ -123,17 +121,16 @@
 			asn: config.asn !== "0",
 			blocks: config.blocks !== "0",
 			blockMin: number(config.block_min, DEFAULT_OPTIONS.blockMin) || DEFAULT_OPTIONS.blockMin,
-			follow: config.follow === "1",
-			focus: FOCUS_KEY$1.test(config.focus ?? "") ? config.focus : ""
+			follow: config.follow === "1"
 		};
 	}
-	/** The live data request's parameters: the viewer's block threshold, reverse DNS choice and
-	* Focus (the API returns only that profile's flows). */
+	/** The live data request's parameters: the viewer's block threshold and reverse DNS choice.
+	* Nothing a viewer sends changes which flows the collector ranks: the ranking profile is the
+	* firewall's. */
 	function summaryParams(settings) {
 		return {
 			blocks_min: settings.blockMin ?? DEFAULT_OPTIONS.blockMin,
-			...settings.hostnames ? { hostnames: 1 } : {},
-			...FOCUS_KEY$1.test(settings.focus ?? "") ? { focus: settings.focus } : {}
+			...settings.hostnames ? { hostnames: 1 } : {}
 		};
 	}
 	/** The same as a query string, for a request that does not build it itself (the page). */
@@ -1901,8 +1898,7 @@
 	}
 	async function openSnapshot(id) {
 		try {
-			const focus = state.settings?.focus ? `&focus=${encodeURIComponent(state.settings.focus)}` : "";
-			const result = await getJSON(`/api/firewallmap/snapshots/get/${encodeURIComponent(id)}?blocks_min=${state.settings?.blockMin ?? 3}${focus}`);
+			const result = await getJSON(`/api/firewallmap/snapshots/get/${encodeURIComponent(id)}?blocks_min=${state.settings?.blockMin ?? 3}`);
 			if (result.result !== "ok") throw new Error(result.error || result.result);
 			enterSnapshotMode(result.snapshot, result.data);
 		} catch (error) {
@@ -2495,32 +2491,6 @@
 		const icon = $select.closest(".fwmap-filter").data("icon");
 		if (icon) $select.find("option").attr("data-icon", icon);
 	}
-	var FOCUS_KEY = "fwmap-focus";
-	function readFocus() {
-		return readStorage(FOCUS_KEY) || "";
-	}
-	/** The Focus selector: the profiles the collector ranks for, the one this view shows selected. */
-	function updateFocus(summary, onChange) {
-		const profiles = summary.profiles || [];
-		const $wrap = $("#fwmap-focus-wrap");
-		$wrap.toggle(profiles.length > 1);
-		if (profiles.length < 2) return;
-		const $select = $("#fwmap-focus");
-		const html = profiles.map((profile) => `<option value="${escapeHtml(profile.key)}" data-icon="fa-fw fa-crosshairs" title="${escapeHtml(`${T.focus || "Focus"}: ${profile.name}`)}">${escapeHtml(profile.name)}</option>`).join("");
-		const open = $select.parent().hasClass("open");
-		if ($select.data("html") !== html && !open) {
-			$select.html(html).data("html", html);
-			$select.selectpicker("refresh");
-			$select.off("changed.bs.select").on("changed.bs.select", () => {
-				const key = $select.val() || "";
-				writeStorage(FOCUS_KEY, key);
-				onChange(key);
-			});
-		}
-		if (!open && summary.focus && $select.val() !== summary.focus) $select.selectpicker("val", summary.focus);
-		const current = profiles.find((profile) => profile.key === summary.focus);
-		$wrap.attr("title", current ? current.description : "");
-	}
 	function updateToolbar(summary) {
 		const locations = locationsById(summary);
 		const services = /* @__PURE__ */ new Map();
@@ -2698,27 +2668,13 @@
 	/** One request at a time, never stacked on a slow firewall; nothing while the page is hidden. */
 	function poll(query) {
 		let timer = null;
-		state.pollNow = () => {
-			if (timer !== null) {
-				clearTimeout(timer);
-				timer = null;
-			}
-			if (!running) tick();
-		};
 		let running = false;
 		const tick = async () => {
 			timer = null;
 			if (document.hidden) return;
 			running = true;
 			try {
-				const summary = await getJSON(`/api/firewallmap/flow/summary${query()}`);
-				updateFocus(summary, (key) => {
-					state.settings = {
-						...state.settings,
-						focus: key
-					};
-					state.pollNow();
-				});
+				const summary = await getJSON(`/api/firewallmap/flow/summary${query}`);
 				const problem = host().problemText(summary, T);
 				showGeo(state.mode === "live" ? summary : null);
 				if (problem && state.mode === "live") {
@@ -2893,8 +2849,6 @@
 			...parseSettings(config),
 			colorMode: state.colorMode
 		};
-		const focus = readFocus();
-		if (focus) state.settings.focus = focus;
 		if (state.can.manage) try {
 			state.pluginStatus = await getJSON("/api/firewallmap/settings/status");
 			state.abuseConfigured = Boolean(state.pluginStatus.abuseipdb_configured);
@@ -2998,7 +2952,7 @@
 		$(document).on("keydown", (event) => {
 			if (event.key === "Escape" && state.mode === "snapshot" && !$(".modal.in").length) backToLive();
 		});
-		poll(() => summaryQuery(state.settings));
+		poll(summaryQuery(state.settings));
 		if (new URLSearchParams(window.location.search).get("debug") === "1" && window.FirewallMapDiagnostics) window.FirewallMapDiagnostics.start({
 			renderer: () => state.renderer,
 			mode: () => state.mode,

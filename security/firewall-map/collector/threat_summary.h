@@ -37,7 +37,7 @@ struct threat_candidate_view {
   uint32_t remote;
   struct candidate_view candidate;
 };
-/* The threat summary is independent of the ranking (and of any Focus): it
+/* The threat summary is independent of the ranking profile: it
  * covers only flagged remotes, those Python named as evidence (IDS,
  * reputation, blocked sources) and those in a classification set of the
  * `flagged` mask (threat lists). They are kept in this order (stable within

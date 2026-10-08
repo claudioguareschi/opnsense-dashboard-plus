@@ -26,7 +26,6 @@
 #define FM_PROTOCOL_H
 #include "aggregate.h"
 #include "event_correlation.h"
-#include "profile.h"
 #include "ranking.h"
 #include "threat_summary.h"
 #include <stdio.h>
@@ -45,7 +44,6 @@ enum record_kind {
   RECORD_TELEMETRY = 6,
   RECORD_CLASSIFIED = 7,
   RECORD_CLASS_SET = 8,
-  RECORD_SELECTION = 9,
   RECORD_SNAPSHOT_CANDIDATE = 10,
   RECORD_FAILURE = 254,
   RECORD_FOOTER = 255,
@@ -95,14 +93,11 @@ uint64_t protocol_get(const unsigned char **, unsigned);
 void protocol_address_put(unsigned char **, struct addr);
 bool protocol_frame(FILE *, const void *, size_t, uint32_t *,
                     struct fm_error *);
-/* The ranked part of a sample: the union of the profiles' selections (each
- * flow once, in the order profile 0, then the flows profile 1 adds, ...) and
- * every profile's selection as positions in that union. */
+/* The ranked part of a sample: the active profile's selection, in rank
+ * order. */
 struct ranked_output {
   const struct ranked_flow *flows;
   size_t count;
-  const struct profiles *profiles;
-  const uint32_t *position; /* position[aggregate flow] = union position + 1, 0 if absent */
   /* a sample that opens a snapshot session: the flows a snapshot may
    * capture (aggregate flow indexes, in priority order) */
   const uint32_t *snapshot;

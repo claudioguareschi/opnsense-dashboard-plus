@@ -28,6 +28,7 @@ development machine. Target (FreeBSD/netlink) costs are measured separately on t
 """
 
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -65,17 +66,18 @@ class CollectorScaleTest(unittest.TestCase):
     def tearDownClass(cls):
         cls.directory.cleanup()
 
-    def engine(self):
-        engine = collector.CollectorEngine(self.worker)
+    def engine(self, profile=None):
+        """A helper started with `profile` (a definition), or with the base ranking (the oracle)."""
+        engine = collector.CollectorEngine(self.worker, profile=profile)
         self.addCleanup(engine.close)
         return engine
 
-    def run_mode(self, mode, count, samples=2, key=None, **options):
+    def run_mode(self, mode, count, samples=2, key=None, profile=None, **options):
         environment = {"FM_TEST_MODE": mode, "FM_TEST_COUNT": str(count), "FM_TEST_INTERVAL": "2",
                        "FM_TEST_CLASS_DIR": self.tables}
         if key:
             environment["FM_TEST_HASH_KEY"] = key
-        engine = self.engine()
+        engine = self.engine(profile)
         with patch.dict(os.environ, environment):
             results, started = [], time.perf_counter()
             for _ in range(samples):
@@ -179,66 +181,56 @@ class CollectorScaleTest(unittest.TestCase):
                 owners = {row[0] for row in result["threat_candidates"] if row[1] == kind}
                 self.assertEqual(owners, set(range(256)), kind)
 
-    def test_every_profile_is_selected_from_one_sample(self):
-        """All built-in profiles at once: one selection each, their union is the flow list, and
-        Classic's selection is exactly what Classic alone ranks."""
-        rows = profiles.request_rows(profiles.enabled())
-        (_, alone), _ = self.run_mode("mixed", 5000)
-        (_, together), _ = self.run_mode("mixed", 5000, profiles=rows)
-        self.assertEqual(len(together["selections"]), len(rows))
-        union = {index for selection in together["selections"] for index, _ in selection}
-        self.assertEqual(union, set(range(len(together["flows"]))))
-        self.assertLessEqual(len(together["flows"]), collector.RANKED_FLOWS * len(rows))
-        classic = [together["flows"][index]["key"] for index, _ in together["selections"][0]]
-        self.assertEqual(classic, [row["key"] for row in alone["flows"]])
-        for selection in together["selections"]:
-            self.assertLessEqual(len(selection), collector.RANKED_FLOWS)
-            scores = [score for _, score in selection]
-            self.assertEqual(scores, sorted(scores, reverse=True))
+    def profile(self, uuid):
+        return profiles.definition(profiles.BY_UUID[uuid])
+
+    def remotes(self, result):
+        return [flow["key"][1] for flow in result["flows"]]
+
+    def test_the_active_profile_ranks_the_flows(self):
+        """One profile, given at startup: the response is its selection in rank order."""
+        for uuid in profiles.BY_UUID:
+            with self.subTest(profile=profiles.BY_UUID[uuid]["name"]):
+                (_, last), _ = self.run_mode("mixed", 5000, profile=self.profile(uuid))
+                scores = [flow["score"] for flow in last["flows"]]
+                self.assertLessEqual(len(scores), collector.RANKED_FLOWS)
+                self.assertEqual(scores, sorted(scores, reverse=True))
+                self.assertNotIn("selections", last)
 
     def test_connections_ranks_by_states_and_security_reserves_flagged_places(self):
-        rows = profiles.request_rows(profiles.enabled())
-        keys = profiles.KEYS
         # sparse: 9.1.0.1 holds 99% of the states
-        (_, sparse), _ = self.run_mode("sparse", 5000, profiles=rows)
-        connections = sparse["selections"][keys.index("connections")]
-        self.assertEqual(sparse["flows"][connections[0][0]]["key"][1], "9.1.0.1")
-        # unique flows, 9.0.0.0-127 threat-listed: Security keeps all 128 of them (100 reserved,
-        # the rest on their flagged weight) although every flow carries the same traffic
-        (_, unique), _ = self.run_mode("unique", 1000, profiles=rows, threat_summary=True,
+        (_, sparse), _ = self.run_mode("sparse", 5000, profile=self.profile(profiles.CONNECTIONS))
+        self.assertEqual(self.remotes(sparse)[0], "9.1.0.1")
+        # unique flows, 9.0.0.0-127 threat-listed: Security keeps all 128 of them (S1 floor 20, the
+        # rest on their threat-list weight) although every flow carries the same traffic
+        security = self.profile(profiles.SECURITY)
+        (_, unique), _ = self.run_mode("unique", 1000, profile=security, threat_summary=True,
                                        classification=("some", [("T", "threats_some")]))
-        security = [unique["flows"][index]["key"][1] for index, _ in unique["selections"][keys.index("security")]]
-        self.assertEqual(set(security[:128]), {f"9.0.0.{n}" for n in range(128)})
-        # light flagged flows against 1,000 heavy ones (late: index 3000 on carries 100x): Classic
-        # shows none of them, Security reserves its places for them
-        (*_, late), _ = self.run_mode("late", 4000, samples=3, profiles=rows,
-                                     classification=("some", [("T", "threats_some")]))
+        self.assertEqual(set(self.remotes(unique)[:128]), {f"9.0.0.{n}" for n in range(128)})
+        # light flagged flows against 1,000 heavy ones (late: index 3000 on carries 100x): the base
+        # ranking shows none of them, Security reserves its places for them
         flagged = {f"9.0.0.{n}" for n in range(128)}
-        chosen = {name: {late["flows"][index]["key"][1] for index, _ in late["selections"][keys.index(name)]}
-                  for name in ("classic", "security")}
-        self.assertFalse(chosen["classic"] & flagged)
-        self.assertTrue(flagged <= chosen["security"])
+        lists = ("some", [("T", "threats_some")])
+        (*_, base), _ = self.run_mode("late", 4000, samples=3, classification=lists)
+        (*_, late), _ = self.run_mode("late", 4000, samples=3, profile=security, classification=lists)
+        self.assertFalse(set(self.remotes(base)) & flagged)
+        self.assertTrue(flagged <= set(self.remotes(late)))
 
     def test_profile_selections_do_not_depend_on_the_hash_key(self):
-        rows = profiles.request_rows(profiles.enabled())
         outputs = []
         facts = {f"9.1.{n >> 8}.{n & 255}": evidence.facts(n % 50, n % 3, 1 + n % 3, n % 2 == 0)
                  for n in range(0, 3000, 11)}
         for key in ("00" * 16, "0123456789abcdeffedcba9876543210"):
-            results, _ = self.run_mode("mixed", 3000, samples=3, key=key, profiles=rows, evidence=facts)
-            outputs.append([(result["flows"], result["selections"]) for result in results])
+            results, _ = self.run_mode("mixed", 3000, samples=3, key=key, profile=self.profile(profiles.BALANCED),
+                                       evidence=facts)
+            outputs.append([result["flows"] for result in results])
         self.assertEqual(outputs[0], outputs[1])
-
-    # flows of the unique mode: remote 9.<n >> 16>.<n >> 8 & 255>.<n & 255>
-    def selected(self, result, profile):
-        return [result["flows"][index]["key"][1] for index, _ in result["selections"][profile]]
 
     def test_every_evidence_source_keeps_its_fact(self):
         facts = {"9.0.0.5": evidence.facts(40, 7, 1, True), "9.0.3.10": evidence.facts(40),
                  "9.0.3.11": evidence.facts(3), "9.0.3.12": evidence.facts(ids_alerts=2, ids_severity=3),
                  "9.0.3.13": evidence.facts(reputation=True)}
-        rows = ["PROFILE 0 classic", "PROFILE 1 scored activity=0 floors=1,2,147 states=1/10"]
-        (_, last), _ = self.run_mode("unique", 1000, profiles=rows, evidence=facts,
+        (_, last), _ = self.run_mode("unique", 1000, profile="activity=0 floors=1,2,147 states=1/10", evidence=facts,
                                      classification=("some", [("T", "threats_some")]))
         flows = {flow["key"][1]: flow for flow in last["flows"]}
         every = evidence.THREAT_LIST | evidence.PF_BLOCKED | evidence.IDS | evidence.IDS_HIGH | evidence.REPUTATION
@@ -271,14 +263,14 @@ class CollectorScaleTest(unittest.TestCase):
                           "security_class": "S2", "states": 1})
 
     def test_security_floors_are_minimums_per_class(self):
-        def run(rows, facts):
-            (_, last), _ = self.run_mode("unique", 1000, profiles=["PROFILE 0 classic"] + rows, evidence=facts)
-            return self.selected(last, 1)
+        def run(profile, facts):
+            (_, last), _ = self.run_mode("unique", 1000, profile=profile, evidence=facts)
+            return self.remotes(last)
         ordinary = [f"9.0.{n >> 8}.{n & 255}" for n in range(150)]
         # one flow qualifying for S3, S2 and S1 takes only the S3 place: the S2 and S1 places go
         # to the flows of those classes, and the rest to the general pool
         multiple, strong, listed = "9.0.3.200", "9.0.3.201", "9.0.3.202"
-        chosen = run(["PROFILE 1 scored activity=0 floors=1,1,1 states=1/10"],
+        chosen = run("activity=0 floors=1,1,1 states=1/10",
                      {multiple: evidence.facts(40, 1, 1, True), strong: evidence.facts(40),
                       listed: evidence.facts(reputation=True)})
         self.assertEqual(len(chosen), 150)
@@ -286,10 +278,10 @@ class CollectorScaleTest(unittest.TestCase):
         self.assertEqual(set(chosen) - {multiple, strong, listed}, set(ordinary[:147]))
         # a reserved class also wins ordinary places on its score: five S3 flows, one reserved place
         high = {f"9.0.3.{n}": evidence.facts(ids_alerts=1, ids_severity=1) for n in range(100, 105)}
-        chosen = run(["PROFILE 1 scored activity=0 floors=1,0,0 states=1/10 ids=100/1"], high)
+        chosen = run("activity=0 floors=1,0,0 states=1/10 ids=100/1", high)
         self.assertEqual(set(chosen[:5]), set(high))
         # unused floors return to the general pool
-        chosen = run(["PROFILE 1 scored activity=0 floors=50,30,20 states=1/10"], {})
+        chosen = run("activity=0 floors=50,30,20 states=1/10", {})
         self.assertEqual(chosen, ordinary)
 
     def test_evidence_alone_forces_tracking_past_the_limit(self):
@@ -309,28 +301,54 @@ class CollectorScaleTest(unittest.TestCase):
             owners = {row[0] for row in result["threat_candidates"] if row[1] == collector.INSIDE_HOST}
             self.assertEqual(owners, set(range(256)))
 
-    def test_classic_ignores_evidence(self):
-        rows = profiles.request_rows(profiles.enabled())
+    def test_the_base_ranking_oracle_ignores_evidence(self):
+        """The base ranking (Classic, the regression oracle) is the same with or without evidence and
+        threat lists: the security machinery never leaks into it."""
         facts = {f"9.1.{n >> 8}.{n & 255}": evidence.facts(40, 3, 1, True) for n in range(0, 3000, 7)}
         (_, alone), _ = self.run_mode("mixed", 3000)
-        (_, together), _ = self.run_mode("mixed", 3000, profiles=rows, evidence=facts,
-                                         classification=THREATS_ALL)
-        classic = [(together["flows"][index]["key"], score) for index, score in together["selections"][0]]
-        self.assertEqual(classic, [(row["key"], row["score"]) for row in alone["flows"]])
+        (_, with_evidence), _ = self.run_mode("mixed", 3000, evidence=facts, classification=THREATS_ALL)
+        self.assertEqual([(row["key"], row["score"]) for row in with_evidence["flows"]],
+                         [(row["key"], row["score"]) for row in alone["flows"]])
 
-    def test_malformed_evidence_and_profiles_are_refused(self):
+    def test_malformed_evidence_is_refused_and_no_request_names_a_profile(self):
+        """Ranking policy is startup configuration: a request carrying a PROFILE row (or any profile
+        at all) is a malformed request, whatever it says."""
         rows, _ = collector._context_rows(*CONTEXT)
         for bad in ("EVIDENCE 9.0.0.1 8 0 1 3", "EVIDENCE 9.0.0.1 2 0 0 0", "EVIDENCE 9.0.0.1 1 0 0 0",
-                    "EVIDENCE 9.0.0.1 2 2000000 0 0", "PROFILE 0 scored activity=1 volume=1/1",
-                    "PROFILE 0 scored activity=1 states=1/10 states=2/10", "PROFILE 0 scored floors=100,40,20",
-                    "PROFILE 0 scored states=1/0", "PROFILE 0 classic extra"):
+                    "EVIDENCE 9.0.0.1 2 2000000 0 0", "PROFILE activity=1 states=1/10",
+                    "PROFILE 0 classic", "PROFILE 1 scored activity=0 states=1/10"):
             with self.subTest(row=bad):
-                engine = self.engine()
+                engine = self.engine(self.profile(profiles.BALANCED))
                 engine._start()
                 text = "FMCONF2\n{rows}{bad}\nRUN\n".format(rows="".join(row + "\n" for row in rows), bad=bad)
                 with self.assertRaises(collector.CollectorError) as raised:
                     engine._request(text, lambda stream, process: collector._decode(stream, process, (), False))
                 self.assertEqual(raised.exception.failure_class, "request")
+
+    def test_a_malformed_profile_stops_the_helper_at_startup(self):
+        for bad in ("activity=1 volume=1/1", "activity=1 states=1/10 states=2/10", "floors=100,40,20",
+                    "states=1/0", "classic"):
+            with self.subTest(profile=bad):
+                result = subprocess.run([self.worker, "--profile", bad], capture_output=True, text=True,
+                                        timeout=10, input="")
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("PROFILE", result.stderr)
+        # one profile only
+        result = subprocess.run([self.worker, "--profile", "states=1/10", "--profile", "states=1/10"],
+                                capture_output=True, text=True, timeout=10, input="")
+        self.assertEqual(result.returncode, 2)
+
+    def test_a_new_profile_restarts_the_helper(self):
+        engine = self.engine(self.profile(profiles.BALANCED))
+        with patch.dict(os.environ, FM_TEST_MODE="mixed", FM_TEST_COUNT="300", FM_TEST_INTERVAL="2"):
+            engine.sample(*CONTEXT)
+            started = engine.metadata["pid"]
+            self.assertFalse(engine.set_profile(self.profile(profiles.BALANCED)))
+            self.assertEqual(engine.metadata["pid"], started)
+            self.assertTrue(engine.set_profile(self.profile(profiles.SECURITY)))
+            after = engine.sample(*CONTEXT)
+        self.assertNotEqual(engine.metadata["pid"], started)
+        self.assertTrue(after["baseline"])
 
     def test_heavy_untracked_flows_are_promoted(self):
         engine = self.engine()
@@ -355,7 +373,7 @@ class CollectorScaleTest(unittest.TestCase):
                     "CLASS 0 T threats_all\nCLASSGEN all\n{rows}RUN\n".format(
                 memory=collector.memory_budget(), rows="".join(row + "\n" for row in rows)))
             summary = engine._request(text, lambda stream, process: collector._decode(
-                stream, process, (), True, categories=["T"], profiles=1))
+                stream, process, (), True, categories=["T"]))
         remotes = [remote["address"] for remote in summary["threat_remotes"]]
         self.assertEqual(len(remotes), 100)
         self.assertEqual(summary["telemetry"]["threat_remotes_omitted"], 400)

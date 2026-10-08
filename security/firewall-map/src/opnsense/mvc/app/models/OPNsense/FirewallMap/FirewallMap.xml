@@ -36,18 +36,11 @@
             <threat_lists type=".\ThreatListField">
                 <Multiple>Y</Multiple>
             </threat_lists>
-            <!-- the Focus (Flow Ranking Profile) a map shows until its viewer picks another -->
-            <focus type="OptionField">
+            <!-- the active ranking profile, by UUID: how the collector ranks flows for every viewer -->
+            <ranking_profile type=".\RankingProfileField">
                 <Required>Y</Required>
-                <Default>classic</Default>
-                <OptionValues>
-                    <classic>Classic</classic>
-                    <balanced>Balanced</balanced>
-                    <bandwidth>Bandwidth</bandwidth>
-                    <security>Security</security>
-                    <connections>Connections</connections>
-                </OptionValues>
-            </focus>
+                <Default>9bded7b2-a028-44ca-b7ab-4e3357694174</Default>
+            </ranking_profile>
             <!-- keep threat history even with the map closed -->
             <record_threats type="BooleanField">
                 <Required>Y</Required>

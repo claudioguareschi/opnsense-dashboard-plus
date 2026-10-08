@@ -41,7 +41,7 @@ import {bindSplitters, readFollow, setFollow, watchSideWidth} from './layout.js'
 import {refreshQueueCount, showQueue} from './queue.js';
 import {backToLive, bindSnapshots, renderSnapshotList, showSavedStates, takenText} from './snapshots.js';
 import {renderTalkers, talkerActive, talkers, talkersFromLast} from './talkers.js';
-import {bindChips, readFocus, syncChips, updateFocus, updateLegend, updateToolbar} from './toolbar.js';
+import {bindChips, syncChips, updateLegend, updateToolbar} from './toolbar.js';
 
 const host = () => window.FirewallMapRenderer.host;
 
@@ -119,16 +119,6 @@ function showGeo(summary) {
 /** One request at a time, never stacked on a slow firewall; nothing while the page is hidden. */
 function poll(query) {
   let timer = null;
-  // a Focus change asks again at once (query() then carries it)
-  state.pollNow = () => {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
-    if (!running) {
-      tick();
-    }
-  };
   // a request is on its way: showing the page again then must not start a second loop
   let running = false;
   const tick = async () => {
@@ -138,11 +128,7 @@ function poll(query) {
     }
     running = true;
     try {
-      const summary = await getJSON(`/api/firewallmap/flow/summary${query()}`);
-      updateFocus(summary, (key) => {
-        state.settings = {...state.settings, focus: key};
-        state.pollNow();
-      });
+      const summary = await getJSON(`/api/firewallmap/flow/summary${query}`);
       const problem = host().problemText(summary, T);
       showGeo(state.mode === 'live' ? summary : null);
       if (problem && state.mode === 'live') {
@@ -341,11 +327,6 @@ async function loadSettings() {
     console.error('Firewall Map+: dashboard settings unavailable', error);
   }
   state.settings = {...parseSettings(config), colorMode: state.colorMode};
-  // the page's Focus is this browser's own choice; the widget keeps its own
-  const focus = readFocus();
-  if (focus) {
-    state.settings.focus = focus;
-  }
   // the plugin's status (background recording, the AbuseIPDB key) for those who may manage it
   if (state.can.manage) {
     try {
@@ -456,7 +437,7 @@ $(async () => {
       backToLive();
     }
   });
-  poll(() => summaryQuery(state.settings));
+  poll(summaryQuery(state.settings));
   // ?debug=1: the diagnostics panel, a separate script that only development packages install
   if (new URLSearchParams(window.location.search).get('debug') === '1' && window.FirewallMapDiagnostics) {
     window.FirewallMapDiagnostics.start({renderer: () => state.renderer, mode: () => state.mode, contextLosses: () => state.contextLosses});

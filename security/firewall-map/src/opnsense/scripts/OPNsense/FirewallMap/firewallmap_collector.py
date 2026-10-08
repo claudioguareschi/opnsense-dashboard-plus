@@ -47,7 +47,6 @@ A map snapshot (the camera button) is a request file in SNAPSHOT_REQUEST_DIR: th
 writes bounded incident detail beyond the live summary, plus PF rows and capture coverage.
 """
 
-import hashlib
 import json
 import ipaddress
 import os
@@ -212,8 +211,6 @@ class FlowTracker:
         # total is an estimate (bounded discovery)
         self.total_estimated = False
         self.quality = None
-        # per enabled profile, its selection as (local, remote) pairs in rank order
-        self.selections = []
         self.collector_visible = []
 
     def update_aggregate(self, aggregate, now):
@@ -224,8 +221,6 @@ class FlowTracker:
         self.total_flows = aggregate["counts"]["flows"]
         self.total_estimated = aggregate["counts"].get("flows_estimated", False)
         self.quality = aggregate.get("quality")
-        self.selections = [[aggregate["flows"][index]["key"] for index, _score in rows]
-                           for rows in aggregate.get("selections") or ()]
         for row in aggregate["flows"]:
             total = _FlowTotals()
             total.states = row["states"]
@@ -647,8 +642,8 @@ class Collector:
         self.blocklists = ThreatClassification()
         self.reputation = Reputation(self.store)
         self.recorder = ThreatRecorder()
-        # Flow Ranking Profiles: the collector selects for each; a viewer's Focus picks one
-        self.profiles = ranking_profiles.enabled()
+        # the active ranking profile (an administrative setting; refreshed with the settings)
+        self.profile = ranking_profiles.active()
         self.collector_engine = CollectorEngine()
         # set while the state collector is incompatible (another protocol, or a PF ABI it was not
         # built for): explicit status and slow pacing; the engine does not run the same binary again
@@ -713,6 +708,13 @@ class Collector:
         if self._due("settings", now, SETTINGS_REFRESH_SECONDS):
             self.values = settings()
             self.recording = recording_wanted(self.values)
+            # the active profile is the collector's startup configuration: a change of profile or of
+            # its definition restarts it (edits to other profiles change nothing here)
+            self.profile = ranking_profiles.active(self.values)
+            if self.collector_engine.set_profile(ranking_profiles.definition(self.profile)) \
+                    and self.collector_engine.starts:
+                log_notice(f"ranking profile {self.profile['name']}: restarting the collector; the next sample "
+                           "is a baseline")
             # DB-IP while it stands in for a failing MaxMind download (its credit is then shown)
             self.provider = geodb.lookup_provider(self.values)
             city, asn, problem = database_state(self.values)
@@ -866,8 +868,7 @@ class Collector:
             payload["locations"].append({
                 "id": origin, "name": origin, "lat": location["lat"], "lon": location["lon"], "local": True,
             })
-        if not snapshot:
-            self.add_focus(payload)
+        payload["ranking_profile"] = ranking_profiles.descriptor(self.profile)
         payload["provider"] = self.provider
         payload["collector"] = self.timing_status()
         if self.sample_skipped:
@@ -889,17 +890,6 @@ class Collector:
                 ("lat", "lat"), ("lon", "lon"), ("country", "country_name"), ("country_code", "country"))})
         payload["security"] = objects
         payload["security_omitted"] = omitted
-
-    def add_focus(self, payload):
-        """Each enabled profile's selection as positions in the payload's flows (their union):
-        the API returns only the Focus a viewer asked for (FlowSummary.php)."""
-        position = {(flow["origin"], flow["dest"]): index for index, flow in enumerate(payload["flows"])}
-        selections = self.tracker.selections or [[(flow["origin"], flow["dest"]) for flow in payload["flows"]]]
-        payload["profiles"] = ranking_profiles.descriptor(self.profiles)
-        payload["focus"] = {profile["key"]: [position[pair] for pair in pairs if pair in position]
-                            for profile, pairs in zip(self.profiles, selections)}
-        default = self.values.get("focus") or ranking_profiles.DEFAULT_FOCUS
-        payload["focus_default"] = default if default in payload["focus"] else self.profiles[0]["key"]
 
     def timing_status(self):
         with self._status_lock:
@@ -979,13 +969,13 @@ class Collector:
 
     def build_snapshot_payload(self, now):
         """A bounded capture of selected flows (capture version 2): the flows with security
-        evidence first, then every enabled profile's selection, as the collector listed them for
+        evidence first, then the active profile's ranked flows, as the collector listed them for
         the sample that opened the session; never all flows, never an uncapped document."""
         candidates = self.snapshot_candidates
         # Truncation never fails a snapshot: what was left out is counted here, and required
         # (evidence) flows that did not fit make required_evidence_complete false.
         coverage = {"candidates": len(candidates), "available": 0, "captured": 0, "limit": SNAPSHOT_FLOWS,
-                    "selection": "evidence_then_profiles_v2", "omitted_limit": 0, "omitted_bytes": 0,
+                    "selection": "evidence_then_ranked_v2", "omitted_limit": 0, "omitted_bytes": 0,
                     "omitted_geo": 0, "required": 0, "omitted_required": 0,
                     "omitted_candidates": self.snapshot_candidates_omitted}
         addresses = list(dict.fromkeys(address for item in candidates for address in (item["remote"], item["local"])
@@ -1041,8 +1031,6 @@ class Collector:
             payload["hostnames"].update(hostnames)
         payload["locations"].sort(key=lambda location: location["id"])
         coverage["captured"] = len(payload["flows"])
-        # each Focus, among the captured flows: a snapshot opens in any of them
-        self.add_focus(payload)
         # required flows beyond the flow ceiling were never selected
         coverage["omitted_required"] += coverage["required"] - len(required_pairs)
         identities = [(flow["origin"], flow["dest"], (flow["origin"], flow["dest"]) in required_pairs)
@@ -1063,14 +1051,12 @@ class Collector:
         """What the capture was taken from (capture version 2): the sample, the population it
         ranked, how exact that ranking was, and the classification and profile definitions."""
         telemetry = (self.collector_status.get("state_collector") or {}).get("telemetry") or {}
-        rows = ranking_profiles.request_rows(self.profiles)
         return {
             "collector_generation": self.collector_status.get("generation"), "sequence": telemetry.get("sequence"),
             "flows_total": self.tracker.total_flows, "flows_estimated": self.tracker.total_estimated,
             "quality": self.tracker.quality, "regime": "bounded" if telemetry.get("regime") else "exact",
             "classification_generation": self.blocklists.generation,
-            "profiles": {"keys": [profile["key"] for profile in self.profiles],
-                         "generation": hashlib.sha256("\n".join(rows).encode()).hexdigest()[:16]},
+            "ranking_profile": ranking_profiles.descriptor(self.profile),
         }
 
     def save_requested_snapshots(self, now):
@@ -1238,8 +1224,7 @@ class Collector:
                 memory=memory_budget(self.values.get("helper_memory")),
                 evidence=self.evidence_facts(),
                 correlation=bool(queries) or os.path.exists(EVE_LOG),
-                classification=self.blocklists.request(), classify=evidence,
-                profiles=ranking_profiles.request_rows(self.profiles))
+                classification=self.blocklists.request(), classify=evidence)
         except CollectorError as error:
             self.collector_engine.close()
             self.set_phase("failed")
@@ -1457,6 +1442,8 @@ def main(arguments):
     secure_umask()
     if arguments == ["tables"]:
         print(json.dumps(tables_report()))
+    elif arguments == ["profiles"]:
+        print(json.dumps({"profiles": ranking_profiles.catalog(), "default": ranking_profiles.DEFAULT}))
     elif arguments == ["ensure"]:
         if recording_wanted():
             subprocess.run([RC_SCRIPT, "onestart"], capture_output=True, check=False, timeout=10)

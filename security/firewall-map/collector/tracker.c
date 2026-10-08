@@ -99,7 +99,7 @@ static bool promote(struct tracker *t, const unsigned char *key, struct fm_error
   return lookup(&t->promoted, key, FM_FLOW_KEY_SIZE, true, error) != NULL;
 }
 /* A state band: the untracked flows with the most states (or new states)
- * that beat the profiles' edge by the margin. */
+ * that beat the active profile's edge by the margin. */
 static bool promote_band(struct tracker *t, const struct summary *band, double per_unit, double edge,
                          struct fm_error *error) {
   size_t candidates = summary_top(band, t->top, TRACK_PROMOTE_STATES_MAX);
@@ -147,8 +147,8 @@ bool tracker_finish(struct tracker *t, const struct aggregate *a, const struct r
   map_clear(&t->pinned);
   map_clear(&t->promoted);
   if (next == TRACK_BOUNDED) {
-    /* the profiles' selections stay tracked, and flagged flows (up to the
-     * forced cap) */
+    /* the ranked flows stay tracked, and flagged flows (up to the forced
+     * cap) */
     for (size_t n = 0; hints && n < hints->selected_count; n++) {
       const struct flow *f = aggregate_flow(a, hints->selected[n].flow);
       unsigned char key[FM_FLOW_KEY_SIZE];

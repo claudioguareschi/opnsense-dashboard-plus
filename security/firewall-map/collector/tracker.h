@@ -32,7 +32,8 @@
 /* The tracked set T and its two regimes (CONTRACTS.md, "Tracked set").
  *
  * Ranking-exact: every flow is tracked, admitted during the pass, while T
- * stays under its limit; ranking and history then equal Classic. If the
+ * stays under its limit; ranking and history are then exact (the base
+ * ranking, the Classic oracle, is reproduced exactly). If the
  * limit is reached during a pass, that whole sample is bounded and the next
  * one starts in the bounded regime.
  *
@@ -83,10 +84,10 @@ void tracker_reset(struct tracker *);
  * admission policy (evidence and threat mask are the caller's). */
 bool tracker_begin(struct tracker *, struct ranking *, struct budget_limits, struct admission *,
                    struct fm_error *);
-/* What the profiles need from the next sample's tracked set: the flows they
- * selected (kept tracked), and, for profiles that rank by state counts, the
+/* What the active profile needs from the next sample's tracked set: the
+ * flows it selected (kept tracked), and, when it ranks by state counts, the
  * smallest active-state count and new-state rate of a full selection (0 when
- * a selection has room): an untracked flow is promoted on those bands only
+ * the selection has room): an untracked flow is promoted on those bands only
  * when it beats that edge by the incumbency margin. */
 struct track_hints {
   const struct ranked_flow *selected;

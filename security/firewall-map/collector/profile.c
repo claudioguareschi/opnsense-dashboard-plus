@@ -31,14 +31,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-struct profiles {
-  struct profile defs[PROFILE_MAX];
-  size_t count;
-  /* per profile: this sample's selection and the flow keys of the previous
-   * one (incumbency), at most `limit` each */
-  struct selected *selection[PROFILE_MAX];
-  size_t selected[PROFILE_MAX], capacity[PROFILE_MAX];
-  struct map previous[PROFILE_MAX];
+struct ranker {
+  struct profile active;
+  bool scored; /* false: the base ranking */
+  /* this sample's selection and the flow keys of the previous one
+   * (incumbency), at most `limit` each */
+  struct selected *selection;
+  size_t selected, capacity;
+  struct map previous;
   /* scratch: candidates of one selection (bounded heaps: general, and one
    * per security class S1-S3) */
   struct candidate_row *general, *reserved[4];
@@ -109,43 +109,31 @@ bool profile_parse(const char *text, struct profile *p, const char **why) {
   return true;
 }
 
-struct profiles *profiles_create(struct fm_error *error) {
-  struct profiles *p = fm_calloc(1, sizeof(*p));
-  if (!p) fm_error_set(error, errno, "profiles allocation");
+struct ranker *ranker_create(struct fm_error *error) {
+  struct ranker *p = fm_calloc(1, sizeof(*p));
+  if (!p) fm_error_set(error, errno, "ranker allocation");
   return p;
 }
-void profiles_reset(struct profiles *p) {
-  for (size_t n = 0; n < PROFILE_MAX; n++) {
-    map_clear(&p->previous[n]);
-    p->selected[n] = 0;
-  }
+void ranker_reset(struct ranker *p) {
+  map_clear(&p->previous);
+  p->selected = 0;
 }
-void profiles_destroy(struct profiles *p) {
+void ranker_destroy(struct ranker *p) {
   if (!p) return;
-  profiles_reset(p);
-  for (size_t n = 0; n < PROFILE_MAX; n++) fm_free(p->selection[n]);
+  ranker_reset(p);
+  fm_free(p->selection);
   fm_free(p->general);
   for (int c = SECURITY_S1; c <= SECURITY_S3; c++) fm_free(p->reserved[c]);
   fm_free(p);
 }
-bool profiles_configure(struct profiles *p, const struct profile *defs, size_t count,
-                        struct fm_error *error) {
-  if (count > PROFILE_MAX)
-    return fm_error_fail(error, FM_FAILURE_REQUEST, EINVAL, "profile count");
-  if (count != p->count || memcmp(defs, p->defs, count * sizeof(*defs)))
-    profiles_reset(p);
-  memset(p->defs, 0, sizeof(p->defs));
-  memcpy(p->defs, defs, count * sizeof(*defs));
-  p->count = count;
-  return true;
+void ranker_configure(struct ranker *p, const struct profile *active) {
+  p->scored = active != NULL;
+  if (active) p->active = *active;
 }
-size_t profiles_count(const struct profiles *p) { return p->count; }
-const struct profile *profiles_at(const struct profiles *p, size_t n) {
-  return n < p->count ? &p->defs[n] : NULL;
-}
-size_t profiles_selection(const struct profiles *p, size_t n, const struct selected **out) {
-  *out = n < p->count ? p->selection[n] : NULL;
-  return n < p->count ? p->selected[n] : 0;
+const struct profile *ranker_profile(const struct ranker *p) { return p->scored ? &p->active : NULL; }
+size_t ranker_selection(const struct ranker *p, const struct selected **out) {
+  *out = p->selection;
+  return p->selected;
 }
 
 static double feature_value(const struct flow *f, const struct flow_rates *rates,
@@ -162,8 +150,8 @@ static double feature_value(const struct flow *f, const struct flow_rates *rates
   default: return 0;
   }
 }
-double profiles_value(const struct aggregate *a, const struct ranking *r, size_t flow,
-                      enum profile_feature feature, double interval) {
+double profile_value(const struct aggregate *a, const struct ranking *r, size_t flow,
+                     enum profile_feature feature, double interval) {
   const struct flow *f = aggregate_flow(a, flow);
   struct flow_rates rates;
   if (!f || !ranking_rates(r, flow, &rates)) return 0;
@@ -216,23 +204,23 @@ static bool reserve_rows(struct selected **rows, size_t *capacity, size_t needed
   return true;
 }
 
-static bool select_classic(struct profiles *p, size_t n, const struct ranking *r, size_t limit,
+static bool select_base(struct ranker *p, const struct ranking *r, size_t limit,
                            struct fm_error *error) {
   size_t count = ranking_count(r) < limit ? ranking_count(r) : limit;
-  if (!reserve_rows(&p->selection[n], &p->capacity[n], count, error)) return false;
+  if (!reserve_rows(&p->selection, &p->capacity, count, error)) return false;
   for (size_t k = 0; k < count; k++) {
     struct ranked_flow row;
     ranking_at(r, k, &row);
-    p->selection[n][k] = (struct selected){(uint32_t)row.flow, row.score};
+    p->selection[k] = (struct selected){(uint32_t)row.flow, row.score};
   }
-  p->selected[n] = count;
+  p->selected = count;
   return true;
 }
 
-static bool select_scored(struct profiles *p, size_t n, const struct aggregate *a,
+static bool select_scored(struct ranker *p, const struct aggregate *a,
                           const struct ranking *r, double interval, size_t limit,
                           struct fm_error *error) {
-  const struct profile *def = &p->defs[n];
+  const struct profile *def = &p->active;
   size_t flows = aggregate_counts(a).flows, general = 0, reserved[4] = {0};
   for (size_t f = 0; f < flows; f++) {
     const struct flow *flow = aggregate_flow(a, f);
@@ -246,7 +234,7 @@ static bool select_scored(struct profiles *p, size_t n, const struct aggregate *
     if (!(score > 0)) continue;
     unsigned char key[FM_FLOW_KEY_SIZE];
     state_flow_key(key, flow->local, flow->remote);
-    if (map_find(&p->previous[n], key, sizeof(key))) score *= PROFILE_INCUMBENCY;
+    if (map_find(&p->previous, key, sizeof(key))) score *= PROFILE_INCUMBENCY;
     struct candidate_row row = {(uint32_t)f, score, rates.order};
     /* a flow counts for its own class's floor only (no flow takes two
      * reserved places) and competes for the general places as well */
@@ -255,43 +243,43 @@ static bool select_scored(struct profiles *p, size_t n, const struct aggregate *
       heap_offer(p->reserved[class], &reserved[class], def->floor[class], &row);
     heap_offer(p->general, &general, limit, &row);
   }
-  if (!reserve_rows(&p->selection[n], &p->capacity[n], limit, error)) return false;
+  if (!reserve_rows(&p->selection, &p->capacity, limit, error)) return false;
   /* the floors' flows (S3, S2, S1: disjoint), then the best others until
    * the limit; places a floor did not use stay in the general pool */
   size_t count = 0;
   for (int c = SECURITY_S3; c >= SECURITY_S1; c--)
     for (size_t k = 0; k < reserved[c] && count < limit; k++)
-      p->selection[n][count++] = (struct selected){p->reserved[c][k].flow, p->reserved[c][k].score};
+      p->selection[count++] = (struct selected){p->reserved[c][k].flow, p->reserved[c][k].score};
   size_t floors = count;
   qsort(p->general, general, sizeof(*p->general), best_first);
   for (size_t k = 0; k < general && count < limit; k++) {
     bool taken = false;
-    for (size_t j = 0; j < floors && !taken; j++) taken = p->selection[n][j].flow == p->general[k].flow;
-    if (!taken) p->selection[n][count++] = (struct selected){p->general[k].flow, p->general[k].score};
+    for (size_t j = 0; j < floors && !taken; j++) taken = p->selection[j].flow == p->general[k].flow;
+    if (!taken) p->selection[count++] = (struct selected){p->general[k].flow, p->general[k].score};
   }
   /* final order: by score, then first-seen */
   struct candidate_row *order = p->general;
   for (size_t k = 0; k < count; k++) {
     struct flow_rates rates;
-    ranking_rates(r, p->selection[n][k].flow, &rates);
-    order[k] = (struct candidate_row){p->selection[n][k].flow, p->selection[n][k].score, rates.order};
+    ranking_rates(r, p->selection[k].flow, &rates);
+    order[k] = (struct candidate_row){p->selection[k].flow, p->selection[k].score, rates.order};
   }
   qsort(order, count, sizeof(*order), best_first);
-  for (size_t k = 0; k < count; k++) p->selection[n][k] = (struct selected){order[k].flow, order[k].score};
-  p->selected[n] = count;
+  for (size_t k = 0; k < count; k++) p->selection[k] = (struct selected){order[k].flow, order[k].score};
+  p->selected = count;
   /* incumbency for the next sample */
-  map_clear(&p->previous[n]);
+  map_clear(&p->previous);
   for (size_t k = 0; k < count; k++) {
-    const struct flow *flow = aggregate_flow(a, p->selection[n][k].flow);
+    const struct flow *flow = aggregate_flow(a, p->selection[k].flow);
     unsigned char key[FM_FLOW_KEY_SIZE];
     state_flow_key(key, flow->local, flow->remote);
-    if (!lookup(&p->previous[n], key, sizeof(key), true, error)) return false;
+    if (!lookup(&p->previous, key, sizeof(key), true, error)) return false;
   }
   return true;
 }
 
-bool profiles_select(struct profiles *p, const struct aggregate *a, const struct ranking *r,
-                     double interval, size_t limit, struct fm_error *error) {
+bool ranker_select(struct ranker *p, const struct aggregate *a, const struct ranking *r,
+                   double interval, size_t limit, struct fm_error *error) {
   /* the scratch holds the general heap and one floor heap per class (limit each) */
   if (p->scratch < limit) {
     void *general = fm_realloc(p->general, limit * sizeof(*p->general));
@@ -304,16 +292,11 @@ bool profiles_select(struct profiles *p, const struct aggregate *a, const struct
     }
     p->scratch = limit;
   }
-  for (size_t n = 0; n < p->count; n++)
-    if (!(p->defs[n].classic ? select_classic(p, n, r, limit, error)
-                             : select_scored(p, n, a, r, interval, limit, error)))
-      return false;
-  return true;
+  return p->scored ? select_scored(p, a, r, interval, limit, error)
+                   : select_base(p, r, limit, error);
 }
 
-size_t profiles_bytes(const struct profiles *p) {
-  size_t bytes = sizeof(*p) + p->scratch * 4 * sizeof(*p->general);
-  for (size_t n = 0; n < PROFILE_MAX; n++)
-    bytes += p->capacity[n] * sizeof(*p->selection[n]) + map_bytes(&p->previous[n]);
-  return bytes;
+size_t ranker_bytes(const struct ranker *p) {
+  return sizeof(*p) + p->scratch * 4 * sizeof(*p->general) + p->capacity * sizeof(*p->selection) +
+         map_bytes(&p->previous);
 }

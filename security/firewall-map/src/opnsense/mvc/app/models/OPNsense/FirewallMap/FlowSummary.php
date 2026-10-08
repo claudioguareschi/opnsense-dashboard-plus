@@ -40,9 +40,8 @@ class FlowSummary
      * @param bool $hostnames the viewer shows host names (reverse DNS)
      * @param int $minimum blocked sources need this many hits before they are drawn
      * @param float|null $now the current time (epoch seconds), for the summary's age
-     * @param string|null $focus the viewer's Focus (a profile key); null: the configured default
      */
-    public static function fromBackend($output, $hostnames, $minimum, $now = null, $focus = null)
+    public static function fromBackend($output, $hostnames, $minimum, $now = null)
     {
         $result = json_decode($output ?? '', true);
         if (!is_array($result) || !isset($result['summary']) || !is_array($result['summary'])) {
@@ -56,31 +55,7 @@ class FlowSummary
         if (!$hostnames) {
             unset($summary['hostnames']);
         }
-        return self::applyBlockThreshold(self::applyFocus($summary, $focus), $minimum);
-    }
-
-    /**
-     * The collector writes every enabled profile's selection as positions in its flows (their
-     * union); a viewer receives only the flows of its Focus, in that profile's order. An unknown
-     * Focus falls back to the default.
-     */
-    public static function applyFocus(array $summary, $focus)
-    {
-        if (!isset($summary['focus']) || !is_array($summary['focus']) || !isset($summary['flows'])) {
-            return $summary;
-        }
-        $key = is_string($focus) && isset($summary['focus'][$focus]) ? $focus : ($summary['focus_default'] ?? null);
-        $positions = isset($summary['focus'][$key]) && is_array($summary['focus'][$key]) ? $summary['focus'][$key] : [];
-        $flows = [];
-        foreach ($positions as $position) {
-            if (is_int($position) && isset($summary['flows'][$position])) {
-                $flows[] = $summary['flows'][$position];
-            }
-        }
-        $summary['flows'] = $flows;
-        $summary['focus'] = $key;
-        unset($summary['focus_default']);
-        return $summary;
+        return self::applyBlockThreshold($summary, $minimum);
     }
 
     /**

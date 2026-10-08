@@ -325,7 +325,13 @@ static int correlate_fixture(const char *context_path, const char *input_path,
   }
   FILE *output = fopen(output_path, "wb");
   struct telemetry telemetry = {.interval = -1};
-  bool ok = output && protocol_write_ranked(output, aggregate, ranking, NULL,
+  /* the base ranking's flows, in rank order */
+  struct ranked_flow rows[BUDGET_RANKED_FLOWS];
+  size_t count = ranking_count(ranking);
+  for (size_t n = 0; n < count; n++)
+    ranking_at(ranking, n, &rows[n]);
+  struct ranked_output ranked = {rows, count, NULL, 0, ranking};
+  bool ok = output && protocol_write_ranked(output, aggregate, &ranked, NULL,
                                              matches, match_count, NULL, BUDGET_CANDIDATES_DEFAULT,
                                              &telemetry, error);
   if (output && fclose(output) && !error->code)

@@ -131,8 +131,13 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       FILE *out = open_memstream(&buffer, &length);
       struct telemetry telemetry = {0};
       if (out) {
-        struct class_report report = {classes, NULL, 0};
-        protocol_write_ranked(out, aggregate, ranking, threats, NULL, 0, &report, 4, &telemetry, &error);
+        struct class_report report = {classes, NULL, 0, aggregate, NULL, NULL, classifier_category(classes, 'T')};
+        struct ranked_flow rows[BUDGET_RANKED_FLOWS];
+        size_t count = ranking_count(ranking);
+        for (size_t n = 0; n < count; n++)
+          ranking_at(ranking, n, &rows[n]);
+        struct ranked_output ranked = {rows, count, NULL, 0, ranking};
+        protocol_write_ranked(out, aggregate, &ranked, threats, NULL, 0, &report, 4, &telemetry, &error);
         fclose(out);
       }
       free(buffer);

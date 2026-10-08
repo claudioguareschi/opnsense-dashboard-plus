@@ -85,7 +85,7 @@ HELPER_MEMORY_MAX_MIB = 16384
 def settings(path=SETTINGS_FILE):
     """The plugin's settings, with their defaults."""
     values = {"provider": "auto", "license_key": "", "update_days": 3, "threat_lists": "",
-              "record_threats": "1", "blocklist_aliases": "0", "helper_memory": "", "focus": "classic"}
+              "record_threats": "1", "blocklist_aliases": "0", "helper_memory": "", "ranking_profile": ""}
     general = _read(path).get("general") or {}
     for field in values:
         if str(general.get(field) or "").strip():

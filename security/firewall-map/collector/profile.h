@@ -28,12 +28,12 @@
 #include "aggregate.h"
 #include "ranking.h"
 
-/* Flow Ranking Profiles (CONTRACTS.md, "Profiles" and "Ranking features").
- * Every enabled profile selects its top flows each sample over the shared
- * tracked set; a viewer's Focus only chooses among the selections.
+/* The active Ranking Profile (CONTRACTS.md, "Ranking profile" and "Ranking
+ * features"). Exactly one profile ranks the collector's flows for every
+ * viewer: it is operational policy, set by the administrator, and startup
+ * configuration (--profile): compiled once, immutable for the process.
  *
- * Classic is the existing ranking itself: max(byte rate, 1) x activity with
- * EMA rates, linear fade and first-seen ties. Every other profile scores
+ * A profile scores every tracked flow as
  *   sum over features f of weight_f * log1p(value_f / scale_f)
  * over a closed set of features, multiplied by the fade activity when the
  * profile says so, plus an incumbency bonus for the flows it selected last
@@ -41,8 +41,13 @@
  * security class (S3, S2, S1; evidence.h): each flow counts only for its own
  * class, unused places return to the general pool, and a reserved class
  * also wins general places on its score. Ties go to the earlier first-seen
- * flow. */
-#define PROFILE_MAX 8
+ * flow.
+ *
+ * Without a profile the selection is the base ranking itself, Classic:
+ * max(byte rate, 1) x activity with EMA rates, linear fade and first-seen
+ * ties. It is not a product profile: only a collector started without
+ * --profile uses it (the regression oracle and its tests); the service
+ * always starts one with the active profile. */
 #define PROFILE_INCUMBENCY 1.1
 /* The ranking features (a closed vocabulary: the request names them, the
  * parser compiles them to these IDs once per request). */
@@ -57,12 +62,11 @@ enum profile_feature {
   FEATURE_COUNT = 7
 };
 struct profile {
-  bool classic;
   bool activity;
   unsigned floor[4]; /* reserved places by security class (index 1-3; 0 unused) */
   double weight[FEATURE_COUNT], scale[FEATURE_COUNT];
 };
-/* Parses the scored part of a PROFILE row ("activity=1 floors=5,3,2
+/* Parses a profile definition ("activity=1 floors=5,3,2
  * byte_rate=30/10000 ..."): every key known, given once, in range; unknown
  * or malformed is an error (message in `why`). Features left out weigh 0. */
 bool profile_parse(const char *text, struct profile *, const char **why);
@@ -70,21 +74,21 @@ struct selected {
   uint32_t flow; /* aggregate flow index */
   double score;
 };
-struct profiles;
-struct profiles *profiles_create(struct fm_error *);
-void profiles_destroy(struct profiles *);
-/* Sets the enabled profiles; a change of definitions forgets incumbency. */
-bool profiles_configure(struct profiles *, const struct profile *, size_t count, struct fm_error *);
-size_t profiles_count(const struct profiles *);
-const struct profile *profiles_at(const struct profiles *, size_t);
-/* Selects up to `limit` flows for every profile. */
-bool profiles_select(struct profiles *, const struct aggregate *, const struct ranking *,
-                     double interval, size_t limit, struct fm_error *);
-size_t profiles_selection(const struct profiles *, size_t profile, const struct selected **);
-/* The value of a feature for an aggregate flow (as profiles_select saw it). */
-double profiles_value(const struct aggregate *, const struct ranking *, size_t flow,
-                      enum profile_feature, double interval);
+struct ranker;
+struct ranker *ranker_create(struct fm_error *);
+void ranker_destroy(struct ranker *);
+/* Sets the active profile once, at startup (NULL: the base ranking). */
+void ranker_configure(struct ranker *, const struct profile *);
+/* The active profile, or NULL for the base ranking. */
+const struct profile *ranker_profile(const struct ranker *);
+/* Selects up to `limit` flows, in rank order. */
+bool ranker_select(struct ranker *, const struct aggregate *, const struct ranking *,
+                   double interval, size_t limit, struct fm_error *);
+size_t ranker_selection(const struct ranker *, const struct selected **);
+/* The value of a feature for an aggregate flow. */
+double profile_value(const struct aggregate *, const struct ranking *, size_t flow,
+                     enum profile_feature, double interval);
 /* Forgets incumbency (a refused sample). */
-void profiles_reset(struct profiles *);
-size_t profiles_bytes(const struct profiles *);
+void ranker_reset(struct ranker *);
+size_t ranker_bytes(const struct ranker *);
 #endif

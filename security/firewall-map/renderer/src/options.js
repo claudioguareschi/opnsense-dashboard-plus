@@ -30,11 +30,8 @@
  */
 export const DEFAULT_OPTIONS = {
   heavyTop: 5, heavyRate: 1000000, maxArcs: 100, labels: true, hostnames: false, asn: true, blocks: true,
-  blockMin: 3, colorMode: 'initiator', follow: false, focus: '',
+  blockMin: 3, colorMode: 'initiator', follow: false,
 };
-
-/* Focus (Flow Ranking Profile) keys look like this; anything else is ignored. */
-const FOCUS_KEY = /^[a-z0-9_-]{1,32}$/;
 
 /** The options dialog's values ("5", "0", "1") as renderer settings, defaults for anything unset. */
 export function parseSettings(config = {}) {
@@ -52,19 +49,14 @@ export function parseSettings(config = {}) {
     blocks: config.blocks !== '0',
     blockMin: number(config.block_min, DEFAULT_OPTIONS.blockMin) || DEFAULT_OPTIONS.blockMin,
     follow: config.follow === '1',
-    // '' or unknown: the firewall's default Focus
-    focus: FOCUS_KEY.test(config.focus ?? '') ? config.focus : '',
   };
 }
 
-/** The live data request's parameters: the viewer's block threshold, reverse DNS choice and
- * Focus (the API returns only that profile's flows). */
+/** The live data request's parameters: the viewer's block threshold and reverse DNS choice.
+ * Nothing a viewer sends changes which flows the collector ranks: the ranking profile is the
+ * firewall's. */
 export function summaryParams(settings) {
-  return {
-    blocks_min: settings.blockMin ?? DEFAULT_OPTIONS.blockMin,
-    ...(settings.hostnames ? {hostnames: 1} : {}),
-    ...(FOCUS_KEY.test(settings.focus ?? '') ? {focus: settings.focus} : {}),
-  };
+  return {blocks_min: settings.blockMin ?? DEFAULT_OPTIONS.blockMin, ...(settings.hostnames ? {hostnames: 1} : {})};
 }
 
 /** The same as a query string, for a request that does not build it itself (the page). */

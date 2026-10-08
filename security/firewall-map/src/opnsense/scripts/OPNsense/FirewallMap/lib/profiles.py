@@ -24,16 +24,17 @@
 
 
 
-"""Flow Ranking Profiles: what the map's Focus chooses between.
+"""Ranking profiles: the collector's ranking policy (collector/CONTRACTS.md, "Ranking profile").
 
-The collector selects the top flows of every enabled profile on every sample, over its shared
-tracked set (collector/CONTRACTS.md, "Profiles"); a viewer's Focus only picks one of those
-selections, so viewers with different Focuses cost the collector nothing more.
+Exactly one profile is active for the firewall and every viewer sees the flows it ranks; it is
+an administrative setting (general.ranking_profile, a profile UUID), never a viewer's choice.
+OPNsense and Python own the profile configuration: this module resolves the active profile and
+generates the collector's startup definition from it (--profile), which the collector compiles once
+and keeps for its lifetime: a new or edited active profile restarts the collector.
 
-Classic is the ranking Firewall Map has always had: max(byte rate, 1) x activity, with smoothed
-rates and a linear fade. The others add, for each feature, weight x log1p(value / scale):
+A profile adds, for each feature, weight x log1p(value / scale):
 
-    byte_rate        EMA-smoothed observed byte rate, both directions (bytes/s; Classic's rate)
+    byte_rate        EMA-smoothed observed byte rate, both directions (bytes/s)
     packet_rate      EMA-smoothed observed packet rate (packets/s)
     states           PF states of the flow now
     new_state_rate   states new since the previous sample, per second
@@ -44,7 +45,13 @@ rates and a linear fade. The others add, for each feature, weight x log1p(value 
 `activity` multiplies the score by the fade (a flow that stopped moving fades out over 20 s);
 `floors` reserve places for the security classes S3, S2 and S1 (collector/evidence.h): minimums,
 never caps, and places a class does not use return to the general pool.
+
+Built-in profiles are immutable templates identified by fixed UUIDs (identity is never the
+name); custom profiles, copies of a built-in or of another custom profile with their own UUIDs,
+are configuration rows (Phase G).
 """
+
+import hashlib
 
 # the collector's closed feature vocabulary (collector/profile.h; CONTRACTS.md "Ranking features")
 FEATURES = ("byte_rate", "packet_rate", "states", "new_state_rate", "blocked", "threat_list", "ids")
@@ -52,55 +59,63 @@ FEATURES = ("byte_rate", "packet_rate", "states", "new_state_rate", "blocked", "
 # weight x log(2)
 SCALES = {"byte_rate": 10000, "packet_rate": 10, "states": 10, "new_state_rate": 1, "blocked": 10,
           "threat_list": 1, "ids": 1}
-MAX_PROFILES = 8
-DEFAULT_FOCUS = "classic"
 
-# Weights are the 0.60 ranking contract's starting values (flow volume and direction come in a
-# later phase); floors reserve places for security classes S3, S2 and S1 (collector/evidence.h).
-PROFILES = [
-    {"key": "classic", "name": "Classic", "classic": True,
-     "description": "The busiest flows by byte rate, fading out when they stop (the original ranking)."},
-    {"key": "balanced", "name": "Balanced", "activity": True, "floors": (5, 3, 2),
+BALANCED = "9bded7b2-a028-44ca-b7ab-4e3357694174"
+BANDWIDTH = "a5df6449-a682-4029-82c9-ae51b25a87db"
+CONNECTIONS = "dcbf98a3-1297-438c-a78b-b21b5bc6bcdd"
+SECURITY = "6c02d03d-4087-46a9-b5bc-6378fb5eeada"
+DEFAULT = BALANCED
+
+# Weights are the ranking contract's starting values (flow volume and direction come in Phase G,
+# which also makes them total 100); floors reserve places for security classes S3, S2 and S1.
+BUILTINS = [
+    {"uuid": BALANCED, "name": "Balanced", "builtin": True, "activity": True, "floors": (5, 3, 2),
      "weights": {"byte_rate": 30, "packet_rate": 10, "states": 15, "new_state_rate": 20, "blocked": 5,
                  "threat_list": 5, "ids": 5},
      "description": "Traffic first, with connection counts and new connections, and a few places kept "
                     "for flows with security evidence."},
-    {"key": "bandwidth", "name": "Bandwidth", "activity": True, "floors": (0, 0, 0),
+    {"uuid": BANDWIDTH, "name": "Bandwidth", "builtin": True, "activity": True, "floors": (0, 0, 0),
      "weights": {"byte_rate": 65, "packet_rate": 15, "states": 5, "new_state_rate": 5},
      "description": "Byte and packet rates, on a logarithmic scale."},
-    {"key": "security", "name": "Security", "activity": False, "floors": (50, 30, 20),
+    {"uuid": CONNECTIONS, "name": "Connections", "builtin": True, "activity": False, "floors": (0, 0, 0),
+     "weights": {"byte_rate": 10, "packet_rate": 10, "states": 35, "new_state_rate": 45},
+     "description": "The most PF states and the most new connections, whatever their traffic."},
+    {"uuid": SECURITY, "name": "Security", "builtin": True, "activity": False, "floors": (50, 30, 20),
      "weights": {"byte_rate": 5, "packet_rate": 5, "states": 10, "new_state_rate": 15, "blocked": 20,
                  "threat_list": 15, "ids": 30},
      "description": "Flows with security evidence first, idle or not (high-severity IDS, then other IDS "
                     "and heavy blocking, then threat lists and reputation), then connection activity."},
-    {"key": "connections", "name": "Connections", "activity": False, "floors": (0, 0, 0),
-     "weights": {"byte_rate": 10, "packet_rate": 10, "states": 35, "new_state_rate": 45},
-     "description": "The most PF states and the most new connections, whatever their traffic."},
 ]
-KEYS = [profile["key"] for profile in PROFILES]
+BY_UUID = {profile["uuid"]: profile for profile in BUILTINS}
 
 
-def enabled():
-    """The enabled profiles, in collector order (Classic first: it is the regression anchor)."""
-    return PROFILES[:MAX_PROFILES]
+def active(values=None):
+    """The active profile: the configured UUID, or the default when it names no known profile."""
+    uuid = (values or {}).get("ranking_profile") or DEFAULT
+    return BY_UUID.get(uuid, BY_UUID[DEFAULT])
 
 
-def request_rows(profiles):
-    """The collector's PROFILE rows (collector/PROTOCOL.md)."""
-    rows = []
-    for number, profile in enumerate(profiles):
-        if profile.get("classic"):
-            rows.append(f"PROFILE {number} classic")
-            continue
-        features = " ".join(f"{name}={float(weight):g}/{float(SCALES[name]):g}"
-                            for name, weight in profile.get("weights", {}).items() if weight)
-        floors = ",".join(str(int(floor)) for floor in profile.get("floors", (0, 0, 0)))
-        rows.append(f"PROFILE {number} scored activity={int(bool(profile.get('activity')))} floors={floors} "
-                    f"{features}".rstrip())
-    return rows
+def definition(profile):
+    """The collector's --profile definition (collector/PROTOCOL.md, "Startup")."""
+    features = " ".join(f"{name}={float(weight):g}/{float(SCALES[name]):g}"
+                        for name, weight in profile.get("weights", {}).items() if weight)
+    floors = ",".join(str(int(floor)) for floor in profile.get("floors", (0, 0, 0)))
+    return f"activity={int(bool(profile.get('activity')))} floors={floors} {features}".rstrip()
 
 
-def descriptor(profiles):
-    """What the map's Focus selector lists."""
-    return [{"key": profile["key"], "name": profile["name"], "description": profile["description"]}
-            for profile in profiles]
+def generation(profile):
+    """The definition's identity: changes whenever what the collector ranks by changes, so a
+    snapshot or status can tell two versions of one (custom) profile apart."""
+    return hashlib.sha256(definition(profile).encode()).hexdigest()[:16]
+
+
+def descriptor(profile):
+    """What status, the map and snapshots say about the active profile."""
+    return {"uuid": profile["uuid"], "name": profile["name"], "builtin": bool(profile.get("builtin")),
+            "generation": generation(profile)}
+
+
+def catalog():
+    """The selectable profiles (the settings field's options)."""
+    return [{"uuid": profile["uuid"], "name": profile["name"], "description": profile["description"],
+             "builtin": True} for profile in BUILTINS]

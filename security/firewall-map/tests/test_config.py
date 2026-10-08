@@ -24,11 +24,15 @@
 
 """Unit tests for the plugin's settings file reader (the OPNsense/FirewallMap template's output)."""
 
+import contextlib
+import io
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -46,14 +50,14 @@ class SettingsFileTest(unittest.TestCase):
             self.write(path, {
                 "general": {"provider": "dbip", "license_key": "", "abuseipdb_key": " key ", "update_days": "7",
                             "threat_lists": "", "record_threats": "1", "blocklist_aliases": "0",
-                            "focus": "security"},
+                            "ranking_profile": "6c02d03d-4087-46a9-b5bc-6378fb5eeada"},
                 "aliases": [{"name": "Drop", "type": "urltable", "enabled": True, "description": ""}, {"name": ""}],
                 "interfaces": {"igb1": "WAN", "vlan01": "LAN"},
                 "topology": {"primary_wan_device": "igb1"},
             })
             expected = {"provider": "dbip", "license_key": "", "update_days": 7, "threat_lists": "",
                         "record_threats": "1", "blocklist_aliases": "0", "helper_memory": None,
-                        "focus": "security"}
+                        "ranking_profile": "6c02d03d-4087-46a9-b5bc-6378fb5eeada"}
             self.assertEqual(CONFIG.settings(path), expected)
             self.assertEqual(CONFIG.abuseipdb_key(path), "key")
             self.assertEqual([alias["name"] for alias in CONFIG.aliases(path)], ["Drop"])
@@ -111,6 +115,27 @@ class SettingsFileTest(unittest.TestCase):
             with mock.patch.object(COLLECTOR, "widget_in_use", return_value=False):
                 self.assertFalse(COLLECTOR.recording_wanted({"record_threats": "1"}))
 
+
+
+class RankingProfileSettingTest(unittest.TestCase):
+    def test_the_setting_names_a_builtin_by_uuid_and_classic_is_not_offered(self):
+        model = (Path(__file__).resolve().parents[1]
+                 / "src/opnsense/mvc/app/models/OPNsense/FirewallMap/FirewallMap.xml").read_text()
+        default = re.search(r"<ranking_profile[^>]*>.*?<Default>([^<]+)</Default>", model, re.S).group(1)
+        profiles = COLLECTOR.ranking_profiles
+        self.assertEqual(default, profiles.DEFAULT)
+        self.assertEqual(profiles.BY_UUID[default]["name"], "Balanced")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            COLLECTOR.main(["profiles"])
+        catalog = json.loads(output.getvalue())
+        self.assertEqual([item["name"] for item in catalog["profiles"]],
+                         ["Balanced", "Bandwidth", "Connections", "Security"])
+        self.assertEqual(catalog["default"], profiles.DEFAULT)
+        self.assertNotIn("classic", output.getvalue().lower())
+        # an unknown or empty setting is the default, never another ranking
+        self.assertEqual(profiles.active({"ranking_profile": ""})["uuid"], profiles.DEFAULT)
+        self.assertEqual(profiles.active({"ranking_profile": "not-a-profile"})["uuid"], profiles.DEFAULT)
 
 if __name__ == "__main__":
     unittest.main()

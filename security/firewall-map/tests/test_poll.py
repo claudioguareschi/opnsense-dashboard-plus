@@ -201,25 +201,33 @@ class ApiTest(unittest.TestCase):
         # flow_summary.py's own age is kept
         self.assertEqual(self.from_backend({"summary": {**PAYLOAD, "age": 1.5}}, True, 1)["age"], 1.5)
 
-    def test_the_viewer_gets_only_its_focus(self):
-        flows = [{"origin": "10.0.0.1", "dest": f"203.0.113.{n}"} for n in range(4)]
-        summary = {**PAYLOAD, "flows": flows, "profiles": [{"key": "classic"}, {"key": "security"}],
-                   "focus": {"classic": [0, 1, 2], "security": [3, 1]}, "focus_default": "classic"}
+    def test_every_viewer_gets_the_same_ranked_flows(self):
+        """One collector-ranked population for the map page and every dashboard: viewer options
+        (hostnames, block threshold) change presentation only, never which flows or their order."""
+        flows = [{"origin": "10.0.0.1", "dest": f"45.56.79.{n}"} for n in range(4)]
+        summary = {**PAYLOAD, "flows": flows, "ranking_profile": {"uuid": "9bded7b2-a028-44ca-b7ab-4e3357694174",
+                                                                  "name": "Balanced"}}
+        results = [self.from_backend({"summary": summary}, hostnames, minimum)
+                   for hostnames in (False, True) for minimum in (1, 5, 100)]
+        for result in results:
+            self.assertEqual(result["flows"], flows)
+            self.assertEqual(result["ranking_profile"], summary["ranking_profile"])
+        # there is no per-viewer ranking selection left in the API
+        source = FLOW_SUMMARY_PHP.read_text() + (FLOW_SUMMARY_PHP.parents[3] / "controllers/OPNsense/FirewallMap/Api/FlowController.php").read_text()
+        self.assertNotIn("focus", source.lower())
 
-        def focus(value):
-            return php("echo json_encode(OPNsense\\FirewallMap\\FlowSummary::fromBackend("
-                       f"{json.dumps(json.dumps({'summary': summary}))}, false, 1, {self.NOW}, "
-                       f"{json.dumps(value)}));")
-        security = focus("security")
-        self.assertEqual(([flow["dest"] for flow in security["flows"]], security["focus"]),
-                         (["203.0.113.3", "203.0.113.1"], "security"))
-        self.assertNotIn("focus_default", security)
-        self.assertEqual(security["profiles"], summary["profiles"])
-        # absent or unknown: the configured default
-        for value in (None, "nonexistent"):
-            result = focus(value)
-            self.assertEqual(([flow["dest"] for flow in result["flows"]], result["focus"]),
-                             (["203.0.113.0", "203.0.113.1", "203.0.113.2"], "classic"))
+    def test_map_and_dashboard_ask_for_the_same_population(self):
+        """The map page and the dashboard widget request the same summary with the same shared
+        parameters (renderer/src/options.js summaryParams: block threshold and host names only)."""
+        www = FLOW_SUMMARY_PHP.parents[5] / "www/js"
+        widget = (www / "widgets/FirewallMap.js").read_text()
+        page = (www / "firewall-map-page.js").read_text()
+        self.assertIn("'/api/firewallmap/flow/summary', window.FirewallMapRenderer.summaryParams(this.settings)",
+                      widget)
+        self.assertIn("/api/firewallmap/flow/summary${query}", page)
+        self.assertIn("poll(summaryQuery(state.settings))", page)
+        for source in (widget, page, (www / "firewall-map-renderer.js").read_text()):
+            self.assertNotRegex(source, r"[?&]focus=|focus:\s*settings|\.focus\b(?!\()")
 
     def test_nothing_usable_is_a_failure(self):
         for output in ("", "not json", '{"status":"ok"}', '{"summary":"text"}'):

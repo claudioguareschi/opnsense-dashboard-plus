@@ -503,30 +503,6 @@ static bool write_classification(FILE *f, const struct class_report *report,
   return true;
 }
 
-/* One record per profile: its selection as union positions with scores. */
-static bool write_selections(FILE *f, const struct ranked_output *out, uint32_t *checksum,
-                             struct fm_error *error) {
-  for (size_t n = 0; n < profiles_count(out->profiles); n++) {
-    const struct selected *rows;
-    size_t count = profiles_selection(out->profiles, n, &rows);
-    unsigned char b[4 + BUDGET_RANKED_FLOWS * 12], *p = b;
-    if (count > BUDGET_RANKED_FLOWS)
-      return fm_error_fail(error, FM_FAILURE_INTERNAL, EOVERFLOW, "profile selection size");
-    *p++ = RECORD_SELECTION;
-    *p++ = (unsigned char)n;
-    protocol_put(&p, count, 2);
-    for (size_t k = 0; k < count; k++) {
-      uint32_t position = out->position[rows[k].flow];
-      if (!position)
-        return fm_error_fail(error, FM_FAILURE_INTERNAL, EINVAL, "profile selection identity");
-      protocol_put(&p, position - 1, 4);
-      put_double(&p, rows[k].score);
-    }
-    if (!protocol_frame(f, b, p - b, checksum, error)) return false;
-  }
-  return true;
-}
-
 bool protocol_write_ranked(FILE *f, const struct aggregate *a,
                            const struct ranked_output *ranked,
                            const struct threat_summary *threats,
@@ -539,7 +515,6 @@ bool protocol_write_ranked(FILE *f, const struct aggregate *a,
   if (!write_header(f, threats != NULL, &checksum, error) ||
       !write_flows(f, a, NULL, ranked->flows, ranked->count, candidates_per_kind,
                    &checksum, &sent, &telemetry->candidates_omitted, error) ||
-      !write_selections(f, ranked, &checksum, error) ||
       (threats && !write_threats(f, threats, &checksum, &sent, error)))
     return false;
   if (threats) {

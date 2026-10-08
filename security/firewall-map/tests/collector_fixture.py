@@ -113,12 +113,24 @@ class CollectorFixture:
         self.current_records = []
         # one entry per request: True when it was the helper's baseline (first) sample
         self.baselines = []
+        # the ranking profile it was started with, and how often a new one restarted it
+        self.profile, self.restarts, self.starts = None, 0, 0
         # PF tables the fixture classifies with, {table: [network...]}, like the helper's own
         self.tables = {}
 
     def close(self):
         self.process = None
         self.snapshot_open = False
+
+    def set_profile(self, profile):
+        """Like the helper: a new definition restarts it (counted), the same one changes nothing."""
+        if profile == self.profile:
+            return False
+        if self.profile is not None:
+            self.restarts += 1
+        self.profile = profile
+        self.close()
+        return True
 
     def sample(self, local, networks, assigned, wan, memory=None, evidence=(), correlation=True, **options):
         """Like the helper: the first sample of a new process is a baseline (no rates)."""
