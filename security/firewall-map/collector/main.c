@@ -34,6 +34,7 @@
 #include "history.h"
 #include "index.h"
 #include "pf_reader.h"
+#include "profile.h"
 #include "protocol.h"
 #include "ranking.h"
 #include "response.h"
@@ -75,6 +76,7 @@ struct engine {
   struct history *history;
   struct ranking *ranking;
   struct tracker *tracker;
+  struct profiles *profiles;
   struct event_history *events;
   /* the classification snapshot and what it was loaded for; replaced only
    * between samples, when the request's configuration differs */
@@ -92,6 +94,8 @@ struct request {
   struct event_query queries[FM_MAX_EVENT_QUERIES];
   size_t query_count;
   struct class_config classes;
+  struct profile profiles[PROFILE_MAX];
+  size_t profile_count;
   struct addr *classify;
   size_t classify_count;
   struct sample_outcome refusal;
@@ -165,6 +169,49 @@ static void class_row(struct request *r, const char *line, struct fm_error *erro
   set->category = category;
   strcpy(set->name, name);
 }
+/* PROFILE <id> classic
+ * PROFILE <id> scored <activity 0|1> <floor> <flagged> (<weight> <scale>) x 4
+ * (bytes/s, packets/s, states, new states/s). */
+static void profile_row(struct request *r, const char *line, struct fm_error *error) {
+  unsigned id, activity, floor;
+  char kind[16], extra;
+  double flagged, v[2 * PRIMITIVE_COUNT];
+  struct profile p = {0};
+  if (sscanf(line, "PROFILE %u %15s", &id, kind) != 2 || id != r->profile_count ||
+      r->profile_count >= PROFILE_MAX) {
+    request_error(error, "PROFILE row");
+    return;
+  }
+  if (!strcmp(kind, "classic")) {
+    if (sscanf(line, "PROFILE %u %15s %c", &id, kind, &extra) != 2) {
+      request_error(error, "PROFILE row");
+      return;
+    }
+    p.classic = true;
+  } else if (!strcmp(kind, "scored") &&
+             sscanf(line, "PROFILE %u scored %u %u %lf %lf %lf %lf %lf %lf %lf %lf %lf %c", &id,
+                    &activity, &floor, &flagged, &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6],
+                    &v[7], &extra) == 12 &&
+             activity <= 1 && floor <= BUDGET_RANKED_FLOWS && isfinite(flagged) && flagged >= 0 &&
+             flagged <= 1000) {
+    p.activity = activity;
+    p.floor = floor;
+    p.flagged = flagged;
+    for (int k = 0; k < PRIMITIVE_COUNT; k++) {
+      p.weight[k] = v[2 * k];
+      p.scale[k] = v[2 * k + 1];
+      if (!isfinite(p.weight[k]) || p.weight[k] < 0 || p.weight[k] > 1000 || !isfinite(p.scale[k]) ||
+          p.scale[k] <= 0) {
+        request_error(error, "PROFILE weights");
+        return;
+      }
+    }
+  } else {
+    request_error(error, "PROFILE row");
+    return;
+  }
+  r->profiles[r->profile_count++] = p;
+}
 static bool read_request(struct request *r, bool *clean_eof, struct fm_error *error) {
   char *line = NULL;
   size_t capacity = 0;
@@ -202,6 +249,8 @@ static bool read_request(struct request *r, bool *clean_eof, struct fm_error *er
       if (sscanf(line, "CORRELATION %u %c", &x, &extra) != 1 || x > 1)
         request_error(error, "CORRELATION row");
       r->correlation = x;
+    } else if (!strncmp(line, "PROFILE ", 8)) {
+      profile_row(r, line, error);
     } else if (!strncmp(line, "CLASS ", 6)) {
       class_row(r, line, error);
     } else if (keyword(line, "CLASSGEN", &seen_generation, error)) {
@@ -335,6 +384,7 @@ static bool refuse(struct engine *e, struct sample_outcome refusal, uint64_t see
    * baseline because the counters in between were never observed. */
   history_reset(e->history);
   ranking_reset(e->ranking);
+  profiles_reset(e->profiles);
   tracker_reset(e->tracker);
   measure_process(telemetry);
   struct response response;
@@ -401,7 +451,63 @@ static void telemetry_track(struct telemetry *t, const struct tracker_report *re
   t->promoted = report->promoted;
 }
 
+/* The union of the profiles' selections (each flow once: profile 0's in its
+ * order, then the flows each later profile adds) and what the tracked set
+ * must know about them. */
+static bool select_union(struct engine *e, const struct aggregate *a, double interval,
+                         struct ranked_flow **rows, uint32_t **position, struct track_hints *hints,
+                         struct fm_error *error) {
+  size_t flows = aggregate_counts(a).flows, profiles = profiles_count(e->profiles);
+  *rows = profiles ? fm_calloc(profiles * BUDGET_RANKED_FLOWS, sizeof(**rows)) : NULL;
+  *position = flows ? fm_calloc(flows, sizeof(**position)) : NULL;
+  if ((profiles && !*rows) || (flows && !*position))
+    return fm_error_set(error, errno ? errno : ENOMEM, "profile union");
+  size_t count = 0;
+  bool states_full = true, created_full = true;
+  double states_edge = INFINITY, created_edge = INFINITY;
+  for (size_t n = 0; n < profiles; n++) {
+    const struct profile *def = profiles_at(e->profiles, n);
+    const struct selected *chosen;
+    size_t selected = profiles_selection(e->profiles, n, &chosen);
+    double least_states = INFINITY, least_created = INFINITY;
+    for (size_t k = 0; k < selected; k++) {
+      uint32_t flow = chosen[k].flow;
+      double s = profiles_value(a, e->ranking, flow, PRIMITIVE_STATES, interval);
+      double c = profiles_value(a, e->ranking, flow, PRIMITIVE_CREATED, interval);
+      least_states = s < least_states ? s : least_states;
+      least_created = c < least_created ? c : least_created;
+      if ((*position)[flow]) continue;
+      struct flow_rates rates;
+      ranking_rates(e->ranking, flow, &rates);
+      (*rows)[count] = (struct ranked_flow){flow, rates.rate_from_remote, rates.rate_to_remote,
+                                            rates.packet_rate, rates.activity, chosen[k].score};
+      (*position)[flow] = (uint32_t)++count;
+    }
+    bool full = selected == BUDGET_RANKED_FLOWS;
+    if (!def->classic && def->weight[PRIMITIVE_STATES] > 0) {
+      hints->states = true;
+      states_full = states_full && full;
+      states_edge = least_states < states_edge ? least_states : states_edge;
+    }
+    if (!def->classic && def->weight[PRIMITIVE_CREATED] > 0) {
+      hints->created = true;
+      created_full = created_full && full;
+      created_edge = least_created < created_edge ? least_created : created_edge;
+    }
+  }
+  hints->selected = *rows;
+  hints->selected_count = count;
+  hints->states_edge = states_full && hints->states ? states_edge : 0;
+  hints->created_edge = created_full && hints->created ? created_edge : 0;
+  return true;
+}
+
 static bool run_sample(struct engine *e, struct request *r, struct fm_error *error) {
+  /* without PROFILE rows: Classic alone */
+  if (!r->profile_count)
+    r->profiles[r->profile_count++] = (struct profile){.classic = true};
+  if (!profiles_configure(e->profiles, r->profiles, r->profile_count, error))
+    return false;
   /* the snapshot persists across samples: it is loaded outside the sample
    * budget and its size comes off the state admission */
   if (!refresh_classifier(e, &r->classes, error))
@@ -471,9 +577,16 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   telemetry.interval = ok ? history_interval(e->history) : -1;
   ok = ok && ranking_update(e->ranking, sample.aggregate, sample.anchor,
                             telemetry.interval, error);
+  /* every enabled profile's selection, and their union for the response */
+  struct ranked_flow *selected = NULL;
+  uint32_t *position = NULL;
+  struct track_hints hints = {0};
+  ok = ok && profiles_select(e->profiles, sample.aggregate, e->ranking, telemetry.interval,
+                             BUDGET_RANKED_FLOWS, error) &&
+       select_union(e, sample.aggregate, telemetry.interval, &selected, &position, &hints, error);
   struct tracker_report report = {0};
   ok = ok && tracker_finish(e->tracker, sample.aggregate, e->ranking, sample.anchor,
-                            telemetry.interval, &report, error);
+                            telemetry.interval, &hints, &report, error);
   map_clear(&evidence);
   if (ok) {
     telemetry_track(&telemetry, &report, aggregate_counts(sample.aggregate));
@@ -509,7 +622,8 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
     measure_process(&telemetry);
     ok = response_begin(&response, error);
     struct class_report classes = {e->classifier, r->classify, r->classify_count};
-    if (ok && !protocol_write_ranked(response.stream, sample.aggregate, e->ranking, threats,
+    struct ranked_output ranked = {selected, hints.selected_count, e->profiles, position};
+    if (ok && !protocol_write_ranked(response.stream, sample.aggregate, &ranked, threats,
                                      matches, match_count, &classes, r->candidates_per_kind,
                                      &telemetry, error)) {
       response_discard(&response);
@@ -518,6 +632,8 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
       ok = response_commit(&response, stdout, error);
   }
   fm_free(matches);
+  fm_free(selected);
+  fm_free(position);
   threat_summary_destroy(threats);
   if (ok)
     history_commit(e->history);
@@ -549,6 +665,7 @@ static void close_engine(struct engine *e) {
   ranking_destroy(e->ranking);
   tracker_destroy(e->tracker);
   event_history_destroy(e->events);
+  profiles_destroy(e->profiles);
   classifier_destroy(e->classifier);
 }
 
@@ -628,8 +745,9 @@ int main(int argc, char **argv) {
       .history = history_create(&error),
       .ranking = ranking_create(BUDGET_RANKED_FLOWS, FADE_SECONDS, RATE_SMOOTHING, &error),
       .tracker = tracker_create(FADE_SECONDS, RATE_SMOOTHING, &error),
+      .profiles = profiles_create(&error),
       .events = event_history_create(&error)};
-  if (!engine.history || !engine.ranking || !engine.tracker || !engine.events) {
+  if (!engine.history || !engine.ranking || !engine.tracker || !engine.profiles || !engine.events) {
     fprintf(stderr, "firewallmap-collector: %s\n", error.message);
     close_engine(&engine);
     return 1;

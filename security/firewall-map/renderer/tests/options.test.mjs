@@ -52,3 +52,13 @@ test('the live data request carries the threshold and the reverse DNS choice', (
   assert.deepEqual(summaryParams({blockMin: 2}), {blocks_min: 2});
   assert.equal(summaryQuery({blockMin: 5, hostnames: true}), '?blocks_min=5&hostnames=1');
 });
+
+test('the Focus is a profile key, sent only when set', () => {
+  assert.equal(parseSettings({}).focus, '');
+  assert.equal(parseSettings({focus: 'security'}).focus, 'security');
+  assert.equal(parseSettings({focus: 'Not a key!'}).focus, '');
+  assert.deepEqual(summaryParams({blockMin: 3, focus: 'connections'}), {blocks_min: 3, focus: 'connections'});
+  assert.equal(summaryQuery({blockMin: 3, focus: 'balanced', hostnames: true}),
+    '?blocks_min=3&hostnames=1&focus=balanced');
+  assert.equal(summaryQuery({blockMin: 3, focus: ''}), '?blocks_min=3');
+});

@@ -129,6 +129,15 @@ export function statusParts(summary, shown, settings, text) {
   if (threats && text.listed_flows_many) {
     parts.push(escapeHtml(plural(text, 'listed_flows', threats)));
   }
+  // the ranking is honest about its limits: past the tracked set it ranks the busiest of the
+  // flows it tracks (an estimate of the total marked ≈), and settles for a fade window afterwards
+  const quality = summary.quality || {};
+  if (quality.ranking === 'bounded' && text.map_ranking_bounded) {
+    const total = Number(summary.tracked_flows || 0).toLocaleString();
+    parts.push(escapeHtml(fill(text.map_ranking_bounded, {count: (summary.tracked_flows_estimated ? '≈' : '') + total})));
+  } else if (quality.ranking === 'warming' && text.map_ranking_warming) {
+    parts.push(escapeHtml(text.map_ranking_warming));
+  }
   if (summary.carp === 'backup') {
     parts.push(escapeHtml(text.carp_backup));
   }

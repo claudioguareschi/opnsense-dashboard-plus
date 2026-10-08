@@ -47,8 +47,11 @@ class FlowController extends ApiControllerBase
         $hostnames = $this->request->get('hostnames') === '1';
         /* per-viewer threshold: blocked sources need this many hits before they are drawn */
         $minimum = max(1, min(100, (int)($this->request->get('blocks_min') ?? 1)));
+        /* per-viewer Focus: one of the profiles the collector selected for (default when absent) */
+        $focus = $this->request->get('focus');
+        $focus = is_string($focus) && preg_match('/^[a-z0-9_-]{1,32}$/', $focus) ? $focus : null;
         $output = $backend->configdpRun('firewallmap flow summary', [$hostnames ? 'hostnames' : 'plain']);
 
-        return FlowSummary::fromBackend($output, $hostnames, $minimum);
+        return FlowSummary::fromBackend($output, $hostnames, $minimum, null, $focus);
     }
 }

@@ -53,8 +53,10 @@ enum quality_ranking { RANKING_EXACT = 0, RANKING_WARMING = 1, RANKING_BOUNDED =
 enum quality_attribution { ATTRIBUTION_EXACT = 0, ATTRIBUTION_WARMING = 1, ATTRIBUTION_PARTIAL = 2 };
 /* A promotion must beat the incumbent it displaces by this factor. */
 #define TRACK_INCUMBENCY_MARGIN 1.25
-/* Flows promoted per sample at most, and flagged flows admitted beyond T. */
+/* Flows promoted per sample at most (byte band; each state band gets a
+ * quarter), and flagged flows admitted beyond T. */
 #define TRACK_PROMOTE_MAX 1024
+#define TRACK_PROMOTE_STATES_MAX 256
 #define TRACK_FORCED_MAX 4096
 
 struct tracker_report {
@@ -81,9 +83,21 @@ void tracker_reset(struct tracker *);
  * admission policy (evidence and threat mask are the caller's). */
 bool tracker_begin(struct tracker *, struct ranking *, struct budget_limits, struct admission *,
                    struct fm_error *);
-/* After the sample's ranking update: quality, regime transition, pinned
- * flagged flows and promotions for the next sample. */
+/* What the profiles need from the next sample's tracked set: the flows they
+ * selected (kept tracked), and, for profiles that rank by state counts, the
+ * smallest active-state count and new-state rate of a full selection (0 when
+ * a selection has room): an untracked flow is promoted on those bands only
+ * when it beats that edge by the incumbency margin. */
+struct track_hints {
+  const struct ranked_flow *selected;
+  size_t selected_count;
+  bool states, created;
+  double states_edge, created_edge;
+};
+/* After the sample's ranking update and profile selection: quality, regime
+ * transition, pinned flows and promotions for the next sample. */
 bool tracker_finish(struct tracker *, const struct aggregate *, const struct ranking *, double now,
-                    double interval, struct tracker_report *, struct fm_error *);
+                    double interval, const struct track_hints *, struct tracker_report *,
+                    struct fm_error *);
 size_t tracker_bytes(const struct tracker *);
 #endif

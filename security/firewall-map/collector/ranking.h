@@ -57,4 +57,11 @@ bool ranking_trim(struct ranking *, size_t keep, const struct map *pinned, struc
 bool ranking_snapshot_at(const struct ranking *, const struct aggregate *, size_t,
                          struct ranked_flow *, uint64_t *order);
 size_t ranking_bytes(const struct ranking *);
+/* The last update's rates of aggregate flow n, idle flows included, with its
+ * first-seen order (profiles score every tracked flow, not only active ones). */
+struct flow_rates {
+  double rate_from_remote, rate_to_remote, packet_rate, activity;
+  uint64_t order;
+};
+bool ranking_rates(const struct ranking *, size_t flow, struct flow_rates *);
 #endif

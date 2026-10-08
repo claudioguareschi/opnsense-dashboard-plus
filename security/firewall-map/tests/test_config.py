@@ -45,13 +45,15 @@ class SettingsFileTest(unittest.TestCase):
             path = os.path.join(directory, "firewallmap.json")
             self.write(path, {
                 "general": {"provider": "dbip", "license_key": "", "abuseipdb_key": " key ", "update_days": "7",
-                            "threat_lists": "", "record_threats": "1", "blocklist_aliases": "0"},
+                            "threat_lists": "", "record_threats": "1", "blocklist_aliases": "0",
+                            "focus": "security"},
                 "aliases": [{"name": "Drop", "type": "urltable", "enabled": True, "description": ""}, {"name": ""}],
                 "interfaces": {"igb1": "WAN", "vlan01": "LAN"},
                 "topology": {"primary_wan_device": "igb1"},
             })
             expected = {"provider": "dbip", "license_key": "", "update_days": 7, "threat_lists": "",
-                        "record_threats": "1", "blocklist_aliases": "0", "helper_memory": None}
+                        "record_threats": "1", "blocklist_aliases": "0", "helper_memory": None,
+                        "focus": "security"}
             self.assertEqual(CONFIG.settings(path), expected)
             self.assertEqual(CONFIG.abuseipdb_key(path), "key")
             self.assertEqual([alias["name"] for alias in CONFIG.aliases(path)], ["Drop"])

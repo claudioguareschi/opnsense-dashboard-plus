@@ -36,6 +36,18 @@
             <threat_lists type=".\ThreatListField">
                 <Multiple>Y</Multiple>
             </threat_lists>
+            <!-- the Focus (Flow Ranking Profile) a map shows until its viewer picks another -->
+            <focus type="OptionField">
+                <Required>Y</Required>
+                <Default>classic</Default>
+                <OptionValues>
+                    <classic>Classic</classic>
+                    <balanced>Balanced</balanced>
+                    <bandwidth>Bandwidth</bandwidth>
+                    <security>Security</security>
+                    <connections>Connections</connections>
+                </OptionValues>
+            </focus>
             <!-- keep threat history even with the map closed -->
             <record_threats type="BooleanField">
                 <Required>Y</Required>

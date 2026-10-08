@@ -51,6 +51,16 @@
     </field>
     <field>
         <type>header</type>
+        <label>Map</label>
+    </field>
+    <field>
+        <id>firewallmap.general.focus</id>
+        <label>Default Focus</label>
+        <type>dropdown</type>
+        <help>Which flows the map shows until a viewer picks another Focus on the map (each browser keeps its own choice; the dashboard widget has its own setting). Classic: the busiest flows by byte rate, as before. Balanced: traffic with connection counts, and places kept for flagged flows. Bandwidth: byte and packet rates. Security: flagged flows first, then connection activity. Connections: the most states and new connections.</help>
+    </field>
+    <field>
+        <type>header</type>
         <label>Threats</label>
     </field>
     <field>

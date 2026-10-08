@@ -568,6 +568,7 @@ bool aggregate_add(struct aggregate *a, const struct state *s,
                  weight, error))
     return false;
   f->states++;
+  f->created += created;
   if (!add_count(v.apparent_remote_initiated ? &f->remote_initiated_states
                                              : &f->local_initiated_states,
                  1, error))

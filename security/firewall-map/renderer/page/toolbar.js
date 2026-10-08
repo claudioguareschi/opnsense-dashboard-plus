@@ -29,6 +29,7 @@ import {escapeHtml, plain} from '../src/format.js';
 import {categoryLabel} from '../src/palette.js';
 import {state, T, TEXT} from './context.js';
 import {flowService, locationsById} from './filters.js';
+import {readStorage, writeStorage} from './storage.js';
 
 /** Rebuild a filter's options (bootstrap-select), never while its list is open. */
 function fillSelect($select, values, current, allLabel) {
@@ -60,6 +61,41 @@ function withIcons($select) {
   if (icon) {
     $select.find('option').attr('data-icon', icon);
   }
+}
+
+/* The viewer's Focus (a Flow Ranking Profile key), kept in this browser. */
+const FOCUS_KEY = 'fwmap-focus';
+export function readFocus() {
+  return readStorage(FOCUS_KEY) || '';
+}
+
+/** The Focus selector: the profiles the collector ranks for, the one this view shows selected. */
+export function updateFocus(summary, onChange) {
+  const profiles = summary.profiles || [];
+  const $wrap = $('#fwmap-focus-wrap');
+  $wrap.toggle(profiles.length > 1);
+  if (profiles.length < 2) {
+    return;
+  }
+  const $select = $('#fwmap-focus');
+  const html = profiles.map((profile) => `<option value="${escapeHtml(profile.key)}" data-icon="fa-fw fa-crosshairs"`
+    + ` title="${escapeHtml(`${T.focus || 'Focus'}: ${profile.name}`)}"`
+    + `>${escapeHtml(profile.name)}</option>`).join('');
+  const open = $select.parent().hasClass('open');
+  if ($select.data('html') !== html && !open) {
+    $select.html(html).data('html', html);
+    $select.selectpicker('refresh');
+    $select.off('changed.bs.select').on('changed.bs.select', () => {
+      const key = $select.val() || '';
+      writeStorage(FOCUS_KEY, key);
+      onChange(key);
+    });
+  }
+  if (!open && summary.focus && $select.val() !== summary.focus) {
+    $select.selectpicker('val', summary.focus);
+  }
+  const current = profiles.find((profile) => profile.key === summary.focus);
+  $wrap.attr('title', current ? current.description : '');
 }
 
 export function updateToolbar(summary) {

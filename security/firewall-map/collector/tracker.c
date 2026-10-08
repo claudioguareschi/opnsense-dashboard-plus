@@ -95,9 +95,24 @@ bool tracker_begin(struct tracker *t, struct ranking *ranking, struct budget_lim
   return true;
 }
 
+static bool promote(struct tracker *t, const unsigned char *key, struct fm_error *error) {
+  return lookup(&t->promoted, key, FM_FLOW_KEY_SIZE, true, error) != NULL;
+}
+/* A state band: the untracked flows with the most states (or new states)
+ * that beat the profiles' edge by the margin. */
+static bool promote_band(struct tracker *t, const struct summary *band, double per_unit, double edge,
+                         struct fm_error *error) {
+  size_t candidates = summary_top(band, t->top, TRACK_PROMOTE_STATES_MAX);
+  for (size_t n = 0; n < candidates; n++) {
+    if (!((double)t->top[n].count * per_unit > edge * TRACK_INCUMBENCY_MARGIN)) break;
+    if (!promote(t, t->top[n].key, error)) return false;
+  }
+  return true;
+}
+
 bool tracker_finish(struct tracker *t, const struct aggregate *a, const struct ranking *ranking,
-                    double now, double interval, struct tracker_report *report,
-                    struct fm_error *error) {
+                    double now, double interval, const struct track_hints *hints,
+                    struct tracker_report *report, struct fm_error *error) {
   struct aggregate_counts counts = aggregate_counts(a);
   const struct discovery *d = &t->discovery;
   bool all_tracked = !counts.untracked_states;
@@ -132,10 +147,19 @@ bool tracker_finish(struct tracker *t, const struct aggregate *a, const struct r
   map_clear(&t->pinned);
   map_clear(&t->promoted);
   if (next == TRACK_BOUNDED) {
-    /* flagged flows stay tracked (up to the forced cap) */
-    for (size_t n = 0; n < counts.flows && t->pinned.used < t->forced_limit; n++) {
+    /* the profiles' selections stay tracked, and flagged flows (up to the
+     * forced cap) */
+    for (size_t n = 0; hints && n < hints->selected_count; n++) {
+      const struct flow *f = aggregate_flow(a, hints->selected[n].flow);
+      unsigned char key[FM_FLOW_KEY_SIZE];
+      state_flow_key(key, f->local, f->remote);
+      if (!lookup(&t->pinned, key, sizeof(key), true, error)) return false;
+    }
+    size_t flagged = 0;
+    for (size_t n = 0; n < counts.flows && flagged < t->forced_limit; n++) {
       const struct flow *f = aggregate_flow(a, n);
       if (!f->flagged) continue;
+      flagged++;
       unsigned char key[FM_FLOW_KEY_SIZE];
       state_flow_key(key, f->local, f->remote);
       if (!lookup(&t->pinned, key, sizeof(key), true, error)) return false;
@@ -153,8 +177,13 @@ bool tracker_finish(struct tracker *t, const struct aggregate *a, const struct r
       double rate = t->smoothing * (double)t->top[n].count * per_second;
       if (edge < active && !(rate > ranking_score_at(ranking, edge) * TRACK_INCUMBENCY_MARGIN))
         break;
-      if (!lookup(&t->promoted, t->top[n].key, FM_FLOW_KEY_SIZE, true, error)) return false;
+      if (!promote(t, t->top[n].key, error)) return false;
     }
+    if (hints && hints->states && !promote_band(t, d->states, 1.0, hints->states_edge, error))
+      return false;
+    if (hints && hints->created && interval > 0 &&
+        !promote_band(t, d->created, 1.0 / interval, hints->created_edge, error))
+      return false;
   }
   report->promoted = t->promoted.used;
   t->regime = next;

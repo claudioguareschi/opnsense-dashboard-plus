@@ -392,6 +392,23 @@ class CollectorLoopTest(unittest.TestCase):
         self.assertEqual(payload["flows"][0]["lists"], ["Test_list"])
         self.assertEqual(self.queued(), [self.REMOTE])
 
+    def test_the_map_document_carries_every_focus(self):
+        """One document for all viewers: the union of the profiles' flows and, per profile, its
+        selection as positions (the API returns only the Focus asked for)."""
+        self.collector.step()
+        self.bytes = 5000
+        self.collector.step()
+        with open(self.output) as handle:
+            payload = json.load(handle)
+        keys = [profile["key"] for profile in payload["profiles"]]
+        self.assertEqual(keys, COLLECTOR.ranking_profiles.KEYS)
+        self.assertEqual(set(payload["focus"]), set(keys))
+        self.assertEqual(payload["focus_default"], "classic")
+        for positions in payload["focus"].values():
+            self.assertTrue(all(0 <= position < len(payload["flows"]) for position in positions))
+        self.assertEqual([payload["flows"][position]["dest"] for position in payload["focus"]["classic"]],
+                         [self.REMOTE])
+
     def test_camera_request_saves_every_flow_and_its_states(self):
         snapshots = os.path.join(self.directory, "snapshots")
         requests = os.path.join(self.directory, "requests")

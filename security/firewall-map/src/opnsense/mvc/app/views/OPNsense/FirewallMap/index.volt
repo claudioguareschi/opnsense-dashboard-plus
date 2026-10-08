@@ -239,6 +239,9 @@
         samples: {{ lang._('samples')|json_encode }},
         peak: {{ lang._('peak')|json_encode }},
         seen_after_block: {{ lang._('Traffic was seen after it was marked blocked: check that a rule uses the alias.')|json_encode }},
+        focus: {{ lang._('Focus')|json_encode }},
+        map_ranking_bounded: {{ lang._('the busiest of {count} flows')|json_encode }},
+        map_ranking_warming: {{ lang._('ranking settling after a busy period')|json_encode }},
         listed_flows_one: {{ lang._('{count} to a listed address')|json_encode }},
         listed_flows_many: {{ lang._('{count} to listed addresses')|json_encode }},
         dismiss_shown: {{ lang._('Dismiss {count} shown')|json_encode }},
@@ -311,6 +314,9 @@
                 <button type="button" id="fwmap-mode-snapshots" class="btn btn-default" data-mode="snapshots" aria-pressed="false" disabled><i class="fa fa-fw fa-camera" aria-hidden="true"></i> {{ lang._('Snapshots') }} <span class="badge" id="fwmap-snapshot-count"></span></button>
             </div>
             <span class="fwmap-tool-sep" aria-hidden="true"></span>
+            <div class="btn-group btn-group-sm" id="fwmap-focus-wrap" style="display:none" title="{{ lang._('Focus: which flows the map shows. Your choice is kept in this browser.') }}">
+                <select id="fwmap-focus" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" aria-label="{{ lang._('Focus') }}"></select>
+            </div>
             <div id="fwmap-chips" role="group" aria-label="{{ lang._('Filters') }}">
                 <div class="btn-group btn-group-sm fwmap-filter" data-filter="traffic" data-icon="fa-fw fa-arrows-up-down">
                     <select id="fwmap-filter-traffic" class="selectpicker" data-width="fit" data-style="btn-default btn-sm" data-icon-base="fa" data-size="12" aria-label="{{ lang._('Traffic') }}">

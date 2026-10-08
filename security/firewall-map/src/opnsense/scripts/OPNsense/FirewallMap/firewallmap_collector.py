@@ -70,6 +70,7 @@ from lib.blocklists import (
     REPUTATION_LIST, Reputation, ThreatClassification, chosen_threat_lists, tables_report, threat_fields,
     threat_lists_for,
 )
+from lib import profiles as ranking_profiles
 from lib.blocks import BlockTracker, FilterLogTail, block_event_time, block_summary, parse_block
 from lib.cache import GEO_LOOKUPS_PER_SAMPLE, CacheStore, GeoCache
 from lib.common import (
@@ -210,6 +211,8 @@ class FlowTracker:
         # total is an estimate (bounded discovery)
         self.total_estimated = False
         self.quality = None
+        # per enabled profile, its selection as (local, remote) pairs in rank order
+        self.selections = []
         self.collector_visible = []
 
     def update_aggregate(self, aggregate, now):
@@ -220,6 +223,8 @@ class FlowTracker:
         self.total_flows = aggregate["counts"]["flows"]
         self.total_estimated = aggregate["counts"].get("flows_estimated", False)
         self.quality = aggregate.get("quality")
+        self.selections = [[aggregate["flows"][index]["key"] for index, _score in rows]
+                           for rows in aggregate.get("selections") or ()]
         for row in aggregate["flows"]:
             total = _FlowTotals()
             total.states = row["states"]
@@ -641,6 +646,8 @@ class Collector:
         self.blocklists = ThreatClassification()
         self.reputation = Reputation(self.store)
         self.recorder = ThreatRecorder()
+        # Flow Ranking Profiles: the collector selects for each; a viewer's Focus picks one
+        self.profiles = ranking_profiles.enabled()
         self.collector_engine = CollectorEngine()
         # set while the state collector is incompatible (another protocol, or a PF ABI it was not
         # built for): explicit status and slow pacing; the engine does not run the same binary again
@@ -850,6 +857,8 @@ class Collector:
             payload["locations"].append({
                 "id": origin, "name": origin, "lat": location["lat"], "lon": location["lon"], "local": True,
             })
+        if not snapshot:
+            self.add_focus(payload)
         payload["provider"] = self.provider
         payload["collector"] = self.timing_status()
         if self.sample_skipped:
@@ -857,6 +866,17 @@ class Collector:
             # complete for everything else
             payload["incomplete"] = {"skipped_states": dict(self.sample_skipped)}
         return payload
+
+    def add_focus(self, payload):
+        """Each enabled profile's selection as positions in the payload's flows (their union):
+        the API returns only the Focus a viewer asked for (FlowSummary.php)."""
+        position = {(flow["origin"], flow["dest"]): index for index, flow in enumerate(payload["flows"])}
+        selections = self.tracker.selections or [[(flow["origin"], flow["dest"]) for flow in payload["flows"]]]
+        payload["profiles"] = ranking_profiles.descriptor(self.profiles)
+        payload["focus"] = {profile["key"]: [position[pair] for pair in pairs if pair in position]
+                            for profile, pairs in zip(self.profiles, selections)}
+        default = self.values.get("focus") or ranking_profiles.DEFAULT_FOCUS
+        payload["focus_default"] = default if default in payload["focus"] else self.profiles[0]["key"]
 
     def timing_status(self):
         with self._status_lock:
@@ -1188,7 +1208,8 @@ class Collector:
                 memory=memory_budget(self.values.get("helper_memory")),
                 evidence=evidence if threat_due else (),
                 correlation=bool(queries) or os.path.exists(EVE_LOG),
-                classification=self.blocklists.request(), classify=evidence)
+                classification=self.blocklists.request(), classify=evidence,
+                profiles=ranking_profiles.request_rows(self.profiles))
         except CollectorError as error:
             self.collector_engine.close()
             self.set_phase("failed")

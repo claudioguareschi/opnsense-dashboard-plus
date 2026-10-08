@@ -51,7 +51,8 @@ struct generation {
 struct ranking {
   struct generation previous, current;
   struct rank_row *rows, *scratch;
-  size_t rows_capacity, scratch_capacity, count, active, total, limit;
+  struct flow_rates *rates;
+  size_t rows_capacity, scratch_capacity, rates_capacity, count, active, total, limit;
   uint64_t next_order;
   double fade, smoothing, sampled_at;
 };
@@ -104,6 +105,7 @@ void ranking_destroy(struct ranking *r) {
   fm_free(r->current.values);
   fm_free(r->rows);
   fm_free(r->scratch);
+  fm_free(r->rates);
   fm_free(r);
 }
 
@@ -162,7 +164,8 @@ bool ranking_update(struct ranking *r, const struct aggregate *aggregate,
   if (!reserve((void **)&current->values, &current->capacity, total,
                sizeof(*current->values), error) ||
       !reserve((void **)&r->rows, &r->rows_capacity, total, sizeof(*r->rows),
-               error))
+               error) ||
+      !reserve((void **)&r->rates, &r->rates_capacity, total, sizeof(*r->rates), error))
     return false;
   uint64_t next_order = r->next_order;
   size_t count = 0;
@@ -199,6 +202,8 @@ bool ranking_update(struct ranking *r, const struct aggregate *aggregate,
     }
     current->values[item->id] = next;
     double activity = activity_at(r, &next, now);
+    r->rates[n] = (struct flow_rates){next.from_remote, next.to_remote, next.packets, activity,
+                                      next.order};
     double rate = next.from_remote + next.to_remote;
     double score = (rate > 1.0 ? rate : 1.0) * activity;
     if (activity > 0)
@@ -225,6 +230,12 @@ bool ranking_update(struct ranking *r, const struct aggregate *aggregate,
 
 size_t ranking_count(const struct ranking *r) { return r->count; }
 size_t ranking_active(const struct ranking *r) { return r->active; }
+bool ranking_rates(const struct ranking *r, size_t flow, struct flow_rates *out) {
+  if (flow >= r->total)
+    return false;
+  *out = r->rates[flow];
+  return true;
+}
 double ranking_score_at(const struct ranking *r, size_t n) { return n < r->active ? r->rows[n].score : 0; }
 const struct map *ranking_keys(const struct ranking *r) { return &r->previous.keys; }
 
@@ -320,5 +331,6 @@ bool ranking_snapshot_at(const struct ranking *r, const struct aggregate *a,
 size_t ranking_bytes(const struct ranking *r) {
   return sizeof(*r) + map_bytes(&r->previous.keys) + map_bytes(&r->current.keys) +
          (r->previous.capacity + r->current.capacity) * sizeof(struct rate_state) +
-         (r->rows_capacity + r->scratch_capacity) * sizeof(struct rank_row);
+         (r->rows_capacity + r->scratch_capacity) * sizeof(struct rank_row) +
+         r->rates_capacity * sizeof(*r->rates);
 }

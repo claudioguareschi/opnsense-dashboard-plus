@@ -28,7 +28,7 @@
 const AUTO_HEIGHT = 10000;
 // the renderer's content hash, written by tools/build-renderer.sh: a new renderer has a new
 // address, so a browser never runs an old cached copy with a newer widget
-const RENDERER_VERSION = 'b81bf0803136';
+const RENDERER_VERSION = '68ec44e27770';
 // follow traffic is the map's own toggle, remembered per browser (as on the full-size map)
 const FOLLOW_KEY = 'firewallmap.widget.follow';
 
@@ -160,6 +160,16 @@ export default class FirewallMap extends BaseWidget {
                 type: 'select',
                 options: choices([['1', this.translations.on], ['0', this.translations.labels_off]]),
                 default: '1',
+            },
+            // which Flow Ranking Profile this widget shows; the map page keeps its own choice
+            focus: {
+                id: `${this.id}-option-focus`,
+                title: this.translations.focus,
+                type: 'select',
+                options: choices([['', this.translations.focus_default],
+                    ...['classic', 'balanced', 'bandwidth', 'security', 'connections'].map(
+                        (key) => [key, this.translations[`focus_${key}`]])]),
+                default: '',
             },
         };
     }

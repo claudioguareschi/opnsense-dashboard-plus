@@ -38,7 +38,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src/opnsense/scripts/OPNsense/FirewallMap"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import collector  # noqa: E402
+from lib import collector, profiles  # noqa: E402
 from collector_build import budget_limits, compile_worker, state_limit  # noqa: E402
 
 CONTEXT = ({"8.8.8.1"}, [], {}, None)
@@ -179,6 +179,54 @@ class CollectorScaleTest(unittest.TestCase):
                 owners = {row[0] for row in result["threat_candidates"] if row[1] == kind}
                 self.assertEqual(owners, set(range(256)), kind)
 
+    def test_every_profile_is_selected_from_one_sample(self):
+        """All built-in profiles at once: one selection each, their union is the flow list, and
+        Classic's selection is exactly what Classic alone ranks."""
+        rows = profiles.request_rows(profiles.enabled())
+        (_, alone), _ = self.run_mode("mixed", 5000)
+        (_, together), _ = self.run_mode("mixed", 5000, profiles=rows)
+        self.assertEqual(len(together["selections"]), len(rows))
+        union = {index for selection in together["selections"] for index, _ in selection}
+        self.assertEqual(union, set(range(len(together["flows"]))))
+        self.assertLessEqual(len(together["flows"]), collector.RANKED_FLOWS * len(rows))
+        classic = [together["flows"][index]["key"] for index, _ in together["selections"][0]]
+        self.assertEqual(classic, [row["key"] for row in alone["flows"]])
+        for selection in together["selections"]:
+            self.assertLessEqual(len(selection), collector.RANKED_FLOWS)
+            scores = [score for _, score in selection]
+            self.assertEqual(scores, sorted(scores, reverse=True))
+
+    def test_connections_ranks_by_states_and_security_reserves_flagged_places(self):
+        rows = profiles.request_rows(profiles.enabled())
+        keys = profiles.KEYS
+        # sparse: 9.1.0.1 holds 99% of the states
+        (_, sparse), _ = self.run_mode("sparse", 5000, profiles=rows)
+        connections = sparse["selections"][keys.index("connections")]
+        self.assertEqual(sparse["flows"][connections[0][0]]["key"][1], "9.1.0.1")
+        # unique flows, 9.0.0.0-127 threat-listed: Security keeps all 128 of them (100 reserved,
+        # the rest on their flagged weight) although every flow carries the same traffic
+        (_, unique), _ = self.run_mode("unique", 1000, profiles=rows, threat_summary=True,
+                                       classification=("some", [("T", "threats_some")]))
+        security = [unique["flows"][index]["key"][1] for index, _ in unique["selections"][keys.index("security")]]
+        self.assertEqual(set(security[:128]), {f"9.0.0.{n}" for n in range(128)})
+        # light flagged flows against 1,000 heavy ones (late: index 3000 on carries 100x): Classic
+        # shows none of them, Security reserves its places for them
+        (*_, late), _ = self.run_mode("late", 4000, samples=3, profiles=rows,
+                                     classification=("some", [("T", "threats_some")]))
+        flagged = {f"9.0.0.{n}" for n in range(128)}
+        chosen = {name: {late["flows"][index]["key"][1] for index, _ in late["selections"][keys.index(name)]}
+                  for name in ("classic", "security")}
+        self.assertFalse(chosen["classic"] & flagged)
+        self.assertTrue(flagged <= chosen["security"])
+
+    def test_profile_selections_do_not_depend_on_the_hash_key(self):
+        rows = profiles.request_rows(profiles.enabled())
+        outputs = []
+        for key in ("00" * 16, "0123456789abcdeffedcba9876543210"):
+            results, _ = self.run_mode("mixed", 3000, samples=3, key=key, profiles=rows)
+            outputs.append([(result["flows"], result["selections"]) for result in results])
+        self.assertEqual(outputs[0], outputs[1])
+
     def test_heavy_untracked_flows_are_promoted(self):
         engine = self.engine()
         environment = {"FM_TEST_MODE": "late", "FM_TEST_COUNT": "4000", "FM_TEST_INTERVAL": "2",
@@ -202,7 +250,7 @@ class CollectorScaleTest(unittest.TestCase):
                     "CLASS 0 T threats_all\nCLASSGEN all\n{rows}RUN\n".format(
                 memory=collector.memory_budget(), rows="".join(row + "\n" for row in rows)))
             summary = engine._request(text, lambda stream, process: collector._decode(
-                stream, process, (), True, categories=["T"]))
+                stream, process, (), True, categories=["T"], profiles=1))
         remotes = [remote["address"] for remote in summary["threat_remotes"]]
         self.assertEqual(len(remotes), 100)
         self.assertEqual(summary["telemetry"]["threat_remotes_omitted"], 400)

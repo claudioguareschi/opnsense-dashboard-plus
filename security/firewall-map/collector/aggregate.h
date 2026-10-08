@@ -51,6 +51,7 @@ struct flow {
       local_initiated_weight, remote_initiated_states, local_initiated_states,
       first;
   uint64_t classes; /* classification sets containing the remote */
+  uint64_t created; /* states new since the previous sample */
   uint32_t oldest, youngest;
   struct state_delta delta;
   bool flagged;  /* threat-listed or evidence remote */
