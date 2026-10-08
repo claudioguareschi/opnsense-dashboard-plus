@@ -182,6 +182,19 @@ class TrackerTest(unittest.TestCase):
         self.assertEqual(len(tracker.native_visible), 150)
         self.assertEqual(tracker.native_visible[0][2], "203.0.113.150")
 
+    def test_native_aggregate_resolves_nonstandard_protocol_number(self):
+        tracker = COLLECTOR.FlowTracker()
+        row = {"key": self.PAIR, "states": 1, "toward": 10, "away": 2, "packets": 1,
+               "bytes_toward": 10, "bytes_away": 2, "remote_started": 1, "local_started": 0,
+               "oldest": 1, "rate_in": 1.0, "rate_out": 0.0, "packet_rate": 1.0,
+               "activity": 1.0, "score": 1.0}
+        aggregate = {"flows": [row], "candidates": [(0, 1, 0, 1, 0, [47])],
+                     "counts": {"flows": 1}}
+
+        tracker.update_aggregate(aggregate, 10.0)
+
+        self.assertEqual(tracker.flows[self.PAIR]["protocols"], [COMMON.protocol_name(47)])
+
     def test_private_origin_is_kept_without_a_map_anchor(self):
         tracker = COLLECTOR.FlowTracker(smoothing=1.0)
         pair = ("192.168.0.2", "45.56.79.53")

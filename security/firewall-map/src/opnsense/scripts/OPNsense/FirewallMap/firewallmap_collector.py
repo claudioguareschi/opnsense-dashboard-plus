@@ -75,7 +75,7 @@ from lib.cache import GEO_LOOKUPS_PER_SAMPLE, CacheStore, GeoCache
 from lib.common import (
     COLLECTOR_TIMINGS, HOSTNAME_MARKER, OUTPUT_FILE, RC_SCRIPT, REQUEST_MARKER, RUN_DIR, SNAPSHOT_DIR,
     SNAPSHOT_REQUEST_DIR, connection_target, host_port, log_error, log_notice, log_warning, private_ip, public_ip,
-    requested, secure_umask, service_name, service_port_label, write_json,
+    protocol_name, requested, secure_umask, service_name, service_port_label, write_json,
     write_text,
 )
 from lib.config import interface_names, settings, topology, widget_in_use
@@ -359,7 +359,7 @@ class FlowTracker:
                 proto = protocols.get(number)
                 if proto is None:
                     try:
-                        proto = common.protocol_name(number)
+                        proto = protocol_name(number)
                     except (OSError, ValueError):
                         proto = str(number)
                     protocols[number] = proto
