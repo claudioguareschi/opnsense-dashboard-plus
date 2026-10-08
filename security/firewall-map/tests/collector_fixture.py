@@ -113,6 +113,8 @@ class CollectorFixture:
         self.current_records = []
         # one entry per request: True when it was the helper's baseline (first) sample
         self.baselines = []
+        # PF tables the fixture classifies with, {table: [network...]}, like the helper's own
+        self.tables = {}
 
     def close(self):
         self.process = None
@@ -129,13 +131,42 @@ class CollectorFixture:
         now = time.monotonic()
         self.tracker.update(records, local, now, networks, interface_addresses=assigned, primary_wan_device=wan)
         selected = [(tuple(row[1:3]), row[3]) for row in self.tracker.visible(now)]
-        threat_entries = REFERENCE_THREATS.observe(records, lambda remote: ["fixture"], local, networks)
+        # like the helper, the threat summary covers only evidence and threat-listed remotes
+        sets = (options.get("classification") or (None, []))[1]
+        evidence = set(evidence)
+        threat = sum(1 << bit for bit, (category, _table) in enumerate(sets) if category == "T")
+        threat_entries = REFERENCE_THREATS.observe(
+            records, lambda remote: ["fixture"] if remote in evidence or self.mask(remote, sets) & threat else [],
+            local, networks)
         result = aggregate(selected, len(records), threat_entries)
         result["counts"]["flows"] = self.tracker.total_flows
         result["baseline"] = baseline
         result["telemetry"] = {"interval": -1.0 if baseline else 2.0, "sequence": len(self.baselines)}
         self.snapshot_open = options.get("snapshot", False)
+        self.classify(result, options.get("classification"), options.get("classify", ()))
         return result
+
+    def mask(self, value, sets):
+        parsed = ipaddress.ip_address(value)
+        return sum(1 << bit for bit, (_category, table) in enumerate(sets)
+                   if any(parsed in ipaddress.ip_network(network, strict=False)
+                          for network in self.tables.get(table, ())))
+
+    def classify(self, result, classification, addresses):
+        """Set masks as the helper reports them: flow and threat remotes, requested addresses."""
+        sets = classification[1] if classification else []
+
+        def mask(value):
+            return self.mask(value, sets)
+        for row in result["flows"]:
+            row["classes"] = mask(row["key"][1])
+        for remote in result["threat_remotes"]:
+            remote["classes"] = mask(remote["address"])
+        result["classified"] = {address: mask(address) for address in addresses if mask(address)}
+        result["class_sets"] = [{"id": bit, "category": category,
+                                 "status": "ok" if table in self.tables else "missing",
+                                 "entries": len(self.tables.get(table, ()))}
+                                for bit, (category, table) in enumerate(sets)]
 
     def snapshot_pages(self):
         flows = self.snapshot_flows if self.snapshot_flows is not None else self.tracker.flows

@@ -43,10 +43,11 @@ class ServiceController extends ApiMutableServiceControllerBase
     protected static $internalServiceName = 'firewallmap';
 
     /* what each "Update now" downloads again, in the background (not again within minutes of a
-     * successful download: see FORCED_REPEAT_SECONDS in the scripts) */
+     * successful download: see FORCED_REPEAT_SECONDS in the scripts). Threat lists are PF
+     * aliases: OPNsense refreshes their tables, and the collector reads them again. */
     private const UPDATES = [
         'geodb' => 'firewallmap geodb force',
-        'feeds' => 'firewallmap feeds refresh',
+        'lists' => 'filter refresh_aliases',
         'abuseipdb' => 'firewallmap abuseipdb refresh',
     ];
 
@@ -99,7 +100,6 @@ class ServiceController extends ApiMutableServiceControllerBase
         $backend->configdRun('template reload OPNsense/FirewallMap');
         /* reload in place: keep live flow and alert history while the chosen list index is rebuilt */
         $backend->configdRun('firewallmap reload');
-        $backend->configdRun('firewallmap feeds update', true);
         /* downloads only for a new key, or once a day: the free plan allows only a few a day */
         $backend->configdRun('firewallmap abuseipdb update', true);
         $backend->configdRun('firewallmap abuseipdb sync', true);
@@ -116,7 +116,7 @@ class ServiceController extends ApiMutableServiceControllerBase
         return is_array($overview) ? $overview : [];
     }
 
-    /** Download the geolocation database, the threat feeds or the AbuseIPDB blacklist now. */
+    /** Download the geolocation database, the threat list aliases or the AbuseIPDB blacklist now. */
     public function updateAction($what = null)
     {
         if (!$this->request->isPost() || !isset(self::UPDATES[$what])) {

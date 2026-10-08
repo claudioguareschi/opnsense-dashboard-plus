@@ -67,7 +67,7 @@ from heapq import nsmallest
 import firewallmap_geodb as geodb
 import firewallmap_threats as threats
 from lib.blocklists import (
-    REPUTATION_LIST, BlocklistIndex, Reputation, chosen_threat_lists, tables_report, threat_fields,
+    REPUTATION_LIST, Reputation, ThreatClassification, chosen_threat_lists, tables_report, threat_fields,
     threat_lists_for,
 )
 from lib.blocks import BlockTracker, FilterLogTail, block_event_time, block_summary, parse_block
@@ -137,7 +137,7 @@ RELOAD_MARKER = f"{RUN_DIR}/reload"
 # rule descriptions, interface names, DHCP names and port forwards
 METADATA_REFRESH_SECONDS = 60
 # threat intelligence: pf tables behind URL/external aliases and well-known feed tables
-BLOCKLIST_REFRESH_SECONDS = 300
+BLOCKLIST_REFRESH_SECONDS = 60
 SETTINGS_REFRESH_SECONDS = 30
 # one PF walk every 2 s: the dashboard polls every 2 s, so faster sampling only costs CPU
 INTERVAL = 2.0
@@ -439,13 +439,17 @@ class ThreatRecorder:
             "city": location.get("city"),
         }.items() if value}
 
-    def update(self, sample, collector, now):
-        """Record the collector's mechanical summaries using Python threat policy."""
+    def update(self, sample, collector, now, cutoff=None):
+        """Record the collector's mechanical summaries using Python threat policy.
+
+        cutoff: the wall-clock time evidence up to which this recording covers (default: now). The
+        service passes the sample's start: that sample classified every evidence remote known then,
+        and later evidence is classified by the next sample, before the next recording reads it."""
         if not self.due(now) or not sample.get("threat_summary"):
             return
         blocklists, reputation, correlator = collector.blocklists, collector.reputation, collector.correlator
         # the cut-off of this recording: evidence after it belongs to the next one
-        wall = time.time()
+        wall = time.time() if cutoff is None else cutoff
         try:
             if self.db is None:
                 self.db = threats.connect(self.path)
@@ -625,7 +629,8 @@ class Collector:
         self.eve_loaded = False
         self.alerts = AlertTracker()
         self.correlator = Correlator()
-        self.blocklists = BlocklistIndex()
+        # threat lists: PF tables the state collector classifies with (lookups answer from the last sample)
+        self.blocklists = ThreatClassification()
         self.reputation = Reputation(self.store)
         self.recorder = ThreatRecorder()
         self.collector_engine = CollectorEngine()
@@ -713,8 +718,9 @@ class Collector:
             self.correlator.forwards = port_forwards()
             self.checked["metadata"] = now
         if self._due("blocklists", now, BLOCKLIST_REFRESH_SECONDS):
-            if self.blocklists.refresh(chosen_threat_lists(self.values.get("threat_lists"))):
-                self.checked["blocklists"] = now
+            tables, unavailable = chosen_threat_lists(self.values.get("threat_lists"))
+            self.blocklists.configure(tables, now, unavailable)
+            self.checked["blocklists"] = now
         self.reputation.refresh(now)
 
     def ingest(self, sample, now, wall, foreground):
@@ -1164,14 +1170,17 @@ class Collector:
         collector_start = time.perf_counter()
         threat_due = self.recorder.due(started)
         queries = self.correlator.collector_queries(self.local_addresses, self.networks)
+        # evidence remotes are classified on every sample: alerts, blocks and history name them
+        evidence = self.evidence_remotes()
         try:
             sample = self.collector_engine.sample(
                 self.local_addresses, self.networks, self.interface_addresses, self.primary_wan_device,
                 threat_summary=threat_due, event_queries=queries,
                 snapshot=not background and self.snapshot_requested(),
                 memory=memory_budget(self.values.get("helper_memory")),
-                evidence=self.evidence_remotes() if threat_due else (),
-                correlation=bool(queries) or os.path.exists(EVE_LOG))
+                evidence=evidence if threat_due else (),
+                correlation=bool(queries) or os.path.exists(EVE_LOG),
+                classification=self.blocklists.request(), classify=evidence)
         except CollectorError as error:
             self.collector_engine.close()
             self.set_phase("failed")
@@ -1201,12 +1210,14 @@ class Collector:
                 log_notice("some PF states are not mapped: " + ", ".join(
                     f"{count} {reason.replace('_', ' ')}" for reason, count in skipped.items()))
             self.sample_skipped = skipped
+        self.blocklists.observe(sample)
         self._record_collector(sample=sample)
         return sample
 
     def evidence_remotes(self):
         """Remotes the threat summary keeps first: IDS, reputation and blocked-attempt evidence."""
         evidence = set(self.alerts.sources) | {key[3] for key in self.correlator.flows}
+        evidence.update(key[3] for key in self.correlator.blocked)
         evidence.update(self.blocks.sources)
         evidence.update(self.reputation.flagged)
         return evidence
@@ -1235,6 +1246,7 @@ class Collector:
                 current.update(last_error=str(error), last_error_class=getattr(error, "failure_class", None),
                                last_error_at=time.time())
             current["incompatible"] = self.collector_incompatible
+            current["classification"] = self.blocklists.report()
             current["ingest_rejected"] = dict(self.ingest_rejected)
             current["ingest_last_rejection"] = self.ingest_last_rejection
             self.collector_status["state_collector"] = current
@@ -1248,7 +1260,7 @@ class Collector:
             timer.phase("tracker")
         self.ingest(sample, now, wall, foreground=not background)
         timer.phase("ingest")
-        self.recorder.update(sample, self, now)
+        self.recorder.update(sample, self, now, cutoff=self._sample_started[0] if self._sample_started else None)
         timer.phase("threats")
         self._record_collector()
 

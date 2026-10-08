@@ -27,15 +27,11 @@
 """Threat lists for Firewall Map+: blocklist pf tables, curated feeds and AbuseIPDB verdicts."""
 
 import hashlib
-import ipaddress
 import os
-import subprocess
-import threading
-from array import array
-from bisect import bisect_left
 
+from .collector import CLASS_MAX_SETS
 from .common import (
-    ABUSEIPDB_BLACKLIST, PFCTL, REPUTATION_KIND, REPUTATION_MAX_AGE, STATE_DIR, ip_object, log_warning, public_ip,
+    ABUSEIPDB_BLACKLIST, REPUTATION_KIND, REPUTATION_MAX_AGE, log_warning, public_ip,
 )
 from .config import aliases as configured_aliases
 from .pf import blocked_rule_tables, pf_tables
@@ -44,10 +40,6 @@ from .pf import blocked_rule_tables, pf_tables
 IDS_LIST = "Suricata IDS"
 BLOCKLIST_ALIAS_TYPES = {"urltable", "url", "urljson", "external"}
 BLOCKLIST_TABLE_PREFIXES = ("crowdsec", "__qfeeds", "qfeeds", "spamhaus", "firehol", "abuse", "fwmap_")
-BLOCKLIST_MAX_ENTRIES = 500000
-BLOCKLIST_MAX_TOTAL = 1000000
-# addresses whose lists are remembered between samples (the map shows a few hundred at a time)
-LOOKUP_CACHE_SIZE = 20000
 # addresses an operator marked, and AbuseIPDB's daily blacklist, always count as threats
 WATCHLIST_TABLE = "FWMAP_Watchlist"
 ABUSEIPDB_LIST = "AbuseIPDB blacklist"
@@ -83,9 +75,8 @@ def is_feed_table(table, aliases):
     return lowered.startswith(BLOCKLIST_TABLE_PREFIXES)
 
 
-# curated public feeds: downloaded by firewallmap_feeds.py for the map, and added as daily URL
-# table aliases when "Maintain blocklist aliases" is on
-FEED_DIR = f"{STATE_DIR}/feeds"
+# curated public feeds: added as daily URL table aliases (FWMAP_*) when "Maintain blocklist
+# aliases" is on; PF loads them, and the collector classifies with those tables
 FEEDS = [
     {"name": "FWMAP_Spamhaus_DROP", "label": "Spamhaus DROP", "url": "https://www.spamhaus.org/drop/drop.txt",
      "about": "Hijacked and criminal netblocks"},
@@ -101,15 +92,6 @@ FEEDS = [
 
 
 FEED_NAMES = {feed["name"] for feed in FEEDS}
-
-
-def feed_file(name):
-    return f"{FEED_DIR}/{name}.txt"
-
-
-def downloaded_feeds():
-    """Curated feeds with a local copy (firewallmap_feeds.py)."""
-    return {feed["name"] for feed in FEEDS if os.path.exists(feed_file(feed["name"]))}
 
 
 def threat_list_candidates(tables=None, aliases=None):
@@ -141,176 +123,119 @@ def tables_report():
 
 
 def chosen_threat_lists(setting):
-    """The administrator's choice when set, otherwise the automatic selection."""
+    """(PF tables to classify with, chosen lists without a PF table).
+
+    The administrator's choice when set, otherwise the automatic selection. Only PF tables
+    classify: a curated feed counts through its FWMAP_* alias, and the AbuseIPDB blacklist through
+    FWMAP_AbuseIPDB (both kept by "Maintain blocklist aliases"); a list with no table is reported,
+    never silently replaced by another source."""
     names = {name.strip() for name in (setting or "").split(",") if name.strip()}
     tables = set(pf_tables())
-    # a curated feed counts from its downloaded copy, with or without its alias
-    available = tables | downloaded_feeds()
-    chosen = (names & available) if names else blocklist_tables(list(tables))
-    # The same cache is indexed below under one stable, friendly badge; reading its PF alias too
-    # would duplicate both work and the badge whenever optional alias maintenance is enabled.
-    chosen.discard(ABUSEIPDB_TABLE)
+    chosen = (names & tables) if names else blocklist_tables(list(tables))
+    unavailable = names - tables
+    if ABUSEIPDB_TABLE in tables:
+        chosen.add(ABUSEIPDB_TABLE)
+    elif os.path.exists(ABUSEIPDB_BLACKLIST):
+        unavailable.add(ABUSEIPDB_TABLE)
     if WATCHLIST_TABLE in tables:
         chosen.add(WATCHLIST_TABLE)
-    return chosen
+    return chosen, unavailable
 
 
-class BlocklistIndex:
-    """Longest-prefix lookup of IPv4 and IPv6 addresses in blocklist PF tables.
+# PF table identity for the classification generation: OPNsense writes the content digest of
+# every URL table alias here, and FWMAP_AbuseIPDB is loaded from the blacklist cache
+ALIAS_TABLE_DIR = "/var/db/aliastables"
+# PF loads a table after its source file changes, and tables without a source (CrowdSec...) change
+# on their own: the collector re-reads every table at least this often
+CLASS_REFRESH_SECONDS = 900
+CLASS_VOLATILE_REFRESH_SECONDS = 300
 
-    Compact: IPv4 uses one 32-bit array per prefix. IPv6 uses parallel 64-bit high/low arrays,
-    avoiding Python's much larger arbitrary-precision integers for large feeds. Both carry a
-    parallel array of table bitmasks and are searched with bisect. The complete dual-family index
-    is rebuilt in a background thread and swapped atomically, so sampling never waits for it.
+
+def list_label(table):
+    """How a threat list is named on the map: FWMAP_AbuseIPDB keeps its historical badge."""
+    return ABUSEIPDB_LIST if table == ABUSEIPDB_TABLE else table
+
+
+class ThreatClassification:
+    """Threat lists as the collector classifies them: PF tables, read by the collector itself.
+
+    Python chooses the tables (one set ID each, in name order) and a generation token that changes
+    when their sources may have changed; the collector compiles them and reports, per sample, the
+    set mask of every flow remote, threat-summary remote and requested address (`wanted`). Lookups
+    answer from the last accepted sample, so Python never holds or searches list contents.
     """
 
     def __init__(self):
-        self.index = ([], {4: {}, 6: {}})
-        self.refreshing = False
-        # what the index was built from, so an unchanged set of lists is not parsed again
-        self.fingerprint = None
-        # lists too large to use, each logged once (the check repeats every few minutes)
-        self.oversized = set()
-        # (index, {address: lists}): the map asks about the same addresses on every sample
-        self._lookups = (self.index, {})
+        self.tables = []        # PF tables in set-ID order
+        self.generation = None
+        self.masks = {}         # address -> set mask, from the last accepted sample
+        self.status = {}        # table -> {"status", "entries"}, from the last accepted sample
+        self.ignored = []       # tables over the set limit
+        self.unavailable = []   # chosen lists that have no PF table (not classified)
 
-    # one bit per table in a 64-bit mask
-    MAX_TABLES = 62
+    def configure(self, tables, now, unavailable=()):
+        names = sorted(tables)
+        self.ignored = names[CLASS_MAX_SETS:]
+        if self.ignored:
+            log_warning(f"{len(self.ignored)} threat lists ignored (more than {CLASS_MAX_SETS}): "
+                        f"{', '.join(self.ignored)}")
+        self.tables = names[:CLASS_MAX_SETS]
+        unavailable = sorted(unavailable)
+        if unavailable and unavailable != self.unavailable:
+            log_warning("threat lists without a PF table are not used (enable Maintain blocklist aliases or "
+                        f"create the aliases): {', '.join(unavailable)}")
+        self.unavailable = unavailable
+        self.generation = self._generation(now)
 
-    @staticmethod
-    def build(contents, max_total=BLOCKLIST_MAX_TOTAL):
-        names = sorted(contents)
-        if len(names) > BlocklistIndex.MAX_TABLES:
-            log_warning(f"{len(names) - BlocklistIndex.MAX_TABLES} threat lists ignored "
-                        f"(more than {BlocklistIndex.MAX_TABLES}): {', '.join(names[BlocklistIndex.MAX_TABLES:])}")
-            names = names[:BlocklistIndex.MAX_TABLES]
-        by_family = {4: {}, 6: {}}
-        total = 0
-        for bit, table in enumerate(names):
-            if total >= max_total:
-                log_warning(f"threat lists truncated at {max_total} entries, from {table} on")
-                break
-            for entry in contents[table]:
-                entry = entry.strip()
-                if not entry or entry.startswith("!"):
-                    continue
-                try:
-                    network = ipaddress.ip_network(entry, strict=False)
-                except ValueError:
-                    continue
-                bucket = by_family[network.version].setdefault(network.prefixlen, {})
-                key = int(network.network_address)
-                bucket[key] = bucket.get(key, 0) | (1 << bit)
-                total += 1
-                if total >= max_total:
-                    break
-        compact = {4: {}, 6: {}}
-        for prefixlen, bucket in by_family[4].items():
-            keys = sorted(bucket)
-            compact[4][prefixlen] = (array("I", keys), array("Q", (bucket[key] for key in keys)))
-        for prefixlen, bucket in by_family[6].items():
-            keys = sorted(bucket)
-            compact[6][prefixlen] = (
-                array("Q", (key >> 64 for key in keys)),
-                array("Q", (key & 0xFFFFFFFFFFFFFFFF for key in keys)),
-                array("Q", (bucket[key] for key in keys)),
-            )
-        return names, compact
-
-    def _refresh(self, tables):
-        try:
-            contents = {}
-            for table in sorted(tables):
-                if table in FEED_NAMES:
-                    # a curated feed's own download, rather than its alias table (which may not exist)
-                    try:
-                        with open(feed_file(table)) as handle:
-                            contents[table] = handle.read().split()[:BLOCKLIST_MAX_ENTRIES]
-                        continue
-                    except OSError:
-                        pass
-                try:
-                    output = subprocess.run(
-                        [PFCTL, "-t", table, "-T", "show"], capture_output=True, check=False, text=True, timeout=20,
-                    ).stdout
-                except (OSError, subprocess.TimeoutExpired):
-                    continue
-                entries = output.split()
-                if len(entries) <= BLOCKLIST_MAX_ENTRIES:
-                    contents[table] = entries
-                    self.oversized.discard(table)
-                elif table not in self.oversized:
-                    self.oversized.add(table)
-                    log_warning(f"threat list {table} has {len(entries)} entries, over {BLOCKLIST_MAX_ENTRIES}: not used")
+    def _generation(self, now):
+        digest = hashlib.sha256()
+        volatile = False
+        for table in self.tables:
+            digest.update(table.encode() + b"\0")
             try:
-                with open(ABUSEIPDB_BLACKLIST) as handle:
-                    contents[ABUSEIPDB_LIST] = handle.read().split()[:BLOCKLIST_MAX_ENTRIES]
+                if table == ABUSEIPDB_TABLE:
+                    info = os.stat(ABUSEIPDB_BLACKLIST)
+                    digest.update(f"{info.st_mtime_ns}:{info.st_size}".encode())
+                else:
+                    with open(f"{ALIAS_TABLE_DIR}/{table}.md5.txt", "rb") as handle:
+                        digest.update(handle.read(64))
             except OSError:
-                pass
-            # parsing every entry is the expensive part: skip it when no list changed since
-            digest = hashlib.sha256()
-            for name in sorted(contents):
-                digest.update(name.encode() + b"\0" + "\n".join(contents[name]).encode() + b"\0")
-            fingerprint = digest.digest()
-            if fingerprint != self.fingerprint:
-                self.index = self.build(contents)
-                self.fingerprint = fingerprint
-        finally:
-            self.refreshing = False
+                volatile = True
+        period = CLASS_VOLATILE_REFRESH_SECONDS if volatile else CLASS_REFRESH_SECONDS
+        digest.update(str(int(now // period)).encode())
+        return digest.hexdigest()[:32]
 
-    def refresh(self, tables, background=True):
-        if self.refreshing:
-            return False
-        self.refreshing = True
-        if background:
-            threading.Thread(target=self._refresh, args=(tables,), daemon=True).start()
-        else:
-            self._refresh(tables)
-        return True
+    def request(self):
+        """The collector's classification argument: (generation, [(category, table)...])."""
+        return (self.generation, [("T", table) for table in self.tables]) if self.tables else None
+
+    def observe(self, sample):
+        """Masks and set statuses of an accepted sample (the previous ones stay otherwise)."""
+        if sample.get("refused"):
+            return
+        masks = {flow["key"][1]: flow["classes"] for flow in sample["flows"] if flow.get("classes")}
+        masks.update((remote["address"], remote["classes"]) for remote in sample["threat_remotes"]
+                     if remote.get("classes"))
+        masks.update(sample.get("classified") or {})
+        self.masks = masks
+        self.status = {self.tables[row["id"]]: {"status": row["status"], "entries": row["entries"]}
+                       for row in sample.get("class_sets") or () if row["id"] < len(self.tables)}
 
     @property
     def names(self):
-        """The lists in the index, in their bit order."""
-        return self.index[0]
+        """The lists in use, as the map names them."""
+        return [list_label(table) for table in self.tables
+                if self.status.get(table, {}).get("status", "ok") == "ok"]
 
     def lookup(self, address):
-        """The lists naming address, remembered per address until the index is replaced."""
-        index = self.index
-        index_seen, known = self._lookups
-        if index_seen is not index or len(known) >= LOOKUP_CACHE_SIZE:
-            known = {}
-            self._lookups = (index, known)
-        lists = known.get(address)
-        if lists is None:
-            lists = known[address] = self._lookup(address, index)
-        return list(lists)
+        mask = self.masks.get(address, 0)
+        return [list_label(table) for bit, table in enumerate(self.tables) if mask >> bit & 1]
 
-    @staticmethod
-    def _lookup(address, index):
-        try:
-            parsed = ip_object(address)
-        except (TypeError, ValueError):
-            return []
-        names, compact = index
-        value = int(parsed)
-        mask = 0
-        bits = parsed.max_prefixlen
-        for prefixlen, bucket in compact.get(parsed.version, {}).items():
-            key = value & (((1 << bits) - 1) ^ ((1 << (bits - prefixlen)) - 1) if prefixlen else 0)
-            if parsed.version == 4:
-                networks, masks = bucket
-                position = bisect_left(networks, key)
-                if position < len(networks) and networks[position] == key:
-                    mask |= masks[position]
-            else:
-                high, low, masks = bucket
-                high_key, low_key = key >> 64, key & 0xFFFFFFFFFFFFFFFF
-                start = bisect_left(high, high_key)
-                end = bisect_left(high, high_key + 1, lo=start)
-                position = bisect_left(low, low_key, lo=start, hi=end)
-                if position < end and low[position] == low_key:
-                    mask |= masks[position]
-        return [name for bit, name in enumerate(names) if mask & (1 << bit)]
+    def report(self):
+        """Status: every list, with what the collector read from its table."""
+        return {"lists": [dict(self.status.get(table, {"status": "pending", "entries": 0}), name=table,
+                               label=list_label(table)) for table in self.tables],
+                "ignored": list(self.ignored), "unavailable": list(self.unavailable)}
 
 
 def threat_lists_for(address, blocklists, reputation, ids_evidence=None):

@@ -25,8 +25,8 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 """What Reporting: Firewall Map: Status shows, as JSON: the installed version, the collector and
-its state collector, the geolocation database and the threat-list downloads. Reads status files
-only; it downloads nothing.
+its state collector, the geolocation database, the threat lists the collector classifies with and
+the AbuseIPDB download. Reads status files only; it downloads nothing.
 
     firewallmap_status.py
 """
@@ -36,11 +36,10 @@ import os
 import time
 
 import firewallmap_abuseipdb as abuseipdb
-import firewallmap_feeds as feeds
 import firewallmap_geodb as geodb
 from firewallmap_collector import IDLE_SECONDS, recording_wanted
 from lib.config import abuseipdb_key, settings, widget_in_use
-from lib.blocklists import FEEDS
+from lib.blocklists import FEEDS, list_label
 from lib.common import COLLECTOR_TIMINGS, OUTPUT_FILE, REQUEST_MARKER, geodb_view, read_json, secure_umask
 from lib.collector import PROTOCOL_VERSION, kernel_version
 
@@ -136,12 +135,17 @@ def database():
     return status
 
 
-def threat_feeds():
-    in_use = {feed["name"] for feed in feeds.feeds_in_use()}
-    downloaded = read_json(feeds.STATUS_FILE)
-    return [{"name": feed["name"], "label": feed["label"], "in_use": feed["name"] in in_use,
-             **{key: downloaded.get(feed["name"], {}).get(key) for key in ("count", "updated", "error")}}
-            for feed in FEEDS]
+def threat_lists(timing):
+    """The PF tables the collector classifies threats with, as it last read them, and the chosen
+    lists it cannot use (no PF table: the alias is missing or alias maintenance is off)."""
+    report = ((timing or {}).get("state_collector") or {}).get("classification") or {}
+    labels = {feed["name"]: feed["label"] for feed in FEEDS}
+    return {
+        "lists": [dict(row, description=labels.get(row.get("name"))) for row in report.get("lists") or []],
+        "unavailable": [{"name": name, "label": list_label(name), "description": labels.get(name)}
+                        for name in report.get("unavailable") or []],
+        "ignored": list(report.get("ignored") or []),
+    }
 
 
 def blacklist():
@@ -154,7 +158,7 @@ def overview():
     state = collector()
     return {"version": installed_version(), "collector": state, "state_collector": state_collector(state.get("timing")),
             "database": database(),
-            "feeds": threat_feeds(), "abuseipdb": blacklist(), "now": time.time()}
+            "threat_lists": threat_lists(state.get("timing")), "abuseipdb": blacklist(), "now": time.time()}
 
 
 if __name__ == "__main__":

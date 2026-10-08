@@ -24,13 +24,10 @@
 
 """Unit tests for threat lists (lib/blocklists.py)."""
 
-import json
 import os
 import sys
 import tempfile
-import time
 import unittest
-from datetime import datetime
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -53,26 +50,64 @@ class BlocklistTest(unittest.TestCase):
             COLLECTOR.request_reload(marker)
             self.assertNotEqual(COLLECTOR.reload_token(marker), first)
 
-    def test_longest_prefix_lookup_across_tables(self):
-        index = BLOCKLISTS.BlocklistIndex()
-        index.index = BLOCKLISTS.BlocklistIndex.build({
-            "spamhaus_drop": ["45.56.0.0/16", "   203.0.113.7", "!10.0.0.0/8", "2606:4700::/32"],
-            "crowdsec_blacklists": ["45.56.79.53", "2606:4700:4700::1111", "2606:4700:4700::/48"],
-        })
-        self.assertEqual(index.lookup("45.56.79.53"), ["crowdsec_blacklists", "spamhaus_drop"])
-        self.assertEqual(index.lookup("203.0.113.7"), ["spamhaus_drop"])
-        self.assertEqual(index.lookup("10.1.2.3"), [])
-        self.assertEqual(index.lookup("2606:4700:4700::1111"), ["crowdsec_blacklists", "spamhaus_drop"])
-        self.assertEqual(index.lookup("2606:4700:4700::2222"), ["crowdsec_blacklists", "spamhaus_drop"])
-        self.assertEqual(index.lookup("2606:4701::1"), [])
-        self.assertEqual(index.lookup("not-an-ip"), [])
+    def test_lookups_answer_from_the_collector_masks(self):
+        lists = BLOCKLISTS.ThreatClassification()
+        lists.configure({"spamhaus_drop", "crowdsec_blacklists", "FWMAP_AbuseIPDB"}, 0.0)
+        generation, sets = lists.request()
+        # set IDs follow table names; the AbuseIPDB table keeps its badge
+        self.assertEqual(sets, [("T", "FWMAP_AbuseIPDB"), ("T", "crowdsec_blacklists"), ("T", "spamhaus_drop")])
+        lists.observe({"refused": None,
+                       "flows": [{"key": ("192.168.1.2", "45.56.79.53"), "classes": 0b110}],
+                       "threat_remotes": [{"address": "203.0.113.7", "classes": 0b100}],
+                       "classified": {"2606:4700:4700::1111": 0b001},
+                       "class_sets": [{"id": 0, "status": "ok", "entries": 3},
+                                      {"id": 1, "status": "ok", "entries": 2},
+                                      {"id": 2, "status": "missing", "entries": 0}]})
+        self.assertEqual(lists.lookup("45.56.79.53"), ["crowdsec_blacklists", "spamhaus_drop"])
+        self.assertEqual(lists.lookup("203.0.113.7"), ["spamhaus_drop"])
+        self.assertEqual(lists.lookup("2606:4700:4700::1111"), ["AbuseIPDB blacklist"])
+        self.assertEqual(lists.lookup("10.1.2.3"), [])
+        self.assertEqual(lists.names, ["AbuseIPDB blacklist", "crowdsec_blacklists"])
+        self.assertEqual([row["status"] for row in lists.report()["lists"]], ["ok", "ok", "missing"])
+        # a refused sample keeps the previous answers
+        lists.observe({"refused": {"reason": "refused_states"}, "flows": [], "threat_remotes": []})
+        self.assertEqual(lists.lookup("203.0.113.7"), ["spamhaus_drop"])
 
-    def test_busy_blocklist_refresh_is_retried(self):
-        index = BLOCKLISTS.BlocklistIndex()
-        index.refreshing = True
-        self.assertFalse(index.refresh(set()))
-        index.refreshing = False
-        self.assertTrue(index.refresh(set(), background=False))
+    def test_generation_follows_the_table_sources(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(BLOCKLISTS, "ALIAS_TABLE_DIR", directory), \
+                mock.patch.object(BLOCKLISTS, "ABUSEIPDB_BLACKLIST", os.path.join(directory, "abuse.txt")):
+            with open(os.path.join(directory, "Drop.md5.txt"), "w") as handle:
+                handle.write("a" * 32)
+            with open(os.path.join(directory, "abuse.txt"), "w") as handle:
+                handle.write("203.0.113.7\n")
+            lists = BLOCKLISTS.ThreatClassification()
+            lists.configure({"Drop", "FWMAP_AbuseIPDB"}, 0.0)
+            first = lists.generation
+            lists.configure({"Drop", "FWMAP_AbuseIPDB"}, 10.0)
+            self.assertEqual(lists.generation, first)
+            with open(os.path.join(directory, "Drop.md5.txt"), "w") as handle:
+                handle.write("b" * 32)
+            lists.configure({"Drop", "FWMAP_AbuseIPDB"}, 10.0)
+            self.assertNotEqual(lists.generation, first)
+            changed = lists.generation
+            # tables with a known source are still re-read periodically (PF loads them after the file)
+            lists.configure({"Drop", "FWMAP_AbuseIPDB"}, BLOCKLISTS.CLASS_REFRESH_SECONDS)
+            self.assertNotEqual(lists.generation, changed)
+            # a table without a source (CrowdSec...) is re-read more often
+            lists.configure({"crowdsec_blacklists"}, 0.0)
+            volatile = lists.generation
+            lists.configure({"crowdsec_blacklists"}, BLOCKLISTS.CLASS_VOLATILE_REFRESH_SECONDS)
+            self.assertNotEqual(lists.generation, volatile)
+        self.assertIsNone(BLOCKLISTS.ThreatClassification().request())
+
+    def test_more_lists_than_sets_are_reported(self):
+        lists = BLOCKLISTS.ThreatClassification()
+        with mock.patch.object(BLOCKLISTS, "log_warning") as warning:
+            lists.configure({f"list{n:02}" for n in range(70)}, 0.0)
+        self.assertEqual(len(lists.request()[1]), 64)
+        self.assertEqual(lists.report()["ignored"], [f"list{n:02}" for n in range(64, 70)])
+        warning.assert_called_once()
 
     def test_selects_feed_tables(self):
         aliases = [alias("Drop", "urltable"), alias("Office", "host"), alias("Off", "url", enabled=False)]
@@ -85,10 +120,20 @@ class BlocklistTest(unittest.TestCase):
         # a URL alias used only by pass rules (an allowlist) is not a threat list
         self.assertEqual(BLOCKLISTS.blocklist_tables(tables, blocked=set(), aliases=aliases), {"crowdsec_blacklists"})
 
-    def test_builtin_abuse_cache_is_not_indexed_again_through_its_alias(self):
-        with mock.patch.object(BLOCKLISTS, "pf_tables", return_value=["FWMAP_AbuseIPDB", "Other"]), \
-                mock.patch.object(BLOCKLISTS, "blocklist_tables", return_value={"FWMAP_AbuseIPDB", "Other"}):
-            self.assertEqual(BLOCKLISTS.chosen_threat_lists(""), {"Other"})
+    def test_only_pf_tables_classify(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(BLOCKLISTS, "ABUSEIPDB_BLACKLIST", os.path.join(directory, "abuse.txt")):
+            with mock.patch.object(BLOCKLISTS, "pf_tables", return_value=["FWMAP_AbuseIPDB", "Other", "FWMAP_Watchlist"]), \
+                    mock.patch.object(BLOCKLISTS, "blocklist_tables", return_value={"Other"}):
+                self.assertEqual(BLOCKLISTS.chosen_threat_lists(""),
+                                 ({"FWMAP_AbuseIPDB", "Other", "FWMAP_Watchlist"}, set()))
+            # a chosen feed without its alias, and the AbuseIPDB blacklist without its table, are
+            # reported rather than read from their downloads
+            with open(os.path.join(directory, "abuse.txt"), "w") as handle:
+                handle.write("203.0.113.7\n")
+            with mock.patch.object(BLOCKLISTS, "pf_tables", return_value=["Other"]):
+                self.assertEqual(BLOCKLISTS.chosen_threat_lists("FWMAP_Feodo,Other"),
+                                 ({"Other"}, {"FWMAP_Feodo", "FWMAP_AbuseIPDB"}))
 
     def test_threat_list_candidates_offer_feeds_not_lan_aliases(self):
         aliases = [alias("Drop", "urltable"), alias("RFC1918", "network"), alias("FWMAP_Feodo", "urltable")]
@@ -109,17 +154,6 @@ class BlocklistTest(unittest.TestCase):
                 handle.write('block in log quick from {<Drop>} to {any} label "abc" # <NotThis>\n'
                              'pass in quick from {<Allow>} to {any} label "def"\n')
             self.assertEqual(PF.blocked_rule_tables(rules), {"Drop"})
-
-
-class LookupCacheTest(unittest.TestCase):
-    def test_a_new_index_is_looked_up_afresh(self):
-        index = BLOCKLISTS.BlocklistIndex()
-        index.index = BLOCKLISTS.BlocklistIndex.build({"spamhaus_drop": ["45.56.0.0/16"]})
-        self.assertEqual(index.lookup("45.56.79.53"), ["spamhaus_drop"])
-        index.lookup("45.56.79.53").append("changed by a caller")
-        self.assertEqual(index.lookup("45.56.79.53"), ["spamhaus_drop"])
-        index.index = BLOCKLISTS.BlocklistIndex.build({"crowdsec_blacklists": ["45.56.79.53"]})
-        self.assertEqual(index.lookup("45.56.79.53"), ["crowdsec_blacklists"])
 
 
 if __name__ == "__main__":

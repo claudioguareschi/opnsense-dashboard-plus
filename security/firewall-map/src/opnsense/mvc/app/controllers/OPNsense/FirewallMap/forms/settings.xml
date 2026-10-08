@@ -58,7 +58,7 @@
         <label>Threat lists</label>
         <type>select_multiple</type>
         <style>selectpicker</style>
-        <help>Used to flag traffic on the map. With none selected: feed tables and the aliases your block rules use.</help>
+        <help>PF tables used to flag traffic on the map and in threat history. With none selected: feed tables and the aliases your block rules use. A curated feed counts only through its FWMAP_* alias (Maintain blocklist aliases).</help>
     </field>
     <field>
         <id>firewallmap.general.record_threats</id>
@@ -82,7 +82,7 @@
         <id>firewallmap.general.blocklist_aliases</id>
         <label>Maintain blocklist aliases</label>
         <type>checkbox</type>
-        <help>Keeps an FWMAP_* alias for each selected feed and for the AbuseIPDB blacklist, for use in your own rules. No rules are added.</help>
+        <help>Keeps an FWMAP_* alias for each selected feed and for the AbuseIPDB blacklist. The map flags traffic with these PF tables, so selected feeds and the blacklist need it; you can also use the aliases in your own rules. No rules are added.</help>
     </field>
     <field>
         <type>header</type>

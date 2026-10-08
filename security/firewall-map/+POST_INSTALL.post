@@ -9,8 +9,9 @@ fi
 /usr/local/sbin/pluginctl -s cron restart > /dev/null 2>&1
 # fetch the geolocation database right away (MaxMind with a key, otherwise DB-IP Lite)
 /usr/local/sbin/configctl -d firewallmap geodb update > /dev/null 2>&1
-# download the curated feeds in use and, with a key, the AbuseIPDB blacklist (each at most daily)
-/usr/local/sbin/configctl -d firewallmap feeds update > /dev/null 2>&1
+# threat lists are PF tables (curated feeds are URL table aliases): only the AbuseIPDB blacklist,
+# with a key, is downloaded here (at most daily); copies earlier versions downloaded are not used
+rm -rf /var/db/firewallmap/feeds /var/db/firewallmap/feeds.json
 /usr/local/sbin/configctl -d firewallmap abuseipdb update > /dev/null 2>&1
 # fill FWMAP_AbuseIPDB from the cached blacklist when the aliases are maintained (no rule is added)
 /usr/local/sbin/configctl -d firewallmap abuseipdb sync > /dev/null 2>&1

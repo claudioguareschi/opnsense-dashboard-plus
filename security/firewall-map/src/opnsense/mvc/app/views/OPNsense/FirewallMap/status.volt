@@ -50,7 +50,12 @@
             missing: {{ lang._('not downloaded')|json_encode }},
             downloading: {{ lang._('Downloading…')|json_encode }},
             ok: {{ lang._('OK')|json_encode }},
-            not_in_use: {{ lang._('not in use')|json_encode }},
+            list_missing: {{ lang._('no PF table: the alias does not exist or is not loaded')|json_encode }},
+            list_too_large: {{ lang._('too large: over 500,000 entries, or past 1,000,000 across all lists')|json_encode }},
+            list_unreadable: {{ lang._('the PF table could not be read')|json_encode }},
+            list_pending: {{ lang._('not read yet')|json_encode }},
+            list_unavailable: {{ lang._('Not used: no PF table. Enable Maintain blocklist aliases in the settings, or create the alias.')|json_encode }},
+            lists_none: {{ lang._('No threat lists: choose them in the settings.')|json_encode }},
             no_key: {{ lang._('No AbuseIPDB API key')|json_encode }},
             key_plugin: {{ lang._('Stored in the Firewall Map settings')|json_encode }},
             key_alias: {{ lang._('Taken from the GeoIP alias')|json_encode }},
@@ -187,11 +192,19 @@
             $('#geo-state').html(db.state === 'downloading' ? `<i class="fa fa-spinner fa-pulse fa-fw"></i> ${escape(T.downloading)}`
                 : state((db.errors || []).map((error) => error.message).join('; ') || db.last_error));
 
-            $('#feeds').html((data.feeds || []).map((feed) => `<tr${feed.in_use ? '' : ' class="text-muted"'}>
-                <td>${escape(feed.label)}<br><small class="text-muted">${escape(feed.name)}</small></td>
-                <td>${feed.count !== null && feed.count !== undefined ? escape(Number(feed.count).toLocaleString()) : '—'}</td>
-                <td>${feed.updated ? when(feed.updated, now) : '—'}</td>
-                <td>${feed.in_use ? state(feed.error) : escape(T.not_in_use)}</td></tr>`).join(''));
+            // the PF tables the collector classifies with; a chosen list without one never classifies silently
+            const lists = data.threat_lists || {};
+            const listName = (row) => `${escape(row.description || row.label)}${row.description || row.label !== row.name
+                ? `<br><small class="text-muted">${escape(row.name)}</small>` : ''}`;
+            const rows = (lists.lists || []).map((row) => `<tr>
+                <td>${listName(row)}</td>
+                <td>${row.status === 'ok' ? escape(Number(row.entries).toLocaleString()) : '—'}</td>
+                <td>${row.status === 'ok' ? state(null) : row.status === 'pending' ? escape(T.list_pending)
+                    : state(T[`list_${row.status}`] || row.status)}</td></tr>`)
+                .concat((lists.unavailable || []).map((row) => `<tr>
+                <td>${listName(row)}</td><td>—</td><td>${state(T.list_unavailable)}</td></tr>`));
+            $('#threat-lists').html(rows.length ? rows.join('')
+                : `<tr><td colspan="3" class="text-muted">${escape(T.lists_none)}</td></tr>`);
 
             const abuse = data.abuseipdb || {};
             $('#abuse-count').text(abuse.count ? `${Number(abuse.count).toLocaleString()} (IPv4 ${Number(abuse.count_v4 || 0).toLocaleString()}, IPv6 ${Number(abuse.count_v6 || 0).toLocaleString()})` : '—');
@@ -292,9 +305,9 @@
 
 <div class="content-box __mb">
     <table class="table table-condensed">
-        <thead><tr><th style="width: 25%;">{{ lang._('Threat feeds') }}</th><th>{{ lang._('Entries') }}</th><th>{{ lang._('Updated') }}</th>
-            <th class="text-right"><button type="button" class="btn btn-default btn-xs update-now" id="update-feeds" data-what="feeds"><i class="fa fa-download fa-fw"></i> {{ lang._('Update now') }}</button></th></tr></thead>
-        <tbody id="feeds"></tbody>
+        <thead><tr><th style="width: 25%;">{{ lang._('Threat lists') }}</th><th>{{ lang._('Entries') }}</th>
+            <th class="text-right"><button type="button" class="btn btn-default btn-xs update-now" id="update-lists" data-what="lists"><i class="fa fa-download fa-fw"></i> {{ lang._('Update now') }}</button></th></tr></thead>
+        <tbody id="threat-lists"></tbody>
     </table>
 </div>
 

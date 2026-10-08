@@ -345,7 +345,7 @@ class CollectorLoopTest(unittest.TestCase):
             "recording_wanted": lambda values=None: True,
             "database_state": lambda values: ("city.mmdb", "asn.mmdb", None),
             "rule_descriptions": dict, "interface_names": dict, "lease_names": lease_names, "port_forwards": list,
-            "chosen_threat_lists": lambda setting: set(),
+            "chosen_threat_lists": lambda setting: (set(), set()),
             "idle": lambda started: self.idle,
             "requested": lambda marker, seconds: False,
             "reload_token": lambda: None,
@@ -366,9 +366,16 @@ class CollectorLoopTest(unittest.TestCase):
         self.addCleanup(self.collector.eve.close)
         self.queue = os.path.join(self.directory, "queue.db")
         self.collector.recorder = COLLECTOR.ThreatRecorder(self.queue)
-        self.collector.blocklists.index = COLLECTOR.BlocklistIndex.build({"Test list": [self.REMOTE]})
+        self.threat_list([self.REMOTE])
         # the list above stands in for pf tables: no refresh from pf during the test
         self.collector.checked["blocklists"] = time.monotonic()
+
+    def threat_list(self, addresses):
+        """One threat list PF table, as the collector (fixture) classifies with it; until the next
+        sample, lookups answer as if a sample had reported these addresses."""
+        self.collector.collector_engine.tables = {"Test_list": list(addresses)}
+        self.collector.blocklists.configure({"Test_list"}, time.monotonic())
+        self.collector.blocklists.masks = {address: 1 for address in addresses}
 
     def queued(self):
         return [row["address"] for row in THREATS.listing(THREATS.connect(self.queue))["rows"]]
@@ -382,7 +389,7 @@ class CollectorLoopTest(unittest.TestCase):
             payload = json.load(handle)
         self.assertEqual(payload["status"], "ok")
         self.assertEqual([flow["dest"] for flow in payload["flows"]], [self.REMOTE])
-        self.assertEqual(payload["flows"][0]["lists"], ["Test list"])
+        self.assertEqual(payload["flows"][0]["lists"], ["Test_list"])
         self.assertEqual(self.queued(), [self.REMOTE])
 
     def test_camera_request_saves_every_flow_and_its_states(self):
@@ -468,7 +475,7 @@ class SnapshotSafetyTest(CollectorLoopTest):
 
     def test_snapshot_is_bounded_and_incident_flows_come_first(self):
         now = self.snapshot_fixture()
-        self.collector.blocklists.index = COLLECTOR.BlocklistIndex.build({"Test list": ["34.1.1.5"]})
+        self.threat_list(["34.1.1.5"])
         with mock.patch.object(COLLECTOR, "SNAPSHOT_FLOWS", 3):
             payload = self.collector.build_snapshot_payload(now)
         self.assertEqual([flow["dest"] for flow in payload["flows"]], ["34.1.1.5", "34.1.1.0", "34.1.1.1"])
@@ -509,8 +516,7 @@ class SnapshotSafetyTest(CollectorLoopTest):
         for flow in self.collector.tracker.flows.values():
             flow["rule"] = "huge"
         self.collector.descriptions["huge"] = "x" * 20000
-        self.collector.blocklists.index = COLLECTOR.BlocklistIndex.build(
-            {"Test list": [remote for _, remote in self.collector.tracker.flows]})
+        self.threat_list([remote for _, remote in self.collector.tracker.flows])
         with mock.patch.object(COLLECTOR, "SNAPSHOT_BYTES", 30000):
             payload = self.collector.build_snapshot_payload(now)
         coverage = payload["capture"]["flows"]
@@ -585,10 +591,18 @@ class SnapshotSafetyTest(CollectorLoopTest):
         self.assertEqual(COLLECTOR.MAX_FLOWS, 150)
 
 
+def flagged_sample(records):
+    """A threat-summary sample in which a threat list names every remote."""
+    engine = CollectorFixture(lambda: records)
+    engine.tables = {"everything": ["0.0.0.0/0", "::/0"]}
+    return engine.sample({"1.2.3.163"}, [], {}, None, threat_summary=True,
+                         classification=("g", [("T", "everything")]))
+
+
 class ThreatRecorderTest(unittest.TestCase):
     @staticmethod
     def collector_sample(records):
-        return CollectorFixture(lambda: records).sample({"1.2.3.163"}, [], {}, None, threat_summary=True)
+        return flagged_sample(records)
 
     def test_hostnames_are_loaded_once_per_recording(self):
         recorder = COLLECTOR.ThreatRecorder(":memory:")
@@ -654,7 +668,7 @@ class ThreatRecorderCommitTest(unittest.TestCase):
         collector.alerts.summary.return_value = None
         collector.correlator = COLLECTOR.Correlator()
         records = PF.parse_states(nat_state(100, 100))
-        sample = CollectorFixture(lambda: records).sample({"1.2.3.163"}, [], {}, None, threat_summary=True)
+        sample = flagged_sample(records)
         windows = []
 
         def blocks(correlator, seen, since, *args):

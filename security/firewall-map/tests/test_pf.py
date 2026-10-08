@@ -423,7 +423,7 @@ class InitiatorTest(unittest.TestCase):
             store.put_many(COMMON.REPUTATION_KIND, [("94.154.43.203", {"score": 100}), ("8.8.8.8", {"score": 0})])
             reputation = BLOCKLISTS.Reputation(store)
             reputation.refresh(now=0.0)
-            index = BLOCKLISTS.BlocklistIndex()
+            index = BLOCKLISTS.ThreatClassification()
             self.assertEqual(BLOCKLISTS.threat_lists_for("94.154.43.203", index, reputation), [BLOCKLISTS.REPUTATION_LIST])
             self.assertEqual(BLOCKLISTS.threat_lists_for("8.8.8.8", index, reputation), [])
 

@@ -53,24 +53,31 @@ class StatusTest(unittest.TestCase):
                 self.assertEqual((result["running"], result["mode"], result["recording"]), (True, "live", True))
                 self.assertEqual(STATUS.collector(now=time.time() + STATUS.IDLE_SECONDS + 1)["mode"], "background")
 
-    def test_feeds_and_blacklist_never_show_the_key(self):
+    def test_blacklist_never_shows_the_key(self):
         with tempfile.TemporaryDirectory() as directory:
-            feeds_file, abuse_file = os.path.join(directory, "feeds.json"), os.path.join(directory, "abuse.json")
-            with open(feeds_file, "w") as handle:
-                json.dump({"FWMAP_Feodo": {"count": 5, "updated": 1000.0, "error": None}}, handle)
+            abuse_file = os.path.join(directory, "abuse.json")
             with open(abuse_file, "w") as handle:
                 json.dump({"count": 3, "updated": 2000.0, "key_id": "0123456789abcdef"}, handle)
-            with mock.patch.object(STATUS.feeds, "STATUS_FILE", feeds_file), \
-                    mock.patch.object(STATUS.feeds, "feeds_in_use", return_value=[{"name": "FWMAP_Feodo"}]), \
-                    mock.patch.object(STATUS.abuseipdb, "STATUS_FILE", abuse_file), \
+            with mock.patch.object(STATUS.abuseipdb, "STATUS_FILE", abuse_file), \
                     mock.patch.object(STATUS, "abuseipdb_key", return_value="secret"):
-                feodo = next(feed for feed in STATUS.threat_feeds() if feed["name"] == "FWMAP_Feodo")
-                self.assertEqual((feodo["in_use"], feodo["count"]), (True, 5))
-                self.assertFalse(any(feed["in_use"] for feed in STATUS.threat_feeds() if feed["name"] != "FWMAP_Feodo"))
                 blacklist = STATUS.blacklist()
                 self.assertEqual((blacklist["configured"], blacklist["count"]), (True, 3))
                 self.assertNotIn("key_id", json.dumps(blacklist))
                 self.assertNotIn("secret", json.dumps(blacklist))
+
+    def test_threat_lists_are_what_the_collector_read(self):
+        timing = {"state_collector": {"classification": {
+            "lists": [{"name": "FWMAP_Feodo", "label": "FWMAP_Feodo", "status": "ok", "entries": 5},
+                      {"name": "crowdsec_blacklists", "label": "crowdsec_blacklists", "status": "too_large",
+                       "entries": 0}],
+            "unavailable": ["FWMAP_AbuseIPDB", "FWMAP_Spamhaus_DROP"], "ignored": []}}}
+        lists = STATUS.threat_lists(timing)
+        self.assertEqual([(row["name"], row["status"], row["description"]) for row in lists["lists"]],
+                         [("FWMAP_Feodo", "ok", "abuse.ch Feodo Tracker"), ("crowdsec_blacklists", "too_large", None)])
+        # an upgrade with alias maintenance off: the lists that no longer classify are named
+        self.assertEqual([(row["name"], row["label"]) for row in lists["unavailable"]],
+                         [("FWMAP_AbuseIPDB", "AbuseIPDB blacklist"), ("FWMAP_Spamhaus_DROP", "FWMAP_Spamhaus_DROP")])
+        self.assertEqual(STATUS.threat_lists(None), {"lists": [], "unavailable": [], "ignored": []})
 
     def test_state_collector_status_and_version_warning(self):
         timing = {"state_collector": {"helper": {"pid": 7, "starts": 2, "protocol": 1, "pf_state_version": 20230404,
