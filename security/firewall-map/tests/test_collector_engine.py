@@ -50,6 +50,7 @@ LOCAL = {"8.8.8.1", "2001:4860::1"}
 CONTEXT = (LOCAL, [], {}, None)
 OUTBOUND_QUERY = ("tcp", "8.8.8.1", "30000", "9.9.9.9", "443")
 INBOUND_QUERY = ("tcp", "8.8.8.1", "443", "9.9.9.9", "55000")
+KERNEL_IDENTITY = collector.kernel_identity  # the real one; the identity tests patch it
 
 
 class CollectorEngineSpecificationTest(unittest.TestCase):
@@ -228,17 +229,50 @@ class CollectorEngineSpecificationTest(unittest.TestCase):
 
 
 class CollectorProtocolIdentityTest(unittest.TestCase):
-    """One protocol: a collector announcing another one is a package inconsistency, reported
-    as incompatible and never restarted until the installed binary changes."""
+    """Persistent incompatibilities: a collector of another protocol is never run again until
+    its binary changes; one built for another PF state ABI is never run again until its binary
+    or the running kernel changes. Ordinary failures keep restarting the collector."""
+
+    PF_ABI = b"PF state ABI version 7, collector built for 5"
 
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.path = Path(directory.name) / "firewallmap-collector"
+        self.runs = Path(directory.name) / "runs"
+        kernel = patch.object(collector, "kernel_identity", return_value=("14.3-RELEASE-p2", "build A"))
+        self.kernel = kernel.start()
+        self.addCleanup(kernel.stop)
 
-    def install(self, banner):
-        self.path.write_text(f"#!/bin/sh\nprintf '{banner}\\n'\nexec cat >/dev/null\n")
+    def install(self, banner, failure=None):
+        """A stand-in collector that counts its executions, announces banner and, given a
+        (class, message) failure, answers the first request with that FMFAIL1 report."""
+        if self.path.exists():
+            self.path.unlink()  # a new binary, as a reinstall makes it
+        announced = banner.encode() + b"\n"
+        self.path.write_text(f"""#!{sys.executable}
+import struct, sys
+with open({str(self.runs)!r}, "a") as runs:
+    runs.write("x")
+sys.stdout.buffer.write({announced!r})
+sys.stdout.flush()
+failure = {failure!r}
+for line in sys.stdin.buffer:
+    if failure and line == b"RUN\\n":
+        record = b"\\xfe" + struct.pack("!Ii", failure[0], 71) + failure[1]
+        sys.stdout.buffer.write(b"FMFAIL1\\0" + struct.pack("!I", len(record)) + record)
+        sys.stdout.flush()
+        sys.exit(1)
+""")
         self.path.chmod(0o755)
+
+    def executions(self):
+        return len(self.runs.read_text()) if self.runs.exists() else 0
+
+    def engine(self):
+        engine = collector.CollectorEngine(str(self.path))
+        self.addCleanup(engine.close)
+        return engine
 
     def start(self, engine):
         with self.assertRaises(collector.CollectorError) as raised:
@@ -248,48 +282,80 @@ class CollectorProtocolIdentityTest(unittest.TestCase):
     def test_expected_protocol_is_1(self):
         self.assertEqual(collector.PROTOCOL_VERSION, 1)
 
-    def test_other_protocol_is_incompatible_and_the_same_binary_is_not_restarted(self):
+    def test_kernel_identity_is_uname_release_and_build(self):
+        self.assertEqual(KERNEL_IDENTITY(), (os.uname().release, os.uname().version))
+
+    def test_other_protocol_is_not_run_again_until_the_binary_changes(self):
         self.install("FMCOLLECTOR protocol=2 pf_state_version=5 freebsd_version=1500000 extra=1")
-        engine = collector.CollectorEngine(str(self.path))
-        self.addCleanup(engine.close)
+        engine = self.engine()
         for _ in range(3):
             error = self.start(engine)
             self.assertIsInstance(error, collector.CollectorIncompatible)
             self.assertEqual((error.failure_class, error.reason, error.protocol), ("incompatible", "protocol", 2))
             self.assertIn("protocol 2", str(error))
-        self.assertEqual(engine.starts, 1)
+        self.assertEqual((self.executions(), engine.starts), (1, 1))
         self.assertIsNone(engine.process)
+        self.kernel.return_value = ("15.0-RELEASE", "build B")  # the kernel does not matter here
+        self.start(engine)
+        self.assertEqual(self.executions(), 1)
+        self.install("FMCOLLECTOR protocol=3 pf_state_version=0 freebsd_version=0")
+        self.assertEqual(self.start(engine).protocol, 3)
+        self.assertEqual(self.executions(), 2)
 
     def test_unannounced_protocol_is_unknown(self):
         for banner in ("FMOTHER pf_state_version=0 freebsd_version=0", "garbage", "FMCOLLECTOR protocol=x"):
             with self.subTest(banner=banner):
                 self.install(banner)
-                error = self.start(collector.CollectorEngine(str(self.path)))
+                error = self.start(self.engine())
                 self.assertIsInstance(error, collector.CollectorIncompatible)
                 self.assertIsNone(error.protocol)
                 self.assertIn("unknown protocol", str(error))
 
-    def test_reinstalled_binary_is_started_again(self):
-        self.install("FMCOLLECTOR protocol=2 pf_state_version=0 freebsd_version=0")
-        engine = collector.CollectorEngine(str(self.path))
-        self.addCleanup(engine.close)
+    def test_pf_abi_mismatch_is_not_run_again_on_the_same_binary_and_kernel(self):
+        self.install("FMCOLLECTOR protocol=1 pf_state_version=5 freebsd_version=1403000", (3, self.PF_ABI))
+        engine = self.engine()
+        for _ in range(3):
+            error = self.start(engine)
+            self.assertIsInstance(error, collector.CollectorIncompatible)
+            self.assertEqual((error.failure_class, error.reason, error.protocol), ("incompatible", "pf_abi", 1))
+            self.assertEqual((error.collector_pf_state_version, error.running_pf_state_version), (5, 7))
+            self.assertIn("PF state version 5, the running kernel uses 7", str(error))
+        self.assertEqual((self.executions(), engine.starts), (1, 1))
+        # another running kernel: evaluated again (here still incompatible), then latched again
+        self.kernel.return_value = ("15.0-RELEASE", "build B")
+        self.assertEqual(self.start(engine).reason, "pf_abi")
+        self.start(engine)
+        self.assertEqual(self.executions(), 2)
+        # another binary on the same kernel: evaluated again
+        self.install("FMCOLLECTOR protocol=1 pf_state_version=5 freebsd_version=1403000", (3, self.PF_ABI))
         self.start(engine)
         self.start(engine)
-        self.assertEqual(engine.starts, 1)
-        self.path.unlink()
-        self.install("FMCOLLECTOR protocol=3 pf_state_version=0 freebsd_version=0")
-        self.assertEqual(self.start(engine).protocol, 3)
-        self.assertEqual(engine.starts, 2)
+        self.assertEqual(self.executions(), 3)
+
+    def test_pf_abi_versions_are_not_invented(self):
+        self.install("FMCOLLECTOR protocol=1 pf_state_version=5 freebsd_version=0", (3, b"something else"))
+        error = self.start(self.engine())
+        self.assertEqual((error.reason, error.collector_pf_state_version, error.running_pf_state_version),
+                         ("pf_abi", 5, None))
+        self.assertIn("the running kernel uses unknown", str(error))
+
+    def test_ordinary_failures_restart_the_collector(self):
+        self.install("FMCOLLECTOR protocol=1 pf_state_version=5 freebsd_version=0", (1, b"truncated dump"))
+        engine = self.engine()
+        for _ in range(3):
+            error = self.start(engine)
+            self.assertNotIsInstance(error, collector.CollectorIncompatible)
+            self.assertEqual(error.failure_class, "structural")
+        self.assertEqual((self.executions(), engine.starts), (3, 3))
 
     def test_malformed_protocol_1_banner_is_an_ordinary_failure(self):
         self.install("FMCOLLECTOR protocol=1 pf_state_version=x")
-        engine = collector.CollectorEngine(str(self.path))
-        self.addCleanup(engine.close)
+        engine = self.engine()
         error = self.start(engine)
         self.assertNotIsInstance(error, collector.CollectorIncompatible)
         self.assertIsNone(error.failure_class)
         self.start(engine)
-        self.assertEqual(engine.starts, 2)
+        self.assertEqual((self.executions(), engine.starts), (2, 2))
 
 
 class CollectorMemoryTest(unittest.TestCase):

@@ -877,10 +877,11 @@ class TimingContractTest(CollectorLoopTest):
         self.assertTrue(self.collector.collector_engine.baselines[-1])
         self.assertEqual(self.payload(), previous)
 
-    def test_incompatible_pf_abi_publishes_its_status_and_retries_slowly(self):
+    def test_incompatible_pf_abi_publishes_its_status_and_versions(self):
         self.collector.step()  # baseline
         self.collector.step()
-        error = COLLECTOR.CollectorError("PF state ABI version 9, collector built for 8", "incompatible")
+        error = COLLECTOR.state_collector.CollectorIncompatible(
+            "pf_abi", collector_pf_state_version=8, running_pf_state_version=9)
         with mock.patch.object(self.collector.collector_engine, "sample", side_effect=error), \
                 mock.patch.object(COLLECTOR, "log_error"):
             rest = self.collector.step()
@@ -889,9 +890,11 @@ class TimingContractTest(CollectorLoopTest):
         self.assertEqual((payload["status"], payload["error"], payload["reason"]),
                          ("collector_incompatible", str(error), "pf_abi"))
         self.assertEqual((payload["protocol"], payload["expected_protocol"]), (1, 1))
+        self.assertEqual((payload["collector_pf_state_version"], payload["running_pf_state_version"]), (8, 9))
+        self.assertIn("PF state version 8, the running kernel uses 9", payload["error"])
         self.assertEqual(self.diagnostic()["state_collector"]["incompatible"]["error"], str(error))
         self.assertEqual(self.diagnostic()["state_collector"]["last_error_class"], "incompatible")
-        self.collector.step()  # compatible again (a new helper): baseline, then normal pacing
+        self.collector.step()  # compatible again (a new binary or kernel): baseline, then normal pacing
         self.assertIsNone(self.collector.collector_incompatible)
         self.assertLess(self.collector.step(), COLLECTOR.INCOMPATIBLE_RETRY_SECONDS)
 
@@ -900,7 +903,7 @@ class TimingContractTest(CollectorLoopTest):
         self.collector.step()
         for protocol, shown in ((2, "2"), (None, "unknown")):
             with self.subTest(protocol=protocol):
-                error = COLLECTOR.state_collector.CollectorIncompatible(protocol)
+                error = COLLECTOR.state_collector.CollectorIncompatible("protocol", protocol=protocol)
                 with mock.patch.object(self.collector.collector_engine, "sample", side_effect=error), \
                         mock.patch.object(COLLECTOR, "log_error") as logged:
                     rests = [self.collector.step() for _ in range(3)]

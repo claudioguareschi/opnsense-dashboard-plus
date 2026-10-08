@@ -29,7 +29,9 @@ The collector speaks exactly one protocol, PROTOCOL_VERSION; the wire formats
 are specified in collector/PROTOCOL.md. A collector announcing any other
 protocol comes from a different package version: that is an installation
 problem (CollectorIncompatible), not a transient failure, and the same binary
-is never started again. Every response is validated completely (framing,
+is never started again. A collector built for another PF state ABI than the
+running kernel's is just as persistent: it is started again only when the
+binary or the running kernel changed. Every response is validated completely (framing,
 record order, counts, checksum) before any of it is used; anything unexpected
 closes the collector, so a stream is never resynchronized. Python never
 supplies elapsed time: the collector anchors each sample itself and reports a
@@ -117,15 +119,42 @@ class CollectorError(RuntimeError):
 
 
 class CollectorIncompatible(CollectorError):
-    """The installed collector speaks another protocol (protocol: the one it announced, or
-    None when its banner names none): the package's components come from different versions."""
+    """A persistent incompatibility; reason names it:
 
-    def __init__(self, protocol):
-        announced = "an unknown protocol" if protocol is None else f"protocol {protocol}"
-        super().__init__(f"the collector uses {announced}; this Firewall Map expects protocol "
-                         f"{PROTOCOL_VERSION}", "incompatible")
-        self.reason = "protocol"
+    * "protocol": the installed collector speaks another protocol (protocol: the one it
+      announced, or None when its banner names none): the package's components come from
+      different versions.
+    * "pf_abi": the collector speaks this protocol but was built for another PF state ABI
+      than the running kernel's (each version None when it is not known).
+    """
+
+    def __init__(self, reason, protocol=PROTOCOL_VERSION, collector_pf_state_version=None,
+                 running_pf_state_version=None):
+        if reason == "protocol":
+            announced = "an unknown protocol" if protocol is None else f"protocol {protocol}"
+            message = f"the collector uses {announced}; this Firewall Map expects protocol {PROTOCOL_VERSION}"
+        else:
+            def known(value):
+                return "unknown" if value is None else value
+            message = (f"PF state ABI mismatch: the collector was built for PF state version "
+                       f"{known(collector_pf_state_version)}, the running kernel uses "
+                       f"{known(running_pf_state_version)}")
+        super().__init__(message, "incompatible")
+        self.reason = reason
         self.protocol = protocol
+        self.collector_pf_state_version = collector_pf_state_version
+        self.running_pf_state_version = running_pf_state_version
+
+
+# the collector's own report of an ABI mismatch (collector/pf_reader.c)
+_PF_ABI_MISMATCH = re.compile(r"PF state ABI version (\d+), collector built for (\d+)")
+
+
+def kernel_identity():
+    """The running kernel, as uname reports it (kern.osrelease and kern.version, which names
+    the build): it changes only when the firewall boots another kernel."""
+    info = os.uname()
+    return info.release, info.version
 
 
 def available(path=HELPER):
@@ -460,7 +489,9 @@ class CollectorEngine:
         self.starts = 0
         self.last_error = None
         self.read_timeout = READ_TIMEOUT
-        # (file identity, announced protocol) of a binary that speaks another protocol
+        self.binary = None  # the identity of the binary the running process was started from
+        # a persistent incompatibility: (binary identity, kernel identity or None when any kernel
+        # gives the same answer, the CollectorIncompatible arguments)
         self.incompatible = None
 
     def _identity(self):
@@ -475,10 +506,12 @@ class CollectorEngine:
             raise CollectorError("collector unavailable")
         identity = self._identity()
         if self.incompatible is not None:
-            if self.incompatible[0] == identity:
-                # the same binary again: only a reinstall or upgrade can change the answer
-                raise CollectorIncompatible(self.incompatible[1])
+            binary, kernel, arguments = self.incompatible
+            if binary == identity and (kernel is None or kernel == kernel_identity()):
+                # the same binary (and kernel): running it again would give the same answer
+                raise CollectorIncompatible(**arguments)
             self.incompatible = None
+        self.binary = identity
         try:
             self.process = subprocess.Popen([self.path], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                             bufsize=0)
@@ -493,8 +526,8 @@ class CollectorEngine:
                 protocol = int(announced.group(1)) if announced else None
                 if protocol == PROTOCOL_VERSION:
                     raise CollectorError("malformed collector banner")
-                self.incompatible = identity, protocol
-                raise CollectorIncompatible(protocol)
+                self.incompatible = identity, None, {"reason": "protocol", "protocol": protocol}
+                raise CollectorIncompatible(**self.incompatible[2])
             self.metadata = {"pid": self.process.pid, "protocol": PROTOCOL_VERSION,
                              "pf_state_version": int(match.group(1)), "freebsd_version": int(match.group(2))}
         except (OSError, CollectorError) as error:
@@ -513,9 +546,17 @@ class CollectorEngine:
         except BaseException as error:
             # framing is unknown: never reuse this helper
             self.close()
+            if isinstance(error, CollectorError) and error.failure_class == "incompatible":
+                # the collector cannot read this kernel's PF states: persistent for this binary
+                # and this running kernel
+                reported = _PF_ABI_MISMATCH.search(str(error))
+                arguments = {"reason": "pf_abi", "collector_pf_state_version": (self.metadata or {}).get(
+                    "pf_state_version"), "running_pf_state_version": int(reported.group(1)) if reported else None}
+                self.incompatible = self.binary, kernel_identity(), arguments
+                error = CollectorIncompatible(**arguments)
             if isinstance(error, CollectorError):
                 self.last_error = str(error)
-                raise
+                raise error
             if isinstance(error, (OSError, UnicodeError, ValueError, struct.error)):
                 self.last_error = f"collector request failed: {error}"
                 raise CollectorError(self.last_error) from error

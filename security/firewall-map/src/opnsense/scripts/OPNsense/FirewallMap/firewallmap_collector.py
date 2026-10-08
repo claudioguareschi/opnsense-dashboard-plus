@@ -127,7 +127,8 @@ BACKGROUND_INTERVAL = 20.0
 THREAT_RECORD_SECONDS = 20.0
 THREAT_PRUNE_SECONDS = 3600.0
 MAX_FAILURE_BACKOFF = 30.0
-# a helper that cannot read this kernel's PF states is not retried every few seconds
+# while the collector is incompatible the service re-evaluates this rarely; each re-evaluation
+# only checks whether the collector binary (or, for a PF ABI mismatch, the kernel) changed
 INCOMPATIBLE_RETRY_SECONDS = 300.0
 COLLECTOR_LOCK = f"{RUN_DIR}/collector.lock"
 # the last sample's timings are written at most this often
@@ -586,8 +587,12 @@ def incompatibility(error):
     if getattr(error, "failure_class", None) != "incompatible":
         return None
     reason = getattr(error, "reason", "pf_abi")
-    return {"reason": reason, "protocol": error.protocol if reason == "protocol" else PROTOCOL_VERSION,
-            "expected_protocol": PROTOCOL_VERSION, "error": str(error)}
+    incompatible = {"reason": reason, "protocol": error.protocol if reason == "protocol" else PROTOCOL_VERSION,
+                    "expected_protocol": PROTOCOL_VERSION, "error": str(error)}
+    if reason == "pf_abi":
+        incompatible.update(collector_pf_state_version=getattr(error, "collector_pf_state_version", None),
+                            running_pf_state_version=getattr(error, "running_pf_state_version", None))
+    return incompatible
 
 
 def incompatibility_message(incompatible):
@@ -625,7 +630,8 @@ class Collector:
         self.recorder = ThreatRecorder()
         self.collector_engine = CollectorEngine()
         # set while the state collector is incompatible (another protocol, or a PF ABI it was not
-        # built for): explicit status, slow retry, and a binary of another protocol is not restarted
+        # built for): explicit status and slow pacing; the engine does not run the same binary again
+        # (for a PF ABI mismatch: on the same running kernel)
         self.collector_incompatible = None
         # unsupported states the last accepted sample skipped, by reason
         self.sample_skipped = {}

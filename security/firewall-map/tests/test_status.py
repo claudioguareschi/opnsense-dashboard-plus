@@ -97,6 +97,11 @@ class StatusTest(unittest.TestCase):
                          ("incompatible", 2, 1))
         unknown = status(incompatible={"reason": "protocol", "protocol": None, "expected_protocol": 1, "error": "x"})
         self.assertEqual((unknown["state"], unknown["protocol"]), ("incompatible", None))
+        abi = status(incompatible={"reason": "pf_abi", "protocol": 1, "expected_protocol": 1, "error": "x",
+                                   "collector_pf_state_version": 8, "running_pf_state_version": None})
+        self.assertEqual((abi["state"], abi["protocol"]), ("incompatible", 1))
+        self.assertEqual((abi["incompatible"]["collector_pf_state_version"],
+                          abi["incompatible"]["running_pf_state_version"]), (8, None))
         self.assertEqual(status(last_error_at=200.0, last_sample_at=100.0)["state"], "failed")
         self.assertEqual(status(last_error_at=100.0, last_sample_at=200.0)["state"], "running")
         self.assertEqual(status()["state"], "starting")

@@ -76,6 +76,8 @@
             engine_refused: {{ lang._('Last sample refused: %s')|json_encode }},
             engine_incompatible: {{ lang._('Incompatible with this firewall: %s')|json_encode }},
             engine_protocol_mismatch: {{ lang._('Firewall Map collector incompatible — The Firewall Map application and its state collector use incompatible protocols. Reinstall or upgrade the Firewall Map package so both components come from the same version.')|json_encode }},
+            reason_protocol: {{ lang._('Protocol mismatch')|json_encode }},
+            reason_pf_abi: {{ lang._('PF ABI mismatch')|json_encode }},
             collector_running: {{ lang._('Running')|json_encode }},
             collector_incompatible: {{ lang._('Incompatible')|json_encode }},
             collector_failed: {{ lang._('Failed')|json_encode }},
@@ -129,6 +131,15 @@
             $('#engine-protocol').text(engine.protocol === null || engine.protocol === undefined
                 ? (engine.state === 'incompatible' ? T.unknown : '—') : engine.protocol);
             $('#engine-expected-protocol').text(engine.expected_protocol || '—');
+            // why it is incompatible, and for a PF ABI mismatch both state versions (unknown when not reported)
+            const known = (value) => (value === null || value === undefined ? T.unknown : value);
+            $('#engine-reason').text(incompatible ? T[`reason_${incompatible.reason}`] || incompatible.reason : '')
+                .closest('tr').toggleClass('hidden', !incompatible);
+            const pfAbi = !!incompatible && incompatible.reason === 'pf_abi';
+            $('#engine-collector-pf').text(pfAbi ? known(incompatible.collector_pf_state_version) : '')
+                .closest('tr').toggleClass('hidden', !pfAbi);
+            $('#engine-running-pf').text(pfAbi ? known(incompatible.running_pf_state_version) : '')
+                .closest('tr').toggleClass('hidden', !pfAbi);
             const helper = engine.helper || {};
             const telemetry = engine.telemetry || {};
             const count = (value) => Number(value || 0).toLocaleString();
@@ -251,6 +262,9 @@
             <tr><td style="width: 25%;">{{ lang._('State collector') }}</td><td id="engine-state"></td></tr>
             <tr><td>{{ lang._('Collector protocol') }}</td><td id="engine-protocol"></td></tr>
             <tr><td>{{ lang._('Expected protocol') }}</td><td id="engine-expected-protocol"></td></tr>
+            <tr class="hidden"><td>{{ lang._('Reason') }}</td><td id="engine-reason"></td></tr>
+            <tr class="hidden"><td>{{ lang._('Collector PF state version') }}</td><td id="engine-collector-pf"></td></tr>
+            <tr class="hidden"><td>{{ lang._('Running PF state version') }}</td><td id="engine-running-pf"></td></tr>
             <tr><td>{{ lang._('Process') }}</td><td id="engine-helper"></td></tr>
             <tr><td>{{ lang._('State limit') }}</td><td id="engine-limit"></td></tr>
             <tr><td>{{ lang._('Last collector sample') }}</td><td id="engine-sample"></td></tr>
