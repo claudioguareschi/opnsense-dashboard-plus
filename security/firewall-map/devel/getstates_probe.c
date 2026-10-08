@@ -36,11 +36,12 @@
  * (every collector source except main.c: protocol.c needs the rest; root's
  * csh on OPNsense cannot expand $(...), hence the explicit list)
  *
- *   getstates_probe [delay_seconds] [per_datagram_ms]
+ *   getstates_probe [delay_seconds] [per_datagram_ms] [per_state_us]
  *
  * Sends one PF GETSTATES dump request, waits delay_seconds before reading
  * anything (a deliberately slow consumer), then drains the multipart reply,
- * optionally sleeping per_datagram_ms after each datagram. Every datagram goes
+ * optionally sleeping per_datagram_ms after each datagram and busy-waiting
+ * per_state_us for each decoded state (emulated processing cost). Every datagram goes
  * through the production decoder, so the state count is what the collector
  * would see. Prints one JSON line: the socket receive limits, the bytes the
  * socket reported queued after the delay and the largest backlog seen after
@@ -66,17 +67,24 @@
 #include <time.h>
 #include <unistd.h>
 
-static bool count_state(const struct state *state, void *arg, struct fm_error *error) {
-  (void)state;
-  (void)error;
-  (*(uint64_t *)arg)++;
-  return true;
-}
-
 static double now(void) {
   struct timespec t;
   clock_gettime(CLOCK_MONOTONIC, &t);
   return t.tv_sec + t.tv_nsec / 1e9;
+}
+
+/* Per-state busy wait standing in for the collector's processing cost: it
+ * runs inside the decode callback, where the real collector does its work. */
+static double per_state_s;
+
+static bool count_state(const struct state *state, void *arg, struct fm_error *error) {
+  (void)state;
+  (void)error;
+  (*(uint64_t *)arg)++;
+  if (per_state_s > 0)
+    for (double until = now() + per_state_s; now() < until;)
+      ;
+  return true;
 }
 
 static void pause_ms(double ms) {
@@ -91,6 +99,7 @@ static double cpu_seconds(const struct timeval *t) { return t->tv_sec + t->tv_us
 int main(int argc, char **argv) {
   double delay = argc > 1 ? atof(argv[1]) : 0;
   double per_datagram_ms = argc > 2 ? atof(argv[2]) : 0;
+  per_state_s = (argc > 3 ? atof(argv[3]) : 0) / 1e6;
   uint64_t status_before = 0, status_after = 0, states = 0, bytes = 0, datagrams = 0;
   bool have_before = pf_reader_state_count(&status_before);
   struct snl_state ss;
@@ -163,13 +172,13 @@ int main(int argc, char **argv) {
   double finished = now();
   getrusage(RUSAGE_SELF, &after_usage);
   bool have_after = pf_reader_state_count(&status_after);
-  printf("{\"delay_s\":%.3f,\"per_datagram_ms\":%.3f,\"so_rcvbuf\":%d,\"read_buffer\":%zu,"
+  printf("{\"delay_s\":%.3f,\"per_datagram_ms\":%.3f,\"per_state_us\":%.2f,\"so_rcvbuf\":%d,\"read_buffer\":%zu,"
          "\"queued_after_delay\":%d,\"max_queued\":%d,\"datagrams\":%llu,\"bytes\":%llu,\"states\":%llu,"
          "\"bytes_per_state\":%.1f,\"done\":%s,\"error\":%d,\"error_class\":%d,"
          "\"error_message\":\"%s\",\"full_buffer_reads\":%s,"
          "\"status_before\":%lld,\"status_after\":%lld,"
          "\"first_datagram_s\":%.3f,\"total_s\":%.3f,\"user_cpu_s\":%.3f,\"system_cpu_s\":%.3f}\n",
-         delay, per_datagram_ms, rcvbuf, ss.bufsize, queued, max_queued,
+         delay, per_datagram_ms, per_state_s * 1e6, rcvbuf, ss.bufsize, queued, max_queued,
          (unsigned long long)datagrams,
          (unsigned long long)bytes, (unsigned long long)states,
          states ? (double)bytes / (double)states : 0.0, done ? "true" : "false", error.code,
