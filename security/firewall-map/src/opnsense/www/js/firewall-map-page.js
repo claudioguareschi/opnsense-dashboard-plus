@@ -164,7 +164,11 @@
 		geo_err_disk_full: "The database could not be saved: the firewall's disk is full.",
 		geo_err_http: "{provider} answered with an error.",
 		geo_err_other: "The download failed.",
+		map_carp_backup: "CARP backup: traffic is passing through the master",
 		map_profile: "{profile} ranking",
+		map_carp_mirror: "CARP backup: mirroring the master's connections (no traffic data)",
+		map_waiting_restart: "The collector is restarting: the map resumes with its first ranked sample",
+		map_waiting_profile: "Applying the {profile} ranking profile: the map resumes with its first ranked sample",
 		map_ranking_bounded: "the top-ranked of {count} flows",
 		map_ranking_warming: "ranking settling after a busy period",
 		map_started_inside: "Outbound",
@@ -862,7 +866,7 @@
 		const localBox = outbound ? inside ? endBox("laptop", inside.name || inside.ip, [inside.name ? inside.ip : "", inside.interface]) : firewallBox(localOrigin()) : target && !target.firewall ? endBox("laptop", target.name || target.ip, [target.name ? target.ip : "", target.interface]) : firewallBox(localOrigin());
 		return {
 			verdict: (flow.lists || []).length > 0 ? bigPill("danger", T.allowed_flagged, "triangle-exclamation") : bigPill("success", T.allowed, "check"),
-			sub: outbound ? T.started_inside_long : T.started_outside_long,
+			sub: flow.presence === "mirror" ? T.mirror_sub : flow.presence === "probe" ? fill(T.probe_sub, { count: Number(flow.attempts || 0).toLocaleString() }) : outbound ? T.started_inside_long : T.started_outside_long,
 			diagram: {
 				from: outbound ? localBox : remoteBox,
 				service,
@@ -2705,7 +2709,7 @@
 			try {
 				const summary = await getJSON(`/api/firewallmap/flow/summary${query}`);
 				const problem = host().problemText(summary, T);
-				state.wait = host().waitText(summary, T);
+				state.wait = host().waitText(summary, TEXT);
 				applyWait();
 				showGeo(state.mode === "live" ? summary : null);
 				if (state.wait) {

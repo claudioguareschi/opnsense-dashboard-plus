@@ -45,11 +45,12 @@ def header(threats=False, version=collector.PROTOCOL_VERSION):
     return b"\x00" + struct.pack("!II", version, int(threats))
 
 
-def flow(rank=0, local="192.168.1.2", remote="203.0.113.3", rate=4.0, classes=0):
+def flow(rank=0, local="192.168.1.2", remote="203.0.113.3", rate=4.0, classes=0, presence=1, attempts=0):
     return b"".join((b"\x01", struct.pack("!I", rank), address(local), address(remote),
                      struct.pack("!QQQIIQQQQQQQ", 1, 400, 200, 20, 2, 1, 0, 9, 40, 20, 2, classes),
                      struct.pack("!BBIIB", 0, 0, 0, 0, 0),
-                     struct.pack("!ddddd", rate, 2.0, 0.2, 0.5, 3.0)))
+                     struct.pack("!ddddd", rate, 2.0, 0.2, 0.5, 3.0),
+                     struct.pack("!BI", presence, attempts)))
 
 
 def candidate(owner=0, kind=1, value=b"\x06"):
@@ -136,11 +137,19 @@ class CollectorProtocolTest(unittest.TestCase):
         self.assertIsNone(result["refused"])
         self.assertFalse(result["threat_summary"])
 
+    def test_flow_presence_is_decoded_and_checked(self):
+        probe = self.decode(response([header(True), flow(presence=2, attempts=14), telemetry()]))["flows"][0]
+        mirror = self.decode(response([header(True), flow(presence=3), telemetry()]))["flows"][0]
+        self.assertEqual(((probe["presence"], probe["attempts"]), mirror["presence"]), (("probe", 14), "mirror"))
+        with self.assertRaises(collector.CollectorError):
+            self.decode(response([header(True), flow(presence=4), telemetry()]))
+
     def test_decodes_every_record_kind(self):
         result = self.decode(response(VALID), require_threat_summary=True)
         flow_row = result["flows"][0]
         self.assertEqual(flow_row["key"], ("192.168.1.2", "203.0.113.3"))
         self.assertEqual((flow_row["rate_from_remote"], flow_row["bytes_from_remote"]), (4.0, 400))
+        self.assertEqual((flow_row["presence"], flow_row["attempts"]), ("traffic", 0))
         self.assertEqual(result["candidates"], [(0, 1, 5, 1, 0, b"\x06")])
         self.assertEqual(result["threat_remotes"][0]["remote_initiated_states"], 1)
         self.assertEqual(result["threat_candidates"][0][0:4], (0, 2, 5, 1))

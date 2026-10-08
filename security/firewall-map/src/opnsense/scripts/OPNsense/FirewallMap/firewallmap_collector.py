@@ -92,7 +92,7 @@ from firewallmap_snapshots import (
     MAX_DOCUMENT_BYTES, DocumentBudget, SnapshotTooLarge, json_size, valid_id as snapshot_valid_id,
 )
 from lib.pf import (
-    _Record, host_info, port_forwards, rule_descriptions,
+    _Record, carp_backup_addresses, host_info, port_forwards, rule_descriptions,
 )
 from lib import collector as state_collector
 from lib.collector import CollectorEngine, CollectorError, PROTOCOL_VERSION, READ_TIMEOUT, memory_budget
@@ -166,12 +166,13 @@ class _Flow(_Record):
     """Persistent flow history and current metadata; the public payload is built separately."""
     __slots__ = ("rate", "rate_in", "rate_out", "packet_rate", "last_active", "first_seen", "states",
                  "protocols", "services", "service_ports", "age", "transferred", "rule", "inside", "egress",
-                 "initiated", "targets", "security")
+                 "initiated", "targets", "security", "presence", "attempts")
 
     def __init__(self, first_seen):
         self.rate = self.rate_in = self.rate_out = self.packet_rate = 0.0
         self.last_active = None
         self.security = None
+        self.presence, self.attempts = "traffic", 0
         self.first_seen = first_seen
         # Remaining presentation fields are filled by update_aggregate().
 
@@ -286,6 +287,9 @@ class FlowTracker:
             # the collector's security class and the evidence facts it was derived from (S0: none)
             security_class = row.get("security_class", "S0")
             flow.security = {"class": security_class, **row["evidence"]} if security_class != "S0" else None
+            # why the flow is on the map: traffic, a probe (connection attempts, no data) or a
+            # mirror of the CARP master's flow
+            flow.presence, flow.attempts = row.get("presence", "traffic"), row.get("attempts", 0)
             flow.inside = _ranked(total.inside, MAX_INSIDE)
             flow.egress = (_ranked(total.egress, 1) or [None])[0]
             started = total.remote_started + total.local_started
@@ -331,6 +335,9 @@ def _flow_entry(local, remote, flow, activity, local_addresses, context, wall_ti
     }
     if flow.get("security"):
         entry["security"] = dict(flow["security"])
+    if flow.get("presence") in ("probe", "mirror"):
+        entry["presence"] = flow["presence"]
+        entry["attempts"] = flow.get("attempts", 0)
     # a permitted flow to a listed address is what deserves attention, not background scans
     entry["threat"] = bool(entry["lists"])
     return entry
@@ -689,6 +696,7 @@ class Collector:
         self._heartbeat_thread = None
         self.descriptions, self.interfaces, self.leases = {}, {}, {}
         self.local_addresses, self.role, self.networks, self.interface_addresses = set(), None, [], {}
+        self.carp_backup = set()
         self.primary_wan_device = None
         self.location_settings = {"discover_external_ip": False, "latitude": None, "longitude": None}
         self.external_ip, self.external_ip_key, self.external_ip_checked = None, None, None
@@ -713,6 +721,8 @@ class Collector:
             log_notice("settings changed: reloading them")
         if self._due("host", now, HOST_REFRESH_SECONDS):
             self.local_addresses, self.role, self.networks, self.interface_addresses = host_info()
+            # the CARP addresses held as BACKUP (their flows are the master's, synchronized)
+            self.carp_backup = carp_backup_addresses() if self.role else set()
             self.checked["host"] = now
         if self._due("settings", now, SETTINGS_REFRESH_SECONDS):
             self.values = settings()
@@ -888,6 +898,9 @@ class Collector:
                 "id": origin, "name": origin, "lat": location["lat"], "lon": location["lon"], "local": True,
             })
         payload["ranking_profile"] = ranking_profiles.descriptor(self.profile)
+        # on a CARP backup: whether the master's (synchronized) flows are mirrored on the map
+        if self.carp_backup:
+            payload["carp_view"] = self.values.get("carp_backup_view", "mirror")
         payload["provider"] = self.provider
         payload["collector"] = self.timing_status()
         if self.sample_skipped:
@@ -1243,7 +1256,8 @@ class Collector:
                 memory=memory_budget(self.values.get("helper_memory")),
                 evidence=self.evidence_facts(),
                 correlation=bool(queries) or os.path.exists(EVE_LOG),
-                classification=self.blocklists.request(), classify=evidence)
+                classification=self.blocklists.request(), classify=evidence,
+                carp_backup=self.carp_backup, mirror=self.values.get("carp_backup_view", "mirror") == "mirror")
         except CollectorError as error:
             self.collector_engine.close()
             self.set_phase("failed")

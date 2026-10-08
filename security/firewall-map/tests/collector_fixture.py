@@ -136,6 +136,8 @@ class CollectorFixture:
         return True
 
     def sample(self, local, networks, assigned, wan, memory=None, evidence=(), correlation=True, **options):
+        # what the service asked for (CARP mirroring and the like)
+        self.last_options = options
         """Like the helper: the first sample of a new process is a baseline (no rates)."""
         baseline = self.process is None
         self.baselines.append(baseline)

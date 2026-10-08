@@ -85,6 +85,8 @@ struct engine {
   bool classes_loaded;
   uint64_t sequence;
 };
+/* CARP addresses a request may name (CARP rows) */
+#define REQUEST_CARP_MAX 256
 struct request {
   struct context *ctx;
   bool threats, snapshot, correlation;
@@ -97,6 +99,11 @@ struct request {
   struct class_config classes;
   struct addr *classify;
   size_t classify_count;
+  /* CARP addresses this firewall holds as BACKUP, and whether their (synchronized) flows mirror
+   * the master on the map or are left out */
+  struct addr carp[REQUEST_CARP_MAX];
+  size_t carp_count;
+  bool mirror;
   struct sample_outcome refusal;
 };
 struct sample {
@@ -173,7 +180,7 @@ static bool read_request(struct request *r, bool *clean_eof, struct fm_error *er
   size_t capacity = 0;
   bool header = false, run = false, got_line = false;
   bool seen_threats = false, seen_snapshot = false, seen_budget = false,
-       seen_correlation = false, seen_generation = false;
+       seen_correlation = false, seen_generation = false, seen_mirror = false;
   struct context *ctx = r->ctx;
   while (!error->code && getline(&line, &capacity, stdin) >= 0) {
     got_line = true;
@@ -205,6 +212,16 @@ static bool read_request(struct request *r, bool *clean_eof, struct fm_error *er
       if (sscanf(line, "CORRELATION %u %c", &x, &extra) != 1 || x > 1)
         request_error(error, "CORRELATION row");
       r->correlation = x;
+    } else if (keyword(line, "MIRROR", &seen_mirror, error)) {
+      if (sscanf(line, "MIRROR %u %c", &x, &extra) != 1 || x > 1)
+        request_error(error, "MIRROR row");
+      r->mirror = x;
+    } else if (!strncmp(line, "CARP ", 5)) {
+      if (sscanf(line, "CARP %63s %c", a, &extra) != 1 || r->carp_count >= REQUEST_CARP_MAX) {
+        request_error(error, "CARP row");
+        break;
+      }
+      parse_address(a, &r->carp[r->carp_count++], error);
     } else if (!strncmp(line, "CLASS ", 6)) {
       class_row(r, line, error);
     } else if (keyword(line, "CLASSGEN", &seen_generation, error)) {
@@ -447,7 +464,10 @@ static bool snapshot_candidates(struct engine *e, const struct aggregate *a,
   for (size_t n = 0; n < flows; n++) {
     const struct flow *flow = aggregate_flow(a, n);
     struct flow_rates rates;
-    if (!flow->evidence.mask || !ranking_rates(e->ranking, n, &rates)) continue;
+    /* evidence first, but never a flow with no reason to be shown (presence none) */
+    if (!flow->evidence.mask || !ranking_rates(e->ranking, n, &rates) ||
+        profile_presence(flow, &rates) == PRESENCE_NONE)
+      continue;
     double rate = rates.rate_from_remote + rates.rate_to_remote;
     ranks[evidence++] = (struct snapshot_rank){(uint32_t)n, security_class(&flow->evidence),
                                                (rate > 1 ? rate : 1) * rates.activity, rates.order};
@@ -473,8 +493,8 @@ static bool snapshot_candidates(struct engine *e, const struct aggregate *a,
 
 /* The active profile's selection as the response's ranked flows (rank
  * order), and what the tracked set must know about it. */
-static bool selection_rows(struct engine *e, struct ranked_flow **rows, struct track_hints *hints,
-                           struct fm_error *error) {
+static bool selection_rows(struct engine *e, const struct aggregate *a, struct ranked_flow **rows,
+                           struct track_hints *hints, struct fm_error *error) {
   const struct selected *chosen;
   size_t count = ranker_selection(e->ranker, &chosen);
   *rows = count ? fm_calloc(count, sizeof(**rows)) : NULL;
@@ -484,7 +504,9 @@ static bool selection_rows(struct engine *e, struct ranked_flow **rows, struct t
     struct flow_rates rates;
     ranking_rates(e->ranking, chosen[k].flow, &rates);
     (*rows)[k] = (struct ranked_flow){chosen[k].flow, rates.rate_from_remote, rates.rate_to_remote,
-                                      rates.packet_rate, rates.activity, chosen[k].score};
+                                      rates.packet_rate, rates.activity, chosen[k].score,
+                                      (unsigned char)profile_presence(aggregate_flow(a, chosen[k].flow), &rates),
+                                      rates.attempts};
   }
   *hints = (struct track_hints){*rows, count, e->ranker};
   return true;
@@ -531,7 +553,7 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
                          : NULL;
   /* the tracked set: who is tracked richly, who only reaches discovery */
   struct admission admission;
-  struct map evidence = {0};
+  struct map evidence = {0}, carp = {0};
   bool tracked = sample.aggregate && tracker_begin(e->tracker, e->ranking, shares, &admission, error);
   for (size_t n = 0; tracked && n < r->evidence_count; n++) {
     unsigned char key[17] = {r->evidence[n].af};
@@ -546,7 +568,14 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
     item->count = 1;
     item->value = n;
   }
+  for (size_t n = 0; tracked && n < r->carp_count; n++) {
+    unsigned char key[17] = {r->carp[n].af};
+    memcpy(key + 1, r->carp[n].b, 16);
+    tracked = lookup(&carp, key, sizeof(key), true, error) != NULL;
+  }
   if (tracked) {
+    admission.carp_backup = &carp;
+    admission.mirror = r->mirror;
     admission.threat_mask = classifier_category(e->classifier, 'T');
     admission.profile = ranker_profile(e->ranker);
     admission.evidence = &evidence;
@@ -577,7 +606,7 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   struct track_hints hints = {0};
   ok = ok && ranker_select(e->ranker, sample.aggregate, e->ranking, telemetry.interval,
                            BUDGET_RANKED_FLOWS, error) &&
-       selection_rows(e, &selected, &hints, error);
+       selection_rows(e, sample.aggregate, &selected, &hints, error);
   struct tracker_report report = {0};
   ok = ok && tracker_finish(e->tracker, sample.aggregate, e->ranking, sample.anchor,
                             telemetry.interval, &hints, &report, error);
@@ -634,6 +663,7 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   fm_free(selected);
   fm_free(snapshot);
   map_clear(&evidence);
+  map_clear(&carp);
   threat_summary_destroy(threats);
   if (ok)
     history_commit(e->history);

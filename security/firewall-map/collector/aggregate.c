@@ -390,6 +390,12 @@ static struct flow *flow_add(struct aggregate *a, const struct state_view *v,
   }
   if (f->classes & a->admission.threat_mask)
     f->evidence.mask |= EVIDENCE_THREAT_LIST;
+  /* one lookup per flow: a flow on a CARP address held as BACKUP is the master's */
+  if (a->admission.carp_backup && a->admission.carp_backup->used) {
+    unsigned char local[17];
+    if (map_find(a->admission.carp_backup, local, address_key(local, v->local)))
+      f->carp = a->admission.mirror ? FLOW_CARP_MIRROR : FLOW_CARP_HIDDEN;
+  }
   return f;
 }
 static bool service_candidate(struct aggregate *a, uint32_t flow,

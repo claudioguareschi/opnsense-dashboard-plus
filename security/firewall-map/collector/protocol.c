@@ -117,7 +117,7 @@ bool protocol_frame(FILE *f, const void *data, size_t len, uint32_t *checksum,
 }
 
 /* Sizes of the fixed FMAGG4 records (PROTOCOL.md). */
-#define FLOW_RECORD_SIZE 178
+#define FLOW_RECORD_SIZE 183
 #define EVENT_RECORD_SIZE 194
 #define TELEMETRY_RECORD_SIZE 373
 #define SNAPSHOT_CANDIDATE_RECORD_SIZE 61
@@ -170,6 +170,8 @@ static bool write_flow(FILE *f, size_t rank, const struct flow *flow,
   put_double(&p, rates->packet_rate);
   put_double(&p, rates->activity);
   put_double(&p, rates->score);
+  *p++ = rates->presence;
+  protocol_put(&p, rates->attempts > UINT32_MAX ? UINT32_MAX : rates->attempts, 4);
   return protocol_frame(f, b, p - b, checksum, error);
 }
 static bool write_candidate(FILE *f, unsigned char kind, uint32_t owner,

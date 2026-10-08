@@ -32,6 +32,7 @@
 struct rate_state {
   double from_remote, to_remote, packets, last_active;
   uint64_t order, volume; /* volume: bytes of the current activity episode */
+  uint64_t attempts;      /* states created in the current activity episode */
   bool active;
 };
 struct rank_row {
@@ -201,6 +202,7 @@ bool ranking_update(struct ranking *r, const struct aggregate *aggregate,
     uint64_t moved = flow->delta.bytes_from_remote + flow->delta.bytes_to_remote;
     next.volume = (activity_at(r, &old, now) > 0 ? old.volume : 0);
     next.volume = moved > UINT64_MAX - next.volume ? UINT64_MAX : next.volume + moved;
+    next.attempts = (activity_at(r, &old, now) > 0 ? old.attempts : 0) + flow->created;
     if (flow->delta.bytes_from_remote || flow->delta.bytes_to_remote) {
       next.last_active = now;
       next.active = true;
@@ -208,7 +210,7 @@ bool ranking_update(struct ranking *r, const struct aggregate *aggregate,
     current->values[item->id] = next;
     double activity = activity_at(r, &next, now);
     r->rates[n] = (struct flow_rates){next.from_remote, next.to_remote, next.packets, activity,
-                                      next.order, next.volume};
+                                      next.order, next.volume, next.attempts};
     double rate = next.from_remote + next.to_remote;
     double score = (rate > 1.0 ? rate : 1.0) * activity;
     if (activity > 0)
@@ -274,7 +276,7 @@ bool ranking_at(const struct ranking *r, size_t n, struct ranked_flow *out) {
     return false;
   const struct rank_row *row = &r->rows[n];
   *out = (struct ranked_flow){row->flow,    row->from_remote, row->to_remote,
-                              row->packets, row->activity,    row->score};
+                              row->packets, row->activity,    row->score, 0, 0};
   return true;
 }
 
@@ -292,7 +294,7 @@ bool ranking_snapshot_at(const struct ranking *r, const struct aggregate *a,
   double activity = activity_at(r, v, r->sampled_at);
   double rate = v->from_remote + v->to_remote;
   *out = (struct ranked_flow){n,          v->from_remote, v->to_remote,
-                              v->packets, activity, (rate > 1 ? rate : 1) * activity};
+                              v->packets, activity, (rate > 1 ? rate : 1) * activity, 0, v->attempts};
   *order = v->order;
   return true;
 }

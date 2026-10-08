@@ -118,9 +118,9 @@ export function waitText(summary, text) {
   }
   const profile = summary.ranking_profile?.name;
   if (summary.reason === 'profile' && profile) {
-    return fill(text.waiting_profile, {profile: plain(profile)});
+    return fill(text.map_waiting_profile, {profile: plain(profile)});
   }
-  return summary.reason === 'restart' ? text.waiting_restart : text.starting;
+  return summary.reason === 'restart' ? text.map_waiting_restart : text.starting;
 }
 
 /**
@@ -160,7 +160,7 @@ export function wait(frame, message) {
 /**
  * The status line under a map, as HTML-escaped parts: flows, blocked sources, threats that got
  * through, CARP backup. `text` holds active_flows_one/_many, blocked_sources_one/_many,
- * below_threshold, listed_flows_one/_many, no_flows and carp_backup.
+ * below_threshold, listed_flows_one/_many, no_flows and map_carp_backup / map_carp_mirror.
  */
 export function statusParts(summary, shown, settings, text) {
   const parts = [];
@@ -195,7 +195,7 @@ export function statusParts(summary, shown, settings, text) {
     parts.push(escapeHtml(text.map_ranking_warming));
   }
   if (summary.carp === 'backup') {
-    parts.push(escapeHtml(text.carp_backup));
+    parts.push(escapeHtml(summary.carp_view === 'mirror' ? text.map_carp_mirror : text.map_carp_backup));
   }
   return parts;
 }

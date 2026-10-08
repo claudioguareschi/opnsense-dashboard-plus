@@ -56,6 +56,7 @@ class TrackerTest(unittest.TestCase):
             "services": ["HTTPS"], "service_ports": {"HTTPS": "443/tcp"}, "age": 605,
             "transferred": (1600, 1100), "rule": None, "inside": ["192.168.1.2"],
             "egress": "vlan01", "initiated": "remote", "targets": ["tcp|192.168.1.2|443"], "security": None,
+            "presence": "traffic", "attempts": 0,
         })
         entry = COLLECTOR._flow_entry(*self.PAIR, flow, 1.0, self.LOCAL, {}, 1002.0)
         injected = COLLECTOR._flow_entry(*self.PAIR, dict(flow), 1.0, self.LOCAL, {}, 1002.0)
@@ -407,6 +408,21 @@ class CollectorLoopTest(unittest.TestCase):
         self.assertFalse({"focus", "focus_default", "profiles", "selections"} & set(payload))
         # the helper was started with the active profile
         self.assertEqual(self.collector.collector_engine.profile, balanced)
+
+    def test_a_carp_backup_sends_its_backup_addresses_and_the_mirror_choice(self):
+        engine = self.collector.collector_engine
+        with mock.patch.object(COLLECTOR, "host_info", lambda: ({"1.2.3.163"}, "backup", [], {"igb1": {"1.2.3.163"}})), \
+                mock.patch.object(COLLECTOR, "carp_backup_addresses", lambda: {"1.2.3.163"}):
+            self.collector.checked["host"] = None
+            self.collector.step()
+            self.assertEqual((engine.last_options["carp_backup"], engine.last_options["mirror"]), ({"1.2.3.163"}, True))
+            with mock.patch.object(COLLECTOR, "settings", lambda: {"provider": "dbip", "carp_backup_view": "own"}):
+                self.collector.checked["settings"] = None
+                self.bytes = 5000
+                self.collector.step()
+            self.assertFalse(engine.last_options["mirror"])
+            with open(self.output) as handle:
+                self.assertEqual(json.load(handle)["carp_view"], "own")
 
     def test_a_profile_change_on_reload_resumes_gracefully(self):
         """Apply reloads in place: a new active profile restarts only the collector process (its

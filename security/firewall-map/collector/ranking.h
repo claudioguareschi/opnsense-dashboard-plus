@@ -29,6 +29,8 @@ struct ranking;
 struct ranked_flow {
   size_t flow;
   double rate_from_remote, rate_to_remote, packet_rate, activity, score;
+  unsigned char presence; /* enum flow_presence (profile.h); 0 where not decided */
+  uint64_t attempts;
 };
 struct ranking *ranking_create(size_t limit, double fade, double smoothing,
                                struct fm_error *);
@@ -59,6 +61,7 @@ struct flow_rates {
   double rate_from_remote, rate_to_remote, packet_rate, activity;
   uint64_t order;
   uint64_t volume; /* bytes since the flow's current activity episode began */
+  uint64_t attempts; /* states created since then (connection attempts) */
 };
 bool ranking_rates(const struct ranking *, size_t flow, struct flow_rates *);
 #endif

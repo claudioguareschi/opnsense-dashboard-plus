@@ -158,11 +158,19 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
       path.push([x, latitudeFromMercator(y)]);
     }
     const {rate, rateIn, rateOut} = flow;
-    const activity = flow.activity;
+    // mirrored: the CARP master's connections, synchronized without traffic counters; probe:
+    // connection attempts without data (an arc is either only when all its flows are)
+    const presence = ['mirror', 'probe'].find((kind) => members.every((member) => member.presence === kind)) || 'traffic';
+    // a mirrored arc has no traffic to fade with: it stays as long as the master has the states
+    const activity = presence === 'mirror' ? 1 : flow.activity;
     const total = rateIn + rateOut;
     const inShare = total > 0 ? rateIn / total : 1;
     let direction = 'both';
-    if (inShare >= 1 - BIDIRECTIONAL_SHARE) {
+    if (presence === 'mirror') {
+      // no byte counters: the pulses follow who opened the connections
+      const opened = initiatedBy(members);
+      direction = opened === 'remote' ? 'in' : opened === 'local' ? 'out' : 'both';
+    } else if (inShare >= 1 - BIDIRECTIONAL_SHARE) {
       direction = 'in';
     } else if (inShare <= BIDIRECTIONAL_SHARE) {
       direction = 'out';
@@ -187,6 +195,7 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
       contained: !members.some((member) => member.threat) && members.some((member) => member.contained),
       ids: members[0].ids_flow || null,
       initiated: initiatedBy(members),
+      presence,
       direction,
       activity,
       period: 6 - 5.2 * strength,
@@ -369,6 +378,11 @@ export function pulsePosition(arc, seconds, reverse, period = arc.period, phase 
   return pointAt(path, t * ARC_SAMPLES);
 }
 
+// a mirrored arc (CARP backup): a closely spaced pair of dots at one fixed pace, since there are
+// no traffic counters to set a speed
+const MIRROR_PERIOD = 4;
+const MIRROR_GAP = 0.035;
+
 // a saved snapshot: evenly spaced dots marching at one pace, so a frozen map never looks live
 const MARCH_DOTS = 6;
 const MARCH_PERIOD = 7;
@@ -376,7 +390,8 @@ const MARCH_PERIOD = 7;
 /** Equally spaced marching dots for every arc of a saved snapshot, in the traffic's direction. */
 export function marchingPulses(arcs) {
   const items = [];
-  for (const item of pulses(arcs)) {
+  // one marching row per direction, whatever the live pattern (a mirrored pair is one)
+  for (const item of pulses(arcs).filter((pulse) => !pulse.pair)) {
     for (let dot = 0; dot < MARCH_DOTS; dot++) {
       items.push({...item, period: MARCH_PERIOD, phase: dot / MARCH_DOTS, march: true});
     }
@@ -391,11 +406,20 @@ export function pulses(arcs) {
     if (arc.ids && !arc.ids.active) {
       continue;  // a closed connection carries no traffic
     }
+    const sides = [];
     if (arc.direction !== 'in') {
-      items.push({arc, reverse: false, toward: false});
+      sides.push({arc, reverse: false, toward: false});
     }
     if (arc.direction !== 'out') {
-      items.push({arc, reverse: true, toward: true});
+      sides.push({arc, reverse: true, toward: true});
+    }
+    for (const side of sides) {
+      if (arc.presence === 'mirror') {
+        items.push({...side, period: MIRROR_PERIOD, phase: arc.phase},
+          {...side, period: MIRROR_PERIOD, phase: arc.phase + MIRROR_GAP, pair: true});
+      } else {
+        items.push(side);
+      }
     }
   }
   return items;

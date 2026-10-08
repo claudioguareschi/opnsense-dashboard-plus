@@ -142,6 +142,26 @@ def interface_addresses(output):
     return addresses
 
 
+def carp_backup_addresses(output=None):
+    """The CARP addresses this firewall holds as BACKUP: an address whose interface carries its
+    vhid in BACKUP state (pfsync gives such a firewall the master's states for them)."""
+    if output is None:
+        try:
+            output = subprocess.run([IFCONFIG, "-a"], capture_output=True, check=False, text=True, timeout=2).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return set()
+    addresses = set()
+    for block in re.split(r"\n(?=\S)", output):
+        backup = set(re.findall(r"\bcarp: BACKUP vhid (\d+)\b", block))
+        for address, vhid in re.findall(r"\binet6?\s+([^\s%]+)(?:%\S+)?\s.*?\bvhid (\d+)\b", block):
+            if vhid in backup:
+                try:
+                    addresses.add(str(ipaddress.ip_address(address)))
+                except ValueError:
+                    pass
+    return addresses
+
+
 def host_info():
     """Return (public addresses, CARP role, interface networks, exact addresses by device)."""
     try:

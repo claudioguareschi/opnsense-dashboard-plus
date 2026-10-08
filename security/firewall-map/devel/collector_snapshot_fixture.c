@@ -47,6 +47,46 @@ static struct addr address_text_parse(const char *text) {
   if (inet_pton(a.af == 4 ? AF_INET : AF_INET6, text, a.b) != 1) a.af = 0;
   return a;
 }
+/* presence: one flow per reason a flow may or may not be shown (profile.h):
+ *   9.2.0.1  a probe: 6 new handshake-only states every sample (about 40 B each)
+ *   9.2.0.2  a stray SYN: one new handshake-only state every sample
+ *   9.2.0.3  0 bytes ever (as pfsync gives a CARP backup)
+ *   9.2.0.4  traffic: two states moving data
+ *   9.2.0.5  0 bytes on 8.8.8.9 (a CARP address the test names as held in BACKUP) */
+static size_t presence_states(unsigned sample, struct state *out) {
+  size_t count = 0;
+  struct {
+    const char *remote, *local;
+    unsigned states, fresh;
+    uint64_t bytes;
+  } flows[] = {{"9.2.0.1", "8.8.8.1", 6, 1, 40}, {"9.2.0.2", "8.8.8.1", 1, 1, 40},
+               {"9.2.0.3", "8.8.8.1", 3, 0, 0}, {"9.2.0.4", "8.8.8.1", 2, 0, 0},
+               {"9.2.0.5", "8.8.8.9", 3, 0, 0}};
+  for (size_t f = 0; f < sizeof(flows) / sizeof(*flows); f++)
+    for (unsigned k = 0; k < flows[f].states; k++) {
+      struct state s = {0};
+      /* fresh states get new IDs every sample: each is a new connection attempt */
+      s.id = 1000000 * (f + 1) + (flows[f].fresh ? sample * 100 : 0) + k;
+      s.creator = 7; s.age = 1; s.expire = 120; s.rule = 19;
+      if (f == 3) { /* traffic grows every sample */
+        s.pf_bytes[0] = 5000 + sample * 3000; s.pf_bytes[1] = 2000 + sample * 1000;
+        s.pf_packets[0] = 10 + sample; s.pf_packets[1] = 10 + sample;
+      } else if (flows[f].bytes) {
+        s.pf_bytes[0] = flows[f].bytes; s.pf_packets[0] = 1;
+      }
+      s.peer[0] = s.peer[1] = 4;
+      strcpy(s.interface, "igb0"); strcpy(s.original_interface, "igb1");
+      s.pf_direction = FM_OUT;
+      struct endpoint local = {address(flows[f].local), (uint16_t)(30000 + k)};
+      struct endpoint remote = {address(flows[f].remote), (uint16_t)(1000 + k)};
+      s.key[0].e[0] = remote; s.key[0].e[1] = local;
+      s.key[1].e[0] = remote; s.key[1].e[1] = local;
+      s.key[0].proto = s.key[1].proto = 6;
+      out[count++] = s;
+    }
+  return count;
+}
+
 static struct state make_state(size_t n, unsigned sample, const char *mode) {
   struct state s = {0};
   s.id = n + 1; s.creator = 7; s.age = 1; s.expire = 120; s.rule = 19;
@@ -215,6 +255,13 @@ bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
     count = strtoull(counts, &end, 10);
     if (k == sample || *end != ',') break;
     counts = end + 1;
+  }
+  if (!strcmp(mode, "presence")) {
+    struct state states[32];
+    size_t made = presence_states(sample, states);
+    for (size_t k = 0; k < made; k++)
+      if (!callback(&states[k], arg, error)) return false;
+    return true;
   }
   bool churn = !strcmp(mode, "churn") && sample >= 3;
   for (size_t index = 0; index < count; index++) {

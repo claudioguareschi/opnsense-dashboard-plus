@@ -59,6 +59,9 @@ struct flow {
   /* asset importance: the largest multiplier of its states' local anchors
    * (inside host, else the local address); 1 without a profile */
   double asset;
+  /* its local address is a CARP address this firewall holds as BACKUP: the
+   * flow is the master's, synchronized by pfsync (FLOW_CARP_*) */
+  unsigned char carp;
   bool evicted;  /* a candidate summary of this flow evicted or dropped a value */
 };
 struct candidate_view {
@@ -86,6 +89,8 @@ struct aggregate_counts {
  * evidence) up to `forced_limit`, while fewer than `hard_limit`. Everything
  * else goes to the discovery tier. */
 enum track_regime { TRACK_EXACT = 0, TRACK_BOUNDED = 1 };
+/* struct flow.carp */
+enum { FLOW_CARP_NONE = 0, FLOW_CARP_MIRROR = 1, FLOW_CARP_HIDDEN = 2 };
 struct profile;
 struct admission {
   enum track_regime regime;
@@ -99,6 +104,10 @@ struct admission {
   /* the active profile (asset importance of flows and discovery weights);
    * NULL: multiplier 1, raw discovery */
   const struct profile *profile;
+  /* 17-byte address keys of the CARP addresses held as BACKUP (NULL: none),
+   * and whether their flows mirror the master or are left out */
+  const struct map *carp_backup;
+  bool mirror;
 };
 /* Context and history are borrowed for the lifetime of this single sample.
  * Returned flow/candidate views remain valid until aggregate_destroy(). */

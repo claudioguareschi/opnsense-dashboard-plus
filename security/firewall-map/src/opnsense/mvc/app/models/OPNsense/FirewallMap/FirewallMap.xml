@@ -43,6 +43,16 @@
             <operational_sets type=".\ClassificationSetField">
                 <Multiple>Y</Multiple>
             </operational_sets>
+            <!-- on a CARP backup: mirror the master's synchronized flows on the map, or show only
+                 this firewall's own traffic -->
+            <carp_backup_view type="OptionField">
+                <Required>Y</Required>
+                <Default>mirror</Default>
+                <OptionValues>
+                    <mirror>Mirror the master's connections</mirror>
+                    <own>Show only this firewall's traffic</own>
+                </OptionValues>
+            </carp_backup_view>
             <!-- the active ranking profile, by UUID: how the collector ranks flows for every viewer -->
             <ranking_profile type=".\RankingProfileField">
                 <Required>Y</Required>

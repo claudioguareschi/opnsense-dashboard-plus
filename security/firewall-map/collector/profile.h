@@ -72,6 +72,22 @@ enum profile_feature {
   FEATURE_IDS_EVIDENCE = 7,        /* 1 with IDS evidence, 2 when it is high-severity */
   FEATURE_COUNT = 8
 };
+/* Why a flow may be on the map (presence), decided before any scoring:
+ *   traffic  data was exchanged (more than a handshake per state);
+ *   probe    handshake-sized only (at most PROBE_BYTES_PER_STATE per state:
+ *            SYN, SYN-ACK, RST), shown only from PROBE_ATTEMPTS_MIN states
+ *            created in its activity episode (a sweep or flood, not a stray
+ *            SYN);
+ *   mirror   on a CARP address this firewall holds as BACKUP: the master's
+ *            flow, synchronized by pfsync without byte counters (shown when
+ *            the administrator chose to mirror the master);
+ *   none     never shown or scored: 0 bytes ever (a real PF state counts the
+ *            packet that created it), a probe below the threshold, or a
+ *            synchronized flow the administrator chose to leave out.
+ * The base ranking (Classic, the regression oracle) does not use presence. */
+enum flow_presence { PRESENCE_NONE = 0, PRESENCE_TRAFFIC = 1, PRESENCE_PROBE = 2, PRESENCE_MIRROR = 3 };
+#define PROBE_BYTES_PER_STATE 120
+#define PROBE_ATTEMPTS_MIN 10
 struct asset_span;
 struct profile {
   char uuid[37];
@@ -107,6 +123,7 @@ uint64_t profile_unit_floor(const struct profile *);
 /* A security class's reserved places in a selection of `limit`: its floor
  * percentage, rounded up (S3 10% of 150 = 15, S2 5% = 8, S1 2% = 3). */
 size_t profile_floor_places(const struct profile *, enum security_class, size_t limit);
+enum flow_presence profile_presence(const struct flow *, const struct flow_rates *);
 struct selected {
   uint32_t flow; /* aggregate flow index */
   double score;

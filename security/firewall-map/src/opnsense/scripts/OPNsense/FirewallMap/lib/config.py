@@ -86,7 +86,7 @@ def settings(path=SETTINGS_FILE):
     """The plugin's settings, with their defaults."""
     values = {"provider": "auto", "license_key": "", "update_days": 3, "threat_lists": "",
               "record_threats": "1", "blocklist_aliases": "0", "helper_memory": "", "ranking_profile": "",
-              "country_sets": "", "operational_sets": ""}
+              "country_sets": "", "operational_sets": "", "carp_backup_view": "mirror"}
     general = _read(path).get("general") or {}
     for field in values:
         if str(general.get(field) or "").strip():
@@ -97,6 +97,8 @@ def settings(path=SETTINGS_FILE):
         values["update_days"] = 3
     if values["provider"] not in PROVIDERS:
         values["provider"] = "auto"
+    if values["carp_backup_view"] not in ("mirror", "own"):
+        values["carp_backup_view"] = "mirror"
     # MiB, or None for automatic; out-of-range values (the model validates them) fall back to automatic
     try:
         memory = int(values["helper_memory"])

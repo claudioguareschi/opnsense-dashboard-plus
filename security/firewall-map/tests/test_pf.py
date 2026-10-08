@@ -529,5 +529,25 @@ class SampleCacheTest(unittest.TestCase):
         self.assertIsNot(first, changed)
 
 
+
+class CarpBackupAddressTest(unittest.TestCase):
+    OUTPUT = """igb0: flags=1008943<UP,BROADCAST,RUNNING,PROMISC,SIMPLEX,MULTICAST,LOWER_UP> metric 0 mtu 1500
+\tinet 198.51.100.2 netmask 0xffffff00 broadcast 198.51.100.255
+\tinet 198.51.100.163 netmask 0xffffff00 broadcast 198.51.100.255 vhid 1
+\tinet6 2001:db8::250 prefixlen 64 vhid 5
+\tcarp: BACKUP vhid 1 advbase 1 advskew 100
+\tcarp: BACKUP vhid 5 advbase 1 advskew 100
+igb1: flags=1008943<UP,BROADCAST,RUNNING> metric 0 mtu 1500
+\tinet 192.168.1.250 netmask 0xffffff00 broadcast 192.168.1.255 vhid 1
+\tcarp: MASTER vhid 1 advbase 1 advskew 0
+igb2: flags=1008943<UP> metric 0 mtu 1500
+\tinet 192.168.2.1 netmask 0xffffff00 broadcast 192.168.2.255
+"""
+
+    def test_only_addresses_whose_vhid_is_backup_on_their_interface(self):
+        self.assertEqual(PF.carp_backup_addresses(self.OUTPUT), {"198.51.100.163", "2001:db8::250"})
+        self.assertEqual(PF.carp_backup_addresses("igb0: flags=0\n\tinet 192.168.2.1 netmask 0xffffff00\n"), set())
+
+
 if __name__ == "__main__":
     unittest.main()

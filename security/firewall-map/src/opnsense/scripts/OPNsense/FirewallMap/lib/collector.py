@@ -109,8 +109,13 @@ FAILURE_CLASSES = {1: "structural", 2: "internal", 3: "incompatible", 4: "resour
 OMISSION_REASONS = ((1, "encoded_bytes"), (2, "state_count"), (4, "per_flow_evidence_limit"))
 SELECTION_POLICIES = {2: "bytes_desc_newest_identity_v1"}
 
-_FLOW = struct.Struct("!I17s17sQQQIIQQQQQQQBBIIBddddd")
+_FLOW = struct.Struct("!I17s17sQQQIIQQQQQQQBBIIBdddddBI")
 SECURITY_CLASSES = ("S0", "S1", "S2", "S3")
+# why a flow may be on the map (collector/profile.h): "none" only where the collector did not
+# decide (the base ranking, snapshot selections)
+PRESENCES = ("none", "traffic", "probe", "mirror")
+# CARP addresses a request may name (CARP rows)
+CARP_ADDRESSES_MAX = 256
 _TELEMETRY = struct.Struct("!IQddddd" + "Q" * 40)
 _TELEMETRY_FIELDS = ("pid", "sequence", "interval", "dump_seconds", "processing_seconds", "user_cpu",
                      "system_cpu", "max_rss", "heap_bytes", "heap_peak", "heap_blocks", "heap_budget",
@@ -455,7 +460,10 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
                 raise CollectorError("invalid FMAGG4 flow record")
             (rank, local, remote, states, from_remote, to_remote, oldest, youngest, remote_weight, local_weight,
              first, delta_from, delta_to, delta_packets, classes, evidence_mask, security_class, blocked_hits,
-             ids_alerts, ids_severity, rate_from, rate_to, packet_rate, activity, score) = _FLOW.unpack_from(data, 1)
+             ids_alerts, ids_severity, rate_from, rate_to, packet_rate, activity, score, presence,
+             attempts) = _FLOW.unpack_from(data, 1)
+            if presence >= len(PRESENCES):
+                raise CollectorError("invalid FMAGG4 flow presence")
             if evidence_mask & ~(evidence_facts.REQUEST_BITS | evidence_facts.THREAT_LIST) \
                     or security_class >= len(SECURITY_CLASSES) or ids_severity > 3:
                 raise CollectorError("invalid FMAGG4 flow evidence")
@@ -474,7 +482,8 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
                           # each evidence source its own fact; the class is the collector's derivation
                           "evidence": {"mask": evidence_mask, "blocked_hits": blocked_hits,
                                        "ids_alerts": ids_alerts, "ids_severity": ids_severity},
-                          "security_class": SECURITY_CLASSES[security_class]})
+                          "security_class": SECURITY_CLASSES[security_class],
+                          "presence": PRESENCES[presence], "attempts": attempts})
         elif kind == CANDIDATE:
             if len(data) < 32:
                 raise CollectorError("invalid FMAGG4 candidate record")
@@ -738,7 +747,7 @@ class CollectorEngine:
 
     def sample(self, local_addresses, networks, interface_addresses, primary_wan_device,
                threat_summary=False, event_queries=(), snapshot=False, memory=None, evidence=None,
-               correlation=True, classification=None, classify=()):
+               correlation=True, classification=None, classify=(), carp_backup=(), mirror=False):
         """One complete sample. memory: the budget in bytes (default: automatic); evidence:
         {remote: lib.evidence facts} (sent every sample: the ranking, forced tracking and the
         threat summary use them); correlation: whether anything consumes
@@ -760,6 +769,10 @@ class CollectorEngine:
             self._start()
         rows.append(f"BUDGET {memory or memory_budget()} {CANDIDATES_PER_KIND} {THREAT_REMOTES}")
         rows.append(f"CORRELATION {int(bool(correlation or event_queries))}")
+        # the CARP addresses held as BACKUP: their flows are the master's (pfsync), mirrored on the
+        # map or left out
+        rows.append(f"MIRROR {int(bool(mirror))}")
+        rows.extend(f"CARP {address}" for address in sorted(carp_backup)[:CARP_ADDRESSES_MAX])
         if threat_summary:
             rows.append("THREATS")
         rows.extend(_evidence_rows(evidence or {}))

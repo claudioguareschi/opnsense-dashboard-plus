@@ -68,10 +68,10 @@ test('the status line names the one active ranking profile and an honest bounded
 
 test('one wait state: waiting summaries are not problems, and say why the map waits', () => {
   const text = {starting: 'Starting flow collector…', unavailable: 'unavailable',
-    waiting_restart: translation('waiting_restart'), waiting_profile: translation('waiting_profile')};
+    map_waiting_restart: translation('map_waiting_restart'), map_waiting_profile: translation('map_waiting_profile')};
   const profile = {uuid: 'u', name: 'Mail <Security>', fingerprint: 'f', builtin: false};
   assert.equal(waitText({status: 'waiting', reason: 'start'}, text), text.starting);
-  assert.equal(waitText({status: 'waiting', reason: 'restart', ranking_profile: profile}, text), text.waiting_restart);
+  assert.equal(waitText({status: 'waiting', reason: 'restart', ranking_profile: profile}, text), text.map_waiting_restart);
   assert.equal(waitText({status: 'waiting', reason: 'profile', ranking_profile: profile}, text),
     'Applying the Mail <Security> ranking profile: the map resumes with its first ranked sample');
   for (const reason of ['start', 'restart', 'profile']) {

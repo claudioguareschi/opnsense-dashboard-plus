@@ -416,6 +416,19 @@ double profile_value(const struct aggregate *a, const struct ranking *r, size_t 
   if (!f || !ranking_rates(r, flow, &rates)) return 0;
   return feature_value(f, &rates, feature, interval);
 }
+enum flow_presence profile_presence(const struct flow *f, const struct flow_rates *rates) {
+  if (f->carp == FLOW_CARP_MIRROR) return PRESENCE_MIRROR;
+  if (f->carp == FLOW_CARP_HIDDEN) return PRESENCE_NONE;
+  uint64_t bytes = f->bytes_from_remote;
+  bytes = UINT64_MAX - bytes < f->bytes_to_remote ? UINT64_MAX : bytes + f->bytes_to_remote;
+  if (!bytes) return PRESENCE_NONE;
+  /* handshake-sized only: at most PROBE_BYTES_PER_STATE per state (states
+   * never come near the product's overflow) */
+  if (bytes <= (uint64_t)PROBE_BYTES_PER_STATE * f->states)
+    return rates->attempts >= PROBE_ATTEMPTS_MIN ? PRESENCE_PROBE : PRESENCE_NONE;
+  return PRESENCE_TRAFFIC;
+}
+
 /* Quality with traffic features faded by activity, times the asset. */
 static double quality(const struct profile *def, const double values[FEATURE_COUNT], double activity) {
   double score = 0;
@@ -511,6 +524,8 @@ static bool select_scored(struct ranker *p, const struct aggregate *a, const str
     if (!ranking_rates(r, f, &rates)) continue;
     double values[FEATURE_COUNT];
     for (int k = 0; k < FEATURE_COUNT; k++) values[k] = feature_value(flow, &rates, k, interval);
+    /* a flow with no reason to be on the map scores 0 and is never selected */
+    if (profile_presence(flow, &rates) == PRESENCE_NONE) continue;
     double score = quality(def, values, rates.activity) * flow->asset;
     p->scores[f] = score;
     if (!(score > 0)) continue;

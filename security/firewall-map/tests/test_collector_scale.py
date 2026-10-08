@@ -427,6 +427,35 @@ class CollectorScaleTest(unittest.TestCase):
         self.assertFalse(tops[0] & light)
         self.assertEqual(tops[1], light)
 
+    def presence_run(self, profile, mirror, samples=4):
+        engine = self.engine(profile)
+        context = ({"8.8.8.1", "8.8.8.9"}, [], {}, None)
+        environment = {"FM_TEST_MODE": "presence", "FM_TEST_INTERVAL": "2", "FM_TEST_CLASS_DIR": self.tables}
+        with patch.dict(os.environ, environment):
+            results = [engine.sample(*context, carp_backup={"8.8.8.9"}, mirror=mirror) for _ in range(samples)]
+        return {flow["key"][1]: flow for flow in results[-1]["flows"]}
+
+    def test_presence_decides_which_flows_the_map_shows(self):
+        """0 bytes ever: never shown (a real state counts its first packet; pfsync copies carry no
+        counters). Handshake-only: a probe from 10 attempts in its activity episode, nothing for a
+        stray SYN. Data exchanged: traffic. A flow on a CARP address held as BACKUP: mirrored, or
+        left out when the administrator chose to show only this firewall's traffic."""
+        balanced = self.profile(profiles.BALANCED)
+        mirrored = self.presence_run(balanced, True)
+        self.assertEqual({remote: flow["presence"] for remote, flow in mirrored.items()},
+                         {"9.2.0.1": "probe", "9.2.0.4": "traffic", "9.2.0.5": "mirror"})
+        self.assertGreaterEqual(mirrored["9.2.0.1"]["attempts"], 10)
+        self.assertEqual((mirrored["9.2.0.5"]["bytes_from_remote"], mirrored["9.2.0.5"]["bytes_to_remote"]), (0, 0))
+        own = self.presence_run(balanced, False)
+        self.assertEqual(set(own), {"9.2.0.1", "9.2.0.4"})
+        # the probe needs its attempts: after two samples (one baseline) it has only 6
+        early = self.presence_run(balanced, True, samples=2)
+        self.assertNotIn("9.2.0.1", early)
+        # the base ranking (the regression oracle) is unchanged: it ranks by traffic alone
+        base = self.presence_run(None, True)
+        self.assertNotIn("9.2.0.3", base)
+        self.assertIn("9.2.0.4", base)
+
     def test_heavy_untracked_flows_are_promoted(self):
         engine = self.engine()
         environment = {"FM_TEST_MODE": "late", "FM_TEST_COUNT": "4000", "FM_TEST_INTERVAL": "2",

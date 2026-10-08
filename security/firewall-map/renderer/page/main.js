@@ -142,7 +142,7 @@ function poll(query) {
     try {
       const summary = await getJSON(`/api/firewallmap/flow/summary${query}`);
       const problem = host().problemText(summary, T);
-      state.wait = host().waitText(summary, T);
+      state.wait = host().waitText(summary, TEXT);
       applyWait();
       showGeo(state.mode === 'live' ? summary : null);
       if (state.wait) {

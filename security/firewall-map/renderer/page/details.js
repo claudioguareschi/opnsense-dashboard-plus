@@ -129,7 +129,10 @@ function flowModel(flow, context) {
   const flagged = (flow.lists || []).length > 0;
   return {
     verdict: flagged ? bigPill('danger', T.allowed_flagged, 'triangle-exclamation') : bigPill('success', T.allowed, 'check'),
-    sub: outbound ? T.started_inside_long : T.started_outside_long,
+    // a mirrored connection or a probe says so first: neither carries data here
+    sub: flow.presence === 'mirror' ? T.mirror_sub
+      : flow.presence === 'probe' ? fill(T.probe_sub, {count: Number(flow.attempts || 0).toLocaleString()})
+        : outbound ? T.started_inside_long : T.started_outside_long,
     diagram: {from: outbound ? localBox : remoteBox, service, rate: rateText(flow.rate_in, flow.rate_out),
       to: outbound ? remoteBox : localBox, blocked: false},
     connection: rows([

@@ -104,6 +104,16 @@
     </field>
     <field>
         <type>header</type>
+        <label>High availability</label>
+    </field>
+    <field>
+        <id>firewallmap.general.carp_backup_view</id>
+        <label>On a CARP backup</label>
+        <type>dropdown</type>
+        <help>A CARP backup holds copies of the master's connections (pfsync) without their traffic counters. Mirror shows them, marked as mirrored and ranked by connections and security evidence, so the map is ready when this firewall takes over; Show only this firewall's traffic leaves them out. On the master, or without CARP, this changes nothing.</help>
+    </field>
+    <field>
+        <type>header</type>
         <label>Collector resources</label>
     </field>
     <field>

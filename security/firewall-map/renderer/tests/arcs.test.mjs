@@ -26,7 +26,7 @@
 
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {buildArcs} from '../src/arcs.js';
+import {buildArcs, marchingPulses, pulses} from '../src/arcs.js';
 import {DEFAULT_OPTIONS} from '../src/options.js';
 
 const home = {id: '192.0.2.1', lat: 33.75, lon: -84.39, local: true};
@@ -55,4 +55,24 @@ test('a connection Suricata alerted on keeps an arc of its own', () => {
 
 test('flows without a known location draw nothing', () => {
   assert.deepEqual(buildArcs({locations: [home], flows: [flow('203.0.113.9')]}, DEFAULT_OPTIONS), []);
+});
+
+test('a mirrored arc (CARP backup) carries a closely spaced pair of dots at one fixed pace', () => {
+  const data = {
+    locations: [home, place('203.0.113.1', 50.11, 8.68), place('198.51.100.1', 35.68, 139.69)],
+    flows: [flow('203.0.113.1', {presence: 'mirror', rate: 0, rateIn: 0, rateOut: 0, rate_in: 0, rate_out: 0,
+      activity: 0, initiated: 'remote'}), flow('198.51.100.1')],
+  };
+  const arcs = buildArcs(data, DEFAULT_OPTIONS);
+  const mirror = arcs.find((arc) => arc.presence === 'mirror');
+  // no counters to fade with or to set a direction: it stays, and follows who opened it
+  assert.equal(mirror.activity, 1);
+  assert.equal(mirror.direction, 'in');
+  const dots = pulses(arcs).filter((item) => item.arc === mirror);
+  assert.equal(dots.length, 2);
+  assert.ok(dots.every((dot) => dot.period === dots[0].period && dot.reverse));
+  assert.ok(Math.abs(dots[1].phase - dots[0].phase) < 0.05);
+  // a traffic arc keeps its rate-driven pulse, and a saved snapshot marches one row per direction
+  assert.equal(pulses(arcs).filter((item) => item.arc !== mirror).length, 1);
+  assert.equal(marchingPulses([mirror]).length, 6);
 });
