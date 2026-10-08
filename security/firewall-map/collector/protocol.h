@@ -42,6 +42,8 @@ enum record_kind {
   RECORD_THREAT_CANDIDATE = 4,
   RECORD_EVENT_MATCH = 5,
   RECORD_TELEMETRY = 6,
+  RECORD_CLASSIFIED = 7,
+  RECORD_CLASS_SET = 8,
   RECORD_FAILURE = 254,
   RECORD_FOOTER = 255,
 };
@@ -61,7 +63,15 @@ struct telemetry {
   double interval, dump_seconds, processing_seconds, user_cpu, system_cpu;
   uint64_t max_rss, heap_bytes, heap_peak, heap_blocks, heap_budget, state_limit,
       preflight_states, skipped_af_translation, candidates_omitted,
-      threat_remotes_omitted, threat_candidates_omitted, event_history_evicted;
+      threat_remotes_omitted, threat_candidates_omitted, event_history_evicted,
+      classifier_bytes;
+};
+/* The sample's classification: set statuses, and the masks of the addresses
+ * the request asked about (K rows). */
+struct class_report {
+  const struct classifier *classifier;
+  const struct addr *addresses;
+  size_t address_count;
 };
 void protocol_put(unsigned char **, uint64_t, unsigned);
 uint64_t protocol_get(const unsigned char **, unsigned);
@@ -72,7 +82,8 @@ bool protocol_frame(FILE *, const void *, size_t, uint32_t *,
 /* Fills the telemetry's omission counters before writing it. */
 bool protocol_write_ranked(FILE *, const struct aggregate *, const struct ranking *,
                            const struct threat_summary *, const struct event_match *, size_t,
-                           size_t candidates_per_kind, struct telemetry *, struct fm_error *);
+                           const struct class_report *, size_t candidates_per_kind,
+                           struct telemetry *, struct fm_error *);
 /* FMAGG4 response for a snapshot selection (explicit flows, no threats). */
 bool protocol_write_selected(FILE *, const struct aggregate *,
                              const struct ranked_flow *, size_t,

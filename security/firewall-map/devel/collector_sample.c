@@ -326,7 +326,7 @@ static int correlate_fixture(const char *context_path, const char *input_path,
   FILE *output = fopen(output_path, "wb");
   struct telemetry telemetry = {.interval = -1};
   bool ok = output && protocol_write_ranked(output, aggregate, ranking, NULL,
-                                             matches, match_count, BUDGET_CANDIDATES_DEFAULT,
+                                             matches, match_count, NULL, BUDGET_CANDIDATES_DEFAULT,
                                              &telemetry, error);
   if (output && fclose(output) && !error->code)
     fm_error_set(error, errno, "close event match fixture");

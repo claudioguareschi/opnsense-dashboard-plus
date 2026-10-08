@@ -30,22 +30,27 @@ struct threat_summary;
 struct threat_remote {
   struct addr address;
   uint64_t remote_initiated_states, local_initiated_states, bytes;
+  uint64_t classes; /* classification sets containing the remote */
   uint32_t youngest;
 };
 struct threat_candidate_view {
   uint32_t remote;
   struct candidate_view candidate;
 };
-/* Which remotes a bounded threat summary keeps, in this order (stable within
+/* The threat summary is independent of the ranking (and of any Focus): it
+ * covers only flagged remotes, those Python named as evidence (IDS,
+ * reputation, blocked sources) and those in a classification set of the
+ * `flagged` mask (threat lists). They are kept in this order (stable within
  * each class by first appearance in the sample):
- *   1. remotes Python named as evidence (IDS, reputation, blocked sources);
- *   2. remotes this site initiated traffic with, by bytes, largest first;
- *   3. remotes that only initiated toward this site, by bytes, then youngest.
+ *   1. evidence remotes;
+ *   2. flagged remotes this site initiated traffic with, by bytes, largest first;
+ *   3. flagged remotes that only initiated toward this site, by bytes, then youngest.
  * At most `remote_limit` remotes and `candidates_per_kind` candidates per
  * (remote, kind) are kept; the omitted counts say what was left out. */
 struct threat_limits {
   const struct addr *evidence;
   size_t evidence_count, remote_limit, candidates_per_kind;
+  uint64_t flagged;
 };
 struct threat_summary *threat_summary_create(const struct aggregate *,
                                              struct threat_limits,

@@ -42,7 +42,7 @@ class CollectorHistoryTest(unittest.TestCase):
                             str(ROOT / "collector/history.c"), str(ROOT / "collector/state.c"),
                             str(ROOT / "collector/context.c"), str(ROOT / "collector/alloc.c"),
                             str(ROOT / "collector/error.c"),
-                            str(Path(__file__).with_name("collector_history_check.c")), "-o", str(program)], check=True)
+                            str(Path(__file__).with_name("collector_history_check.c")), "-lm", "-o", str(program)], check=True)
             result = subprocess.run([str(program)], capture_output=True, text=True, timeout=120)
         self.assertEqual((result.returncode, result.stdout.strip()), (0, "ok"), result.stdout)
 

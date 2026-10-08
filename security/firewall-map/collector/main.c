@@ -29,6 +29,7 @@
 #include "aggregate.h"
 #include "alloc.h"
 #include "budget.h"
+#include "classify.h"
 #include "event_correlation.h"
 #include "history.h"
 #include "index.h"
@@ -61,10 +62,23 @@
 #define FADE_SECONDS 20.0
 #define RATE_SMOOTHING 0.5
 
+/* A request's classification: the sets (CLASS rows) and the generation
+ * token (CLASSGEN) Python derives from their source files. */
+#define CLASS_GENERATION_SIZE 64
+struct class_config {
+  struct class_set sets[CLASSIFY_MAX_SETS];
+  size_t count;
+  char generation[CLASS_GENERATION_SIZE];
+};
 struct engine {
   struct history *history;
   struct ranking *ranking;
   struct event_history *events;
+  /* the classification snapshot and what it was loaded for; replaced only
+   * between samples, when the request's configuration differs */
+  struct classifier *classifier;
+  struct class_config classes;
+  bool classes_loaded;
   uint64_t sequence;
 };
 struct request {
@@ -75,6 +89,9 @@ struct request {
   size_t evidence_count;
   struct event_query queries[FM_MAX_EVENT_QUERIES];
   size_t query_count;
+  struct class_config classes;
+  struct addr *classify;
+  size_t classify_count;
   struct sample_outcome refusal;
 };
 struct sample {
@@ -115,12 +132,43 @@ static bool keyword(const char *line, const char *word, bool *seen,
   *seen = true;
   return true;
 }
+/* PF table names as OPNsense aliases and feed tables spell them. */
+static bool table_name(const char *name) {
+  size_t length = strlen(name);
+  if (!length || length >= CLASSIFY_NAME_SIZE) return false;
+  for (const char *c = name; *c; c++)
+    if (!((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') ||
+          *c == '_' || *c == '-' || *c == '.'))
+      return false;
+  return true;
+}
+static void class_row(struct request *r, const char *line, struct fm_error *error) {
+  unsigned id;
+  char category, name[64], extra;
+  struct class_config *c = &r->classes;
+  if (sscanf(line, "CLASS %u %c %63s %c", &id, &category, name, &extra) != 3 ||
+      c->count >= CLASSIFY_MAX_SETS || id != c->count ||
+      (category != 'T' && category != 'C' && category != 'O') || !table_name(name)) {
+    request_error(error, "CLASS row");
+    return;
+  }
+  for (size_t n = 0; n < c->count; n++)
+    if (!strcmp(c->sets[n].name, name)) {
+      request_error(error, "duplicate CLASS table");
+      return;
+    }
+  struct class_set *set = &c->sets[c->count++];
+  memset(set, 0, sizeof(*set));
+  set->id = id;
+  set->category = category;
+  strcpy(set->name, name);
+}
 static bool read_request(struct request *r, bool *clean_eof, struct fm_error *error) {
   char *line = NULL;
   size_t capacity = 0;
   bool header = false, run = false, got_line = false;
   bool seen_threats = false, seen_snapshot = false, seen_budget = false,
-       seen_correlation = false;
+       seen_correlation = false, seen_generation = false;
   struct context *ctx = r->ctx;
   while (!error->code && getline(&line, &capacity, stdin) >= 0) {
     got_line = true;
@@ -152,6 +200,22 @@ static bool read_request(struct request *r, bool *clean_eof, struct fm_error *er
       if (sscanf(line, "CORRELATION %u %c", &x, &extra) != 1 || x > 1)
         request_error(error, "CORRELATION row");
       r->correlation = x;
+    } else if (!strncmp(line, "CLASS ", 6)) {
+      class_row(r, line, error);
+    } else if (keyword(line, "CLASSGEN", &seen_generation, error)) {
+      if (sscanf(line, "CLASSGEN %63s %c", r->classes.generation, &extra) != 1)
+        request_error(error, "CLASSGEN row");
+    } else if (!strncmp(line, "K ", 2)) {
+      if (sscanf(line, "K %63s %c", a, &extra) != 1 || r->classify_count >= CLASSIFY_MAX_ADDRESSES) {
+        request_error(error, "K row");
+        break;
+      }
+      if (!r->classify &&
+          !(r->classify = fm_calloc(CLASSIFY_MAX_ADDRESSES, sizeof(*r->classify)))) {
+        fm_error_set(error, errno, "classify allocation");
+        break;
+      }
+      parse_address(a, &r->classify[r->classify_count++], error);
     } else if (!strncmp(line, "EVIDENCE ", 9)) {
       if (sscanf(line, "EVIDENCE %63s %c", a, &extra) != 1 ||
           r->evidence_count >= BUDGET_THREAT_REMOTES_MAX) {
@@ -280,10 +344,46 @@ static bool refuse(struct engine *e, struct sample_outcome refusal, uint64_t see
   return response_commit(&response, stdout, error);
 }
 
+static bool same_classes(const struct class_config *a, const struct class_config *b) {
+  if (a->count != b->count || strcmp(a->generation, b->generation)) return false;
+  for (size_t n = 0; n < a->count; n++)
+    if (a->sets[n].category != b->sets[n].category || strcmp(a->sets[n].name, b->sets[n].name))
+      return false;
+  return true;
+}
+/* Reads the PF tables again only when the configuration or its generation
+ * changed: never per sample. A failed load leaves no snapshot (and is
+ * retried by the next request). */
+static bool refresh_classifier(struct engine *e, const struct class_config *wanted,
+                               struct fm_error *error) {
+  if (e->classes_loaded && same_classes(&e->classes, wanted)) return true;
+  classifier_destroy(e->classifier);
+  e->classifier = NULL;
+  e->classes_loaded = false;
+  if (!wanted->count) {
+    e->classes = *wanted;
+    e->classes_loaded = true;
+    return true;
+  }
+  struct class_config loaded = *wanted;
+  e->classifier = classifier_load(loaded.sets, loaded.count, error);
+  if (!e->classifier) return false;
+  e->classes = loaded;
+  e->classes_loaded = true;
+  return true;
+}
+
 static bool run_sample(struct engine *e, struct request *r, struct fm_error *error) {
-  uint64_t state_limit = budget_state_limit(r->memory_budget);
+  /* the snapshot persists across samples: it is loaded outside the sample
+   * budget and its size comes off the state admission */
+  if (!refresh_classifier(e, &r->classes, error))
+    return false;
+  uint64_t class_bytes = classifier_bytes(e->classifier);
+  uint64_t state_limit = budget_state_limit(
+      r->memory_budget > class_bytes ? r->memory_budget - class_bytes : 0);
   struct telemetry telemetry = {.pid = (uint32_t)getpid(), .sequence = ++e->sequence,
-                                .interval = -1, .state_limit = state_limit};
+                                .interval = -1, .state_limit = state_limit,
+                                .classifier_bytes = class_bytes};
   fm_heap_set_budget(r->memory_budget);
 #ifdef FM_TEST_HOOKS
   /* FM_TEST_HEAP_BUDGET=<bytes>:<sequence> exhausts the heap below the
@@ -312,6 +412,8 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
                          ? aggregate_create(r->ctx, e->history, events ? event_sample_observe : NULL,
                                             events, error)
                          : NULL;
+  if (sample.aggregate)
+    aggregate_set_classifier(sample.aggregate, e->classifier);
   struct timespec wall = {0};
   /* presize the baseline from PF's own count (+10% for growth during the
    * dump) so the traversal does not rehash it */
@@ -329,7 +431,7 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   ok = ok && ranking_update(e->ranking, sample.aggregate, sample.anchor,
                             telemetry.interval, error);
   struct threat_limits limits = {r->evidence, r->evidence_count, r->threat_remotes,
-                                 r->candidates_per_kind};
+                                 r->candidates_per_kind, classifier_category(e->classifier, 'T')};
   struct threat_summary *threats =
       ok && r->threats ? threat_summary_create(sample.aggregate, limits, error) : NULL;
   ok = ok && (!r->threats || threats);
@@ -351,9 +453,10 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
     telemetry.event_history_evicted = event_history_evicted(e->events);
     measure_process(&telemetry);
     ok = response_begin(&response, error);
+    struct class_report classes = {e->classifier, r->classify, r->classify_count};
     if (ok && !protocol_write_ranked(response.stream, sample.aggregate, e->ranking, threats,
-                                     matches, match_count, r->candidates_per_kind, &telemetry,
-                                     error)) {
+                                     matches, match_count, &classes, r->candidates_per_kind,
+                                     &telemetry, error)) {
       response_discard(&response);
       ok = false;
     } else if (ok)
@@ -390,6 +493,7 @@ static void close_engine(struct engine *e) {
   history_destroy(e->history);
   ranking_destroy(e->ranking);
   event_history_destroy(e->events);
+  classifier_destroy(e->classifier);
 }
 
 /* A fresh 128-bit hash key per helper process (arc4random_buf cannot fail).
@@ -501,6 +605,7 @@ int main(int argc, char **argv) {
     if (request) {
       context_destroy(request->ctx);
       fm_free(request->evidence);
+      fm_free(request->classify);
     }
     fm_free(request);
     if (ok)

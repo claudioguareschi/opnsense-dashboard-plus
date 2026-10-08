@@ -35,6 +35,7 @@ struct aggregate {
   struct history *history;
   tuple_observer observe;
   void *observer;
+  const struct classifier *classifier;
   /* flows: value unused, id is the flow id. candidates: value holds the
    * association of the earliest state. lan: value is a slot in lan_labels.
    * pending: count/seq only. */
@@ -78,6 +79,9 @@ struct aggregate *aggregate_create(const struct context *ctx,
   a->observe = observe;
   a->observer = observer;
   return a;
+}
+void aggregate_set_classifier(struct aggregate *a, const struct classifier *classifier) {
+  a->classifier = classifier;
 }
 void aggregate_destroy(struct aggregate *a) {
   if (!a)
@@ -176,6 +180,8 @@ static struct flow *flow_get(struct aggregate *a, const struct state_view *v,
     f->local = v->local;
     f->remote = v->remote;
     f->first = seq;
+    /* one lookup per flow, never per state */
+    f->classes = classifier_lookup(a->classifier, v->remote);
   }
   i->count++;
   return f;

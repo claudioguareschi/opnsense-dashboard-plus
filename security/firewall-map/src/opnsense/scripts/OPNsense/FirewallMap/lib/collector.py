@@ -80,12 +80,21 @@ MEMORY_MIN_MIB, MEMORY_MAX_MIB, MEMORY_AUTO_MAX_MIB = 64, 16384, 1024
 MEMORY_AUTO_SHARE = 0.05
 # operator context maxima: over them a sample is refused, naming the kind (never truncated)
 CONTEXT_MAXIMA = {"L": 4096, "N": 8192, "A": 1024}
-_FLOW_RECORD, _CANDIDATE_RECORD, _THREAT_REMOTE_RECORD, _THREAT_CANDIDATE_RECORD = 163, 100, 54, 92
-_EVENT_RECORD, _FIXED_RECORDS = 198, 4096
+_FLOW_RECORD, _CANDIDATE_RECORD, _THREAT_REMOTE_RECORD, _THREAT_CANDIDATE_RECORD = 171, 100, 62, 92
+_EVENT_RECORD, _CLASSIFIED_RECORD, _CLASS_SET_RECORD, _FIXED_RECORDS = 198, 30, 16, 4096
+# classification (collector/classify.h): PF tables given Firewall Map meaning, one bit each
+CLASS_MAX_SETS, CLASS_MAX_ADDRESSES = 64, 20000
+CLASS_CATEGORIES = ("T", "C", "O")  # threat, country, operational
+CLASS_STATUSES = {0: "ok", 1: "missing", 2: "too_large", 3: "unreadable"}
+_TABLE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,31}$")
+_GENERATION = re.compile(r"^[!-~]{1,63}$")
 
 # FMAGG4 record kinds
-HEADER, FLOW, CANDIDATE, THREAT_REMOTE, THREAT_CANDIDATE, EVENT_MATCH, TELEMETRY = range(7)
+HEADER, FLOW, CANDIDATE, THREAT_REMOTE, THREAT_CANDIDATE, EVENT_MATCH, TELEMETRY, CLASSIFIED, CLASS_SET = range(9)
 FAILURE, FOOTER = 254, 255
+# record order within a response; telemetry, then the footer, end it
+_ORDER = {FLOW: 1, CANDIDATE: 2, THREAT_REMOTE: 3, THREAT_CANDIDATE: 4, EVENT_MATCH: 5, CLASSIFIED: 6,
+          CLASS_SET: 7}
 # candidate kinds
 PROTOCOL, INSIDE_HOST, EGRESS_INTERFACE, SERVICE, REMOTE_TARGET, RULE_LABEL = range(1, 7)
 THREAT_CANDIDATE_KINDS = (INSIDE_HOST, SERVICE, REMOTE_TARGET)
@@ -97,13 +106,14 @@ FAILURE_CLASSES = {1: "structural", 2: "internal", 3: "incompatible", 4: "resour
 OMISSION_REASONS = ((1, "encoded_bytes"), (2, "state_count"), (4, "per_flow_evidence_limit"))
 SELECTION_POLICIES = {2: "bytes_desc_newest_identity_v1"}
 
-_FLOW = struct.Struct("!I17s17sQQQIIQQQQQQddddd")
-_TELEMETRY = struct.Struct("!IQdddddQQQQQQQQQQQQ")
+_FLOW = struct.Struct("!I17s17sQQQIIQQQQQQQddddd")
+_TELEMETRY = struct.Struct("!IQdddddQQQQQQQQQQQQQ")
 _TELEMETRY_FIELDS = ("pid", "sequence", "interval", "dump_seconds", "processing_seconds", "user_cpu",
                      "system_cpu", "max_rss", "heap_bytes", "heap_peak", "heap_blocks", "heap_budget",
                      "state_limit", "preflight_states", "skipped_af_translation", "candidates_omitted",
-                     "threat_remotes_omitted", "threat_candidates_omitted", "event_history_evicted")
-_FOOTER = struct.Struct("!IIQQQQQQQQQQQI")
+                     "threat_remotes_omitted", "threat_candidates_omitted", "event_history_evicted",
+                     "classifier_bytes")
+_FOOTER = struct.Struct("!IIQQQQQQQQQQQQQI")
 
 
 class CollectorError(RuntimeError):
@@ -198,12 +208,13 @@ def memory_budget(setting_mib=None, physical=None):
 
 
 def response_byte_limit(candidates_per_kind=CANDIDATES_PER_KIND, threat_remotes=THREAT_REMOTES,
-                        queries=MAX_EVENT_QUERIES):
+                        queries=MAX_EVENT_QUERIES, classify=CLASS_MAX_ADDRESSES, class_sets=CLASS_MAX_SETS):
     """The largest FMAGG4 response the budgets allow (framing included); more is a helper bug."""
     flows = RANKED_FLOWS * (_FLOW_RECORD + RULE_LABEL * candidates_per_kind * _CANDIDATE_RECORD)
     threats = threat_remotes * (_THREAT_REMOTE_RECORD + len(THREAT_CANDIDATE_KINDS) * candidates_per_kind
                                 * _THREAT_CANDIDATE_RECORD)
-    return 8 + flows + threats + queries * _EVENT_RECORD + _FIXED_RECORDS
+    classes = classify * _CLASSIFIED_RECORD + class_sets * _CLASS_SET_RECORD
+    return 8 + flows + threats + queries * _EVENT_RECORD + classes + _FIXED_RECORDS
 
 
 def _context_address(value):
@@ -282,19 +293,47 @@ def _read_exact(stream, size, process, deadline):
     return bytes(data)
 
 
+_READ_CHUNK = 1 << 16
+
+
 def _frames(stream, process, deadline, byte_limit=None, received=8):
-    """(frame bytes, payload) pairs; the footer (255) is the last one yielded."""
+    """(frame bytes, payload) pairs; the footer (255) is the last one yielded.
+
+    Reads in chunks (a large threat summary is tens of thousands of frames). The helper writes
+    nothing after a footer until it is sent the next request, so a byte read past it is a
+    protocol violation."""
+    buffer, position, descriptor = bytearray(), 0, stream.fileno()
+
+    def need(size):
+        nonlocal buffer, position
+        if position > _READ_CHUNK:
+            buffer, position = buffer[position:], 0
+        while len(buffer) - position < size:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([descriptor], [], [], remaining)[0]:
+                raise CollectorError("collector response timed out")
+            part = os.read(descriptor, max(size - (len(buffer) - position), _READ_CHUNK))
+            if not part:
+                code = process.poll()
+                raise CollectorError(f"collector ended before its response was complete ({code})")
+            buffer.extend(part)
+
     while True:
-        size = _read_exact(stream, 4, process, deadline)
+        need(4)
+        size = bytes(buffer[position:position + 4])
         length, = struct.unpack("!I", size)
         received += length + 4
         if not 0 < length <= MAX_FRAME:
             raise CollectorError("collector frame size")
         if byte_limit is not None and received > byte_limit:
             raise CollectorError("collector response exceeds its byte ceiling")
-        data = _read_exact(stream, length, process, deadline)
+        need(4 + length)
+        data = bytes(buffer[position + 4:position + 4 + length])
+        position += 4 + length
         yield size, data
         if data[0] == FOOTER:
+            if position != len(buffer):
+                raise CollectorError("collector wrote past its response")
             return
 
 
@@ -320,14 +359,44 @@ def _magic(stream, process, deadline, expected):
         raise CollectorError(f"unexpected collector response {magic!r}")
 
 
+def _class_rows(classification, classify):
+    """(rows, categories by set ID, addresses asked about) for the request's classification."""
+    rows, categories, asked = [], [], set()
+    if classification is not None:
+        generation, sets = classification
+        if len(sets) > CLASS_MAX_SETS or (sets and not _GENERATION.match(str(generation))):
+            raise CollectorError("invalid classification request")
+        names = set()
+        for category, name in sets:
+            if category not in CLASS_CATEGORIES or not _TABLE_NAME.match(name) or name in names:
+                raise CollectorError("invalid classification set")
+            names.add(name)
+            rows.append(f"CLASS {len(categories)} {category} {name}")
+            categories.append(category)
+        if sets:
+            rows.append(f"CLASSGEN {generation}")
+    for address in map(_context_address, classify):
+        if address and address not in asked and len(asked) < CLASS_MAX_ADDRESSES:
+            asked.add(address)
+            rows.append(f"K {address}")
+    return rows, categories, asked
+
+
+def _class_mask(mask, categories):
+    if mask >> len(categories):
+        raise CollectorError("FMAGG4 classification outside the requested sets")
+    return mask
+
+
 def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANKED_FLOWS, byte_limit=None,
-            timeout=None):
+            timeout=None, categories=(), asked=frozenset()):
     """Read one complete FMAGG4 response."""
     deadline = time.monotonic() + (timeout or READ_TIMEOUT)
     _magic(stream, process, deadline, b"FMAGG4\0\0")
     checksum, threats_present, telemetry, footer, previous_kind = 0, None, None, None, HEADER
     flows, candidates, matches = [], [], {}
     threat_remotes, threat_candidates = [], []
+    classified, class_sets = {}, []
     for size, data in _frames(stream, process, deadline, byte_limit):
         kind = data[0]
         if kind != FOOTER:
@@ -344,15 +413,16 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
             continue
         if telemetry is not None and kind != FOOTER:
             raise CollectorError("FMAGG4 record after telemetry")
-        if kind in (FLOW, CANDIDATE, THREAT_REMOTE, THREAT_CANDIDATE, EVENT_MATCH) and kind < previous_kind:
-            raise CollectorError("FMAGG4 record order")
-        if kind != FOOTER:
-            previous_kind = max(previous_kind, kind)
+        rank = _ORDER.get(kind)
+        if rank is not None:
+            if rank < previous_kind:
+                raise CollectorError("FMAGG4 record order")
+            previous_kind = rank
         if kind == FLOW:
             if len(data) != 1 + _FLOW.size:
                 raise CollectorError("invalid FMAGG4 flow record")
             (rank, local, remote, states, from_remote, to_remote, oldest, youngest, remote_weight, local_weight,
-             first, delta_from, delta_to, delta_packets, rate_from, rate_to, packet_rate, activity,
+             first, delta_from, delta_to, delta_packets, classes, rate_from, rate_to, packet_rate, activity,
              score) = _FLOW.unpack_from(data, 1)
             if rank != len(flows) or not all(math.isfinite(value) and value >= 0 for value in
                                              (rate_from, rate_to, packet_rate, activity, score)):
@@ -364,7 +434,8 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
                           "first": first, "delta_bytes_from_remote": delta_from,
                           "delta_bytes_to_remote": delta_to, "delta_packets": delta_packets,
                           "rate_from_remote": rate_from, "rate_to_remote": rate_to,
-                          "packet_rate": packet_rate, "activity": activity, "score": score})
+                          "packet_rate": packet_rate, "activity": activity, "score": score,
+                          "classes": _class_mask(classes, categories)})
         elif kind == CANDIDATE:
             if len(data) < 32:
                 raise CollectorError("invalid FMAGG4 candidate record")
@@ -374,15 +445,15 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
                 raise CollectorError("invalid FMAGG4 candidate identity")
             candidates.append((flow, candidate_kind, sequence, weight, association, data[32:]))
         elif kind == THREAT_REMOTE:
-            if not threats_present or len(data) != 50:
+            if not threats_present or len(data) != 58:
                 raise CollectorError("invalid FMAGG4 threat remote")
             index, = struct.unpack_from("!I", data, 1)
-            remote_states, local_states, transferred, youngest = struct.unpack_from("!QQQI", data, 22)
+            remote_states, local_states, transferred, classes, youngest = struct.unpack_from("!QQQQI", data, 22)
             if index != len(threat_remotes):
                 raise CollectorError("FMAGG4 threat remote order")
             threat_remotes.append({"address": _address(data[5:22]), "remote_initiated_states": remote_states,
                                    "local_initiated_states": local_states, "bytes": transferred,
-                                   "youngest": youngest})
+                                   "classes": _class_mask(classes, categories), "youngest": youngest})
         elif kind == THREAT_CANDIDATE:
             if not threats_present or len(data) < 24:
                 raise CollectorError("invalid FMAGG4 threat candidate")
@@ -396,6 +467,22 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
             if key in matches:
                 raise CollectorError("FMAGG4 duplicate event match")
             matches[key] = match
+        elif kind == CLASSIFIED:
+            if len(data) != 26:
+                raise CollectorError("invalid FMAGG4 classified address")
+            address, mask = _address(data[1:18]), struct.unpack_from("!Q", data, 18)[0]
+            if address not in asked or address in classified or not mask:
+                raise CollectorError("invalid FMAGG4 classified address identity")
+            classified[address] = _class_mask(mask, categories)
+        elif kind == CLASS_SET:
+            if len(data) != 12:
+                raise CollectorError("invalid FMAGG4 classification set")
+            set_id, category, status, entries = struct.unpack_from("!BBBQ", data, 1)
+            if set_id != len(class_sets) or set_id >= len(categories) or chr(category) != categories[set_id] \
+                    or status not in CLASS_STATUSES or (status and entries):
+                raise CollectorError("invalid FMAGG4 classification set identity")
+            class_sets.append({"id": set_id, "category": categories[set_id], "status": CLASS_STATUSES[status],
+                               "entries": entries})
         elif kind == TELEMETRY:
             if len(data) != 1 + _TELEMETRY.size:
                 raise CollectorError("invalid FMAGG4 telemetry")
@@ -411,11 +498,11 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
     if threats_present is None or telemetry is None or footer is None:
         raise CollectorError("incomplete FMAGG4 response")
     (outcome, context_kind, actual, limit, seen, retained, mapped, flow_total, flows_sent, candidates_sent,
-     matches_sent, remotes_sent, remote_candidates_sent, expected) = footer
-    records = (flows, candidates, matches, threat_remotes, threat_candidates)
+     matches_sent, remotes_sent, remote_candidates_sent, classified_sent, class_sets_sent, expected) = footer
+    records = (flows, candidates, matches, threat_remotes, threat_candidates, classified, class_sets)
     if expected != checksum or outcome not in OUTCOMES \
-            or (flows_sent, candidates_sent, matches_sent, remotes_sent, remote_candidates_sent) \
-            != tuple(map(len, records)) \
+            or (flows_sent, candidates_sent, matches_sent, remotes_sent, remote_candidates_sent, classified_sent,
+                class_sets_sent) != tuple(map(len, records)) \
             or len(flows) > flow_limit or not mapped <= retained <= seen \
             or sum(flow["states"] for flow in flows) > mapped \
             or (outcome and (any(records) or threats_present)):
@@ -429,6 +516,7 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
     return {"flows": flows, "skipped": skipped, "candidates": candidates, "matches": matches,
             "threat_remotes": threat_remotes, "threat_candidates": threat_candidates,
             "threat_summary": threats_present, "telemetry": telemetry,
+            "classified": classified, "class_sets": class_sets,
             "baseline": telemetry["interval"] < 0,
             "refused": refused and {"reason": refused, "kind": chr(context_kind) if context_kind else None,
                                     "actual": actual, "limit": limit},
@@ -485,6 +573,7 @@ class CollectorEngine:
         self.process = None
         self.snapshot_open = False
         self.snapshot_generation = None
+        self.snapshot_categories = ()
         self.metadata = None
         self.starts = 0
         self.last_error = None
@@ -564,14 +653,17 @@ class CollectorEngine:
 
     def sample(self, local_addresses, networks, interface_addresses, primary_wan_device,
                threat_summary=False, event_queries=(), snapshot=False, memory=None, evidence=(),
-               correlation=True):
+               correlation=True, classification=None, classify=()):
         """One complete sample. memory: the budget in bytes (default: automatic); evidence:
         remotes the threat summary must keep first; correlation: whether anything consumes
-        IDS/block tuple matching (it is skipped otherwise)."""
+        IDS/block tuple matching (it is skipped otherwise); classification: (generation token,
+        [(category, PF table)...]) in set-ID order, the helper re-reading the tables only when
+        either changes; classify: addresses whose set masks the response carries."""
         rows, refused = _context_rows(local_addresses, networks, interface_addresses, primary_wan_device)
         if refused:
             # Python's own check; the helper would refuse the same request
             return {"flows": [], "candidates": [], "matches": {}, "threat_remotes": [], "threat_candidates": [],
+                    "classified": {}, "class_sets": [],
                     "threat_summary": False, "telemetry": None, "baseline": False, "refused": refused,
                     "counts": {"states": 0, "retained": 0, "mapped": 0, "flows": 0, "captured_flows": 0,
                                "candidates": 0, "matches": 0, "threat_remotes": 0, "threat_candidates": 0},
@@ -587,6 +679,8 @@ class CollectorEngine:
             rows.extend(f"EVIDENCE {address}" for address in evidence_rows[:THREAT_REMOTES])
         if snapshot:
             rows.append("SNAPSHOT")
+        class_rows, categories, asked = _class_rows(classification, classify)
+        rows.extend(class_rows)
         query_keys = []
         for protocol, public, public_port, remote, remote_port in event_queries[:MAX_EVENT_QUERIES]:
             number = PROTO_NUMBERS.get(protocol)
@@ -599,15 +693,22 @@ class CollectorEngine:
             rows.append(f"Q {len(query_keys) - 1} {number} {public} {int(public_port or 0)} "
                         f"{remote} {int(remote_port or 0)}")
         text = "FMCONF2\n%sRUN\n" % "".join(row + "\n" for row in rows)
-        limit = response_byte_limit(queries=len(query_keys))
-        result = self._request(text, lambda stream, process: _decode(stream, process, query_keys,
-                                                                     threat_summary, byte_limit=limit,
-                                                                     timeout=self.read_timeout))
+        limit = response_byte_limit(queries=len(query_keys), classify=len(asked), class_sets=len(categories))
+        def decode(stream, process):
+            decoded = _decode(stream, process, query_keys, threat_summary, byte_limit=limit,
+                              timeout=self.read_timeout, categories=categories, asked=asked)
+            # a sample reports every requested set's status
+            if not decoded["refused"] and len(decoded["class_sets"]) != len(categories):
+                raise CollectorError("FMAGG4 classification sets incomplete")
+            return decoded
+        result = self._request(text, decode)
         telemetry = result["telemetry"]
         # the next response may take as long as this one did, with a margin
         self.read_timeout = min(READ_TIMEOUT_MAX, max(READ_TIMEOUT, READ_TIMEOUT_FACTOR * (
             telemetry["dump_seconds"] + telemetry["processing_seconds"])))
         self.snapshot_open = snapshot and not result["refused"]
+        # snapshot selections carry the flows' masks of this sample's classification
+        self.snapshot_categories = categories
         self.snapshot_generation = result["telemetry"]["sequence"] if self.snapshot_open else None
         result["helper"] = dict(self.metadata or {}, starts=self.starts)
         return result
@@ -634,7 +735,7 @@ class CollectorEngine:
         text += _identity_rows(identities)
         result = self._request(text, lambda stream, process: _decode(
             stream, process, (), False, flow_limit=SNAPSHOT_FLOWS, byte_limit=SNAPSHOT_BYTES,
-            timeout=self.read_timeout))
+            timeout=self.read_timeout, categories=self.snapshot_categories))
         if [row["key"] for row in result["flows"]] != [tuple(item[:2]) for item in identities]:
             self.close()
             raise CollectorError("collector snapshot selection identity mismatch")

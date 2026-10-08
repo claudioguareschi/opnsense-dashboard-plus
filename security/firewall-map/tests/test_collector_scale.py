@@ -43,6 +43,8 @@ from collector_build import budget_constant, compile_worker, state_limit  # noqa
 
 CONTEXT = ({"8.8.8.1"}, [], {}, None)
 QUERY = ("tcp", "8.8.8.1", "30000", "9.9.9.9", "443")
+# a threat list naming every synthetic remote (9.0.0.0/8): the worst case for the threat summary
+THREATS_ALL = ("all", [("T", "threats_all")])
 
 
 class CollectorScaleTest(unittest.TestCase):
@@ -50,6 +52,12 @@ class CollectorScaleTest(unittest.TestCase):
     def setUpClass(cls):
         cls.directory = tempfile.TemporaryDirectory()
         cls.worker = compile_worker(Path(cls.directory.name) / "worker")
+        tables = Path(cls.directory.name) / "tables"
+        tables.mkdir()
+        (tables / "threats_all.txt").write_text("9.0.0.0/8\n")
+        (tables / "threats_some.txt").write_text("9.0.0.0/24\n!9.0.0.128/25\n")
+        (tables / "country.txt").write_text("9.0.0.0/16\n")
+        cls.tables = str(tables)
 
     @classmethod
     def tearDownClass(cls):
@@ -61,7 +69,8 @@ class CollectorScaleTest(unittest.TestCase):
         return engine
 
     def run_mode(self, mode, count, samples=2, key=None, **options):
-        environment = {"FM_TEST_MODE": mode, "FM_TEST_COUNT": str(count), "FM_TEST_INTERVAL": "2"}
+        environment = {"FM_TEST_MODE": mode, "FM_TEST_COUNT": str(count), "FM_TEST_INTERVAL": "2",
+                       "FM_TEST_CLASS_DIR": self.tables}
         if key:
             environment["FM_TEST_HASH_KEY"] = key
         engine = self.engine()
@@ -75,12 +84,12 @@ class CollectorScaleTest(unittest.TestCase):
         count = 200000
         memory = 1024 << 20
         (_, last), seconds = self.run_mode("unique", count, threat_summary=True, event_queries=[QUERY],
-                                           memory=memory)
+                                           memory=memory, classification=THREATS_ALL)
         telemetry = last["telemetry"]
         print(f"\n  unique x{count}: {seconds:.2f} s/sample, heap peak {telemetry['heap_peak'] >> 20} MiB, "
               f"limit {telemetry['state_limit']} states, max RSS {telemetry['max_rss'] >> 20} MiB")
         self.assertIsNone(last["refused"])
-        self.assertEqual(telemetry["state_limit"], state_limit(memory))
+        self.assertEqual(telemetry["state_limit"], state_limit(memory - telemetry["classifier_bytes"]))
         self.assertLess(telemetry["heap_peak"], memory)
         self.assertEqual(len(last["flows"]), collector.RANKED_FLOWS)
         self.assertEqual(len(last["threat_remotes"]), collector.THREAT_REMOTES)
@@ -100,12 +109,15 @@ class CollectorScaleTest(unittest.TestCase):
 
     def test_threat_summary_priority_and_remote_cap(self):
         engine = self.engine()
-        with patch.dict(os.environ, FM_TEST_MODE="unique", FM_TEST_COUNT="500", FM_TEST_INTERVAL="2"):
+        with patch.dict(os.environ, FM_TEST_MODE="unique", FM_TEST_COUNT="500", FM_TEST_INTERVAL="2",
+                        FM_TEST_CLASS_DIR=self.tables):
             engine.sample(*CONTEXT)
             rows, _ = collector._context_rows(*CONTEXT)
-            text = ("FMCONF2\nBUDGET {memory} 16 100\nTHREATS\nEVIDENCE 9.0.1.200\n{rows}RUN\n".format(
+            text = ("FMCONF2\nBUDGET {memory} 16 100\nTHREATS\nEVIDENCE 9.0.1.200\n"
+                    "CLASS 0 T threats_all\nCLASSGEN all\n{rows}RUN\n".format(
                 memory=collector.memory_budget(), rows="".join(row + "\n" for row in rows)))
-            summary = engine._request(text, lambda stream, process: collector._decode(stream, process, (), True))
+            summary = engine._request(text, lambda stream, process: collector._decode(
+                stream, process, (), True, categories=["T"]))
         remotes = [remote["address"] for remote in summary["threat_remotes"]]
         self.assertEqual(len(remotes), 100)
         self.assertEqual(summary["telemetry"]["threat_remotes_omitted"], 400)
@@ -113,6 +125,52 @@ class CollectorScaleTest(unittest.TestCase):
         # then locally initiated remotes by bytes, largest first
         sizes = [remote["bytes"] for remote in summary["threat_remotes"][1:]]
         self.assertEqual(sizes, sorted(sizes, reverse=True))
+
+    def test_threat_summary_keeps_only_flagged_remotes(self):
+        """Focus-independent: the summary is what the threat lists and evidence name, not the
+        long tail; country sets classify without making a remote a threat."""
+        classification = ("some", [("T", "threats_some"), ("C", "country"), ("T", "absent")])
+        (_, last), _ = self.run_mode("unique", 1000, threat_summary=True, evidence=["9.0.2.7"],
+                                     classification=classification, classify=["9.0.0.5", "9.0.0.200", "9.0.3.1"])
+        remotes = {remote["address"]: remote["classes"] for remote in last["threat_remotes"]}
+        # 9.0.0.0/24 without its negated upper half, plus the evidence remote
+        self.assertEqual(set(remotes), {f"9.0.0.{n}" for n in range(128)} | {"9.0.2.7"})
+        self.assertEqual(remotes["9.0.0.5"], 0b011)
+        self.assertEqual(remotes["9.0.2.7"], 0b010)
+        self.assertEqual(last["telemetry"]["threat_remotes_omitted"], 0)
+        self.assertEqual(last["classified"], {"9.0.0.5": 0b011, "9.0.0.200": 0b010, "9.0.3.1": 0b010})
+        self.assertEqual([(row["status"], row["entries"]) for row in last["class_sets"]],
+                         [("ok", 2), ("ok", 1), ("missing", 0)])
+        self.assertGreater(last["telemetry"]["classifier_bytes"], 0)
+        by_remote = {flow["key"][1]: flow["classes"] for flow in last["flows"]}
+        self.assertTrue(all(mask == (0b011 if int(remote.split(".")[3]) < 128 and remote.startswith("9.0.0.")
+                                     else 0b010 if remote.startswith("9.0.") else 0)
+                            for remote, mask in by_remote.items()))
+
+    def test_classifier_is_reloaded_only_when_its_configuration_changes(self):
+        engine = self.engine()
+        environment = {"FM_TEST_MODE": "unique", "FM_TEST_COUNT": "300", "FM_TEST_INTERVAL": "2",
+                       "FM_TEST_CLASS_DIR": self.tables}
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, environment):
+            table = Path(directory) / "changing.txt"
+            table.write_text("9.0.0.1\n")
+            os.environ["FM_TEST_CLASS_DIR"] = directory
+            first = engine.sample(*CONTEXT, classification=("g1", [("T", "changing")]), classify=["9.0.0.2"])
+            table.write_text("9.0.0.2\n")
+            same = engine.sample(*CONTEXT, classification=("g1", [("T", "changing")]), classify=["9.0.0.2"])
+            changed = engine.sample(*CONTEXT, classification=("g2", [("T", "changing")]), classify=["9.0.0.2"])
+            cleared = engine.sample(*CONTEXT, classify=["9.0.0.2"])
+        self.assertEqual((first["classified"], same["classified"]), ({}, {}))
+        self.assertEqual(changed["classified"], {"9.0.0.2": 1})
+        self.assertEqual((cleared["classified"], cleared["class_sets"]), ({}, []))
+        self.assertEqual(cleared["telemetry"]["classifier_bytes"], 0)
+
+    def test_classifier_comes_off_the_state_admission(self):
+        (_, plain), _ = self.run_mode("unique", 100, memory=64 << 20)
+        (_, classified), _ = self.run_mode("unique", 100, memory=64 << 20, classification=THREATS_ALL)
+        used = classified["telemetry"]["classifier_bytes"]
+        self.assertEqual(plain["telemetry"]["state_limit"], state_limit(64 << 20))
+        self.assertEqual(classified["telemetry"]["state_limit"], state_limit((64 << 20) - used))
 
     def test_output_is_identical_under_any_hash_key(self):
         keys = ("00" * 16, "0123456789abcdeffedcba9876543210")

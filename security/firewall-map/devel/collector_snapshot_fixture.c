@@ -29,6 +29,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <time.h>
 #ifdef FM_SNAPSHOT_BENCHMARK
 #include <sys/resource.h>

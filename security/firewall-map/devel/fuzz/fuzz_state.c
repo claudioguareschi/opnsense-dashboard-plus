@@ -41,6 +41,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 
 #define RECORD sizeof(struct state)
 
@@ -75,9 +76,19 @@ static struct context *context(void) {
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   static struct context *ctx;
+  static struct classifier *classes;
   static uint64_t context_blocks;
   if (!ctx) {
+    struct fm_error error = {0};
     ctx = context();
+    /* half of each address family is threat-listed, the other half a country: both summary
+     * classes and every mask path are reached */
+    struct class_set sets[2] = {{0, 'T', "threat", CLASS_OK, 0}, {1, 'C', "country", CLASS_OK, 0}};
+    struct class_entry threat[2] = {{{4, {0}}, 1, false}, {{6, {0}}, 1, false}};
+    struct class_entry country[2] = {{{4, {128}}, 1, false}, {{6, {128}}, 1, false}};
+    const struct class_entry *entries[2] = {threat, country};
+    size_t counts[2] = {2, 2};
+    classes = classifier_build(sets, 2, entries, counts, &error);
     context_blocks = fm_heap_usage().blocks;
   }
   struct fm_error error = {0};
@@ -91,6 +102,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     struct aggregate *aggregate =
         stream ? aggregate_create(ctx, history, event_sample_observe, stream, &error) : NULL;
     bool ok = aggregate != NULL;
+    if (ok) aggregate_set_classifier(aggregate, classes);
     for (unsigned n = 0; ok && n < 64 && offset + RECORD <= size; n++, offset += RECORD) {
       struct state s;
       memcpy(&s, data + offset, RECORD);
@@ -105,7 +117,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     if (offset + RECORD > size) offset = size;
     ok = ok && aggregate_finish(aggregate, &error) &&
          ranking_update(ranking, aggregate, anchor, history_interval(history), &error);
-    struct threat_limits limits = {NULL, 0, 100, 4};
+    struct threat_limits limits = {NULL, 0, 100, 4, classifier_category(classes, 'T')};
     struct threat_summary *threats = ok ? threat_summary_create(aggregate, limits, &error) : NULL;
     ok = ok && threats;
     if (ok) {
@@ -119,7 +131,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       FILE *out = open_memstream(&buffer, &length);
       struct telemetry telemetry = {0};
       if (out) {
-        protocol_write_ranked(out, aggregate, ranking, threats, NULL, 0, 4, &telemetry, &error);
+        struct class_report report = {classes, NULL, 0};
+        protocol_write_ranked(out, aggregate, ranking, threats, NULL, 0, &report, 4, &telemetry, &error);
         fclose(out);
       }
       free(buffer);

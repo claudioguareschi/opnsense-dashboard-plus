@@ -117,13 +117,15 @@ bool protocol_frame(FILE *f, const void *data, size_t len, uint32_t *checksum,
 }
 
 /* Sizes of the fixed FMAGG4 records (PROTOCOL.md). */
-#define FLOW_RECORD_SIZE 159
+#define FLOW_RECORD_SIZE 167
 #define EVENT_RECORD_SIZE 194
-#define TELEMETRY_RECORD_SIZE 149
-#define FOOTER_RECORD_SIZE 101
+#define TELEMETRY_RECORD_SIZE 157
+#define FOOTER_RECORD_SIZE 117
+#define CLASSIFIED_RECORD_SIZE 26
+#define CLASS_SET_RECORD_SIZE 12
 
 struct sent {
-  uint64_t flows, candidates, matches, remotes, remote_candidates;
+  uint64_t flows, candidates, matches, remotes, remote_candidates, classified, class_sets;
 };
 
 static bool write_header(FILE *f, bool threats, uint32_t *checksum,
@@ -155,6 +157,7 @@ static bool write_flow(FILE *f, size_t rank, const struct flow *flow,
   protocol_put(&p, flow->delta.bytes_from_remote, 8);
   protocol_put(&p, flow->delta.bytes_to_remote, 8);
   protocol_put(&p, flow->delta.packets, 8);
+  protocol_put(&p, flow->classes, 8);
   put_double(&p, rates->rate_from_remote);
   put_double(&p, rates->rate_to_remote);
   put_double(&p, rates->packet_rate);
@@ -233,7 +236,8 @@ static bool write_telemetry(FILE *f, const struct telemetry *t,
                              t->candidates_omitted,
                              t->threat_remotes_omitted,
                              t->threat_candidates_omitted,
-                             t->event_history_evicted};
+                             t->event_history_evicted,
+                             t->classifier_bytes};
   for (size_t n = 0; n < sizeof(values) / sizeof(*values); n++)
     protocol_put(&p, values[n], 8);
   return protocol_frame(f, b, p - b, checksum, error);
@@ -256,6 +260,8 @@ static bool write_footer(FILE *f, struct sample_outcome outcome,
   protocol_put(&p, sent->matches, 8);
   protocol_put(&p, sent->remotes, 8);
   protocol_put(&p, sent->remote_candidates, 8);
+  protocol_put(&p, sent->classified, 8);
+  protocol_put(&p, sent->class_sets, 8);
   protocol_put(&p, checksum, 4);
   return protocol_frame(f, b, p - b, NULL, error) &&
          (fflush(f) == 0 || fm_error_set(error, errno, "FMAGG4 flush"));
@@ -364,6 +370,7 @@ static bool write_threats(FILE *f, const struct threat_summary *threats,
     protocol_put(&p, remote.remote_initiated_states, 8);
     protocol_put(&p, remote.local_initiated_states, 8);
     protocol_put(&p, remote.bytes, 8);
+    protocol_put(&p, remote.classes, 8);
     protocol_put(&p, remote.youngest, 4);
     if (!protocol_frame(f, b, p - b, checksum, error))
       return false;
@@ -382,10 +389,40 @@ static bool write_threats(FILE *f, const struct threat_summary *threats,
   return true;
 }
 
+/* Masks of the requested addresses (nonzero only), then every set's status. */
+static bool write_classification(FILE *f, const struct class_report *report,
+                                 uint32_t *checksum, struct sent *sent,
+                                 struct fm_error *error) {
+  for (size_t n = 0; n < report->address_count; n++) {
+    uint64_t mask = classifier_lookup(report->classifier, report->addresses[n]);
+    if (!mask) continue;
+    unsigned char b[CLASSIFIED_RECORD_SIZE], *p = b;
+    *p++ = RECORD_CLASSIFIED;
+    protocol_address_put(&p, report->addresses[n]);
+    protocol_put(&p, mask, 8);
+    if (!protocol_frame(f, b, p - b, checksum, error)) return false;
+    sent->classified++;
+  }
+  size_t sets = report->classifier ? classifier_set_count(report->classifier) : 0;
+  for (size_t n = 0; n < sets; n++) {
+    const struct class_set *set = classifier_set(report->classifier, n);
+    unsigned char b[CLASS_SET_RECORD_SIZE], *p = b;
+    *p++ = RECORD_CLASS_SET;
+    *p++ = (unsigned char)set->id;
+    *p++ = (unsigned char)set->category;
+    *p++ = (unsigned char)set->status;
+    protocol_put(&p, set->entries, 8);
+    if (!protocol_frame(f, b, p - b, checksum, error)) return false;
+    sent->class_sets++;
+  }
+  return true;
+}
+
 bool protocol_write_ranked(FILE *f, const struct aggregate *a,
                            const struct ranking *ranking,
                            const struct threat_summary *threats,
                            const struct event_match *matches, size_t count,
+                           const struct class_report *classes,
                            size_t candidates_per_kind, struct telemetry *telemetry,
                            struct fm_error *error) {
   uint32_t checksum = 0;
@@ -404,6 +441,8 @@ bool protocol_write_ranked(FILE *f, const struct aggregate *a,
       return false;
     sent.matches++;
   }
+  if (classes && !write_classification(f, classes, &checksum, &sent, error))
+    return false;
   return write_telemetry(f, telemetry, &checksum, error) &&
          write_footer(f, (struct sample_outcome){OUTCOME_SAMPLE, 0, 0, 0},
                       aggregate_counts(a), &sent, checksum, error);

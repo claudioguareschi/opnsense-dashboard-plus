@@ -24,6 +24,7 @@
 
 #ifndef FM_AGGREGATE_H
 #define FM_AGGREGATE_H
+#include "classify.h"
 #include "correlation.h"
 #include "history.h"
 struct aggregate;
@@ -44,6 +45,7 @@ struct flow {
   uint64_t states, bytes_from_remote, bytes_to_remote, remote_initiated_weight,
       local_initiated_weight, remote_initiated_states, local_initiated_states,
       first;
+  uint64_t classes; /* classification sets containing the remote */
   uint32_t oldest, youngest;
   struct state_delta delta;
 };
@@ -65,6 +67,9 @@ struct aggregate_counts {
 struct aggregate *aggregate_create(const struct context *, struct history *,
                                    tuple_observer observe, void *observer,
                                    struct fm_error *);
+/* The sample's classification snapshot (borrowed; NULL: no sets). Set before
+ * the first state. */
+void aggregate_set_classifier(struct aggregate *, const struct classifier *);
 void aggregate_destroy(struct aggregate *);
 bool aggregate_add(struct aggregate *, const struct state *, struct fm_error *);
 bool aggregate_finish(struct aggregate *, struct fm_error *);

@@ -45,9 +45,9 @@ def header(threats=False, version=collector.PROTOCOL_VERSION):
     return b"\x00" + struct.pack("!II", version, int(threats))
 
 
-def flow(rank=0, local="192.168.1.2", remote="203.0.113.3", rate=4.0):
+def flow(rank=0, local="192.168.1.2", remote="203.0.113.3", rate=4.0, classes=0):
     return b"".join((b"\x01", struct.pack("!I", rank), address(local), address(remote),
-                     struct.pack("!QQQIIQQQQQQ", 1, 400, 200, 20, 2, 1, 0, 9, 40, 20, 2),
+                     struct.pack("!QQQIIQQQQQQQ", 1, 400, 200, 20, 2, 1, 0, 9, 40, 20, 2, classes),
                      struct.pack("!ddddd", rate, 2.0, 0.2, 0.5, 3.0)))
 
 
@@ -55,8 +55,9 @@ def candidate(owner=0, kind=1, value=b"\x06"):
     return b"\x02" + struct.pack("!IBQQQH", owner, kind, 5, 1, 0, len(value)) + value
 
 
-def threat_remote(index=0):
-    return b"".join((b"\x03", struct.pack("!I", index), address("203.0.113.3"), struct.pack("!QQQI", 1, 0, 600, 2)))
+def threat_remote(index=0, classes=0):
+    return b"".join((b"\x03", struct.pack("!I", index), address("203.0.113.3"),
+                     struct.pack("!QQQQI", 1, 0, 600, classes, 2)))
 
 
 def threat_candidate(owner=0, kind=2):
@@ -76,9 +77,17 @@ def event(query=0, protocol=6, flags=b"\x01\x01"):
         flags, b"igb0".ljust(16, b"\0"), b"rule-label".ljust(64, b"\0")))
 
 
+def classified(value="203.0.113.3", mask=1):
+    return b"\x07" + address(value) + struct.pack("!Q", mask)
+
+
+def class_set(set_id=0, category="T", status=0, entries=12):
+    return b"\x08" + struct.pack("!BBBQ", set_id, ord(category), status, entries)
+
+
 def telemetry(interval=2.0):
-    values = (42, 7, interval, 0.01, 0.002, 1.0, 0.5, 1 << 20, 4096, 8192, 10, 0, 100000, 0, 0, 0, 0, 0, 0)
-    return b"\x06" + struct.pack("!IQdddddQQQQQQQQQQQQ", *values)
+    values = (42, 7, interval, 0.01, 0.002, 1.0, 0.5, 1 << 20, 4096, 8192, 10, 0, 100000, 0, 0, 0, 0, 0, 0, 0)
+    return b"\x06" + struct.pack("!IQdddddQQQQQQQQQQQQQ", *values)
 
 
 def response(records, outcome=(0, 0, 0, 0), counts=None, corrupt=0, magic=b"FMAGG4\0\0", footer=True):
@@ -88,9 +97,10 @@ def response(records, outcome=(0, 0, 0, 0), counts=None, corrupt=0, magic=b"FMAG
         body += encoded
         checksum = zlib.crc32(encoded, checksum)
     kinds = [record[0] for record in records if record]
-    sent = counts or (kinds.count(1), kinds.count(2), kinds.count(5), kinds.count(3), kinds.count(4))
+    sent = counts or (kinds.count(1), kinds.count(2), kinds.count(5), kinds.count(3), kinds.count(4),
+                      kinds.count(7), kinds.count(8))
     seen = (1, 1, 1, sent[0])
-    tail = b"\xff" + struct.pack("!IIQQQQQQQQQQQI", *outcome, *seen, *sent, (checksum + corrupt) & 0xffffffff)
+    tail = b"\xff" + struct.pack("!IIQQQQQQQQQQQQQI", *outcome, *seen, *sent, (checksum + corrupt) & 0xffffffff)
     return magic + body + (frame(tail) if footer else b"")
 
 
@@ -104,13 +114,15 @@ class Process:
 
 
 class CollectorProtocolTest(unittest.TestCase):
-    def decode(self, data, query_keys=(QUERY,), require_threat_summary=False):
+    def decode(self, data, query_keys=(QUERY,), require_threat_summary=False, categories=(),
+               asked=frozenset()):
         read_fd, write_fd = os.pipe()
         with os.fdopen(write_fd, "wb") as output:
             output.write(data)
         stream = os.fdopen(read_fd, "rb", buffering=0)
         try:
-            return collector._decode(stream, Process(), query_keys, require_threat_summary)
+            return collector._decode(stream, Process(), query_keys, require_threat_summary,
+                                     categories=categories, asked=asked)
         finally:
             stream.close()
 
@@ -146,6 +158,7 @@ class CollectorProtocolTest(unittest.TestCase):
         bad_label = event()[:130] + b"\xff" * 64
         cases = {
             "truncated": response(VALID)[:-1],
+            "bytes past the footer": response(VALID) + b"\0",
             "checksum": response(VALID, corrupt=1),
             "unexpected magic": response(VALID, magic=b"FMSTATE2"),
             "header version 0": response([header(version=0), telemetry()]),
@@ -165,7 +178,7 @@ class CollectorProtocolTest(unittest.TestCase):
             "event tuple": response([header(), event(protocol=17), telemetry()]),
             "event query id": response([header(), event(query=3), telemetry()]),
             "event flags": response([header(), event(flags=b"\x02\x00"), telemetry()]),
-            "count mismatch": response(VALID, counts=(2, 1, 1, 1, 1)),
+            "count mismatch": response(VALID, counts=(2, 1, 1, 1, 1, 0, 0)),
             "refusal with records": response(VALID, outcome=(1, 0, 10, 5)),
             "unknown outcome": response([header(), telemetry()], outcome=(9, 0, 0, 0)),
             "unknown record": response([header(), b"\x09" + b"x", telemetry()]),
@@ -179,6 +192,47 @@ class CollectorProtocolTest(unittest.TestCase):
         # the label bytes are invalid UTF-8: decoded with replacement, never an error
         result = self.decode(response([header(), bad_label, telemetry()]))
         self.assertEqual(result["matches"][QUERY]["rule"], "\ufffd" * 64)
+
+    def test_decodes_classification(self):
+        records = [header(True), flow(classes=2), threat_remote(classes=3), classified(mask=3),
+                   class_set(0, "T"), class_set(1, "C", status=1, entries=0), telemetry()]
+        result = self.decode(response(records), categories=("T", "C"), asked={"203.0.113.3"})
+        self.assertEqual(result["flows"][0]["classes"], 2)
+        self.assertEqual(result["threat_remotes"][0]["classes"], 3)
+        self.assertEqual(result["classified"], {"203.0.113.3": 3})
+        self.assertEqual(result["class_sets"], [
+            {"id": 0, "category": "T", "status": "ok", "entries": 12},
+            {"id": 1, "category": "C", "status": "missing", "entries": 0}])
+
+    def test_rejects_malformed_classification(self):
+        sets = [class_set(0, "T"), class_set(1, "C")]
+        cases = {
+            "flow mask outside the sets": [header(), flow(classes=4), *sets, telemetry()],
+            "threat mask outside the sets": [header(True), threat_remote(classes=8), *sets, telemetry()],
+            "address not asked": [header(), classified("198.51.100.9"), *sets, telemetry()],
+            "zero mask": [header(), classified(mask=0), *sets, telemetry()],
+            "duplicate address": [header(), classified(), classified(), *sets, telemetry()],
+            "set order": [header(), class_set(1, "C"), class_set(0, "T"), telemetry()],
+            "set category": [header(), class_set(0, "C"), telemetry()],
+            "set status": [header(), class_set(0, "T", status=9), telemetry()],
+            "entries of a missing set": [header(), class_set(0, "T", status=1, entries=5), telemetry()],
+            "unrequested set": [header(), *sets, class_set(2, "T"), telemetry()],
+            "classification before events": [header(), classified(), event(), *sets, telemetry()],
+        }
+        for name, records in cases.items():
+            with self.subTest(case=name), self.assertRaises(collector.CollectorError):
+                self.decode(response(records), categories=("T", "C"), asked={"203.0.113.3"})
+
+    def test_classification_request_rows(self):
+        rows, categories, asked = collector._class_rows(
+            ("g1", [("T", "FWMAP_Feodo"), ("C", "Country_CN")]), ["203.0.113.3", "203.0.113.3", "fe80::1"])
+        self.assertEqual(rows, ["CLASS 0 T FWMAP_Feodo", "CLASS 1 C Country_CN", "CLASSGEN g1",
+                                "K 203.0.113.3"])
+        self.assertEqual((categories, asked), (["T", "C"], {"203.0.113.3"}))
+        for invalid in (("g", [("X", "a")]), ("g", [("T", "bad name")]), ("g", [("T", "a"), ("C", "a")]),
+                        ("has space", [("T", "a")]), ("g", [("T", "a" * 32)])):
+            with self.subTest(invalid=invalid), self.assertRaises(collector.CollectorError):
+                collector._class_rows(invalid, ())
 
     def test_failure_report_carries_its_class(self):
         message = b"PF state ABI version 2, collector built for 1"

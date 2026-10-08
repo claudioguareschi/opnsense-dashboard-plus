@@ -37,8 +37,9 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #endif
-#if defined(FM_TEST_HOOKS) && !defined(__FreeBSD__)
+#ifdef FM_TEST_HOOKS
 #include <arpa/inet.h>
+#include <sys/socket.h>
 #include <stdio.h>
 #endif
 
@@ -376,8 +377,10 @@ static enum class_status read_table(int fd, const char *name, struct class_entry
   *count = kept;
   return CLASS_OK;
 }
-#elif defined(FM_TEST_HOOKS)
-/* Test builds: FM_TEST_CLASS_DIR/<name>.txt in `pfctl -t NAME -T show` form. */
+#endif
+#ifdef FM_TEST_HOOKS
+/* Test builds with FM_TEST_CLASS_DIR (on any system): <dir>/<name>.txt in `pfctl -t NAME -T show`
+ * form stands in for the PF table. */
 static enum class_status read_table_file(const char *name, struct class_entry **out,
                                          size_t *count, size_t budget, struct fm_error *error) {
   const char *dir = getenv("FM_TEST_CLASS_DIR");
@@ -435,19 +438,29 @@ struct classifier *classifier_load(struct class_set *sets, size_t set_count, str
   }
   struct class_entry *entries[CLASSIFY_MAX_SETS] = {0};
   size_t counts[CLASSIFY_MAX_SETS] = {0}, total = 0;
+#ifdef FM_TEST_HOOKS
+  bool test_tables = getenv("FM_TEST_CLASS_DIR") != NULL;
+#endif
 #ifdef __FreeBSD__
-  int fd = open("/dev/pf", O_RDONLY);
+  int fd = -1;
+#ifdef FM_TEST_HOOKS
+  if (!test_tables)
+#endif
+    fd = open("/dev/pf", O_RDONLY);
 #endif
   for (size_t s = 0; s < set_count; s++) {
     size_t budget = CLASSIFY_MAX_TOTAL_ENTRIES - total;
+#ifdef FM_TEST_HOOKS
+    if (test_tables)
+      sets[s].status = read_table_file(sets[s].name, &entries[s], &counts[s], budget, error);
+    else
+#endif
 #ifdef __FreeBSD__
-    sets[s].status = fd < 0 ? CLASS_UNREADABLE
-                            : read_table(fd, sets[s].name, &entries[s], &counts[s], budget, error);
-#elif defined(FM_TEST_HOOKS)
-    sets[s].status = read_table_file(sets[s].name, &entries[s], &counts[s], budget, error);
+      sets[s].status = fd < 0 ? CLASS_UNREADABLE
+                              : read_table(fd, sets[s].name, &entries[s], &counts[s], budget, error);
 #else
+      sets[s].status = CLASS_MISSING;
     (void)budget;
-    sets[s].status = CLASS_MISSING;
 #endif
     if (error->code)
       break;

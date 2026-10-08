@@ -34,6 +34,7 @@ struct remote_row {
   struct threat_remote remote;
   size_t first; /* first appearance: the stable tie-break */
   unsigned priority;
+  bool flagged;     /* evidence or a flagged classification */
   uint32_t kept; /* 1 + output index when kept, else 0 */
 };
 struct threat_summary {
@@ -111,8 +112,11 @@ struct threat_summary *threat_summary_create(const struct aggregate *aggregate,
       item->count = 1;
       item->value = row_count;
       rows[row_count++] = (struct remote_row){
-          .remote = {.address = flow->remote, .youngest = UINT32_MAX}, .first = n,
+          .remote = {.address = flow->remote, .classes = flow->classes, .youngest = UINT32_MAX},
+          .first = n,
           .priority = map_find(&evidence, key, 17) ? PRIORITY_EVIDENCE : PRIORITY_REMOTE_ONLY};
+      rows[row_count - 1].flagged = rows[row_count - 1].priority == PRIORITY_EVIDENCE ||
+                                    (flow->classes & limits.flagged);
     }
     struct remote_row *row = &rows[item->value];
     if (UINT64_MAX - flow->bytes_from_remote < flow->bytes_to_remote) {
@@ -133,10 +137,12 @@ struct threat_summary *threat_summary_create(const struct aggregate *aggregate,
     fm_error_set(error, errno, "threat remote order");
     goto fail;
   }
-  for (size_t n = 0; n < row_count; n++) order[n] = &rows[n];
-  qsort(order, row_count, sizeof(*order), compare_rows);
-  size_t kept = row_count < limits.remote_limit ? row_count : limits.remote_limit;
-  summary->remotes_omitted = row_count - kept;
+  size_t flagged = 0;
+  for (size_t n = 0; n < row_count; n++)
+    if (rows[n].flagged) order[flagged++] = &rows[n];
+  qsort(order, flagged, sizeof(*order), compare_rows);
+  size_t kept = flagged < limits.remote_limit ? flagged : limits.remote_limit;
+  summary->remotes_omitted = flagged - kept;
   summary->remotes = kept ? fm_calloc(kept, sizeof(*summary->remotes)) : NULL;
   if (kept && !summary->remotes) {
     fm_error_set(error, errno, "threat remote allocation");
@@ -168,6 +174,8 @@ struct threat_summary *threat_summary_create(const struct aggregate *aggregate,
       goto fail;
     }
     const struct remote_row *row = &rows[item->value];
+    /* values of remotes outside the summary are never indexed */
+    if (!row->kept) continue;
     unsigned char candidate_key[7 + CANDIDATE_VALUE_MAX], *key_end = candidate_key;
     uint32_t remote_id = (uint32_t)item->value;
     memcpy(key_end, &remote_id, sizeof(remote_id)); key_end += sizeof(remote_id);
@@ -180,7 +188,6 @@ struct threat_summary *threat_summary_create(const struct aggregate *aggregate,
     if (!seen) goto fail;
     if (seen->count) continue;
     seen->count = 1;
-    if (!row->kept) continue;
     /* per (remote, kind) count, kept in a second key without the value */
     unsigned char kind_key[5];
     memcpy(kind_key, &remote_id, 4);
