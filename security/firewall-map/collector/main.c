@@ -39,6 +39,7 @@
 #include "response.h"
 #include "snapshot.h"
 #include "threat_summary.h"
+#include "tracker.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <math.h>
@@ -73,6 +74,7 @@ struct class_config {
 struct engine {
   struct history *history;
   struct ranking *ranking;
+  struct tracker *tracker;
   struct event_history *events;
   /* the classification snapshot and what it was loaded for; replaced only
    * between samples, when the request's configuration differs */
@@ -333,6 +335,7 @@ static bool refuse(struct engine *e, struct sample_outcome refusal, uint64_t see
    * baseline because the counters in between were never observed. */
   history_reset(e->history);
   ranking_reset(e->ranking);
+  tracker_reset(e->tracker);
   measure_process(telemetry);
   struct response response;
   if (!response_begin(&response, error))
@@ -373,14 +376,39 @@ static bool refresh_classifier(struct engine *e, const struct class_config *want
   return true;
 }
 
+/* The sample's tracked-set report in the telemetry (PROTOCOL.md). */
+static void telemetry_track(struct telemetry *t, const struct tracker_report *report,
+                            struct aggregate_counts counts) {
+  t->regime = report->regime;
+  t->next_regime = report->next_regime;
+  t->quality_discovery = report->discovery;
+  t->quality_ranking = report->ranking;
+  t->quality_attribution = report->attribution;
+  t->discovery_error = report->discovery_error;
+  t->flows_total = report->flows;
+  t->flows_estimated = report->flows_estimated;
+  t->tracked_flows = report->tracked;
+  t->tracked_limit = report->limit;
+  t->exit_threshold = report->exit_threshold;
+  t->forced_limit = report->forced_limit;
+  t->forced_flows = counts.forced;
+  t->forced_refused = counts.forced_refused;
+  t->candidate_limit = report->candidate_limit;
+  t->candidate_evictions = counts.candidate_evictions;
+  t->join_limit = report->join_limit;
+  t->join_refused = counts.join_refused;
+  t->untracked_states = counts.untracked_states;
+  t->promoted = report->promoted;
+}
+
 static bool run_sample(struct engine *e, struct request *r, struct fm_error *error) {
   /* the snapshot persists across samples: it is loaded outside the sample
    * budget and its size comes off the state admission */
   if (!refresh_classifier(e, &r->classes, error))
     return false;
   uint64_t class_bytes = classifier_bytes(e->classifier);
-  uint64_t state_limit = budget_state_limit(
-      r->memory_budget > class_bytes ? r->memory_budget - class_bytes : 0);
+  struct budget_limits shares = budget_limits(r->memory_budget, class_bytes);
+  uint64_t state_limit = shares.states;
   struct telemetry telemetry = {.pid = (uint32_t)getpid(), .sequence = ++e->sequence,
                                 .interval = -1, .state_limit = state_limit,
                                 .classifier_bytes = class_bytes};
@@ -412,12 +440,25 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
                          ? aggregate_create(r->ctx, e->history, events ? event_sample_observe : NULL,
                                             events, error)
                          : NULL;
-  if (sample.aggregate)
+  /* the tracked set: who is tracked richly, who only reaches discovery */
+  struct admission admission;
+  struct map evidence = {0};
+  bool tracked = sample.aggregate && tracker_begin(e->tracker, e->ranking, shares, &admission, error);
+  for (size_t n = 0; tracked && n < r->evidence_count; n++) {
+    unsigned char key[17] = {r->evidence[n].af};
+    memcpy(key + 1, r->evidence[n].b, 16);
+    tracked = lookup(&evidence, key, sizeof(key), true, error) != NULL;
+  }
+  if (tracked) {
+    admission.threat_mask = classifier_category(e->classifier, 'T');
+    admission.evidence = &evidence;
     aggregate_set_classifier(sample.aggregate, e->classifier);
+    aggregate_set_admission(sample.aggregate, &admission);
+  }
   struct timespec wall = {0};
   /* presize the baseline from PF's own count (+10% for growth during the
    * dump) so the traversal does not rehash it */
-  bool ok = sample.aggregate &&
+  bool ok = tracked &&
             (!telemetry.preflight_states ||
              history_reserve(e->history, telemetry.preflight_states + telemetry.preflight_states / 10,
                              error)) &&
@@ -430,6 +471,20 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   telemetry.interval = ok ? history_interval(e->history) : -1;
   ok = ok && ranking_update(e->ranking, sample.aggregate, sample.anchor,
                             telemetry.interval, error);
+  struct tracker_report report = {0};
+  ok = ok && tracker_finish(e->tracker, sample.aggregate, e->ranking, sample.anchor,
+                            telemetry.interval, &report, error);
+  map_clear(&evidence);
+  if (ok) {
+    telemetry_track(&telemetry, &report, aggregate_counts(sample.aggregate));
+    struct aggregate_usage usage = aggregate_usage(sample.aggregate);
+    telemetry.baseline_bytes = history_bytes(e->history);
+    telemetry.tracked_bytes = usage.tracked;
+    telemetry.candidate_bytes = usage.candidates;
+    telemetry.join_bytes = usage.join;
+    telemetry.ranking_bytes = ranking_bytes(e->ranking);
+    telemetry.discovery_bytes = tracker_bytes(e->tracker);
+  }
   struct threat_limits limits = {r->evidence, r->evidence_count, r->threat_remotes,
                                  r->candidates_per_kind, classifier_category(e->classifier, 'T')};
   struct threat_summary *threats =
@@ -492,6 +547,7 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
 static void close_engine(struct engine *e) {
   history_destroy(e->history);
   ranking_destroy(e->ranking);
+  tracker_destroy(e->tracker);
   event_history_destroy(e->events);
   classifier_destroy(e->classifier);
 }
@@ -571,8 +627,9 @@ int main(int argc, char **argv) {
   struct engine engine = {
       .history = history_create(&error),
       .ranking = ranking_create(BUDGET_RANKED_FLOWS, FADE_SECONDS, RATE_SMOOTHING, &error),
+      .tracker = tracker_create(FADE_SECONDS, RATE_SMOOTHING, &error),
       .events = event_history_create(&error)};
-  if (!engine.history || !engine.ranking || !engine.events) {
+  if (!engine.history || !engine.ranking || !engine.tracker || !engine.events) {
     fprintf(stderr, "firewallmap-collector: %s\n", error.message);
     close_engine(&engine);
     return 1;

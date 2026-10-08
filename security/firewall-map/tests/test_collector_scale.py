@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src/opnsense/scripts/OPNsense/FirewallMap"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import collector  # noqa: E402
-from collector_build import budget_constant, compile_worker, state_limit  # noqa: E402
+from collector_build import budget_limits, compile_worker, state_limit  # noqa: E402
 
 CONTEXT = ({"8.8.8.1"}, [], {}, None)
 QUERY = ("tcp", "8.8.8.1", "30000", "9.9.9.9", "443")
@@ -57,6 +57,8 @@ class CollectorScaleTest(unittest.TestCase):
         (tables / "threats_all.txt").write_text("9.0.0.0/8\n")
         (tables / "threats_some.txt").write_text("9.0.0.0/24\n!9.0.0.128/25\n")
         (tables / "country.txt").write_text("9.0.0.0/16\n")
+        # flows 4096-4351 of the unique mode: past a 64 MiB budget's tracked-set limit
+        (tables / "threats_late.txt").write_text("9.0.16.0/24\n")
         cls.tables = str(tables)
 
     @classmethod
@@ -81,31 +83,114 @@ class CollectorScaleTest(unittest.TestCase):
         return results, (time.perf_counter() - started) / samples
 
     def test_high_cardinality_sample_stays_within_budget_and_response_bounds(self):
+        """Every state its own flow, all threat-listed: past the tracked-set limit the sample is
+        bounded, flagged flows beyond the forced cap are refused (counted), and memory stays within
+        the budget's shares."""
         count = 200000
         memory = 1024 << 20
-        (_, last), seconds = self.run_mode("unique", count, threat_summary=True, event_queries=[QUERY],
-                                           memory=memory, classification=THREATS_ALL)
+        (first, last), seconds = self.run_mode("unique", count, threat_summary=True, event_queries=[QUERY],
+                                               memory=memory, classification=THREATS_ALL)
         telemetry = last["telemetry"]
         print(f"\n  unique x{count}: {seconds:.2f} s/sample, heap peak {telemetry['heap_peak'] >> 20} MiB, "
-              f"limit {telemetry['state_limit']} states, max RSS {telemetry['max_rss'] >> 20} MiB")
+              f"limit {telemetry['state_limit']} states, tracked {telemetry['tracked_flows']} of "
+              f"{telemetry['tracked_limit']}, max RSS {telemetry['max_rss'] >> 20} MiB")
+        states, tracked, candidates, joins = budget_limits(memory, telemetry["classifier_bytes"])
         self.assertIsNone(last["refused"])
-        self.assertEqual(telemetry["state_limit"], state_limit(memory - telemetry["classifier_bytes"]))
+        self.assertEqual((telemetry["state_limit"], telemetry["tracked_limit"], telemetry["candidate_limit"],
+                          telemetry["join_limit"]), (states, tracked, candidates, joins))
         self.assertLess(telemetry["heap_peak"], memory)
+        # the first sample ran out of exact admission: bounded, and so is the next
+        self.assertEqual((first["regime"], first["telemetry"]["next_regime"]), ("bounded", 1))
+        self.assertEqual(last["quality"]["ranking"], "bounded")
+        self.assertLessEqual(telemetry["tracked_flows"], tracked + telemetry["forced_limit"])
+        self.assertGreater(telemetry["forced_refused"], 0)
+        self.assertEqual(last["quality"]["attribution"], "partial")
+        # the untracked flows were counted, approximately (HyperLogLog, 1.6% standard error)
+        self.assertTrue(last["counts"]["flows_estimated"])
+        self.assertLess(abs(last["counts"]["flows"] - count), count * 0.05)
+        self.assertEqual(last["quality"]["discovery"], "bounded")
         self.assertEqual(len(last["flows"]), collector.RANKED_FLOWS)
         self.assertEqual(len(last["threat_remotes"]), collector.THREAT_REMOTES)
-        self.assertEqual(telemetry["threat_remotes_omitted"], count - collector.THREAT_REMOTES)
-        # worst-case accounting holds: the derived limit admits no more than the budget pays for
-        per_state = (telemetry["heap_peak"] - (24 << 20)) / count
-        self.assertLess(per_state, budget_constant("BUDGET_BYTES_PER_STATE"))
+        self.assertEqual(telemetry["threat_remotes_omitted"], telemetry["tracked_flows"] - collector.THREAT_REMOTES)
 
     def test_candidates_per_flow_and_kind_are_capped(self):
         (_, last), _ = self.run_mode("ports", 5000)
         services = [row for row in last["candidates"] if row[1] == collector.SERVICE]
         self.assertEqual(len(last["flows"]), 1)
         self.assertEqual(len(services), collector.CANDIDATES_PER_KIND)
-        self.assertGreater(last["telemetry"]["candidates_omitted"], 4000)
+        # a (flow, kind) keeps a bounded summary of its values: the rest were evicted, and the
+        # sample's attribution says it is partial
+        # (services and remote targets: 32 kept, 16 sent, each)
+        self.assertEqual(last["telemetry"]["candidates_omitted"], 2 * (32 - collector.CANDIDATES_PER_KIND))
+        self.assertGreater(last["telemetry"]["candidate_evictions"], 4000)
+        self.assertEqual(last["quality"]["attribution"], "partial")
         # the heaviest were kept: their weights are not below any omitted one's (all equal here)
         self.assertEqual(len({row[0] for row in services}), 1)
+
+    def test_small_population_is_exact(self):
+        (*_, last), _ = self.run_mode("mixed", 3000, samples=3)
+        self.assertEqual(last["regime"], "exact")
+        self.assertEqual(last["quality"], {"discovery": "exact", "ranking": "exact", "attribution": "exact"})
+        self.assertFalse(last["counts"]["flows_estimated"])
+        self.assertEqual(last["counts"]["flows"], last["counts"]["tracked_flows"])
+        self.assertEqual(last["telemetry"]["untracked_states"], 0)
+
+    def test_regime_enters_bounded_and_returns_through_warming(self):
+        """64 MiB budget: about 2,450 tracked flows. 5,000 flows exhaust exact admission; the
+        bounded samples know the rest exactly (they fit the summaries); 1,000 flows fall below the
+        exit threshold and the next samples are exact again, with history warming for one fade
+        window."""
+        engine = self.engine()
+        memory = 64 << 20
+        tracked = budget_limits(memory)[1]
+        environment = {"FM_TEST_MODE": "unique", "FM_TEST_INTERVAL": "2", "FM_TEST_CLASS_DIR": self.tables,
+                       "FM_TEST_COUNTS": "5000,5000,5000,1000,1000"}
+        with patch.dict(os.environ, environment):
+            results = [engine.sample(*CONTEXT, memory=memory) for _ in range(5)]
+        exhausted, bounded, _, leaving, back = results
+        self.assertEqual((exhausted["regime"], exhausted["quality"]["ranking"]), ("bounded", "bounded"))
+        self.assertEqual(exhausted["telemetry"]["tracked_flows"], tracked)
+        self.assertEqual(bounded["regime"], "bounded")
+        self.assertLessEqual(bounded["telemetry"]["tracked_flows"], tracked)
+        # the untracked flows fit the summaries: discovery and the flow count stay exact
+        self.assertEqual((bounded["quality"]["discovery"], bounded["counts"]["flows"],
+                          bounded["counts"]["flows_estimated"]), ("exact", 5000, False))
+        # a flat population: no promotion beats an incumbent by the margin, the map does not reshuffle
+        self.assertEqual(bounded["telemetry"]["promoted"], 0)
+        self.assertEqual([row["key"] for row in bounded["flows"]], [row["key"] for row in results[2]["flows"]])
+        self.assertEqual((leaving["regime"], leaving["telemetry"]["next_regime"]), ("bounded", 0))
+        self.assertEqual((back["regime"], back["quality"]["ranking"]), ("exact", "warming"))
+
+    def test_threat_history_keeps_detail_for_flagged_flows_past_the_limit(self):
+        """Flagged flows that exact admission never reached are force-tracked during the pass and
+        pinned afterwards: their threat records keep inside host and service detail."""
+        engine = self.engine()
+        environment = {"FM_TEST_MODE": "unique", "FM_TEST_COUNT": "5000", "FM_TEST_INTERVAL": "2",
+                       "FM_TEST_CLASS_DIR": self.tables}
+        with patch.dict(os.environ, environment):
+            results = [engine.sample(*CONTEXT, memory=64 << 20, threat_summary=True,
+                                     classification=("late", [("T", "threats_late")])) for _ in range(3)]
+        for result in results:
+            self.assertEqual(result["regime"], "bounded")
+            remotes = [remote["address"] for remote in result["threat_remotes"]]
+            self.assertEqual(sorted(remotes), sorted(f"9.0.16.{n}" for n in range(256)))
+            self.assertEqual(result["telemetry"]["forced_refused"], 0)
+            for kind in (collector.INSIDE_HOST, collector.SERVICE):
+                owners = {row[0] for row in result["threat_candidates"] if row[1] == kind}
+                self.assertEqual(owners, set(range(256)), kind)
+
+    def test_heavy_untracked_flows_are_promoted(self):
+        engine = self.engine()
+        environment = {"FM_TEST_MODE": "late", "FM_TEST_COUNT": "4000", "FM_TEST_INTERVAL": "2",
+                       "FM_TEST_CLASS_DIR": self.tables}
+        with patch.dict(os.environ, environment):
+            results = [engine.sample(*CONTEXT, memory=64 << 20) for _ in range(4)]
+        promoting = results[1]
+        self.assertEqual(promoting["regime"], "bounded")
+        self.assertGreater(promoting["telemetry"]["promoted"], 0)
+        # the next sample tracks them: the heavy flows (index 3000 on: 9.0.11.184 and up) lead the map
+        top = [row["key"][1] for row in results[3]["flows"][:20]]
+        self.assertTrue(all(tuple(map(int, remote.split(".")))[1:] >= (0, 11, 184) for remote in top), top)
 
     def test_threat_summary_priority_and_remote_cap(self):
         engine = self.engine()

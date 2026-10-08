@@ -65,6 +65,14 @@ struct telemetry {
       preflight_states, skipped_af_translation, candidates_omitted,
       threat_remotes_omitted, threat_candidates_omitted, event_history_evicted,
       classifier_bytes;
+  /* the tracked set and the quality axes (tracker.h) */
+  uint64_t regime, next_regime, quality_discovery, quality_ranking, quality_attribution,
+      discovery_error, flows_total, flows_estimated, tracked_flows, tracked_limit,
+      exit_threshold, forced_limit, forced_flows, forced_refused, candidate_limit,
+      candidate_evictions, join_limit, join_refused, untracked_states, promoted;
+  /* accounted bytes by structure at the end of the sample */
+  uint64_t baseline_bytes, tracked_bytes, candidate_bytes, join_bytes, ranking_bytes,
+      discovery_bytes;
 };
 /* The sample's classification: set statuses, and the masks of the addresses
  * the request asked about (K rows). */

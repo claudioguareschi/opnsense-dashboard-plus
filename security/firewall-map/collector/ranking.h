@@ -42,6 +42,16 @@ bool ranking_update(struct ranking *, const struct aggregate *, double now,
 size_t ranking_count(const struct ranking *);
 size_t ranking_total(const struct ranking *);
 bool ranking_at(const struct ranking *, size_t, struct ranked_flow *);
+/* Every active flow of the last update in rank order (ranking_count stops at
+ * the limit): the tracked set's retention and incumbency use the full order. */
+size_t ranking_active(const struct ranking *);
+double ranking_score_at(const struct ranking *, size_t);
+/* The flow keys with rate history (the tracked set carried to the next
+ * sample), keyed as state_flow_key. */
+const struct map *ranking_keys(const struct ranking *);
+/* Keeps the history of the `pinned` keys and of the `keep` best others (by
+ * score at the last update, then first-seen order), forgetting the rest. */
+bool ranking_trim(struct ranking *, size_t keep, const struct map *pinned, struct fm_error *);
 /* Snapshot-only rate/order view, including quiet flows for Python's IDS policy.
  * Uses existing history, without updating rates or re-ranking. */
 bool ranking_snapshot_at(const struct ranking *, const struct aggregate *, size_t,

@@ -206,6 +206,10 @@ class FlowTracker:
         self.fade_seconds = fade_seconds
         self.flows = {}
         self.total_flows = 0
+        # the collector's quality axes for the last sample (CONTRACTS.md) and whether the flow
+        # total is an estimate (bounded discovery)
+        self.total_estimated = False
+        self.quality = None
         self.collector_visible = []
 
     def update_aggregate(self, aggregate, now):
@@ -214,6 +218,8 @@ class FlowTracker:
         rows_by_pair = {}
         protocols = {1: "icmp", 6: "tcp", 17: "udp", 58: "ipv6-icmp", 132: "sctp"}
         self.total_flows = aggregate["counts"]["flows"]
+        self.total_estimated = aggregate["counts"].get("flows_estimated", False)
+        self.quality = aggregate.get("quality")
         for row in aggregate["flows"]:
             total = _FlowTotals()
             total.states = row["states"]
@@ -389,6 +395,8 @@ def summarize_flows(tracker, geo, local_addresses, role, now, wall_time, hostnam
         "interval": INTERVAL,
         "carp": role,
         "tracked_flows": getattr(tracker, "total_flows", len(tracker.flows)),
+        "tracked_flows_estimated": getattr(tracker, "total_estimated", False),
+        "quality": getattr(tracker, "quality", None),
         "flows": flows,
         "locations": [locations[address] for address in sorted(locations)],
         "hostnames": resolved,

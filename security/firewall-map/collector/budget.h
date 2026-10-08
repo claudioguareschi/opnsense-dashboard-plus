@@ -25,23 +25,22 @@
 #ifndef FM_BUDGET_H
 #define FM_BUDGET_H
 #include <stdint.h>
-/* The helper's resource model (PROTOCOL.md, "Resource budgets").
+/* The helper's resource model (PROTOCOL.md, "Resource budgets";
+ * CONTRACTS.md, "Boundedness").
  *
- * Two controls bound everything the helper does per sample:
- *
- * 1. The memory budget (BUDGET row; accounted heap, alloc.c). Every per-sample
- *    structure (history, aggregate, candidates, correlation, ranking, threat
- *    summary) grows at most linearly with the PF states traversed, so the same
- *    budget derives the PF state admission ceiling: a sample whose state count
- *    exceeds it is refused before traversal (preflight) or as soon as the
- *    count passes it (backstop), and any allocation the budget refuses turns
- *    the sample into a refusal too. Refusals are not helper failures.
+ * 1. The memory budget (BUDGET row; accounted heap, alloc.c). After the
+ *    fixed structures and the classification snapshot, the rest is shared
+ *    out: the state baseline (the only structure that grows with PF's state
+ *    count; it derives the state admission limit), the tracked set T (rich
+ *    per-flow accounting and rate history), the attribution candidates and
+ *    the LAN-companion join. Each has an explicit entry cap derived from its
+ *    share; reaching one degrades quality (bounded ranking, partial
+ *    attribution), it never refuses the sample. A sample over the state
+ *    admission limit, or an allocation the budget refuses, is refused.
  *
  * 2. The output budget: ranked flows, candidates per (flow, kind), threat
  *    remotes and their candidates per (remote, kind), and event matches. It
- *    bounds the response and therefore all of Python's per-sample work.
- *
- * Nothing else is capped independently: every other size is derived. */
+ *    bounds the response and therefore all of Python's per-sample work. */
 
 /* Ranked flows sent per sample (the map's own limit). */
 #define BUDGET_RANKED_FLOWS 150
@@ -57,25 +56,42 @@
 #define BUDGET_MEMORY_MIN (UINT64_C(64) << 20)
 #define BUDGET_MEMORY_MAX (UINT64_C(16384) << 20)
 #define BUDGET_MEMORY_DEFAULT (UINT64_C(256) << 20)
-/* Accounted heap per PF state at a sample's peak in the worst case: every
- * state its own flow, remote and attribution values, with the compact
- * baseline, the per-flow aggregate and ranking structures and a threat
- * summary. Measured on LP64 with the synthetic reader's "unique" table after
- * the 0.60 Phase B changes (compact baseline, streamed IDS tuples): at most
- * 2,100 bytes per additional state between 100,000 and 300,000 states
- * (tests/test_collector_scale.py), plus a 25% margin. Tables with many states
- * per flow cost far less (about 56 bytes per state: the baseline alone), but
- * admission stays worst-case until Phase D bounds the per-flow structures.
- * Accounting counts requested bytes, not allocator overhead, so the figure
- * does not depend on the libc; how RSS relates to it on the target (jemalloc)
- * is pending FreeBSD calibration. */
-#define BUDGET_BYTES_PER_STATE 2624
-/* Accounted heap that does not scale with states: the IDS recent-tuple ring,
- * its sample window and rebuild copy (about 13 MB), request context at its
- * maxima, response bookkeeping. */
-#define BUDGET_FIXED_BYTES (UINT64_C(24) << 20)
+/* Accounted heap that does not scale with states or flows: the IDS
+ * recent-tuple ring, its sample window and rebuild copy (about 13 MB), the
+ * discovery summaries (about 9.5 MB), request context at its maxima, response
+ * bookkeeping. */
+#define BUDGET_FIXED_BYTES (UINT64_C(40) << 20)
+/* Shares of the rest, in percent. */
+#define BUDGET_BASELINE_SHARE 45
+#define BUDGET_TRACKED_SHARE 15
+#define BUDGET_CANDIDATE_SHARE 15
+#define BUDGET_JOIN_SHARE 25
+/* Accounted bytes per unit on LP64, with a margin over what the synthetic
+ * worst cases measure (unique flows, 90k to 300k states): a baseline entry
+ * at the table's load (57-64 measured); a tracked flow: aggregate row and
+ * index, rate history in two generations, ranking rows (750-800 measured)
+ * plus the threat summary's per-flow row; a candidate entry with its index
+ * (about 136); a join entry, LAN label or pending inside-flow label (about
+ * 128). */
+#define BUDGET_BASELINE_BYTES_PER_STATE 80
+#define BUDGET_BYTES_PER_TRACKED_FLOW 1536
+#define BUDGET_BYTES_PER_CANDIDATE 136
+#define BUDGET_BYTES_PER_JOIN 224
+/* The tracked set never shrinks below this (very small budgets). */
+#define BUDGET_TRACKED_MIN 1000
 
-static inline uint64_t budget_state_limit(uint64_t memory) {
-  return memory > BUDGET_FIXED_BYTES ? (memory - BUDGET_FIXED_BYTES) / BUDGET_BYTES_PER_STATE : 0;
+/* What the shares come to for a budget less the classification snapshot. */
+struct budget_limits {
+  uint64_t states, tracked, candidates, joins;
+};
+static inline struct budget_limits budget_limits(uint64_t memory, uint64_t classifier) {
+  uint64_t rest = memory > BUDGET_FIXED_BYTES + classifier ? memory - BUDGET_FIXED_BYTES - classifier : 0;
+  struct budget_limits l = {
+      rest / 100 * BUDGET_BASELINE_SHARE / BUDGET_BASELINE_BYTES_PER_STATE,
+      rest / 100 * BUDGET_TRACKED_SHARE / BUDGET_BYTES_PER_TRACKED_FLOW,
+      rest / 100 * BUDGET_CANDIDATE_SHARE / BUDGET_BYTES_PER_CANDIDATE,
+      rest / 100 * BUDGET_JOIN_SHARE / BUDGET_BYTES_PER_JOIN};
+  if (l.tracked < BUDGET_TRACKED_MIN) l.tracked = BUDGET_TRACKED_MIN;
+  return l;
 }
 #endif

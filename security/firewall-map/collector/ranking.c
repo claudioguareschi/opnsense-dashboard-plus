@@ -51,7 +51,7 @@ struct generation {
 struct ranking {
   struct generation previous, current;
   struct rank_row *rows, *scratch;
-  size_t rows_capacity, scratch_capacity, count, total, limit;
+  size_t rows_capacity, scratch_capacity, count, active, total, limit;
   uint64_t next_order;
   double fade, smoothing, sampled_at;
 };
@@ -112,7 +112,7 @@ void ranking_reset(struct ranking *r) {
     return;
   /* Forget rate state but keep buffers for reuse. */
   map_clear(&r->previous.keys);
-  r->count = r->total = 0;
+  r->count = r->active = r->total = 0;
   r->next_order = 0;
 }
 
@@ -217,12 +217,77 @@ bool ranking_update(struct ranking *r, const struct aggregate *aggregate,
   map_clear(&r->current.keys);
   r->next_order = next_order;
   r->total = total;
+  r->active = count;
   r->count = count < r->limit ? count : r->limit;
   r->sampled_at = now;
   return true;
 }
 
 size_t ranking_count(const struct ranking *r) { return r->count; }
+size_t ranking_active(const struct ranking *r) { return r->active; }
+double ranking_score_at(const struct ranking *r, size_t n) { return n < r->active ? r->rows[n].score : 0; }
+const struct map *ranking_keys(const struct ranking *r) { return &r->previous.keys; }
+
+struct keep_row {
+  size_t index;
+  double score;
+  uint64_t order;
+};
+static int keep_first(const void *left, const void *right) {
+  const struct keep_row *a = left, *b = right;
+  if (a->score != b->score) return a->score > b->score ? -1 : 1;
+  return a->order < b->order ? -1 : a->order > b->order;
+}
+bool ranking_trim(struct ranking *r, size_t keep, const struct map *pinned, struct fm_error *error) {
+  size_t used = r->previous.keys.used;
+  if (used <= keep)
+    return true;
+  struct keep_row *rows = fm_calloc(used, sizeof(*rows));
+  unsigned char *kept = rows ? fm_calloc(used, 1) : NULL;
+  if (!kept) {
+    fm_free(rows);
+    return fm_error_set(error, errno ? errno : ENOMEM, "ranking trim");
+  }
+  size_t others = 0;
+  for (size_t n = 0; n < used; n++) {
+    const struct item *i = r->previous.keys.order[n];
+    if (pinned && map_find(pinned, i->key, i->len)) {
+      kept[n] = 1;
+      continue;
+    }
+    const struct rate_state *v = &r->previous.values[i->id];
+    double activity = activity_at(r, v, r->sampled_at), rate = v->from_remote + v->to_remote;
+    rows[others++] = (struct keep_row){n, (rate > 1 ? rate : 1) * activity, v->order};
+  }
+  qsort(rows, others, sizeof(*rows), keep_first);
+  for (size_t n = 0; n < others && n < keep; n++)
+    kept[rows[n].index] = 1;
+  fm_free(rows);
+  /* the kept history becomes the committed generation, in its old order */
+  struct generation *next = &r->current;
+  map_clear(&next->keys);
+  bool ok = reserve((void **)&next->values, &next->capacity, used, sizeof(*next->values), error);
+  for (size_t n = 0; ok && n < used; n++) {
+    if (!kept[n]) continue;
+    const struct item *i = r->previous.keys.order[n];
+    struct item *copy = lookup(&next->keys, i->key, i->len, true, error);
+    if (!copy) {
+      ok = false;
+      break;
+    }
+    next->values[copy->id] = r->previous.values[i->id];
+  }
+  fm_free(kept);
+  if (!ok) {
+    map_clear(&next->keys);
+    return false;
+  }
+  struct generation retired = r->previous;
+  r->previous = *next;
+  r->current = retired;
+  map_clear(&r->current.keys);
+  return true;
+}
 size_t ranking_total(const struct ranking *r) { return r->total; }
 bool ranking_at(const struct ranking *r, size_t n, struct ranked_flow *out) {
   if (n >= r->count)

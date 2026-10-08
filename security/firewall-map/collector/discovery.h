@@ -72,4 +72,20 @@ struct cardinality {
 void cardinality_reset(struct cardinality *);
 void cardinality_add(struct cardinality *, const unsigned char key[FM_FLOW_KEY_SIZE]);
 uint64_t cardinality_estimate(const struct cardinality *);
+
+/* The discovery tier of one sample: Space-Saving summaries of the untracked
+ * flows' byte deltas, active states and new states, and their distinct
+ * count. Tracked flows are counted exactly elsewhere; the two populations
+ * are disjoint, so the flow total is tracked + `flows`. */
+#define DISCOVERY_BYTES_CAPACITY 65536
+#define DISCOVERY_STATES_CAPACITY 32768
+struct discovery {
+  struct summary *bytes, *states, *created;
+  struct cardinality flows;
+  uint64_t untracked_states;
+};
+bool discovery_init(struct discovery *, struct fm_error *);
+void discovery_reset(struct discovery *);
+void discovery_destroy(struct discovery *);
+size_t discovery_bytes(const struct discovery *);
 #endif

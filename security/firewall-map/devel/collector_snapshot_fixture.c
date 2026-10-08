@@ -67,7 +67,11 @@ static struct state make_state(size_t n, unsigned sample, const char *mode) {
   struct endpoint local = {address(kind >= 3 && kind != 4 ? "2001:4860::1" : "8.8.8.1"), (uint16_t)(30000 + n % 20000)};
   struct endpoint remote = {address(kind >= 3 && kind != 4 ? "2001:4860::2" : "9.9.9.9"), 443};
   struct endpoint inside = {address(kind >= 3 && kind != 4 ? "fd00::2" : "10.0.0.2"), local.port};
-  if (!strcmp(mode, "unique")) {
+  /* late: like unique, but the flows from index 3000 on carry 100 times the
+   * traffic (the heavy flows arrive after a small tracked set filled up) */
+  if (!strcmp(mode, "late") && n >= 3000)
+    s.pf_bytes[0] = 1000 + sample * 30000 + n % 50;
+  if (!strcmp(mode, "unique") || !strcmp(mode, "late")) {
     /* worst case: every state its own remote, flow, tuple, target and label */
     char text[64];
     snprintf(text, sizeof(text), "9.%u.%u.%u", (unsigned)(n >> 16) & 255, (unsigned)(n >> 8) & 255,
@@ -195,6 +199,14 @@ bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
   if (!mode) mode = "one";
   const char *size = getenv("FM_TEST_COUNT");
   size_t count = size ? strtoull(size, NULL, 10) : 12;
+  /* FM_TEST_COUNTS=<n1>,<n2>,...: the count of each sample (the last repeats) */
+  const char *counts = getenv("FM_TEST_COUNTS");
+  for (unsigned k = 1; counts && *counts; k++) {
+    char *end;
+    count = strtoull(counts, &end, 10);
+    if (k == sample || *end != ',') break;
+    counts = end + 1;
+  }
   bool churn = !strcmp(mode, "churn") && sample >= 3;
   for (size_t index = 0; index < count; index++) {
     size_t n = !strcmp(mode, "shuffle") ? count - index - 1 : index;

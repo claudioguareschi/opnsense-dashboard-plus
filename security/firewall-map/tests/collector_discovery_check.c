@@ -105,6 +105,16 @@ static int run(const char *name, size_t capacity, unsigned keys, unsigned count,
     printf("%s: reset\n", name);
     return 1;
   }
+  /* the same keys again after a reset: every one is new, counted once */
+  for (unsigned k = 0; k < keys && k < capacity; k++) {
+    unsigned char key[FM_FLOW_KEY_SIZE];
+    key_of(k, key);
+    summary_add(s, key, index_hash(key, sizeof(key)), 1);
+  }
+  if (summary_count(s) != (keys < capacity ? keys : capacity) || summary_evictions(s)) {
+    printf("%s: %zu keys after a reset\n", name, summary_count(s));
+    return 1;
+  }
   summary_destroy(s);
   return 0;
 }

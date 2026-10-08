@@ -119,7 +119,7 @@ bool protocol_frame(FILE *f, const void *data, size_t len, uint32_t *checksum,
 /* Sizes of the fixed FMAGG4 records (PROTOCOL.md). */
 #define FLOW_RECORD_SIZE 167
 #define EVENT_RECORD_SIZE 194
-#define TELEMETRY_RECORD_SIZE 157
+#define TELEMETRY_RECORD_SIZE 365
 #define FOOTER_RECORD_SIZE 117
 #define CLASSIFIED_RECORD_SIZE 26
 #define CLASS_SET_RECORD_SIZE 12
@@ -237,7 +237,33 @@ static bool write_telemetry(FILE *f, const struct telemetry *t,
                              t->threat_remotes_omitted,
                              t->threat_candidates_omitted,
                              t->event_history_evicted,
-                             t->classifier_bytes};
+                             t->classifier_bytes,
+                             t->regime,
+                             t->next_regime,
+                             t->quality_discovery,
+                             t->quality_ranking,
+                             t->quality_attribution,
+                             t->discovery_error,
+                             t->flows_total,
+                             t->flows_estimated,
+                             t->tracked_flows,
+                             t->tracked_limit,
+                             t->exit_threshold,
+                             t->forced_limit,
+                             t->forced_flows,
+                             t->forced_refused,
+                             t->candidate_limit,
+                             t->candidate_evictions,
+                             t->join_limit,
+                             t->join_refused,
+                             t->untracked_states,
+                             t->promoted,
+                             t->baseline_bytes,
+                             t->tracked_bytes,
+                             t->candidate_bytes,
+                             t->join_bytes,
+                             t->ranking_bytes,
+                             t->discovery_bytes};
   for (size_t n = 0; n < sizeof(values) / sizeof(*values); n++)
     protocol_put(&p, values[n], 8);
   return protocol_frame(f, b, p - b, checksum, error);
@@ -389,6 +415,15 @@ static bool write_threats(FILE *f, const struct threat_summary *threats,
   return true;
 }
 
+/* The footer's flow total is every flow of the sample, tracked or not (an
+ * estimate when the telemetry says so); the tracked count is in the telemetry. */
+static struct aggregate_counts footer_counts(const struct aggregate *a, const struct telemetry *t) {
+  struct aggregate_counts counts = aggregate_counts(a);
+  if (t->flows_total > counts.flows)
+    counts.flows = t->flows_total;
+  return counts;
+}
+
 /* Masks of the requested addresses (nonzero only), then every set's status. */
 static bool write_classification(FILE *f, const struct class_report *report,
                                  uint32_t *checksum, struct sent *sent,
@@ -445,7 +480,7 @@ bool protocol_write_ranked(FILE *f, const struct aggregate *a,
     return false;
   return write_telemetry(f, telemetry, &checksum, error) &&
          write_footer(f, (struct sample_outcome){OUTCOME_SAMPLE, 0, 0, 0},
-                      aggregate_counts(a), &sent, checksum, error);
+                      footer_counts(a, telemetry), &sent, checksum, error);
 }
 
 bool protocol_write_selected(FILE *f, const struct aggregate *a,
@@ -461,7 +496,7 @@ bool protocol_write_selected(FILE *f, const struct aggregate *a,
                      &telemetry.candidates_omitted, error) &&
          write_telemetry(f, &telemetry, &checksum, error) &&
          write_footer(f, (struct sample_outcome){OUTCOME_SAMPLE, 0, 0, 0},
-                      aggregate_counts(a), &sent, checksum, error);
+                      footer_counts(a, &telemetry), &sent, checksum, error);
 }
 
 bool protocol_write_refusal(FILE *f, struct sample_outcome outcome,

@@ -74,6 +74,14 @@
             engine_helper: {{ lang._('Process %s, started %s times; built for PF state ABI %s')|json_encode }},
             engine_version_warning: {{ lang._('Built on FreeBSD %s, running %s: compatibility is decided by the PF state check')|json_encode }},
             engine_limit: {{ lang._('Up to %s states (memory budget %s)')|json_encode }},
+            engine_tracking: {{ lang._('%s: %s of up to %s flows tracked, %s flows in all')|json_encode }},
+            engine_quality: {{ lang._('discovery %s, ranking %s, attribution %s')|json_encode }},
+            regime_exact: {{ lang._('Every flow tracked')|json_encode }},
+            regime_bounded: {{ lang._('Bounded')|json_encode }},
+            quality_exact: {{ lang._('exact')|json_encode }},
+            quality_bounded: {{ lang._('bounded')|json_encode }},
+            quality_warming: {{ lang._('warming')|json_encode }},
+            quality_partial: {{ lang._('partial')|json_encode }},
             engine_sample: {{ lang._('%s states: PF read %s ms, processing %s ms, memory peak %s')|json_encode }},
             engine_baseline: {{ lang._('first sample of this process: no rates yet')|json_encode }},
             engine_omitted: {{ lang._('%s states skipped (unsupported address-family translation), %s candidates and %s threat remotes over their budgets, %s recent tuples evicted')|json_encode }},
@@ -159,6 +167,15 @@
             $('#engine-sample').text(telemetry.sequence ? fill(T.engine_sample, count(engine.states),
                 ms(telemetry.dump_seconds || 0), ms(telemetry.processing_seconds || 0), megabytes(telemetry.heap_peak || 0))
                 + (engine.baseline ? ` (${T.engine_baseline})` : '') : '—');
+            // the tracked set and the quality axes (an estimated flow total is marked ≈)
+            const axis = (n, names) => T[`quality_${names[n] || names[0]}`];
+            $('#engine-tracking').html(telemetry.sequence ? escape(fill(T.engine_tracking,
+                telemetry.regime ? T.regime_bounded : T.regime_exact, count(telemetry.tracked_flows),
+                count(telemetry.tracked_limit), (telemetry.flows_estimated ? '≈' : '') + count(telemetry.flows_total)))
+                + `<br><small class="text-muted">${escape(fill(T.engine_quality,
+                    axis(telemetry.quality_discovery, ['exact', 'bounded']),
+                    axis(telemetry.quality_ranking, ['exact', 'warming', 'bounded']),
+                    axis(telemetry.quality_attribution, ['exact', 'warming', 'partial'])))}</small>` : '—');
             $('#engine-omitted').text(telemetry.sequence ? fill(T.engine_omitted, count(telemetry.skipped_af_translation),
                 count(telemetry.candidates_omitted), count(telemetry.threat_remotes_omitted),
                 count(telemetry.event_history_evicted)) : '—');
@@ -281,6 +298,7 @@
             <tr><td>{{ lang._('Process') }}</td><td id="engine-helper"></td></tr>
             <tr><td>{{ lang._('State limit') }}</td><td id="engine-limit"></td></tr>
             <tr><td>{{ lang._('Last collector sample') }}</td><td id="engine-sample"></td></tr>
+            <tr><td>{{ lang._('Flows') }}</td><td id="engine-tracking"></td></tr>
             <tr><td>{{ lang._('Left out') }}</td><td id="engine-omitted"></td></tr>
             <tr><td>{{ lang._('Rejected log lines') }}</td><td id="engine-rejected"></td></tr>
             <tr><td>{{ lang._('Problems') }}</td><td id="engine-problem"></td></tr>

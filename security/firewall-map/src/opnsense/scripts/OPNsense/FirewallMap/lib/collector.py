@@ -107,12 +107,21 @@ OMISSION_REASONS = ((1, "encoded_bytes"), (2, "state_count"), (4, "per_flow_evid
 SELECTION_POLICIES = {2: "bytes_desc_newest_identity_v1"}
 
 _FLOW = struct.Struct("!I17s17sQQQIIQQQQQQQddddd")
-_TELEMETRY = struct.Struct("!IQdddddQQQQQQQQQQQQQ")
+_TELEMETRY = struct.Struct("!IQddddd" + "Q" * 39)
 _TELEMETRY_FIELDS = ("pid", "sequence", "interval", "dump_seconds", "processing_seconds", "user_cpu",
                      "system_cpu", "max_rss", "heap_bytes", "heap_peak", "heap_blocks", "heap_budget",
                      "state_limit", "preflight_states", "skipped_af_translation", "candidates_omitted",
                      "threat_remotes_omitted", "threat_candidates_omitted", "event_history_evicted",
-                     "classifier_bytes")
+                     "classifier_bytes", "regime", "next_regime", "quality_discovery", "quality_ranking",
+                     "quality_attribution", "discovery_error", "flows_total", "flows_estimated",
+                     "tracked_flows", "tracked_limit", "exit_threshold", "forced_limit", "forced_flows",
+                     "forced_refused", "candidate_limit", "candidate_evictions", "join_limit", "join_refused",
+                     "untracked_states", "promoted", "baseline_bytes", "tracked_bytes", "candidate_bytes",
+                     "join_bytes", "ranking_bytes", "discovery_bytes")
+# the quality axes (collector/CONTRACTS.md), as the telemetry numbers them
+REGIMES = ("exact", "bounded")
+QUALITY = {"discovery": ("exact", "bounded"), "ranking": ("exact", "warming", "bounded"),
+           "attribution": ("exact", "warming", "partial")}
 _FOOTER = struct.Struct("!IIQQQQQQQQQQQQQI")
 
 
@@ -487,7 +496,10 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
             if len(data) != 1 + _TELEMETRY.size:
                 raise CollectorError("invalid FMAGG4 telemetry")
             telemetry = dict(zip(_TELEMETRY_FIELDS, _TELEMETRY.unpack_from(data, 1)))
-            if not all(math.isfinite(telemetry[name]) for name in _TELEMETRY_FIELDS[2:7]):
+            if not all(math.isfinite(telemetry[name]) for name in _TELEMETRY_FIELDS[2:7]) \
+                    or telemetry["regime"] >= len(REGIMES) or telemetry["next_regime"] >= len(REGIMES) \
+                    or telemetry["flows_estimated"] > 1 \
+                    or any(telemetry[f"quality_{axis}"] >= len(values) for axis, values in QUALITY.items()):
                 raise CollectorError("invalid FMAGG4 telemetry")
         elif kind == FOOTER:
             if len(data) != 1 + _FOOTER.size:
@@ -513,7 +525,11 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
     skipped = {"af_translation": telemetry["skipped_af_translation"]} if telemetry["skipped_af_translation"] else {}
     for match in matches.values():
         match["sample_degraded"] = bool(skipped)
+    quality = {axis: values[telemetry[f"quality_{axis}"]] for axis, values in QUALITY.items()}
+    if telemetry["discovery_error"] and quality["discovery"] == "bounded":
+        quality["discovery_error"] = telemetry["discovery_error"]
     return {"flows": flows, "skipped": skipped, "candidates": candidates, "matches": matches,
+            "quality": quality, "regime": REGIMES[telemetry["regime"]],
             "threat_remotes": threat_remotes, "threat_candidates": threat_candidates,
             "threat_summary": threats_present, "telemetry": telemetry,
             "classified": classified, "class_sets": class_sets,
@@ -521,6 +537,8 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
             "refused": refused and {"reason": refused, "kind": chr(context_kind) if context_kind else None,
                                     "actual": actual, "limit": limit},
             "counts": {"states": seen, "retained": retained, "mapped": mapped, "flows": flow_total,
+                       "flows_estimated": bool(telemetry["flows_estimated"]),
+                       "tracked_flows": telemetry["tracked_flows"],
                        "captured_flows": len(flows), "candidates": len(candidates), "matches": len(matches),
                        "threat_remotes": len(threat_remotes), "threat_candidates": len(threat_candidates)}}
 

@@ -47,9 +47,20 @@ def budget_constant(name):
     return int(match.group(1)) << int(match.group(2)) if match.group(1) else int(match.group(3))
 
 
-def state_limit(memory):
-    fixed, per_state = budget_constant("BUDGET_FIXED_BYTES"), budget_constant("BUDGET_BYTES_PER_STATE")
-    return (memory - fixed) // per_state if memory > fixed else 0
+def budget_limits(memory, classifier=0):
+    """collector/budget.h's budget_limits: (states, tracked flows, candidates, joins)."""
+    rest = max(0, memory - budget_constant("BUDGET_FIXED_BYTES") - classifier)
+    share = rest // 100
+
+    def part(name, unit):
+        return share * budget_constant(f"BUDGET_{name}_SHARE") // budget_constant(unit)
+    tracked = max(part("TRACKED", "BUDGET_BYTES_PER_TRACKED_FLOW"), budget_constant("BUDGET_TRACKED_MIN"))
+    return (part("BASELINE", "BUDGET_BASELINE_BYTES_PER_STATE"), tracked,
+            part("CANDIDATE", "BUDGET_BYTES_PER_CANDIDATE"), part("JOIN", "BUDGET_BYTES_PER_JOIN"))
+
+
+def state_limit(memory, classifier=0):
+    return budget_limits(memory, classifier)[0]
 
 
 def compile_worker(output, extra_flags=()):

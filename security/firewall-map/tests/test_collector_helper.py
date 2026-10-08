@@ -85,9 +85,10 @@ def class_set(set_id=0, category="T", status=0, entries=12):
     return b"\x08" + struct.pack("!BBBQ", set_id, ord(category), status, entries)
 
 
-def telemetry(interval=2.0):
-    values = (42, 7, interval, 0.01, 0.002, 1.0, 0.5, 1 << 20, 4096, 8192, 10, 0, 100000, 0, 0, 0, 0, 0, 0, 0)
-    return b"\x06" + struct.pack("!IQdddddQQQQQQQQQQQQQ", *values)
+def telemetry(interval=2.0, quality=(0,) * 26):
+    values = (42, 7, interval, 0.01, 0.002, 1.0, 0.5, 1 << 20, 4096, 8192, 10, 0, 100000, 0, 0, 0, 0, 0, 0, 0,
+              *quality)
+    return b"\x06" + struct.pack("!IQddddd" + "Q" * 39, *values)
 
 
 def response(records, outcome=(0, 0, 0, 0), counts=None, corrupt=0, magic=b"FMAGG4\0\0", footer=True):

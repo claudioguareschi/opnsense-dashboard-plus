@@ -133,9 +133,8 @@ void summary_destroy(struct summary *s) {
   fm_free(s);
 }
 void summary_reset(struct summary *s) {
-  /* clearing only the used slots keeps a reset proportional to the sample */
-  for (size_t n = 0; n < s->used; n++)
-    s->slots[find_slot(s, s->heap[n].entry.key, s->heap[n].hash)] = 0;
+  /* the whole index: clearing slot by slot would break probe chains */
+  memset(s->slots, 0, (s->mask + 1) * sizeof(*s->slots));
   s->used = 0;
   s->evictions = s->total = 0;
 }
@@ -245,4 +244,32 @@ uint64_t cardinality_estimate(const struct cardinality *c) {
   double estimate = alpha * m * m / sum;
   if (estimate <= 2.5 * m && zeros) estimate = m * log(m / (double)zeros);
   return (uint64_t)(estimate + 0.5);
+}
+
+bool discovery_init(struct discovery *d, struct fm_error *error) {
+  memset(d, 0, sizeof(*d));
+  d->bytes = summary_create(DISCOVERY_BYTES_CAPACITY, error);
+  d->states = d->bytes ? summary_create(DISCOVERY_STATES_CAPACITY, error) : NULL;
+  d->created = d->states ? summary_create(DISCOVERY_STATES_CAPACITY, error) : NULL;
+  if (!d->created) {
+    discovery_destroy(d);
+    return false;
+  }
+  return true;
+}
+void discovery_reset(struct discovery *d) {
+  summary_reset(d->bytes);
+  summary_reset(d->states);
+  summary_reset(d->created);
+  cardinality_reset(&d->flows);
+  d->untracked_states = 0;
+}
+void discovery_destroy(struct discovery *d) {
+  summary_destroy(d->bytes);
+  summary_destroy(d->states);
+  summary_destroy(d->created);
+  memset(d, 0, sizeof(*d));
+}
+size_t discovery_bytes(const struct discovery *d) {
+  return summary_bytes(d->bytes) + summary_bytes(d->states) + summary_bytes(d->created);
 }

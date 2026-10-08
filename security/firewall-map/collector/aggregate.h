@@ -26,7 +26,9 @@
 #define FM_AGGREGATE_H
 #include "classify.h"
 #include "correlation.h"
+#include "discovery.h"
 #include "history.h"
+#include "index.h"
 struct aggregate;
 /* Attribution evidence kept per flow, deduplicated by (flow, kind, value) and
  * weighted by traffic. The numbers are part of the FMAGG4 wire format. */
@@ -40,6 +42,9 @@ enum candidate_kind {
 };
 #define CANDIDATE_KIND_COUNT 6
 #define CANDIDATE_VALUE_MAX 64
+/* Distinct values kept per (flow, kind): a Space-Saving summary, twice the
+ * largest number sent (BUDGET_CANDIDATES_MAX is 64, the default 16). */
+#define CANDIDATE_SLOTS 32
 struct flow {
   struct addr local, remote;
   uint64_t states, bytes_from_remote, bytes_to_remote, remote_initiated_weight,
@@ -48,6 +53,9 @@ struct flow {
   uint64_t classes; /* classification sets containing the remote */
   uint32_t oldest, youngest;
   struct state_delta delta;
+  bool flagged;  /* threat-listed or evidence remote */
+  bool late;     /* admitted after some of its states streamed past (forced) */
+  bool evicted;  /* a candidate summary of this flow evicted or dropped a value */
 };
 struct candidate_view {
   uint32_t flow;
@@ -59,6 +67,28 @@ struct candidate_view {
 struct aggregate_counts {
   uint64_t seen, retained, mapped, skipped_af_translation;
   size_t flows, candidates;
+  /* bounded tiers (CONTRACTS.md, boundedness): states of flows outside the
+   * tracked set, whether exact admission ran out during the pass, flows
+   * admitted by the forced security cap and those it refused, candidate
+   * values evicted or dropped, and LAN-companion join entries refused */
+  uint64_t untracked_states;
+  bool exhausted;
+  uint64_t forced, forced_refused, candidate_evictions, join_refused;
+};
+/* How one sample admits flows into its tracked set (tracker.c decides).
+ * Exact regime: every new flow while fewer than `limit` are tracked (beyond
+ * that the pass is exhausted). Always: flows tracked by the previous sample
+ * (`known`) or promoted for this one, and flagged remotes (threat mask,
+ * evidence) up to `forced_limit`, while fewer than `hard_limit`. Everything
+ * else goes to the discovery tier. */
+enum track_regime { TRACK_EXACT = 0, TRACK_BOUNDED = 1 };
+struct admission {
+  enum track_regime regime;
+  size_t limit, hard_limit, forced_limit, candidate_limit, join_limit;
+  uint64_t threat_mask;
+  const struct map *known, *promoted; /* flow keys */
+  const struct map *evidence;         /* 17-byte address keys */
+  struct discovery *discovery;        /* reset by the caller */
 };
 /* Context and history are borrowed for the lifetime of this single sample.
  * Returned flow/candidate views remain valid until aggregate_destroy(). */
@@ -70,6 +100,9 @@ struct aggregate *aggregate_create(const struct context *, struct history *,
 /* The sample's classification snapshot (borrowed; NULL: no sets). Set before
  * the first state. */
 void aggregate_set_classifier(struct aggregate *, const struct classifier *);
+/* The sample's admission policy (borrowed; copied). Without one every flow
+ * is tracked and nothing is capped: tools and tests only. */
+void aggregate_set_admission(struct aggregate *, const struct admission *);
 void aggregate_destroy(struct aggregate *);
 bool aggregate_add(struct aggregate *, const struct state *, struct fm_error *);
 bool aggregate_finish(struct aggregate *, struct fm_error *);
@@ -78,4 +111,10 @@ const struct flow *aggregate_flow(const struct aggregate *, size_t);
 bool aggregate_candidate(const struct aggregate *, size_t,
                          struct candidate_view *);
 size_t aggregate_bytes(const struct aggregate *);
+/* Accounted bytes by tier: tracked flows (rows, index), candidates (entries,
+ * index), LAN-companion join (labels, both maps). */
+struct aggregate_usage {
+  size_t tracked, candidates, join;
+};
+struct aggregate_usage aggregate_usage(const struct aggregate *);
 #endif
