@@ -79,7 +79,7 @@ from lib.common import (
     protocol_name, requested, secure_umask, service_name, service_port_label, write_json,
     write_text,
 )
-from lib.config import interface_names, settings, topology, widget_in_use
+from lib.config import interface_names, ranking_profiles as configured_profiles, settings, topology, widget_in_use
 from lib.ids import (
     ALERT_BACKLOG_BYTES, EVE_LOG, AlertTracker, Correlator, alert_summary, connection_keys, connection_summary, firewall_blocks,
     ips_drops,
@@ -643,8 +643,8 @@ class Collector:
         self.reputation = Reputation(self.store)
         self.recorder = ThreatRecorder()
         # the active ranking profile (an administrative setting; refreshed with the settings)
-        self.profile = ranking_profiles.active()
-        self.collector_engine = CollectorEngine()
+        self.profile, self.profile_problem = ranking_profiles.resolve()
+        self.collector_engine = CollectorEngine(profile=self.profile)
         # set while the state collector is incompatible (another protocol, or a PF ABI it was not
         # built for): explicit status and slow pacing; the engine does not run the same binary again
         # (for a PF ABI mismatch: on the same running kernel)
@@ -708,11 +708,14 @@ class Collector:
         if self._due("settings", now, SETTINGS_REFRESH_SECONDS):
             self.values = settings()
             self.recording = recording_wanted(self.values)
-            # the active profile is the collector's startup configuration: a change of profile or of
-            # its definition restarts it (edits to other profiles change nothing here)
-            self.profile = ranking_profiles.active(self.values)
-            if self.collector_engine.set_profile(ranking_profiles.definition(self.profile)) \
-                    and self.collector_engine.starts:
+            # the active profile is the collector's startup configuration: another active profile or
+            # another definition of it (its fingerprint) restarts it; edits to other profiles change
+            # nothing here
+            profile, problem = ranking_profiles.resolve(self.values, configured_profiles())
+            if problem and problem != self.profile_problem:
+                log_error(f"{problem}: ranking with {profile['name']}")
+            self.profile, self.profile_problem = profile, problem
+            if self.collector_engine.set_profile(self.profile) and self.collector_engine.starts:
                 log_notice(f"ranking profile {self.profile['name']}: restarting the collector; the next sample "
                            "is a baseline")
             # DB-IP while it stands in for a failing MaxMind download (its credit is then shown)
@@ -1443,7 +1446,8 @@ def main(arguments):
     if arguments == ["tables"]:
         print(json.dumps(tables_report()))
     elif arguments == ["profiles"]:
-        print(json.dumps({"profiles": ranking_profiles.catalog(), "default": ranking_profiles.DEFAULT}))
+        print(json.dumps({"profiles": ranking_profiles.catalog(configured_profiles()),
+                          "default": ranking_profiles.DEFAULT}))
     elif arguments == ["ensure"]:
         if recording_wanted():
             subprocess.run([RC_SCRIPT, "onestart"], capture_output=True, check=False, timeout=10)

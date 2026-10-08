@@ -169,7 +169,7 @@ int main(int argc, char **argv) {
         for (size_t n = 0; n < count; n++) {
           unsigned char key[FM_FLOW_KEY_SIZE];
           key_of(rows[n].flow, key);
-          if (rows[n].weight) summary_add(s, key, index_hash(key, sizeof(key)), rows[n].weight);
+          if (rows[n].weight) summary_add(s, key, index_hash(key, sizeof(key)), rows[n].weight, 1);
         }
         clock_gettime(CLOCK_MONOTONIC, &t1);
         struct summary_entry top[TOP + 1];

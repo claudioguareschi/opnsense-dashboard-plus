@@ -31,7 +31,7 @@
 
 struct rate_state {
   double from_remote, to_remote, packets, last_active;
-  uint64_t order;
+  uint64_t order, volume; /* volume: bytes of the current activity episode */
   bool active;
 };
 struct rank_row {
@@ -196,6 +196,11 @@ bool ranking_update(struct ranking *r, const struct aggregate *aggregate,
         .order = old.order,
         .last_active = old.last_active,
         .active = old.active};
+    /* flow volume: bytes since the flow last became active (an episode ends
+     * when its activity has faded out) */
+    uint64_t moved = flow->delta.bytes_from_remote + flow->delta.bytes_to_remote;
+    next.volume = (activity_at(r, &old, now) > 0 ? old.volume : 0);
+    next.volume = moved > UINT64_MAX - next.volume ? UINT64_MAX : next.volume + moved;
     if (flow->delta.bytes_from_remote || flow->delta.bytes_to_remote) {
       next.last_active = now;
       next.active = true;
@@ -203,7 +208,7 @@ bool ranking_update(struct ranking *r, const struct aggregate *aggregate,
     current->values[item->id] = next;
     double activity = activity_at(r, &next, now);
     r->rates[n] = (struct flow_rates){next.from_remote, next.to_remote, next.packets, activity,
-                                      next.order};
+                                      next.order, next.volume};
     double rate = next.from_remote + next.to_remote;
     double score = (rate > 1.0 ? rate : 1.0) * activity;
     if (activity > 0)
@@ -229,58 +234,23 @@ bool ranking_update(struct ranking *r, const struct aggregate *aggregate,
 }
 
 size_t ranking_count(const struct ranking *r) { return r->count; }
-size_t ranking_active(const struct ranking *r) { return r->active; }
 bool ranking_rates(const struct ranking *r, size_t flow, struct flow_rates *out) {
   if (flow >= r->total)
     return false;
   *out = r->rates[flow];
   return true;
 }
-double ranking_score_at(const struct ranking *r, size_t n) { return n < r->active ? r->rows[n].score : 0; }
 const struct map *ranking_keys(const struct ranking *r) { return &r->previous.keys; }
 
-struct keep_row {
-  size_t index;
-  double score;
-  uint64_t order;
-};
-static int keep_first(const void *left, const void *right) {
-  const struct keep_row *a = left, *b = right;
-  if (a->score != b->score) return a->score > b->score ? -1 : 1;
-  return a->order < b->order ? -1 : a->order > b->order;
-}
-bool ranking_trim(struct ranking *r, size_t keep, const struct map *pinned, struct fm_error *error) {
+bool ranking_retain(struct ranking *r, const struct map *retained, struct fm_error *error) {
   size_t used = r->previous.keys.used;
-  if (used <= keep)
-    return true;
-  struct keep_row *rows = fm_calloc(used, sizeof(*rows));
-  unsigned char *kept = rows ? fm_calloc(used, 1) : NULL;
-  if (!kept) {
-    fm_free(rows);
-    return fm_error_set(error, errno ? errno : ENOMEM, "ranking trim");
-  }
-  size_t others = 0;
-  for (size_t n = 0; n < used; n++) {
-    const struct item *i = r->previous.keys.order[n];
-    if (pinned && map_find(pinned, i->key, i->len)) {
-      kept[n] = 1;
-      continue;
-    }
-    const struct rate_state *v = &r->previous.values[i->id];
-    double activity = activity_at(r, v, r->sampled_at), rate = v->from_remote + v->to_remote;
-    rows[others++] = (struct keep_row){n, (rate > 1 ? rate : 1) * activity, v->order};
-  }
-  qsort(rows, others, sizeof(*rows), keep_first);
-  for (size_t n = 0; n < others && n < keep; n++)
-    kept[rows[n].index] = 1;
-  fm_free(rows);
   /* the kept history becomes the committed generation, in its old order */
   struct generation *next = &r->current;
   map_clear(&next->keys);
   bool ok = reserve((void **)&next->values, &next->capacity, used, sizeof(*next->values), error);
   for (size_t n = 0; ok && n < used; n++) {
-    if (!kept[n]) continue;
     const struct item *i = r->previous.keys.order[n];
+    if (!map_find(retained, i->key, i->len)) continue;
     struct item *copy = lookup(&next->keys, i->key, i->len, true, error);
     if (!copy) {
       ok = false;
@@ -288,7 +258,6 @@ bool ranking_trim(struct ranking *r, size_t keep, const struct map *pinned, stru
     }
     next->values[copy->id] = r->previous.values[i->id];
   }
-  fm_free(kept);
   if (!ok) {
     map_clear(&next->keys);
     return false;

@@ -1,0 +1,4 @@
+{"schema_version":1,"profile":{"uuid":"6f36c7b2-70ad-4c41-a32d-4cb1e3fb1a01","name":"Balanced",
+ "weights":{"byte_rate":30,"packet_rate":10,"active_states":15,"new_state_rate":20,"flow_volume":10,"pf_blocked":5,"threat_intelligence":5,"ids_evidence":5},
+ "asset_importance":{"default_multiplier":1.0,"rules":[{"cidr":"192.168.70.0/24","multiplier":2.0},{"cidr":"192.168.70.5/32","multiplier":10.0},{"cidr":"192.168.1.2/32","multiplier":5.0}]},
+ "security_visibility":{"s3_min_percent":10,"s2_min_percent":5,"s1_min_percent":2},"direction":"equal"}}

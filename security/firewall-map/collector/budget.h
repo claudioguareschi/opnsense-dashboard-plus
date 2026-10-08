@@ -70,7 +70,9 @@
  * worst cases measure (unique flows, 90k to 300k states): a baseline entry
  * at the table's load (57-64 measured); a tracked flow: aggregate row and
  * index, rate history in two generations, ranking rows (750-800 measured)
- * plus the threat summary's per-flow row; a candidate entry with its index
+ * plus the threat summary's per-flow row and the active profile's per-flow
+ * state (asset multiplier, flow volume, effective score and the bounded
+ * regime's retention order: about 64); a candidate entry with its index
  * (about 136); a join entry, LAN label or pending inside-flow label (about
  * 128). */
 #define BUDGET_BASELINE_BYTES_PER_STATE 80

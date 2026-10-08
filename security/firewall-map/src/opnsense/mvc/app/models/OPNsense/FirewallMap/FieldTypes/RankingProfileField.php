@@ -32,24 +32,38 @@ use OPNsense\Core\Backend;
 
 /**
  * The active ranking profile, by UUID (never by name or position): the built-in profiles as the
- * collector lists them. Asking for them takes a configd call, so the list is built only when the
- * settings form or a validation needs it, once per request.
+ * collector lists them, then this model's custom profiles. Asking for the built-ins takes a configd
+ * call, so they are read only when the settings form or a validation needs them, once per request;
+ * the custom rows are read from the model each time (a profile added in this request counts).
  */
 class RankingProfileField extends BaseListField
 {
-    private function loadOptions()
+    private static $builtins = null;
+
+    public static function builtins()
     {
-        if (!$this->hasStaticOptions()) {
-            $options = [];
+        if (self::$builtins === null) {
+            self::$builtins = [];
             $report = json_decode((string)(new Backend())->configdRun('firewallmap profiles'), true);
             foreach ($report['profiles'] ?? [] as $profile) {
-                if (!empty($profile['uuid']) && !empty($profile['name'])) {
-                    $options[$profile['uuid']] = $profile['name'];
+                if (!empty($profile['builtin']) && !empty($profile['uuid']) && !empty($profile['name'])) {
+                    self::$builtins[$profile['uuid']] = $profile;
                 }
             }
-            $this->setStaticOptions($options);
         }
-        $this->internalOptionList = $this->getStaticOptions();
+        return self::$builtins;
+    }
+
+    private function loadOptions()
+    {
+        $options = [];
+        foreach (self::builtins() as $uuid => $profile) {
+            $options[$uuid] = $profile['name'];
+        }
+        foreach ($this->getParentModel()->profiles->profile->iterateItems() as $uuid => $profile) {
+            $options[$uuid] = (string)$profile->name;
+        }
+        $this->internalOptionList = $options;
     }
 
     public function getNodeData()

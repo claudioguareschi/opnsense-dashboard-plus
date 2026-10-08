@@ -105,6 +105,12 @@ def settings(path=SETTINGS_FILE):
     return values
 
 
+def ranking_profiles(path=SETTINGS_FILE):
+    """The custom ranking profile rows (lib/profiles.py reads them): [{"uuid", "name", ...}]."""
+    rows = _read(path).get("ranking_profiles")
+    return [row for row in rows if isinstance(row, dict) and row.get("uuid")] if isinstance(rows, list) else []
+
+
 def abuseipdb_key(path=SETTINGS_FILE):
     return str((_read(path).get("general") or {}).get("abuseipdb_key") or "").strip() or None
 

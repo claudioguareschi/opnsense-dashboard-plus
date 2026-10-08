@@ -27,6 +27,7 @@ are printed for the record; the assertions use only generous bounds, since they 
 development machine. Target (FreeBSD/netlink) costs are measured separately on the firewall.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -67,7 +68,7 @@ class CollectorScaleTest(unittest.TestCase):
         cls.directory.cleanup()
 
     def engine(self, profile=None):
-        """A helper started with `profile` (a definition), or with the base ranking (the oracle)."""
+        """A helper started with `profile` (a validated profile), or with the base ranking (the oracle)."""
         engine = collector.CollectorEngine(self.worker, profile=profile)
         self.addCleanup(engine.close)
         return engine
@@ -182,7 +183,18 @@ class CollectorScaleTest(unittest.TestCase):
                 self.assertEqual(owners, set(range(256)), kind)
 
     def profile(self, uuid):
-        return profiles.definition(profiles.BY_UUID[uuid])
+        return profiles.validate(profiles.BY_UUID[uuid])
+
+    @staticmethod
+    def custom(floors=(0, 0, 0), assets=(), default=1, **weights):
+        """A test profile: the given weights (the rest 0; totalling 100), floor percentages and
+        asset rules."""
+        return profiles.validate({
+            "uuid": "6f36c7b2-70ad-4c41-a32d-4cb1e3fb1a01", "name": "Test",
+            "weights": {feature: weights.get(feature, 0) for feature in profiles.FEATURES},
+            "floors": dict(zip(profiles.FLOORS, floors)), "default_multiplier": default,
+            "assets": [{"cidr": cidr, "multiplier": multiplier} for cidr, multiplier in assets],
+            "direction": "equal"})
 
     def remotes(self, result):
         return [flow["key"][1] for flow in result["flows"]]
@@ -230,7 +242,7 @@ class CollectorScaleTest(unittest.TestCase):
         facts = {"9.0.0.5": evidence.facts(40, 7, 1, True), "9.0.3.10": evidence.facts(40),
                  "9.0.3.11": evidence.facts(3), "9.0.3.12": evidence.facts(ids_alerts=2, ids_severity=3),
                  "9.0.3.13": evidence.facts(reputation=True)}
-        (_, last), _ = self.run_mode("unique", 1000, profile="activity=0 floors=1,2,147 states=1/10", evidence=facts,
+        (_, last), _ = self.run_mode("unique", 1000, profile=self.custom((0.5, 1, 97.5), active_states=100), evidence=facts,
                                      classification=("some", [("T", "threats_some")]))
         flows = {flow["key"][1]: flow for flow in last["flows"]}
         every = evidence.THREAT_LIST | evidence.PF_BLOCKED | evidence.IDS | evidence.IDS_HIGH | evidence.REPUTATION
@@ -270,7 +282,7 @@ class CollectorScaleTest(unittest.TestCase):
         # one flow qualifying for S3, S2 and S1 takes only the S3 place: the S2 and S1 places go
         # to the flows of those classes, and the rest to the general pool
         multiple, strong, listed = "9.0.3.200", "9.0.3.201", "9.0.3.202"
-        chosen = run("activity=0 floors=1,1,1 states=1/10",
+        chosen = run(self.custom((0.5, 0.5, 0.5), active_states=100),
                      {multiple: evidence.facts(40, 1, 1, True), strong: evidence.facts(40),
                       listed: evidence.facts(reputation=True)})
         self.assertEqual(len(chosen), 150)
@@ -278,10 +290,10 @@ class CollectorScaleTest(unittest.TestCase):
         self.assertEqual(set(chosen) - {multiple, strong, listed}, set(ordinary[:147]))
         # a reserved class also wins ordinary places on its score: five S3 flows, one reserved place
         high = {f"9.0.3.{n}": evidence.facts(ids_alerts=1, ids_severity=1) for n in range(100, 105)}
-        chosen = run("activity=0 floors=1,0,0 states=1/10 ids=100/1", high)
+        chosen = run(self.custom((0.5, 0, 0), active_states=1, ids_evidence=99), high)
         self.assertEqual(set(chosen[:5]), set(high))
         # unused floors return to the general pool
-        chosen = run("activity=0 floors=50,30,20 states=1/10", {})
+        chosen = run(self.custom((50, 30, 20), active_states=100), {})
         self.assertEqual(chosen, ordinary)
 
     def test_evidence_alone_forces_tracking_past_the_limit(self):
@@ -326,16 +338,34 @@ class CollectorScaleTest(unittest.TestCase):
                 self.assertEqual(raised.exception.failure_class, "request")
 
     def test_a_malformed_profile_stops_the_helper_at_startup(self):
-        for bad in ("activity=1 volume=1/1", "activity=1 states=1/10 states=2/10", "floors=100,40,20",
-                    "states=1/0", "classic"):
-            with self.subTest(profile=bad):
-                result = subprocess.run([self.worker, "--profile", bad], capture_output=True, text=True,
-                                        timeout=10, input="")
-                self.assertEqual(result.returncode, 2)
-                self.assertIn("PROFILE", result.stderr)
-        # one profile only
-        result = subprocess.run([self.worker, "--profile", "states=1/10", "--profile", "states=1/10"],
-                                capture_output=True, text=True, timeout=10, input="")
+        valid = profiles.document(self.profile(profiles.BALANCED))
+        def variant(change):
+            document = json.loads(json.dumps(valid))
+            change(document["profile"])
+            return json.dumps(document)
+        bad = {
+            "schema": json.dumps(dict(valid, schema_version=2)),
+            "weights": variant(lambda p: p["weights"].update(byte_rate=24)),
+            "feature": variant(lambda p: p["weights"].update(reputation=0)),
+            "cidr": variant(lambda p: p["asset_importance"].update(rules=[{"cidr": "10.0.0.1/8", "multiplier": 2}])),
+            "direction": variant(lambda p: p.update(direction="inbound")),
+            "keyword definition": "activity=1 states=1/10",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            for name, text in bad.items():
+                with self.subTest(profile=name):
+                    path = Path(directory) / "profile.json"
+                    path.write_text(text)
+                    result = subprocess.run([self.worker, "--profile", str(path)], capture_output=True, text=True,
+                                            timeout=10, input="")
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn("usage", result.stderr)
+        # one profile only, and a file that does not exist
+        result = subprocess.run([self.worker, "--profile", "/nonexistent.json"], capture_output=True, text=True,
+                                timeout=10, input="")
+        self.assertEqual(result.returncode, 2)
+        result = subprocess.run([self.worker, "--profile", "a", "--profile", "b"], capture_output=True, text=True,
+                                timeout=10, input="")
         self.assertEqual(result.returncode, 2)
 
     def test_a_new_profile_restarts_the_helper(self):
@@ -344,11 +374,58 @@ class CollectorScaleTest(unittest.TestCase):
             engine.sample(*CONTEXT)
             started = engine.metadata["pid"]
             self.assertFalse(engine.set_profile(self.profile(profiles.BALANCED)))
+            # a rename is not a new definition
+            self.assertFalse(engine.set_profile(dict(self.profile(profiles.BALANCED), name="Renamed")))
             self.assertEqual(engine.metadata["pid"], started)
             self.assertTrue(engine.set_profile(self.profile(profiles.SECURITY)))
             after = engine.sample(*CONTEXT)
         self.assertNotEqual(engine.metadata["pid"], started)
         self.assertTrue(after["baseline"])
+
+    def test_any_change_to_the_active_definition_restarts_the_helper(self):
+        base = self.custom(active_states=100)
+        changes = [self.custom(active_states=99, byte_rate=1), self.custom((1, 0, 0), active_states=100),
+                   self.custom(assets=[("192.168.1.0/24", 2)], active_states=100),
+                   self.custom(default=2, active_states=100), dict(base, uuid="0d1e4f0e-2b0c-4f39-9df1-6d1a7c1f2e10")]
+        for changed in changes:
+            engine = self.engine(base)
+            self.assertTrue(engine.set_profile(changed))
+            self.assertFalse(engine.set_profile(changed))
+
+    def test_asset_importance_multiplies_quality(self):
+        """assets: one state per flow, flow n from inside host 10.0.<n / 256>.<n % 256>. The /32
+        inside the 2x /24 is 10x (the longest prefix, never 20x); others keep the default."""
+        plain = self.custom(active_states=100)
+        weighted = self.custom(assets=[("10.0.1.0/24", 2), ("10.0.1.7/32", 10)], active_states=100)
+        (_, before), _ = self.run_mode("assets", 1000, profile=plain)
+        (_, after), _ = self.run_mode("assets", 1000, profile=weighted)
+        base = before["flows"][0]["score"]
+        self.assertTrue(all(abs(flow["score"] - base) < 1e-9 for flow in before["flows"]))
+        ratios = [round(flow["score"] / base, 6) for flow in after["flows"]]
+        self.assertEqual(after["flows"][0]["key"][1], "9.0.1.7")
+        self.assertEqual(ratios, [10.0] + [2.0] * (collector.RANKED_FLOWS - 1))
+        # the class of a flow never depends on its asset
+        self.assertTrue(all(flow["security_class"] == "S0" for flow in after["flows"]))
+
+    def test_asset_importance_reaches_bounded_discovery(self):
+        """assets_late at 64 MiB: about 2,450 flows fit T, and from index 3000 on flows carry 100x
+        the bytes. Ranked by byte rate alone the heavy ones are promoted and lead; with the light
+        flows 2600-2699 (never tracked at first) on a 1000x asset, discovery keeps them, promotion
+        compares effective scores, and they lead in bounded mode instead."""
+        lists = ("none", [])
+        environment = {"FM_TEST_MODE": "assets_late", "FM_TEST_COUNT": "4000", "FM_TEST_INTERVAL": "2",
+                       "FM_TEST_CLASS_DIR": self.tables}
+        light = {f"9.0.{n >> 8}.{n & 255}" for n in range(2600, 2700)}
+        tops = []
+        for rules in ((), [(cidr, 1000) for cidr in ("10.0.10.40/29", "10.0.10.48/28", "10.0.10.64/26",
+                                                             "10.0.10.128/29", "10.0.10.136/30")]):
+            engine = self.engine(self.custom(assets=rules, byte_rate=100))
+            with patch.dict(os.environ, environment):
+                results = [engine.sample(*CONTEXT, memory=64 << 20, classification=lists) for _ in range(4)]
+            self.assertEqual(results[1]["regime"], "bounded")
+            tops.append({row["key"][1] for row in results[3]["flows"][:100]})
+        self.assertFalse(tops[0] & light)
+        self.assertEqual(tops[1], light)
 
     def test_heavy_untracked_flows_are_promoted(self):
         engine = self.engine()

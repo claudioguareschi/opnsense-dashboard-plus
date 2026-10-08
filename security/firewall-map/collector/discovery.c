@@ -140,14 +140,17 @@ void summary_reset(struct summary *s) {
 }
 
 bool summary_add(struct summary *s, const unsigned char key[FM_FLOW_KEY_SIZE], uint64_t hash,
-                 uint64_t weight) {
+                 uint64_t weight, uint64_t unit) {
   if (!weight) return true;
+  if (!unit) unit = 1;
+  weight = weight > UINT64_MAX / unit ? UINT64_MAX : weight * unit;
   s->total = UINT64_MAX - s->total < weight ? UINT64_MAX : s->total + weight;
   size_t slot = find_slot(s, key, hash);
   if (s->slots[slot]) {
     size_t n = s->slots[slot] - 1;
     struct summary_entry *e = &s->heap[n].entry;
     e->count = UINT64_MAX - e->count < weight ? UINT64_MAX : e->count + weight;
+    if (unit > e->unit) e->unit = unit;
     sift_down(s, n, slot);
     return true;
   }
@@ -156,6 +159,7 @@ bool summary_add(struct summary *s, const unsigned char key[FM_FLOW_KEY_SIZE], u
     s->heap[n] = (struct node){.hash = hash};
     memcpy(s->heap[n].entry.key, key, FM_FLOW_KEY_SIZE);
     s->heap[n].entry.count = weight;
+    s->heap[n].entry.unit = unit;
     s->slots[slot] = (uint32_t)n + 1;
     sift_up(s, n, slot);
     return true;
@@ -168,6 +172,7 @@ bool summary_add(struct summary *s, const unsigned char key[FM_FLOW_KEY_SIZE], u
   memcpy(min->entry.key, key, FM_FLOW_KEY_SIZE);
   min->hash = hash;
   min->entry.error = floor;
+  min->entry.unit = unit;
   min->entry.count = UINT64_MAX - floor < weight ? UINT64_MAX : floor + weight;
   slot = find_slot(s, key, hash);
   s->slots[slot] = 1;

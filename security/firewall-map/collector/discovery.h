@@ -42,13 +42,18 @@ struct summary;
 struct summary_entry {
   unsigned char key[FM_FLOW_KEY_SIZE];
   uint64_t count, error; /* estimate, and its overcount bound */
+  uint64_t unit;         /* the largest weight unit the key was added with */
 };
 struct summary *summary_create(size_t capacity, struct fm_error *);
 void summary_destroy(struct summary *);
 void summary_reset(struct summary *);
-/* Adds weight to key (0 is ignored); hash is index_hash(key). */
+/* Adds weight x unit to key (weight 0 is ignored; the product saturates);
+ * hash is index_hash(key). The unit is a key's importance (the asset
+ * multiplier in discovery units, 1 without asset rules): a heavier unit keeps
+ * a key in the summary against lighter ones, and count / unit recovers the
+ * raw total while the key was added with one unit only. */
 bool summary_add(struct summary *, const unsigned char key[FM_FLOW_KEY_SIZE], uint64_t hash,
-                 uint64_t weight);
+                 uint64_t weight, uint64_t unit);
 size_t summary_count(const struct summary *);
 size_t summary_capacity(const struct summary *);
 uint64_t summary_evictions(const struct summary *);

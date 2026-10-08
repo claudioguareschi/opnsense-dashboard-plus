@@ -134,8 +134,9 @@ class RankingProfileSettingTest(unittest.TestCase):
         self.assertEqual(catalog["default"], profiles.DEFAULT)
         self.assertNotIn("classic", output.getvalue().lower())
         # an unknown or empty setting is the default, never another ranking
-        self.assertEqual(profiles.active({"ranking_profile": ""})["uuid"], profiles.DEFAULT)
-        self.assertEqual(profiles.active({"ranking_profile": "not-a-profile"})["uuid"], profiles.DEFAULT)
+        self.assertEqual(profiles.resolve({"ranking_profile": ""}), (profiles.validate(profiles.BY_UUID[profiles.DEFAULT]), None))
+        resolved, problem = profiles.resolve({"ranking_profile": "not-a-profile"})
+        self.assertEqual((resolved["uuid"], bool(problem)), (profiles.DEFAULT, True))
 
 if __name__ == "__main__":
     unittest.main()

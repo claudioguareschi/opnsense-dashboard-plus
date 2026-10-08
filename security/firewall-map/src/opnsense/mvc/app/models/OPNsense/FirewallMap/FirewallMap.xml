@@ -69,5 +69,113 @@
                 <ValidationMessage>The collector memory budget is between 64 and 16384 MiB.</ValidationMessage>
             </helper_memory>
         </general>
+        <!-- custom ranking profiles (the built-ins are fixed and live in the scripts); each row is
+             one complete operational policy, referenced by its UUID (general.ranking_profile) -->
+        <profiles>
+            <profile type="ArrayField">
+                <name type="TextField">
+                    <Required>Y</Required>
+                    <Mask>/^[^\x00-\x1f]{1,64}$/u</Mask>
+                    <ValidationMessage>A profile name is 1 to 64 characters on one line.</ValidationMessage>
+                </name>
+                <description type="TextField">
+                    <Mask>/^[^\x00-\x1f]{0,255}$/u</Mask>
+                    <ValidationMessage>A description is at most 255 characters on one line.</ValidationMessage>
+                </description>
+                <byte_rate type="NumericField">
+                    <Required>Y</Required>
+                    <Default>0</Default>
+                    <MinimumValue>0</MinimumValue>
+                    <MaximumValue>100</MaximumValue>
+                    <ValidationMessage>A weight is from 0 to 100.</ValidationMessage>
+                </byte_rate>
+                <packet_rate type="NumericField">
+                    <Required>Y</Required>
+                    <Default>0</Default>
+                    <MinimumValue>0</MinimumValue>
+                    <MaximumValue>100</MaximumValue>
+                    <ValidationMessage>A weight is from 0 to 100.</ValidationMessage>
+                </packet_rate>
+                <active_states type="NumericField">
+                    <Required>Y</Required>
+                    <Default>0</Default>
+                    <MinimumValue>0</MinimumValue>
+                    <MaximumValue>100</MaximumValue>
+                    <ValidationMessage>A weight is from 0 to 100.</ValidationMessage>
+                </active_states>
+                <new_state_rate type="NumericField">
+                    <Required>Y</Required>
+                    <Default>0</Default>
+                    <MinimumValue>0</MinimumValue>
+                    <MaximumValue>100</MaximumValue>
+                    <ValidationMessage>A weight is from 0 to 100.</ValidationMessage>
+                </new_state_rate>
+                <flow_volume type="NumericField">
+                    <Required>Y</Required>
+                    <Default>0</Default>
+                    <MinimumValue>0</MinimumValue>
+                    <MaximumValue>100</MaximumValue>
+                    <ValidationMessage>A weight is from 0 to 100.</ValidationMessage>
+                </flow_volume>
+                <pf_blocked type="NumericField">
+                    <Required>Y</Required>
+                    <Default>0</Default>
+                    <MinimumValue>0</MinimumValue>
+                    <MaximumValue>100</MaximumValue>
+                    <ValidationMessage>A weight is from 0 to 100.</ValidationMessage>
+                </pf_blocked>
+                <threat_intelligence type="NumericField">
+                    <Required>Y</Required>
+                    <Default>0</Default>
+                    <MinimumValue>0</MinimumValue>
+                    <MaximumValue>100</MaximumValue>
+                    <ValidationMessage>A weight is from 0 to 100.</ValidationMessage>
+                </threat_intelligence>
+                <ids_evidence type="NumericField">
+                    <Required>Y</Required>
+                    <Default>0</Default>
+                    <MinimumValue>0</MinimumValue>
+                    <MaximumValue>100</MaximumValue>
+                    <ValidationMessage>A weight is from 0 to 100.</ValidationMessage>
+                </ids_evidence>
+                <s3_min_percent type="NumericField">
+                    <Required>Y</Required>
+                    <Default>0</Default>
+                    <MinimumValue>0</MinimumValue>
+                    <MaximumValue>100</MaximumValue>
+                    <ValidationMessage>A floor is a percentage from 0 to 100.</ValidationMessage>
+                </s3_min_percent>
+                <s2_min_percent type="NumericField">
+                    <Required>Y</Required>
+                    <Default>0</Default>
+                    <MinimumValue>0</MinimumValue>
+                    <MaximumValue>100</MaximumValue>
+                    <ValidationMessage>A floor is a percentage from 0 to 100.</ValidationMessage>
+                </s2_min_percent>
+                <s1_min_percent type="NumericField">
+                    <Required>Y</Required>
+                    <Default>0</Default>
+                    <MinimumValue>0</MinimumValue>
+                    <MaximumValue>100</MaximumValue>
+                    <ValidationMessage>A floor is a percentage from 0 to 100.</ValidationMessage>
+                </s1_min_percent>
+                <default_multiplier type="NumericField">
+                    <Required>Y</Required>
+                    <Default>1</Default>
+                    <MinimumValue>0.000001</MinimumValue>
+                    <MaximumValue>1000000</MaximumValue>
+                    <ValidationMessage>A multiplier is from 0.000001 to 1000000.</ValidationMessage>
+                </default_multiplier>
+                <!-- asset importance rules: one "CIDR multiplier" per line (an address alone is a host) -->
+                <assets type="TextField"/>
+                <direction type="OptionField">
+                    <Required>Y</Required>
+                    <Default>equal</Default>
+                    <OptionValues>
+                        <equal>Equal</equal>
+                    </OptionValues>
+                </direction>
+            </profile>
+        </profiles>
     </items>
 </model>

@@ -51,16 +51,6 @@
     </field>
     <field>
         <type>header</type>
-        <label>Ranking</label>
-    </field>
-    <field>
-        <id>firewallmap.general.ranking_profile</id>
-        <label>Ranking profile</label>
-        <type>dropdown</type>
-        <help>How the collector chooses the flows every map and dashboard shows. Balanced: traffic with connection counts, and places kept for flows with security evidence. Bandwidth: byte and packet rates. Connections: the most states and new connections. Security: flows with security evidence first, then connection activity. After a change the ranking settles over a few seconds.</help>
-    </field>
-    <field>
-        <type>header</type>
         <label>Threats</label>
     </field>
     <field>

@@ -68,10 +68,19 @@ static struct state make_state(size_t n, unsigned sample, const char *mode) {
   struct endpoint remote = {address(kind >= 3 && kind != 4 ? "2001:4860::2" : "9.9.9.9"), 443};
   struct endpoint inside = {address(kind >= 3 && kind != 4 ? "fd00::2" : "10.0.0.2"), local.port};
   /* late: like unique, but the flows from index 3000 on carry 100 times the
-   * traffic (the heavy flows arrive after a small tracked set filled up) */
-  if (!strcmp(mode, "late") && n >= 3000)
+   * traffic (the heavy flows arrive after a small tracked set filled up);
+   * assets and assets_late: unique and late, each flow from its own inside
+   * host 10.0.<n / 256>.<n % 256> (asset importance) */
+  bool assets = !strcmp(mode, "assets") || !strcmp(mode, "assets_late");
+  bool late = !strcmp(mode, "late") || !strcmp(mode, "assets_late");
+  if (late && n >= 3000)
     s.pf_bytes[0] = 1000 + sample * 30000 + n % 50;
-  if (!strcmp(mode, "unique") || !strcmp(mode, "late")) {
+  if (assets) {
+    char text[64];
+    snprintf(text, sizeof(text), "10.0.%u.%u", (unsigned)(n >> 8) & 255, (unsigned)n & 255);
+    inside.a = address(text);
+  }
+  if (!strcmp(mode, "unique") || late || assets) {
     /* worst case: every state its own remote, flow, tuple, target and label */
     char text[64];
     snprintf(text, sizeof(text), "9.%u.%u.%u", (unsigned)(n >> 16) & 255, (unsigned)(n >> 8) & 255,

@@ -71,7 +71,7 @@ static int run(const char *name, size_t capacity, unsigned keys, unsigned count,
     uint64_t weight = 1 + next() % 1500;
     unsigned char key[FM_FLOW_KEY_SIZE];
     key_of(k, key);
-    summary_add(s, key, index_hash(key, sizeof(key)), weight);
+    summary_add(s, key, index_hash(key, sizeof(key)), weight, 1);
     exact[k] += weight;
   }
   uint64_t floor = summary_floor(s);
@@ -109,7 +109,7 @@ static int run(const char *name, size_t capacity, unsigned keys, unsigned count,
   for (unsigned k = 0; k < keys && k < capacity; k++) {
     unsigned char key[FM_FLOW_KEY_SIZE];
     key_of(k, key);
-    summary_add(s, key, index_hash(key, sizeof(key)), 1);
+    summary_add(s, key, index_hash(key, sizeof(key)), 1, 1);
   }
   if (summary_count(s) != (keys < capacity ? keys : capacity) || summary_evictions(s)) {
     printf("%s: %zu keys after a reset\n", name, summary_count(s));

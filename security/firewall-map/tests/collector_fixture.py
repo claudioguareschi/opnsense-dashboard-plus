@@ -34,7 +34,7 @@ import ipaddress
 import time
 from types import SimpleNamespace
 
-from support import COMMON, PF, REFERENCE, REFERENCE_THREATS
+from support import COLLECTOR, COMMON, PF, REFERENCE, REFERENCE_THREATS
 
 
 def address(value):
@@ -123,8 +123,11 @@ class CollectorFixture:
         self.snapshot_open = False
 
     def set_profile(self, profile):
-        """Like the helper: a new definition restarts it (counted), the same one changes nothing."""
-        if profile == self.profile:
+        """Like the engine: another UUID or definition (fingerprint) restarts it (counted), the same
+        one changes nothing."""
+        key = COLLECTOR.state_collector.CollectorEngine._profile_key
+        if key(profile) == key(self.profile):
+            self.profile = profile
             return False
         if self.profile is not None:
             self.restarts += 1

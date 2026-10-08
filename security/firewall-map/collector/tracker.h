@@ -27,6 +27,7 @@
 #define FM_TRACKER_H
 #include "aggregate.h"
 #include "budget.h"
+#include "profile.h"
 #include "ranking.h"
 
 /* The tracked set T and its two regimes (CONTRACTS.md, "Tracked set").
@@ -37,10 +38,14 @@
  * limit is reached during a pass, that whole sample is bounded and the next
  * one starts in the bounded regime.
  *
- * Bounded: T keeps the flows with the best scores, flagged flows (pinned)
- * and the discovery tier's heaviest untracked flows, promoted at the end of
- * a sample for the next one; a promotion displaces an incumbent only when
- * its byte rate beats the incumbent's score by the incumbency margin. The
+ * Bounded: T keeps the selected flows, flagged flows (pinned) and the best
+ * others by effective score (the active profile's, asset importance
+ * included; the base score without a profile), and the discovery tier's
+ * best untracked flows, promoted at the end of a sample for the next one: a
+ * promotion displaces an incumbent only when its estimated effective score
+ * beats the incumbent's by the incumbency margin. Discovery counts are
+ * weighted by asset importance, so an important flow is not lost to heavier
+ * unimportant ones before it can be compared. The
  * collector returns to the exact regime when the estimated flow count falls
  * below the exit threshold; history stays warming for one fade window.
  *
@@ -54,8 +59,9 @@ enum quality_ranking { RANKING_EXACT = 0, RANKING_WARMING = 1, RANKING_BOUNDED =
 enum quality_attribution { ATTRIBUTION_EXACT = 0, ATTRIBUTION_WARMING = 1, ATTRIBUTION_PARTIAL = 2 };
 /* A promotion must beat the incumbent it displaces by this factor. */
 #define TRACK_INCUMBENCY_MARGIN 1.25
-/* Flows promoted per sample at most (byte band; each state band gets a
- * quarter), and flagged flows admitted beyond T. */
+/* Flows promoted per sample at most (candidates: the byte summary's top, and
+ * a quarter of that from each state summary when a profile is active), and
+ * flagged flows admitted beyond T. */
 #define TRACK_PROMOTE_MAX 1024
 #define TRACK_PROMOTE_STATES_MAX 256
 #define TRACK_FORCED_MAX 4096
@@ -84,16 +90,13 @@ void tracker_reset(struct tracker *);
  * admission policy (evidence and threat mask are the caller's). */
 bool tracker_begin(struct tracker *, struct ranking *, struct budget_limits, struct admission *,
                    struct fm_error *);
-/* What the active profile needs from the next sample's tracked set: the
- * flows it selected (kept tracked), and, when it ranks by state counts, the
- * smallest active-state count and new-state rate of a full selection (0 when
- * the selection has room): an untracked flow is promoted on those bands only
- * when it beats that edge by the incumbency margin. */
+/* What the next sample's tracked set needs from this one's selection: the
+ * flows selected (kept tracked), and the ranker, whose effective scores
+ * order retention and promotion (and whose profile estimates candidates). */
 struct track_hints {
   const struct ranked_flow *selected;
   size_t selected_count;
-  bool states, created;
-  double states_edge, created_edge;
+  const struct ranker *ranker;
 };
 /* After the sample's ranking update and profile selection: quality, regime
  * transition, pinned flows and promotions for the next sample. */

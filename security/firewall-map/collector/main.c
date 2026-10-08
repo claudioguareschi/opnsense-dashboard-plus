@@ -473,35 +473,20 @@ static bool snapshot_candidates(struct engine *e, const struct aggregate *a,
 
 /* The active profile's selection as the response's ranked flows (rank
  * order), and what the tracked set must know about it. */
-static bool selection_rows(struct engine *e, const struct aggregate *a, double interval,
-                           struct ranked_flow **rows, struct track_hints *hints,
+static bool selection_rows(struct engine *e, struct ranked_flow **rows, struct track_hints *hints,
                            struct fm_error *error) {
   const struct selected *chosen;
   size_t count = ranker_selection(e->ranker, &chosen);
   *rows = count ? fm_calloc(count, sizeof(**rows)) : NULL;
   if (count && !*rows)
     return fm_error_set(error, errno, "ranked flows");
-  double least_states = INFINITY, least_created = INFINITY;
   for (size_t k = 0; k < count; k++) {
     struct flow_rates rates;
     ranking_rates(e->ranking, chosen[k].flow, &rates);
     (*rows)[k] = (struct ranked_flow){chosen[k].flow, rates.rate_from_remote, rates.rate_to_remote,
                                       rates.packet_rate, rates.activity, chosen[k].score};
-    double s = profile_value(a, e->ranking, chosen[k].flow, FEATURE_STATES, interval);
-    double c = profile_value(a, e->ranking, chosen[k].flow, FEATURE_NEW_STATE_RATE, interval);
-    least_states = s < least_states ? s : least_states;
-    least_created = c < least_created ? c : least_created;
   }
-  /* a profile that ranks by states or new states promotes on those bands:
-   * past the smallest value of a full selection (0 while it has room) */
-  const struct profile *def = ranker_profile(e->ranker);
-  bool full = count == BUDGET_RANKED_FLOWS;
-  hints->selected = *rows;
-  hints->selected_count = count;
-  hints->states = def && def->weight[FEATURE_STATES] > 0;
-  hints->created = def && def->weight[FEATURE_NEW_STATE_RATE] > 0;
-  hints->states_edge = hints->states && full ? least_states : 0;
-  hints->created_edge = hints->created && full ? least_created : 0;
+  *hints = (struct track_hints){*rows, count, e->ranker};
   return true;
 }
 
@@ -563,6 +548,7 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   }
   if (tracked) {
     admission.threat_mask = classifier_category(e->classifier, 'T');
+    admission.profile = ranker_profile(e->ranker);
     admission.evidence = &evidence;
     admission.evidence_facts = r->evidence_facts;
     aggregate_set_classifier(sample.aggregate, e->classifier);
@@ -591,7 +577,7 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   struct track_hints hints = {0};
   ok = ok && ranker_select(e->ranker, sample.aggregate, e->ranking, telemetry.interval,
                            BUDGET_RANKED_FLOWS, error) &&
-       selection_rows(e, sample.aggregate, telemetry.interval, &selected, &hints, error);
+       selection_rows(e, &selected, &hints, error);
   struct tracker_report report = {0};
   ok = ok && tracker_finish(e->tracker, sample.aggregate, e->ranking, sample.anchor,
                             telemetry.interval, &hints, &report, error);
@@ -749,15 +735,16 @@ int main(int argc, char **argv) {
     return print_version();
   if (argc == 2 && !strcmp(argv[1], "--selftest"))
     return self_test();
-  /* --profile <definition>: the active ranking profile, startup configuration
-   * compiled once and immutable for this process (profile.h); a new profile is
-   * a new process. Without it, the base ranking (the regression oracle). */
-  struct profile profile;
-  const char *why = "profile";
+  /* --profile <file>: the active ranking profile (schema-v1 JSON), startup
+   * configuration compiled once and immutable for this process (profile.h); a
+   * changed profile is a new process. Without it, the base ranking (the
+   * regression oracle). */
+  struct profile profile = {0};
+  char why[256] = "";
   bool scored = argc == 3 && !strcmp(argv[1], "--profile");
-  if ((argc != 1 && !scored) || (scored && !profile_parse(argv[2], &profile, &why))) {
+  if ((argc != 1 && !scored) || (scored && !profile_load(argv[2], &profile, why, sizeof(why)))) {
     if (scored) fprintf(stderr, "firewallmap-collector: %s\n", why);
-    fprintf(stderr, "usage: firewallmap-collector [--version | --selftest | --profile <definition>]\n");
+    fprintf(stderr, "usage: firewallmap-collector [--version | --selftest | --profile <file>]\n");
     return 2;
   }
   seed_hash();
@@ -816,5 +803,6 @@ int main(int argc, char **argv) {
     break;
   }
   close_engine(&engine);
+  profile_release(&profile);
   return status;
 }

@@ -24,6 +24,7 @@
 
 #include "aggregate.h"
 #include "alloc.h"
+#include "profile.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -494,17 +495,20 @@ static bool add_correlation(struct aggregate *a, const struct state *s,
 }
 /* A state of a flow outside the tracked set: the discovery tier only. */
 static void discover(struct aggregate *a, const unsigned char *key, uint64_t hash,
-                     const struct state_delta *delta, bool created) {
+                     const struct state_delta *delta, bool created, double asset) {
   struct discovery *d = a->admission.discovery;
   if (!d)
     return;
   d->untracked_states++;
+  /* weighted by asset importance, so an important flow keeps its place in
+   * the summaries against heavier unimportant ones */
+  uint64_t unit = profile_unit(a->admission.profile, asset);
   uint64_t bytes = delta->bytes_from_remote;
   bytes = UINT64_MAX - bytes < delta->bytes_to_remote ? UINT64_MAX : bytes + delta->bytes_to_remote;
-  summary_add(d->bytes, key, hash, bytes);
-  summary_add(d->states, key, hash, 1);
+  summary_add(d->bytes, key, hash, bytes, unit);
+  summary_add(d->states, key, hash, 1, unit);
   if (created)
-    summary_add(d->created, key, hash, 1);
+    summary_add(d->created, key, hash, 1, unit);
   cardinality_add(&d->flows, key);
 }
 bool aggregate_add(struct aggregate *a, const struct state *s,
@@ -542,6 +546,10 @@ bool aggregate_add(struct aggregate *a, const struct state *s,
   state_flow_key(key, v.local, v.remote);
   uint64_t hash = index_hash(key, sizeof(key));
   const struct item *known = map_find_hashed(&a->flows, key, sizeof(key), hash);
+  /* the state's local anchor: the inside host when known */
+  double asset = a->admission.profile
+                     ? profile_asset(a->admission.profile, v.has_inside ? v.inside.a : v.local)
+                     : 1.0;
   uint32_t id;
   struct flow *f;
   if (known) {
@@ -550,7 +558,7 @@ bool aggregate_add(struct aggregate *a, const struct state *s,
   } else {
     int admitted = admit(a, key, hash, &v);
     if (!admitted) {
-      discover(a, key, hash, &delta, created);
+      discover(a, key, hash, &delta, created, asset);
       return true;
     }
     if (!(f = flow_add(a, &v, key, seq, &id, error)))
@@ -574,6 +582,8 @@ bool aggregate_add(struct aggregate *a, const struct state *s,
     return false;
   f->states++;
   f->created += created;
+  if (f->states == 1 || asset > f->asset)
+    f->asset = asset;
   if (!add_count(v.apparent_remote_initiated ? &f->remote_initiated_states
                                              : &f->local_initiated_states,
                  1, error))

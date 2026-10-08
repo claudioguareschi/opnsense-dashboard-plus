@@ -56,6 +56,9 @@ struct flow {
   uint32_t oldest, youngest;
   struct state_delta delta;
   struct evidence evidence; /* the remote's evidence (mask != 0: any evidence) */
+  /* asset importance: the largest multiplier of its states' local anchors
+   * (inside host, else the local address); 1 without a profile */
+  double asset;
   bool evicted;  /* a candidate summary of this flow evicted or dropped a value */
 };
 struct candidate_view {
@@ -83,6 +86,7 @@ struct aggregate_counts {
  * evidence) up to `forced_limit`, while fewer than `hard_limit`. Everything
  * else goes to the discovery tier. */
 enum track_regime { TRACK_EXACT = 0, TRACK_BOUNDED = 1 };
+struct profile;
 struct admission {
   enum track_regime regime;
   size_t limit, hard_limit, forced_limit, candidate_limit, join_limit;
@@ -92,6 +96,9 @@ struct admission {
   const struct map *evidence;
   const struct evidence *evidence_facts;
   struct discovery *discovery;        /* reset by the caller */
+  /* the active profile (asset importance of flows and discovery weights);
+   * NULL: multiplier 1, raw discovery */
+  const struct profile *profile;
 };
 /* Context and history are borrowed for the lifetime of this single sample.
  * Returned flow/candidate views remain valid until aggregate_destroy(). */

@@ -51,10 +51,11 @@ import select
 import socket
 import struct
 import subprocess
+import tempfile
 import time
 import zlib
 
-from . import classification, common, evidence as evidence_facts
+from . import classification, common, evidence as evidence_facts, profiles
 
 HELPER = "/usr/local/libexec/firewallmap-collector"
 PROTOCOL_VERSION = 1
@@ -640,11 +641,13 @@ class CollectorEngine:
     flight), leaves the stream in an unknown position, so the helper is closed.
     """
 
-    def __init__(self, path=HELPER, profile=None):
+    def __init__(self, path=HELPER, profile=None, profile_dir=None):
         self.path = path
-        # the active ranking profile's definition (lib/profiles.py): startup configuration, compiled
-        # once by the helper; None starts the base ranking (the regression oracle, tests only)
+        # the active ranking profile (a validated lib/profiles.py profile): startup configuration,
+        # written as the schema-v1 document the helper compiles once; None starts the base ranking
+        # (the regression oracle, tests only)
         self.profile = profile
+        self.profile_dir = profile_dir
         self.process = None
         self.snapshot_open = False
         self.snapshot_generation = None
@@ -677,13 +680,20 @@ class CollectorEngine:
             self.incompatible = None
         self.binary = identity
         try:
-            arguments = [self.path] + (["--profile", self.profile] if self.profile else [])
-            self.process = subprocess.Popen(arguments, stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0)
-            self.starts += 1
-            banner = bytearray()
-            deadline = time.monotonic() + READ_TIMEOUT
-            while not banner.endswith(b"\n") and len(banner) < 128:
-                banner += _read_exact(self.process.stdout, 1, self.process, deadline)
+            startup = self._startup_file()
+            try:
+                arguments = [self.path] + (["--profile", startup] if startup else [])
+                self.process = subprocess.Popen(arguments, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                                bufsize=0)
+                self.starts += 1
+                banner = bytearray()
+                deadline = time.monotonic() + READ_TIMEOUT
+                while not banner.endswith(b"\n") and len(banner) < 128:
+                    banner += _read_exact(self.process.stdout, 1, self.process, deadline)
+            finally:
+                # the helper compiles the profile before its banner: the file is not needed after
+                if startup:
+                    os.unlink(startup)
             match = BANNER.match(bytes(banner))
             if not match:
                 announced = BANNER_PROTOCOL.match(bytes(banner))
@@ -790,15 +800,30 @@ class CollectorEngine:
         result["helper"] = dict(self.metadata or {}, starts=self.starts)
         return result
 
+    def _startup_file(self):
+        """The active profile's startup document in a private file (0600), or None."""
+        if self.profile is None:
+            return None
+        directory = self.profile_dir or (common.RUN_DIR if os.path.isdir(common.RUN_DIR) else None)
+        descriptor, path = tempfile.mkstemp(prefix="collector-profile-", suffix=".json", dir=directory)
+        with os.fdopen(descriptor, "w") as handle:
+            handle.write(profiles.startup_text(self.profile))
+        return path
+
+    @staticmethod
+    def _profile_key(profile):
+        return None if profile is None else (profile["uuid"], profiles.fingerprint(profile))
+
     def set_profile(self, profile):
-        """A new active ranking profile (or a new definition of it): the helper compiled the old one
-        at startup, so it is closed and the next sample starts one with the new profile (a
-        baseline). The same definition again changes nothing."""
-        if profile == self.profile:
-            return False
+        """The active ranking profile (validated). Another UUID or another definition of the active
+        one (its fingerprint) closes the helper, which compiled the old one at startup: the next
+        sample starts one with the new profile (a baseline). The same UUID and definition again
+        (a rename, or an edit of another profile) changes nothing."""
+        changed = self._profile_key(profile) != self._profile_key(self.profile)
         self.profile = profile
-        self.close()
-        return True
+        if changed:
+            self.close()
+        return changed
 
     def snapshot_selection(self, identities):
         text = f"FMSNAP1 SELECT {self.snapshot_generation} {len(identities)}\n"

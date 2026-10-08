@@ -400,27 +400,47 @@ class CollectorLoopTest(unittest.TestCase):
         self.collector.step()
         with open(self.output) as handle:
             payload = json.load(handle)
-        balanced = COLLECTOR.ranking_profiles.BY_UUID[COLLECTOR.ranking_profiles.BALANCED]
-        self.assertEqual(payload["ranking_profile"], COLLECTOR.ranking_profiles.descriptor(balanced))
+        profiles = COLLECTOR.ranking_profiles
+        balanced = profiles.validate(profiles.BY_UUID[profiles.BALANCED])
+        self.assertEqual(payload["ranking_profile"], profiles.descriptor(balanced))
+        self.assertEqual(set(payload["ranking_profile"]), {"uuid", "name", "builtin", "fingerprint"})
         self.assertFalse({"focus", "focus_default", "profiles", "selections"} & set(payload))
-        # the helper was started with the active profile's definition
-        self.assertEqual(self.collector.collector_engine.profile, COLLECTOR.ranking_profiles.definition(balanced))
+        # the helper was started with the active profile
+        self.assertEqual(self.collector.collector_engine.profile, balanced)
 
     def test_a_ranking_profile_change_restarts_the_collector(self):
         self.collector.step()
         engine = self.collector.collector_engine
-        security = COLLECTOR.ranking_profiles.SECURITY
-        with mock.patch.object(COLLECTOR, "settings", lambda: {"provider": "dbip", "ranking_profile": security}):
-            self.collector.checked["settings"] = None
-            self.collector.step()
-        self.assertEqual(engine.profile,
-                         COLLECTOR.ranking_profiles.definition(COLLECTOR.ranking_profiles.BY_UUID[security]))
+        profiles = COLLECTOR.ranking_profiles
+        security = profiles.SECURITY
+        custom = {"uuid": "0d1e4f0e-2b0c-4f39-9df1-6d1a7c1f2e10", "name": "Mail Security",
+                  **dict(zip(profiles.FEATURES, ("5", "5", "10", "15", "0", "25", "10", "30"))),
+                  "s3_min_percent": "20", "s2_min_percent": "10", "s1_min_percent": "0",
+                  "default_multiplier": "1", "direction": "equal", "assets": "192.168.1.25 10\n192.168.2.0/24 3"}
+        def step(active, rows):
+            with mock.patch.object(COLLECTOR, "settings", lambda: {"provider": "dbip", "ranking_profile": active}), \
+                    mock.patch.object(COLLECTOR, "configured_profiles", lambda: rows):
+                self.collector.checked["settings"] = None
+                self.collector.step()
+        step(security, [custom])
+        self.assertEqual(engine.profile, profiles.validate(profiles.BY_UUID[security]))
         self.assertEqual(engine.restarts, 1)
-        # the same profile again changes nothing
-        with mock.patch.object(COLLECTOR, "settings", lambda: {"provider": "dbip", "ranking_profile": security}):
-            self.collector.checked["settings"] = None
-            self.collector.step()
+        # the same profile again, and an edit of an inactive profile, change nothing
+        step(security, [dict(custom, byte_rate="10", packet_rate="0")])
         self.assertEqual(engine.restarts, 1)
+        # activating the custom profile restarts; renaming it does not; editing an asset rule does
+        step(custom["uuid"], [custom])
+        self.assertEqual((engine.restarts, engine.profile["name"]), (2, "Mail Security"))
+        self.assertEqual(engine.profile["assets"], [{"cidr": "192.168.1.25/32", "multiplier": 10.0},
+                                                    {"cidr": "192.168.2.0/24", "multiplier": 3.0}])
+        step(custom["uuid"], [dict(custom, name="Mail")])
+        self.assertEqual((engine.restarts, engine.profile["name"]), (2, "Mail"))
+        step(custom["uuid"], [dict(custom, assets="192.168.1.25 5")])
+        self.assertEqual(engine.restarts, 3)
+        # an invalid active profile ranks with the default (and says so), never half-applied
+        step(custom["uuid"], [dict(custom, byte_rate="50")])
+        self.assertEqual(engine.profile["uuid"], profiles.DEFAULT)
+        self.assertIn("weights total", self.collector.profile_problem)
 
     def test_camera_request_saves_every_flow_and_its_states(self):
         snapshots = os.path.join(self.directory, "snapshots")
@@ -446,9 +466,11 @@ class CollectorLoopTest(unittest.TestCase):
         self.assertFalse(os.listdir(requests))
         # a new capture names the policy it was ranked under, and nothing per profile or viewer
         context = saved["capture"]["context"]
-        balanced = COLLECTOR.ranking_profiles.BY_UUID[COLLECTOR.ranking_profiles.BALANCED]
+        profiles = COLLECTOR.ranking_profiles
+        balanced = profiles.validate(profiles.BY_UUID[profiles.BALANCED])
         self.assertEqual((saved["capture"]["version"], context["ranking_profile"]),
-                         (2, COLLECTOR.ranking_profiles.descriptor(balanced)))
+                         (2, profiles.descriptor(balanced)))
+        self.assertEqual(context["ranking_profile"]["fingerprint"], profiles.fingerprint(balanced))
         self.assertFalse({"focus", "focus_default", "profiles"} & set(saved))
         self.assertNotIn("profiles", context)
 
