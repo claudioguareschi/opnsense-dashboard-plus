@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src/opnsense/scripts/OPNsense/FirewallMap"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import collector  # noqa: E402
-from collector_build import compile_worker, state_limit  # noqa: E402
+from collector_build import budget_constant, compile_worker, state_limit  # noqa: E402
 
 CONTEXT = ({"8.8.8.1"}, [], {}, None)
 QUERY = ("tcp", "8.8.8.1", "30000", "9.9.9.9", "443")
@@ -87,7 +87,7 @@ class CollectorScaleTest(unittest.TestCase):
         self.assertEqual(telemetry["threat_remotes_omitted"], count - collector.THREAT_REMOTES)
         # worst-case accounting holds: the derived limit admits no more than the budget pays for
         per_state = (telemetry["heap_peak"] - (24 << 20)) / count
-        self.assertLess(per_state, 2816)
+        self.assertLess(per_state, budget_constant("BUDGET_BYTES_PER_STATE"))
 
     def test_candidates_per_flow_and_kind_are_capped(self):
         (_, last), _ = self.run_mode("ports", 5000)

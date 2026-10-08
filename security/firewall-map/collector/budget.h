@@ -58,16 +58,20 @@
 #define BUDGET_MEMORY_MAX (UINT64_C(16384) << 20)
 #define BUDGET_MEMORY_DEFAULT (UINT64_C(256) << 20)
 /* Accounted heap per PF state at a sample's peak in the worst case: every
- * state its own flow, remote, correlation tuple and attribution values, with
- * current and previous history and ranking generations and a threat summary.
- * Measured on LP64 with the synthetic reader's "unique" table: 2262 bytes per
- * state between 100,000 and 200,000 states (tests/test_collector_scale.py), plus
- * a 25% margin. Accounting counts requested bytes, not allocator overhead, so
- * the figure does not depend on the libc; how RSS relates to it on the target
- * (jemalloc) is pending FreeBSD calibration. */
-#define BUDGET_BYTES_PER_STATE 2816
-/* Accounted heap that does not scale with states: event history (two copies
- * while it is rebuilt, about 13 MB measured with it), request context at its
+ * state its own flow, remote and attribution values, with the compact
+ * baseline, the per-flow aggregate and ranking structures and a threat
+ * summary. Measured on LP64 with the synthetic reader's "unique" table after
+ * the 0.60 Phase B changes (compact baseline, streamed IDS tuples): at most
+ * 2,100 bytes per additional state between 100,000 and 300,000 states
+ * (tests/test_collector_scale.py), plus a 25% margin. Tables with many states
+ * per flow cost far less (about 56 bytes per state: the baseline alone), but
+ * admission stays worst-case until Phase D bounds the per-flow structures.
+ * Accounting counts requested bytes, not allocator overhead, so the figure
+ * does not depend on the libc; how RSS relates to it on the target (jemalloc)
+ * is pending FreeBSD calibration. */
+#define BUDGET_BYTES_PER_STATE 2624
+/* Accounted heap that does not scale with states: the IDS recent-tuple ring,
+ * its sample window and rebuild copy (about 13 MB), request context at its
  * maxima, response bookkeeping. */
 #define BUDGET_FIXED_BYTES (UINT64_C(24) << 20)
 
