@@ -137,28 +137,29 @@ flagged traffic got through*, or *Blocked*), then one sentence per address, for 
 A snapshot is a saved map document, not a screenshot. When the collector responds, it captures
 up to 5,000 active or fading flows, prioritizing IDS/alerting and threat-listed destinations,
 then the strongest traffic. The compact document is limited to 10 MiB; unusually large flow
-details can be omitted so smaller entries still fit. Independently bounded blocked-source,
-alert and correlated-IDS evidence is preserved; if that required evidence cannot fit, capture
-fails explicitly instead of silently replacing it with a summary.
+details can be omitted so smaller entries still fit. Truncation never fails a snapshot: what was
+left out is counted, and `capture.required_evidence_complete` says whether every flow with
+IDS, alert, blocked-source or threat-list evidence made it in full.
 
-With the native engine, PF detail is collected in a second, on-demand traversal and explicitly
-associated with each retained logical flow. Matching states are included up to the remaining
-document byte budget and the existing 5,000-row safety ceiling; there is no 50-row per-remote
-limit on this path. Incident PF evidence displaces ordinary rows when necessary. If required
-incident evidence alone exceeds a ceiling, capture fails explicitly. Quiet PF flows associated
-with IDS, alerts, blocked sources or threat intelligence remain eligible independently of the
-live top-150 ranking. Raw state rows remain protected by the Show States privilege.
+PF detail is collected in a second, on-demand traversal and explicitly associated with each
+retained logical flow. The 5,000-state evidence budget is shared by quota: incident flows
+(those with IDS, alert, blocked-source or threat-list evidence) are guaranteed 80% of it, each
+first getting up to 20 states, and every share a flow cannot use goes back to the others. Within
+its quota a flow keeps the states with the most bytes, then the newest. Every flow also records
+exact totals over all its matching states (count, bytes and packets in each direction), however
+many exemplar rows were kept, together with its quota and the reason for any omission. Quiet PF
+flows associated with IDS, alerts, blocked sources or threat intelligence remain eligible
+independently of the live top-150 ranking. Raw state rows remain protected by the Show States
+privilege.
 
 The detail counts and timestamps describe the second traversal, not an atomic copy of the
 first: states may disappear, new matching states may appear, and counters may advance.
-Generation, matching/captured/omitted counts and omission reasons are stored in
-`capture.states`. The legacy Python engine still covers captured flow destinations, blocked
-sources and captured IDS connection remotes, with up to 50 rows per remote and 5,000 rows total.
-The snapshot list, banner and JSON report captured versus available flows, geographic omissions
-and PF-row truncation. **Complete detail** means complete within this capture scope, not a full
-PF archive: the existing IDS/log evidence limits still apply. Hosts, Countries, Networks and
-Top Talkers describe captured flows, not the entire state table. Older snapshots remain readable
-but their completeness is unknown.
+Generation, matching/captured/omitted counts, per-flow totals and omission reasons are stored in
+`capture.states`. The snapshot list, banner and JSON report captured versus available flows,
+geographic omissions and PF-row truncation. **Complete detail** means complete within this
+capture scope, not a full PF archive: the existing IDS/log evidence limits still apply. Hosts,
+Countries, Networks and Top Talkers describe captured flows, not the entire state table. Older
+snapshots remain readable but their completeness is unknown.
 
 1. On the dashboard widget or full-size map, select the camera button. The confirmation toast has
    an **Open in full map** link.
@@ -234,13 +235,19 @@ instead.
 The plugin settings are in **Reporting ▸ Firewall Map ▸ Settings** (administrators); press
 **Apply** after saving: geolocation service (automatic, MaxMind GeoLite2, MaxMind GeoIP2 City,
 DB-IP Lite), MaxMind license key (taken from a MaxMind GeoIP alias when present), database update
-frequency, threat lists, background recording, AbuseIPDB API key and *Maintain blocklist aliases*.
-Keys are write-only and never displayed or logged: leave a key field empty to keep the stored key,
+frequency, threat lists, background recording, AbuseIPDB API key, *Maintain blocklist aliases* and
+the collector's *Memory budget*. The memory budget (empty: 5% of physical memory, at most
+1024 MiB) bounds the state engine and sets the largest PF state table the map processes; above it
+the map says the state table is too large instead of slowing the firewall. Keys are write-only and never displayed or logged: leave a key field empty to keep the stored key,
 or tick *Remove the stored key* to delete it.
 
 **Reporting ▸ Firewall Map ▸ Status** shows whether the collector is running (with the usual start,
 stop and restart controls), how fresh the geolocation database, the threat feeds and the AbuseIPDB
-blacklist are, and any download errors. Each has an *Update now* button.
+blacklist are, and any download errors. Each has an *Update now* button. Its *State engine* section
+shows the native helper (process, restarts, the PF state ABI it was built for), the state limit
+its memory budget allows, the cost of the last sample, anything left out (unsupported states,
+candidates or threat remotes over their budgets) and the last refusal or error. An administrator
+can check the engine against the running kernel with `configctl firewallmap native selftest`.
 
 **Reporting ▸ Firewall Map ▸ Log File** is the plugin's log (System ▸ Settings ▸ Logging sets how long
 it is kept and can forward it). It records what helps diagnose a problem, without one line per

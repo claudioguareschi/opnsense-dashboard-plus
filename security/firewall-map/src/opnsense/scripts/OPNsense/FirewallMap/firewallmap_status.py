@@ -41,6 +41,7 @@ from firewallmap_collector import IDLE_SECONDS, recording_wanted
 from lib.config import abuseipdb_key, settings, widget_in_use
 from lib.blocklists import FEEDS
 from lib.common import COLLECTOR_TIMINGS, OUTPUT_FILE, REQUEST_MARKER, geodb_view, read_json, secure_umask
+from lib.native import kernel_version
 
 PID_FILE = "/var/run/firewallmap.pid"
 
@@ -82,6 +83,20 @@ def collector(now=None):
     }
 
 
+def native_engine(timing):
+    """The state engine as the running collector last saw it: helper identity and build ABI,
+    the admission limit its budget derives, the last sample's cost, omissions, skips,
+    refusals and errors. A helper built for another FreeBSD version is only a warning: the
+    PF state ABI check decides compatibility."""
+    status = dict((timing or {}).get("native") or {})
+    helper = status.get("helper") or {}
+    kernel = kernel_version()
+    built = helper.get("freebsd_version")
+    status["kernel_version"] = kernel
+    status["version_warning"] = bool(kernel and built and kernel != built)
+    return status
+
+
 def database():
     status = geodb.status()
     # while MaxMind keeps failing, the map looks addresses up in the DB-IP Lite stand-in: show its files
@@ -114,8 +129,9 @@ def blacklist():
 
 
 def overview():
-    return {"collector": collector(), "database": database(), "feeds": threat_feeds(), "abuseipdb": blacklist(),
-            "now": time.time()}
+    state = collector()
+    return {"collector": state, "native": native_engine(state.get("timing")), "database": database(),
+            "feeds": threat_feeds(), "abuseipdb": blacklist(), "now": time.time()}
 
 
 if __name__ == "__main__":

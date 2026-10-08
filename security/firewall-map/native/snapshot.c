@@ -34,69 +34,117 @@
 #include <sys/socket.h>
 #include <time.h>
 
-struct detail_row {
-  struct detail_row *previous, *next;
+/* One kept state: its selection key and its rendered JSON. */
+struct exemplar {
+  uint64_t bytes, id;
+  uint32_t age, creator;
   size_t cost, length;
-  uint32_t flow;
   char json[];
 };
-struct row_list { struct detail_row *first, *last; };
 /* Exact per-flow accounting over every matching state, independent of how
- * many exemplar rows fit the budgets. */
-struct flow_totals {
+ * many exemplars fit, and the bounded set of exemplars kept so far: a heap
+ * with the worst kept exemplar on top, holding at most `quota`. */
+struct flow_evidence {
   uint64_t matched, captured, bytes_from_remote, bytes_to_remote,
       packets_from_remote, packets_to_remote;
   unsigned reasons;
+  size_t quota, used;
+  struct exemplar **heap;
 };
 struct snapshot {
   const struct context *ctx;
   struct map selected;
   struct snapshot_flow *flows;
-  struct flow_totals *totals;
+  struct flow_evidence *evidence;
   size_t count, byte_limit, state_limit, bytes, included;
-  uint64_t observed, traversed, generation;
+  uint64_t observed, traversed, generation, skipped;
   unsigned reasons;
   double sample_time, started;
-  struct row_list incident, ordinary;
 };
 
 static double wall_time(void) {
   struct timespec t;
   return clock_gettime(CLOCK_REALTIME, &t) ? 0.0 : t.tv_sec + t.tv_nsec / 1e9;
 }
-static void append(struct row_list *list, struct detail_row *row) {
-  row->previous = list->last;
-  row->next = NULL;
-  if (list->last) list->last->next = row;
-  else list->first = row;
-  list->last = row;
+/* Selection order: more bytes, then newer (lower age), then PF identity. */
+static bool better(const struct exemplar *a, const struct exemplar *b) {
+  if (a->bytes != b->bytes) return a->bytes > b->bytes;
+  if (a->age != b->age) return a->age < b->age;
+  if (a->creator != b->creator) return a->creator < b->creator;
+  return a->id < b->id;
 }
-static void drop_last(struct snapshot *s, unsigned reason) {
-  struct detail_row *row = s->ordinary.last;
-  s->ordinary.last = row->previous;
-  if (row->previous) row->previous->next = NULL;
-  else s->ordinary.first = NULL;
-  s->bytes -= row->cost;
-  s->included--;
-  s->totals[row->flow].captured--;
-  s->totals[row->flow].reasons |= reason;
-  fm_free(row);
+static void sift_down(struct exemplar **heap, size_t used, size_t n) {
+  for (;;) {
+    size_t worst = n, left = 2 * n + 1, right = left + 1;
+    if (left < used && better(heap[worst], heap[left])) worst = left;
+    if (right < used && better(heap[worst], heap[right])) worst = right;
+    if (worst == n) return;
+    struct exemplar *swap = heap[n];
+    heap[n] = heap[worst];
+    heap[worst] = swap;
+    n = worst;
+  }
+}
+static void sift_up(struct exemplar **heap, size_t n) {
+  while (n) {
+    size_t parent = (n - 1) / 2;
+    if (!better(heap[parent], heap[n])) return;
+    struct exemplar *swap = heap[n];
+    heap[n] = heap[parent];
+    heap[parent] = swap;
+    n = parent;
+  }
 }
 void snapshot_destroy(struct snapshot *s) {
   if (!s) return;
-  struct row_list *lists[] = {&s->incident, &s->ordinary};
-  for (unsigned i = 0; i < 2; i++) {
-    struct detail_row *row = lists[i]->first;
-    while (row) {
-      struct detail_row *next = row->next;
-      fm_free(row);
-      row = next;
-    }
+  for (size_t n = 0; n < s->count; n++) {
+    for (size_t i = 0; s->evidence && i < s->evidence[n].used; i++)
+      fm_free(s->evidence[n].heap[i]);
+    if (s->evidence) fm_free(s->evidence[n].heap);
   }
   map_clear(&s->selected);
   fm_free(s->flows);
-  fm_free(s->totals);
+  fm_free(s->evidence);
   fm_free(s);
+}
+
+/* Gives flows of one class (incident or not) up to their remaining demand,
+ * evenly ("water-filling"); returns the budget no flow could use. */
+static size_t water_fill(const struct snapshot_flow *flows, size_t count, bool incident,
+                         size_t budget, size_t *quotas) {
+  while (budget) {
+    size_t needing = 0;
+    for (size_t n = 0; n < count; n++)
+      needing += flows[n].incident == incident && quotas[n] < flows[n].sample_states;
+    if (!needing) break;
+    size_t share = budget / needing;
+    for (size_t n = 0; n < count && budget; n++) {
+      if (flows[n].incident != incident || quotas[n] >= flows[n].sample_states) continue;
+      uint64_t want = flows[n].sample_states - quotas[n];
+      size_t give = share ? (want < share ? (size_t)want : share) : 1;
+      quotas[n] += give;
+      budget -= give;
+    }
+  }
+  return budget;
+}
+void snapshot_quotas(const struct snapshot_flow *flows, size_t count, size_t state_limit,
+                     size_t *quotas) {
+  if (!count) return;
+  memset(quotas, 0, count * sizeof(*quotas));
+  size_t reserve = state_limit * SNAPSHOT_INCIDENT_SHARE_PERCENT / 100;
+  size_t pool = state_limit - reserve;
+  for (size_t n = 0; n < count && reserve; n++) {
+    if (!flows[n].incident) continue;
+    uint64_t floor = flows[n].sample_states < SNAPSHOT_INCIDENT_FLOOR ? flows[n].sample_states
+                                                                       : SNAPSHOT_INCIDENT_FLOOR;
+    size_t give = floor < reserve ? (size_t)floor : reserve;
+    quotas[n] = give;
+    reserve -= give;
+  }
+  reserve = water_fill(flows, count, true, reserve, quotas);
+  pool = water_fill(flows, count, false, pool + reserve, quotas);
+  water_fill(flows, count, true, pool, quotas);
 }
 
 struct snapshot *snapshot_create(const struct context *ctx,
@@ -119,25 +167,31 @@ struct snapshot *snapshot_create(const struct context *ctx,
   s->sample_time = sample_time;
   s->started = wall_time();
   s->flows = count ? fm_malloc(count * sizeof(*flows)) : NULL;
-  s->totals = count ? fm_calloc(count, sizeof(*s->totals)) : NULL;
-  if (count && (!s->flows || !s->totals)) {
+  s->evidence = count ? fm_calloc(count, sizeof(*s->evidence)) : NULL;
+  size_t *quotas = count ? fm_calloc(count, sizeof(*quotas)) : NULL;
+  if (count && (!s->flows || !s->evidence || !quotas)) {
     fm_error_set(error, errno, "snapshot identities allocation");
+    fm_free(quotas);
     snapshot_destroy(s);
     return NULL;
   }
   if (count) memcpy(s->flows, flows, count * sizeof(*flows));
+  snapshot_quotas(flows, count, state_limit, quotas);
   for (size_t n = 0; n < count; n++) {
+    s->evidence[n].quota = quotas[n];
     unsigned char key[FM_FLOW_KEY_SIZE];
     state_flow_key(key, flows[n].local, flows[n].remote);
     struct item *i = lookup(&s->selected, key, sizeof(key), true, error);
     if (!i || i->count) {
       if (i) fm_error_fail(error, FM_FAILURE_REQUEST, EINVAL, "duplicate snapshot flow");
+      fm_free(quotas);
       snapshot_destroy(s);
       return NULL;
     }
     i->count = 1;
     i->value = n;
   }
+  fm_free(quotas);
   return s;
 }
 
@@ -274,56 +328,73 @@ static bool add_total(uint64_t *total, uint64_t value) {
   *total += value;
   return true;
 }
+static struct exemplar *exemplar(const struct state *state, const struct state_view *v,
+                                 struct fm_error *error) {
+  char json[FM_FRAME_MAX];
+  size_t cost = 0, length = row_json(state, v, json, &cost);
+  if (!length) {
+    fm_error_fail(error, FM_FAILURE_INTERNAL, EOVERFLOW, "snapshot record size");
+    return NULL;
+  }
+  struct exemplar *e = fm_malloc(sizeof(*e) + length);
+  if (!e) {
+    fm_error_set(error, errno, "snapshot row allocation");
+    return NULL;
+  }
+  *e = (struct exemplar){state->pf_bytes[FM_PF_FORWARD] + state->pf_bytes[FM_PF_REVERSE], state->id,
+                         state->age, state->creator, cost, length};
+  memcpy(e->json, json, length);
+  return e;
+}
 bool snapshot_add(const struct state *state, void *arg, struct fm_error *error) {
   struct snapshot *s = arg;
   s->traversed++;
   struct state_view v;
   if (!state_normalize(state, s->ctx, &v, error)) return false;
+  s->skipped += v.pf.skip != SKIP_NONE;
   if (!v.mapped) return true;
   unsigned char key[FM_FLOW_KEY_SIZE];
   state_flow_key(key, v.local, v.remote);
   const struct item *i = map_find(&s->selected, key, sizeof(key));
   if (!i) return true;
   s->observed++;
-  struct flow_totals *totals = &s->totals[i->value];
+  struct flow_evidence *f = &s->evidence[i->value];
   bool remote = v.remote_initiated;
-  if (!add_total(&totals->matched, 1) ||
-      !add_total(&totals->bytes_from_remote, state_bytes_from_remote(state, remote)) ||
-      !add_total(&totals->bytes_to_remote, state_bytes_to_remote(state, remote)) ||
-      !add_total(&totals->packets_from_remote, state_packets_from_remote(state, remote)) ||
-      !add_total(&totals->packets_to_remote, state_packets_to_remote(state, remote)))
+  if (!add_total(&f->matched, 1) ||
+      !add_total(&f->bytes_from_remote, state_bytes_from_remote(state, remote)) ||
+      !add_total(&f->bytes_to_remote, state_bytes_to_remote(state, remote)) ||
+      !add_total(&f->packets_from_remote, state_packets_from_remote(state, remote)) ||
+      !add_total(&f->packets_to_remote, state_packets_to_remote(state, remote)))
     return fm_error_set(error, EOVERFLOW, "snapshot flow totals");
-  char json[FM_FRAME_MAX];
-  size_t cost = 0, length = row_json(state, &v, json, &cost);
-  if (!length) return fm_error_fail(error, FM_FAILURE_INTERNAL, EOVERFLOW, "snapshot record size");
-  bool incident = s->flows[i->value].incident;
-  while (incident && s->ordinary.last &&
-         (cost > s->byte_limit - s->bytes || s->included >= s->state_limit)) {
-    unsigned reason = cost > s->byte_limit - s->bytes ? SNAPSHOT_OMITTED_BYTES
-                                                      : SNAPSHOT_OMITTED_STATES;
-    s->reasons |= reason;
-    drop_last(s, reason);
-  }
-  if (cost > s->byte_limit - s->bytes || s->included >= s->state_limit) {
-    if (incident)
-      return fm_error_set(error, EOVERFLOW, "required incident PF evidence exceeds snapshot safety ceiling");
-    unsigned reason = cost > s->byte_limit - s->bytes ? SNAPSHOT_OMITTED_BYTES
-                                                      : SNAPSHOT_OMITTED_STATES;
-    s->reasons |= reason;
-    totals->reasons |= reason;
+  if (!f->quota) return true;
+  if (f->used == f->quota) {
+    /* full: keep it only if it beats the worst exemplar kept */
+    struct exemplar probe = {state->pf_bytes[FM_PF_FORWARD] + state->pf_bytes[FM_PF_REVERSE], state->id,
+                             state->age, state->creator, 0, 0};
+    if (!better(&probe, f->heap[0])) return true;
+    struct exemplar *e = exemplar(state, &v, error);
+    if (!e) return false;
+    fm_free(f->heap[0]);
+    f->heap[0] = e;
+    sift_down(f->heap, f->used, 0);
     return true;
   }
-  struct detail_row *row = fm_malloc(sizeof(*row) + length);
-  if (!row) return fm_error_set(error, errno, "snapshot row allocation");
-  row->cost = cost; row->length = length; row->flow = (uint32_t)i->value;
-  memcpy(row->json, json, length);
-  append(incident ? &s->incident : &s->ordinary, row);
-  s->bytes += cost;
-  s->included++;
-  totals->captured++;
+  if (!f->heap && !(f->heap = fm_calloc(f->quota, sizeof(*f->heap))))
+    return fm_error_set(error, errno, "snapshot exemplar heap");
+  struct exemplar *e = exemplar(state, &v, error);
+  if (!e) return false;
+  f->heap[f->used] = e;
+  sift_up(f->heap, f->used++);
   return true;
 }
 
+static int compare_exemplars(const void *left, const void *right) {
+  const struct exemplar *a = *(const struct exemplar *const *)left;
+  const struct exemplar *b = *(const struct exemplar *const *)right;
+  return better(a, b) ? -1 : better(b, a) ? 1 : 0;
+}
+/* Emits incident flows first, each flow's exemplars best first, within the
+ * encoded-size budget; a row that does not fit is omitted and counted. */
 bool snapshot_write(struct snapshot *s, FILE *out, struct fm_error *error) {
   if (fwrite("FMSTATE2", 1, 8, out) != 8)
     return fm_error_set(error, EIO, "snapshot header");
@@ -331,27 +402,43 @@ bool snapshot_write(struct snapshot *s, FILE *out, struct fm_error *error) {
   unsigned char frame[FM_FRAME_MAX], *p = frame;
   *p++ = 0; protocol_put(&p, 2, 4); protocol_put(&p, s->generation, 8);
   if (!protocol_frame(out, frame, p - frame, &crc, error)) return false;
-  struct row_list *lists[] = {&s->incident, &s->ordinary};
-  for (unsigned n = 0; n < 2; n++)
-    for (struct detail_row *row = lists[n]->first; row; row = row->next) {
-      p = frame; *p++ = 1; protocol_put(&p, row->flow, 4);
-      memcpy(p, row->json, row->length); p += row->length;
-      if (!protocol_frame(out, frame, p - frame, &crc, error)) return false;
+  for (unsigned pass = 0; pass < 2; pass++)
+    for (size_t n = 0; n < s->count; n++) {
+      if (s->flows[n].incident != (pass == 0)) continue;
+      struct flow_evidence *f = &s->evidence[n];
+      if (f->used) qsort(f->heap, f->used, sizeof(*f->heap), compare_exemplars);
+      for (size_t i = 0; i < f->used; i++) {
+        const struct exemplar *e = f->heap[i];
+        if (e->cost > s->byte_limit - s->bytes) {
+          f->reasons |= SNAPSHOT_OMITTED_BYTES;
+          continue;
+        }
+        p = frame; *p++ = 1; protocol_put(&p, n, 4);
+        memcpy(p, e->json, e->length); p += e->length;
+        if (!protocol_frame(out, frame, p - frame, &crc, error)) return false;
+        s->bytes += e->cost;
+        s->included++;
+        f->captured++;
+      }
     }
   for (size_t n = 0; n < s->count; n++) {
-    const struct flow_totals *t = &s->totals[n];
+    struct flow_evidence *f = &s->evidence[n];
+    if (f->matched > f->used)
+      f->reasons |= f->quota ? SNAPSHOT_OMITTED_FLOW_QUOTA : SNAPSHOT_OMITTED_STATES;
+    s->reasons |= f->reasons;
     p = frame; *p++ = 2; protocol_put(&p, n, 4);
-    protocol_put(&p, t->matched, 8); protocol_put(&p, t->captured, 8);
-    protocol_put(&p, t->bytes_from_remote, 8); protocol_put(&p, t->bytes_to_remote, 8);
-    protocol_put(&p, t->packets_from_remote, 8); protocol_put(&p, t->packets_to_remote, 8);
-    *p++ = (unsigned char)t->reasons;
+    protocol_put(&p, f->matched, 8); protocol_put(&p, f->captured, 8);
+    protocol_put(&p, f->bytes_from_remote, 8); protocol_put(&p, f->bytes_to_remote, 8);
+    protocol_put(&p, f->packets_from_remote, 8); protocol_put(&p, f->packets_to_remote, 8);
+    protocol_put(&p, s->flows[n].sample_states, 8); protocol_put(&p, f->quota, 8);
+    *p++ = (unsigned char)f->reasons;
     if (!protocol_frame(out, frame, p - frame, &crc, error)) return false;
   }
   p = frame; *p++ = 255;
   protocol_put(&p, s->traversed, 8); protocol_put(&p, s->observed, 8);
   protocol_put(&p, s->included, 8); protocol_put(&p, s->bytes, 8);
-  protocol_put(&p, s->reasons, 4); protocol_put(&p, SNAPSHOT_POLICY_ARRIVAL, 4);
-  protocol_put(&p, 0, 8); /* skipped states: none are skipped yet */
+  protocol_put(&p, s->reasons, 4); protocol_put(&p, SNAPSHOT_POLICY_BYTES_NEWEST, 4);
+  protocol_put(&p, s->skipped, 8);
   protocol_put(&p, crc, 4);
   double times[] = {s->sample_time, s->started, wall_time()};
   for (unsigned n = 0; n < 3; n++) {
@@ -521,8 +608,10 @@ bool snapshot_session(FILE *in, FILE *out, const struct context *ctx,
         goto done;
       }
       ok = identities(in, c.flows, c.count, error) &&
-           select_rows(a, r, c.flows, c.count, c.rows, error) &&
-           respond(COMMAND_DETAIL, &c, out, error);
+           select_rows(a, r, c.flows, c.count, c.rows, error);
+      for (size_t n = 0; ok && n < c.count; n++)
+        c.flows[n].sample_states = aggregate_flow(a, c.rows[n].flow)->states;
+      ok = ok && respond(COMMAND_DETAIL, &c, out, error);
       goto done;
     } else {
       fm_error_fail(error, FM_FAILURE_REQUEST, EPROTO, "snapshot command/version");

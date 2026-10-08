@@ -39,6 +39,9 @@ bool pf_reader_live(pf_state_callback, void *, FILE *raw_fixture,
 bool pf_reader_state_count(uint64_t *count);
 /* PF_STATE_VERSION the reader was compiled against (0 without PF headers). */
 unsigned pf_reader_state_version(void);
+/* Devel builds only (FM_DEVEL_TOOLS): decode one netlink datagram (fuzzing). */
+bool pf_reader_decode_datagram(unsigned char *, size_t, uint32_t seq, int family,
+                               pf_state_callback, void *, bool *done, struct fm_error *);
 /* Devel builds only (FM_DEVEL_TOOLS): replay a saved FMNLLE1 capture. */
 bool pf_reader_wire(const char *, pf_state_callback, void *, struct fm_error *);
 #endif

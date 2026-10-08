@@ -72,6 +72,17 @@ class StatusTest(unittest.TestCase):
                 self.assertNotIn("key_id", json.dumps(blacklist))
                 self.assertNotIn("secret", json.dumps(blacklist))
 
+    def test_native_engine_status_and_version_warning(self):
+        timing = {"native": {"helper": {"pid": 7, "starts": 2, "pf_state_version": 20230404,
+                                        "freebsd_version": 1403000},
+                             "state_limit": 372363, "telemetry": {"sequence": 9}}}
+        for kernel, warning in ((1403000, False), (1500000, True), (None, False)):
+            with self.subTest(kernel=kernel), mock.patch.object(STATUS, "kernel_version", return_value=kernel):
+                engine = STATUS.native_engine(timing)
+                self.assertEqual((engine["version_warning"], engine["state_limit"]), (warning, 372363))
+        with mock.patch.object(STATUS, "kernel_version", return_value=None):
+            self.assertEqual(STATUS.native_engine(None)["version_warning"], False)
+
     def test_last_sample_while_running(self):
         with tempfile.TemporaryDirectory() as directory, \
                 mock.patch.object(STATUS, "widget_in_use", return_value=True), \

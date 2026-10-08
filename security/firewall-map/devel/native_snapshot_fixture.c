@@ -40,6 +40,12 @@ static struct addr address(const char *text) {
   inet_pton(a.af == 4 ? AF_INET : AF_INET6, text, a.b);
   return a;
 }
+static struct addr address_text_parse(const char *text) {
+  struct addr a = {0};
+  a.af = strchr(text, ':') ? 6 : 4;
+  if (inet_pton(a.af == 4 ? AF_INET : AF_INET6, text, a.b) != 1) a.af = 0;
+  return a;
+}
 static struct state make_state(size_t n, unsigned sample, const char *mode) {
   struct state s = {0};
   s.id = n + 1; s.creator = 7; s.age = 1; s.expire = 120; s.rule = 19;
@@ -104,6 +110,69 @@ bool pf_reader_state_count(uint64_t *count) {
   return true;
 }
 
+/* FM_TEST_STATES=<file> replays scenario states written by the specification
+ * tests, one traversal per "sample <n>" block (the last block repeats):
+ *   state <id> <creator> <in|out> <wire proto> <stack proto>
+ *         <wire0> <wire1> <stack0> <stack1>   (a.b.c.d:port or [v6]:port)
+ *         <forward bytes> <reverse bytes> <forward packets> <reverse packets>
+ *         <age> <interface> <original interface|-> [label]                  */
+static bool endpoint_text(const char *text, struct endpoint *e) {
+  char address[64];
+  unsigned port;
+  if (text[0] == '[') {
+    if (sscanf(text, "[%63[^]]]:%u", address, &port) != 2) return false;
+  } else if (sscanf(text, "%63[^:]:%u", address, &port) != 2)
+    return false;
+  e->a = address_text_parse(address);
+  e->port = (uint16_t)port;
+  return e->a.af != 0;
+}
+static bool scenario(const char *path, unsigned sample, pf_state_callback callback, void *arg,
+                     struct fm_error *error) {
+  FILE *f = fopen(path, "r");
+  if (!f) return fm_error_set(error, errno, "scenario file");
+  char line[1024];
+  unsigned block = 0, last = 0;
+  while (fgets(line, sizeof(line), f)) /* the last block repeats for later samples */
+    if (sscanf(line, "sample %u", &block) == 1 && block > last) last = block;
+  unsigned wanted = sample < last ? sample : last;
+  rewind(f);
+  block = 0;
+  bool ok = true;
+  while (ok && fgets(line, sizeof(line), f)) {
+    unsigned number;
+    if (sscanf(line, "sample %u", &number) == 1) {
+      block = number;
+      continue;
+    }
+    if (block != wanted || strncmp(line, "state ", 6)) continue;
+    struct state s = {0};
+    char direction[8], keys[4][80], interface[32], original[32], label[96] = "";
+    unsigned long long id, forward, reverse, forward_packets, reverse_packets;
+    unsigned creator, wire_proto, stack_proto, age;
+    int fields = sscanf(line, "state %llu %u %7s %u %u %79s %79s %79s %79s %llu %llu %llu %llu %u %31s %31s %95[^\n]",
+                        &id, &creator, direction, &wire_proto, &stack_proto, keys[0], keys[1], keys[2], keys[3],
+                        &forward, &reverse, &forward_packets, &reverse_packets, &age, interface, original, label);
+    if (fields < 16 || !endpoint_text(keys[0], &s.key[0].e[0]) || !endpoint_text(keys[1], &s.key[0].e[1]) ||
+        !endpoint_text(keys[2], &s.key[1].e[0]) || !endpoint_text(keys[3], &s.key[1].e[1])) {
+      ok = fm_error_set(error, EINVAL, "scenario state line");
+      break;
+    }
+    s.id = id; s.creator = creator; s.age = age; s.expire = 60; s.rule = 1;
+    s.pf_direction = !strcmp(direction, "in") ? FM_IN : FM_OUT;
+    s.key[0].proto = (unsigned char)wire_proto; s.key[1].proto = (unsigned char)stack_proto;
+    s.pf_bytes[0] = forward; s.pf_bytes[1] = reverse;
+    s.pf_packets[0] = forward_packets; s.pf_packets[1] = reverse_packets;
+    s.peer[0] = s.peer[1] = 4;
+    snprintf(s.interface, sizeof(s.interface), "%s", interface);
+    if (strcmp(original, "-")) snprintf(s.original_interface, sizeof(s.original_interface), "%s", original);
+    snprintf(s.label, sizeof(s.label), "%s", label);
+    ok = callback(&s, arg, error);
+  }
+  fclose(f);
+  return ok && !error->code;
+}
+
 /* FM_TEST_INTERVAL (seconds) makes sample anchors deterministic: sample n is
  * anchored at n * interval; otherwise the real monotonic clock is used. */
 bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
@@ -118,6 +187,9 @@ bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
     *request_anchor = interval ? sample * strtod(interval, NULL)
                                : now.tv_sec + now.tv_nsec / 1e9;
   }
+  const char *states = getenv("FM_TEST_STATES");
+  if (states)
+    return scenario(states, sample, callback, arg, error);
   const char *mode = getenv("FM_TEST_MODE");
   if (!mode) mode = "one";
   const char *size = getenv("FM_TEST_COUNT");

@@ -127,6 +127,8 @@ BACKGROUND_INTERVAL = 20.0
 THREAT_RECORD_SECONDS = 20.0
 THREAT_PRUNE_SECONDS = 3600.0
 MAX_FAILURE_BACKOFF = 30.0
+# a helper that cannot read this kernel's PF states is not retried every few seconds
+INCOMPATIBLE_RETRY_SECONDS = 300.0
 COLLECTOR_LOCK = f"{RUN_DIR}/collector.lock"
 # the last sample's timings are written at most this often
 TIMINGS_WRITE_SECONDS = 10.0
@@ -600,6 +602,10 @@ class Collector:
         self.reputation = Reputation(self.store)
         self.recorder = ThreatRecorder()
         self.native_engine = NativeEngine()
+        # set while the helper reports an incompatible PF ABI: explicit status, slow retry
+        self.native_incompatible = None
+        # unsupported states the last accepted sample skipped, by reason
+        self.sample_skipped = {}
         # per-source counts of log lines rejected by per-line containment, and the last reason
         self.ingest_rejected = {"filterlog": 0, "eve": 0}
         self.ingest_last_rejection = None
@@ -804,6 +810,10 @@ class Collector:
             })
         payload["provider"] = self.provider
         payload["collector"] = self.timing_status()
+        if self.sample_skipped:
+            # states the engine recognized but does not model (counted by reason): the map is
+            # complete for everything else
+            payload["incomplete"] = {"skipped_states": dict(self.sample_skipped)}
         return payload
 
     def timing_status(self):
@@ -885,13 +895,16 @@ class Collector:
     def build_snapshot_payload(self, now):
         """Bounded incident-first detail. Scan candidates, but never build an uncapped document."""
         evidence = set(self.alerts.sources) | {key[3] for key in self.correlator.flows}
+        # Truncation never fails a snapshot: what was left out is counted here, and required
+        # (incident) evidence that did not fit makes required_evidence_complete false.
         coverage = {"candidates": 0, "available": 0, "captured": 0, "limit": SNAPSHOT_FLOWS,
-                    "selection": "incident_then_traffic_v1", "omitted_limit": 0, "omitted_bytes": 0, "omitted_geo": 0}
+                    "selection": "incident_then_traffic_v1", "omitted_limit": 0, "omitted_bytes": 0, "omitted_geo": 0,
+                    "required": 0, "omitted_required": 0}
 
         evidence.update(self.blocks.sources)
 
         def native_candidates():
-            required, lookup_budget = 0, GEO_LOOKUPS_PER_SAMPLE
+            lookup_budget = GEO_LOOKUPS_PER_SAMPLE
             for page in self.native_engine.snapshot_pages():
                 addresses = list(dict.fromkeys(address for local, remote, _rank, _order in page
                                                for address in (remote, local) if public_ip(address)))
@@ -908,9 +921,7 @@ class Collector:
                         coverage["omitted_geo"] += 1
                         continue
                     coverage["available"] += 1
-                    required += int(incident)
-                    if required > SNAPSHOT_FLOWS:
-                        raise SnapshotTooLarge("required incident flows exceed snapshot flow ceiling")
+                    coverage["required"] += int(incident)
                     yield incident, rank, order, local, remote
 
         identities = nsmallest(SNAPSHOT_FLOWS, native_candidates(),
@@ -944,9 +955,9 @@ class Collector:
                          if address in names and address not in payload["hostnames"]}
             # The wrapper overhead is conservative; no full document is encoded to test a fit.
             if not budget.take({"flow": flow, "locations": places, "hostnames": hostnames}):
-                if (flow["origin"], flow["dest"]) in required_pairs:
-                    raise SnapshotTooLarge("required incident flow evidence exceeds snapshot byte ceiling")
                 coverage["omitted_bytes"] += 1
+                if (flow["origin"], flow["dest"]) in required_pairs:
+                    coverage["omitted_required"] += 1
                 continue
             payload["flows"].append(flow)
             payload["locations"].extend(places)
@@ -954,12 +965,16 @@ class Collector:
             payload["hostnames"].update(hostnames)
         payload["locations"].sort(key=lambda location: location["id"])
         coverage["captured"] = len(payload["flows"])
+        # required flows beyond the flow ceiling were never selected
+        coverage["omitted_required"] += coverage["required"] - len(required_pairs)
         identities = [(flow["origin"], flow["dest"], (flow["origin"], flow["dest"]) in required_pairs)
                       for flow in payload["flows"]]
         payload["states"], states = self.native_engine.snapshot_detail(
             identities, max(0, budget.remaining), SNAPSHOT_STATES_TOTAL)
         payload["capture"]["states"] = states
         payload["capture"]["source"] = "native_collector"
+        payload["capture"]["required_evidence_complete"] = (
+            not coverage["omitted_required"] and states.get("required_evidence_complete", True))
         if coverage["captured"] < coverage["candidates"] or states["truncated"]:
             payload["capture"]["detail_status"] = "truncated"
         if json_size(payload, SNAPSHOT_BYTES) > SNAPSHOT_BYTES:
@@ -997,7 +1012,7 @@ class Collector:
         for snapshot_id in requests:
             try:
                 if snapshot_valid_id(snapshot_id):
-                    write_json(f"{SNAPSHOT_DIR}/{snapshot_id}.json", payload)
+                    write_json(f"{SNAPSHOT_DIR}/{snapshot_id}.json", payload, durable=True)
             except OSError as error:
                 log_warning(f"snapshot {snapshot_id} could not be saved: {error}")
             try:
@@ -1135,7 +1150,15 @@ class Collector:
             if not self.failures:
                 log_error(f"reading the firewall states failed: {error}")
             self.failures += 1
+            incompatible = getattr(error, "failure_class", None) == "incompatible"
+            if incompatible and self.native_incompatible is None:
+                log_error(f"the native helper is incompatible with this firewall: {error}")
+            self.native_incompatible = str(error) if incompatible else None
             self._record_native(error=error)
+            if incompatible:
+                if not background:
+                    write_json(OUTPUT_FILE, status_document("native_incompatible", error=str(error),
+                                                            collector=self.timing_status()))
             # Preserve the last successful document and its mtime. Existing API
             # freshness expires it naturally; liveness diagnostics report failure.
             return None
@@ -1144,6 +1167,13 @@ class Collector:
         if self.failures:
             log_notice(f"reading the firewall states works again, after {self.failures} failed attempts")
         self.failures = 0
+        self.native_incompatible = None
+        if not native["refused"]:
+            skipped = native.get("skipped") or {}
+            if skipped and not self.sample_skipped:
+                log_notice("some PF states are not mapped: " + ", ".join(
+                    f"{count} {reason.replace('_', ' ')}" for reason, count in skipped.items()))
+            self.sample_skipped = skipped
         self._record_native(native=native)
         return native
 
@@ -1171,12 +1201,13 @@ class Collector:
                 if omitted and not current.get("threat_remotes_omitted"):
                     log_warning(f"threat recording incomplete: {omitted} remotes over the summary budget")
                 current.update(helper=native.get("helper"), telemetry=telemetry or None,
-                               baseline=native["baseline"], refused=refused,
+                               baseline=native["baseline"], refused=refused, states=native["counts"]["states"],
                                threat_remotes_omitted=omitted,
                                state_limit=telemetry.get("state_limit", current.get("state_limit")))
             if error is not None:
                 current.update(last_error=str(error), last_error_class=getattr(error, "failure_class", None),
                                last_error_at=time.time())
+            current["incompatible"] = self.native_incompatible
             current["ingest_rejected"] = dict(self.ingest_rejected)
             current["ingest_last_rejection"] = self.ingest_last_rejection
             self.collector_status["native"] = current
@@ -1230,7 +1261,8 @@ class Collector:
     def _rest(self, started, background):
         took = time.monotonic() - started
         if background:
-            return max(BACKGROUND_INTERVAL - took, 0.05)
+            rest = max(BACKGROUND_INTERVAL - took, 0.05)
+            return max(rest, INCOMPATIBLE_RETRY_SECONDS) if self.native_incompatible is not None else rest
         interval = INTERVAL if requested(REQUEST_MARKER, ACTIVE_VIEWER_SECONDS) else IDLE_INTERVAL
         with self._status_lock:
             # samples slower than the interval: the map updates at the rest floor below instead
@@ -1238,6 +1270,8 @@ class Collector:
         rest = max(interval - took, took, 0.05)
         if self.failures:
             rest = max(rest, min(MAX_FAILURE_BACKOFF, 2.0 ** self.failures))
+        if self.native_incompatible is not None:
+            rest = max(rest, INCOMPATIBLE_RETRY_SECONDS)
         return rest
 
     def close(self):

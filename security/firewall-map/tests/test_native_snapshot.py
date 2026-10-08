@@ -76,7 +76,9 @@ class NativeSnapshotTest(unittest.TestCase):
         self.assertFalse(meta["atomic"])
         self.assertEqual(meta["population"], "detail_traversal")
         self.assertEqual(len(summary["flows"]), 1)
-        row = rows["9.9.9.9"][0]
+        # exemplars are ordered most bytes first: state 50 (forward bytes ... + 49) leads
+        self.assertEqual(rows["9.9.9.9"][0]["id"], "0000000000000032")
+        row = next(row for row in rows["9.9.9.9"] if row["id"] == "0000000000000001")
         self.assertEqual(row["flow"], {"origin": "8.8.8.1", "dest": "9.9.9.9"})
         self.assertEqual(row["id"], "0000000000000001")
         self.assertEqual(row["creatorid"], "00000007")
@@ -130,7 +132,7 @@ class NativeSnapshotTest(unittest.TestCase):
         self.assertIn("000000000000000d", ids)
         self.assertTrue(meta["complete"])  # complete for pass 2, not an atomic pass-1 freeze
 
-    def test_byte_and_count_backstops_and_incident_failure(self):
+    def test_byte_and_count_backstops_and_incident_truncation(self):
         for limit in ({"byte_limit": 1200}, {"state_limit": 2}):
             with self.subTest(limit=limit):
                 self.engine.close()
@@ -147,11 +149,20 @@ class NativeSnapshotTest(unittest.TestCase):
                 if "state_limit" in limit:
                     self.assertEqual((meta["available"], meta["captured"], meta["omitted"]), (12, 2, 10))
                     self.assertFalse(meta["complete"])
-                    self.assertEqual(meta["omission_reasons"], ["state_count"])
-                    self.assertEqual(totals["omission_reasons"], ["state_count"])
+                    self.assertEqual(meta["omission_reasons"], ["per_flow_evidence_limit"])
+                    self.assertEqual((totals["omission_reasons"], totals["quota"]), (["per_flow_evidence_limit"], 2))
+                    # the two kept are the two with the most bytes
+                    self.assertEqual([row["id"] for row in rows["9.9.9.9"]], ["000000000000000c", "000000000000000b"])
+                else:
+                    self.assertEqual(totals["omission_reasons"], ["encoded_bytes"])
                 self.engine.close()
-                with self.assertRaises(native.NativeError):
-                    self.capture(count=12, incident=True, **limit)
+                # incident evidence over the ceiling is truncated and says so; it never fails
+                rows, meta = self.capture(count=12, incident=True, **limit)[3:]
+                (totals,) = meta["flows"]
+                self.assertTrue(totals["required"])
+                self.assertFalse(meta["required_evidence_complete"])
+                self.assertEqual(totals["matching"], 12)
+                self.assertLess(totals["captured"], 12)
 
     def test_incomplete_reader_and_cross_family_fail_atomically(self):
         for mode in ("incomplete", "cross"):
@@ -174,14 +185,14 @@ class NativeSnapshotTest(unittest.TestCase):
                "flow": {"origin": "8.8.8.1", "dest": "9.9.9.9"}}
         encoded = json.dumps(row, separators=(",", ":")).encode()
         records = [b"\0" + struct.pack("!IQ", 2, 2), b"\1" + struct.pack("!I", 0) + encoded,
-                   b"\2" + struct.pack("!IQQQQQQB", 0, 1, 1, 5, 6, 1, 1, 0)]
+                   b"\2" + struct.pack("!IQQQQQQQQB", 0, 1, 1, 5, 6, 1, 1, 1, 20, 0)]
         body, checksum = b"", 0
         for record in records:
             framed = struct.pack("!I", len(record)) + record
             body += framed
             checksum = zlib.crc32(framed, checksum)
         cost = len(encoded) + len("9.9.9.9") + 8
-        footer = b"\xff" + struct.pack("!QQQQIIQIddd", 1, 1, 1, cost, 0, 1, 0, checksum, 3, 2, 1)
+        footer = b"\xff" + struct.pack("!QQQQIIQIddd", 1, 1, 1, cost, 0, 2, 0, checksum, 3, 2, 1)
         valid = b"FMSTATE2" + body + struct.pack("!I", len(footer)) + footer
 
         def decode(data, identities=(("8.8.8.1", "9.9.9.9", False),)):
@@ -194,7 +205,7 @@ class NativeSnapshotTest(unittest.TestCase):
         rows, meta = decode(valid)
         self.assertTrue(meta["complete"])
         self.assertEqual(meta["flows"][0]["bytes_from_remote"], 5)
-        self.assertEqual(meta["selection_policy"], "arrival_incident_first_v1")
+        self.assertEqual(meta["selection_policy"], "bytes_desc_newest_identity_v1")
         for invalid in (valid[:-1], b"FMSTATE1" + valid[8:], valid[:-26] + b"x" + valid[-25:]):
             with self.subTest(length=len(invalid)), self.assertRaises(native.NativeError):
                 decode(invalid)

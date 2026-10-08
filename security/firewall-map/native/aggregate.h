@@ -55,7 +55,7 @@ struct candidate_view {
   uint64_t seq, weight, association;
 };
 struct aggregate_counts {
-  uint64_t seen, retained, mapped;
+  uint64_t seen, retained, mapped, skipped_af_translation;
   size_t flows, candidates;
 };
 /* Context and history are borrowed for the lifetime of this single sample.

@@ -184,9 +184,11 @@ def normalize_ip(value):
         return value
 
 
-def write_text(path, text):
+def write_text(path, text, durable=False):
     """Write atomically, through a unique temporary file, so readers never see a partial
-    document and two writers never share a temporary name."""
+    document and two writers never share a temporary name. durable: also survive a crash or
+    power loss (the data and the rename reach the disk before returning), for documents kept
+    as records such as saved snapshots; live, regenerated files skip the cost."""
     directory = os.path.dirname(path)
     os.makedirs(directory, exist_ok=True)
     handle, temporary = tempfile.mkstemp(dir=directory, prefix=f".{os.path.basename(path)}.")
@@ -196,7 +198,16 @@ def write_text(path, text):
         os.fchmod(handle, FILE_MODE)
         with os.fdopen(handle, "w") as output:
             output.write(text)
+            if durable:
+                output.flush()
+                os.fsync(output.fileno())
         os.replace(temporary, path)
+        if durable:
+            directory_handle = os.open(directory, os.O_RDONLY)
+            try:
+                os.fsync(directory_handle)
+            finally:
+                os.close(directory_handle)
     except BaseException:
         try:
             os.unlink(temporary)
@@ -205,9 +216,9 @@ def write_text(path, text):
         raise
 
 
-def write_json(path, payload):
+def write_json(path, payload, durable=False):
     """NaN or infinity raise ValueError instead of producing a document JSON readers reject."""
-    write_text(path, json.dumps(payload, separators=(",", ":"), allow_nan=False))
+    write_text(path, json.dumps(payload, separators=(",", ":"), allow_nan=False), durable)
 
 
 def read_json(path):

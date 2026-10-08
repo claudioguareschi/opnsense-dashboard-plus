@@ -63,10 +63,18 @@ struct state {
  * untranslated: the endpoint PF rewrote, before translation: the inside
  *   source of an outbound NAT, or the public destination of an inbound
  *   redirect. Equal to the corresponding side when nothing was translated. */
+/* A state PF can produce but the map does not model yet. It is recognized
+ * positively, skipped before any aggregation side effect and counted by
+ * reason; anything not recognized this way is a structural failure. */
+enum state_skip {
+  SKIP_NONE = 0,
+  SKIP_AF_TRANSLATION = 1, /* af-to (NAT64/NAT46): wire and stack keys of different families */
+};
 struct orientation {
   struct endpoint initiator, responder, untranslated;
   unsigned proto;
   bool translated;
+  enum state_skip skip;
 };
 /* Map semantics of one state.
  * local/remote: the logical flow pair (our-side anchor address, external peer).
@@ -84,6 +92,10 @@ struct state_view {
   unsigned service_port;
   bool has_inside, retained, mapped, remote_initiated, apparent_remote_initiated;
 };
+/* Failure classes: an impossible PF direction or key protocol pair is
+ * structural (FM_FAILURE_STRUCTURAL); keys the decoder should never produce
+ * break an internal invariant (FM_FAILURE_INTERNAL); a recognized but
+ * unsupported state sets orientation.skip and returns true. */
 bool state_orient(const struct state *, struct orientation *, struct fm_error *);
 bool state_normalize(const struct state *, const struct context *,
                      struct state_view *, struct fm_error *);

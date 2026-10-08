@@ -98,32 +98,40 @@ size_t state_tuple(unsigned char *b, unsigned proto, struct endpoint inside,
   return FM_TUPLE_SIZE;
 }
 
+static bool icmp_pair(unsigned a, unsigned b) {
+  return (a == IPPROTO_ICMP && b == IPPROTO_ICMPV6) || (a == IPPROTO_ICMPV6 && b == IPPROTO_ICMP);
+}
 bool state_orient(const struct state *s, struct orientation *o,
                   struct fm_error *error) {
   memset(o, 0, sizeof(*o));
-  for (unsigned k = 0; k < 2; k++) {
-    if (s->key[k].proto != s->key[FM_WIRE_KEY].proto)
-      return fm_error_set(error, EPROTO, "key protocols differ");
+  if (s->pf_direction != FM_IN && s->pf_direction != FM_OUT)
+    return fm_error_fail(error, FM_FAILURE_STRUCTURAL, EPROTO, "PF direction");
+  for (unsigned k = 0; k < 2; k++)
     for (unsigned e = 0; e < 2; e++)
       if (s->key[k].e[e].a.af != s->key[k].e[0].a.af ||
           (s->key[k].e[e].a.af != 4 && s->key[k].e[e].a.af != 6))
-        return fm_error_set(error, EPROTO, "key address family");
+        return fm_error_fail(error, FM_FAILURE_INTERNAL, EPROTO, "key address family");
+  bool cross_family = s->key[FM_WIRE_KEY].e[0].a.af != s->key[FM_STACK_KEY].e[0].a.af;
+  unsigned wire_proto = s->key[FM_WIRE_KEY].proto, stack_proto = s->key[FM_STACK_KEY].proto;
+  if (wire_proto != stack_proto && !(cross_family && icmp_pair(wire_proto, stack_proto)))
+    return fm_error_fail(error, FM_FAILURE_STRUCTURAL, EPROTO, "key protocols differ");
+  if (cross_family) {
+    /* af-to translation: complete keys of the two families, protocols equal
+     * or the ICMP/ICMPv6 pair af-to rewrites. Not modelled yet: skipped. */
+    o->skip = SKIP_AF_TRANSLATION;
+    return true;
   }
-  if (s->key[FM_WIRE_KEY].e[0].a.af != s->key[FM_STACK_KEY].e[0].a.af)
-    return fm_error_set(error, EPROTONOSUPPORT,
-                        "cross-family translation unsupported");
   const struct key *wire = &s->key[FM_WIRE_KEY], *stack = &s->key[FM_STACK_KEY];
   o->proto = wire->proto;
   if (s->pf_direction == FM_OUT) {
     o->initiator = wire->e[1];
     o->responder = wire->e[0];
     o->untranslated = stack->e[1];
-  } else if (s->pf_direction == FM_IN) {
+  } else {
     o->initiator = stack->e[0];
     o->responder = stack->e[1];
     o->untranslated = wire->e[1];
-  } else
-    return fm_error_set(error, EPROTO, "PF direction");
+  }
   /* Inbound pfctl equalizes the left-side ICMP identifier. Outbound it
    * equalizes the right side only: the inside/source identifier must survive.
    */
@@ -139,6 +147,8 @@ bool state_normalize(const struct state *s, const struct context *ctx,
   memset(v, 0, sizeof(*v));
   if (!state_orient(s, &v->pf, error))
     return false;
+  if (v->pf.skip)
+    return true; /* neither retained nor mapped: counted by the caller */
   struct endpoint src = v->pf.initiator, dst = v->pf.responder,
                   nat = v->pf.untranslated, *inside = NULL;
   bool has_nat = v->pf.translated;

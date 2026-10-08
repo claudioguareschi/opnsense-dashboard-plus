@@ -80,12 +80,13 @@ FAILURE, FOOTER = 254, 255
 # candidate kinds
 PROTOCOL, INSIDE_HOST, EGRESS_INTERFACE, SERVICE, REMOTE_TARGET, RULE_LABEL = range(1, 7)
 THREAT_CANDIDATE_KINDS = (INSIDE_HOST, SERVICE, REMOTE_TARGET)
-EVENT_MATCH_KINDS = (1, 2)  # current state, recently seen state
+EVENT_MATCH_CURRENT, EVENT_MATCH_RECENT = 1, 2  # a state in this sample, one seen recently
+EVENT_MATCH_KINDS = (EVENT_MATCH_CURRENT, EVENT_MATCH_RECENT)
 OUTCOMES = {0: "sample", 1: "refused_states", 2: "refused_context", 3: "refused_memory"}
 FAILURE_CLASSES = {1: "structural", 2: "internal", 3: "incompatible", 4: "resources", 5: "request"}
 # FMSTATE2 omission reason bits and selection policies
-OMISSION_REASONS = ((1, "encoded_bytes"), (2, "state_count"), (4, "flow_quota"))
-SELECTION_POLICIES = {1: "arrival_incident_first_v1"}
+OMISSION_REASONS = ((1, "encoded_bytes"), (2, "state_count"), (4, "per_flow_evidence_limit"))
+SELECTION_POLICIES = {2: "bytes_desc_newest_identity_v1"}
 
 _FLOW = struct.Struct("!I17s17sQQQIIQQQQQQddddd")
 _TELEMETRY = struct.Struct("!IQdddddQQQQQQQQQQQQ")
@@ -110,6 +111,29 @@ class NativeError(RuntimeError):
 
 def available(path=HELPER):
     return os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def self_test(path=HELPER, timeout=READ_TIMEOUT_MAX):
+    """The helper's own compatibility check (one PF dump, no aggregation): a dict with ok,
+    and class/error on failure. An incompatible PF ABI has class "incompatible"."""
+    if not available(path):
+        return {"ok": False, "class": "unavailable", "error": "native helper unavailable"}
+    try:
+        result = subprocess.run([path, "--selftest"], capture_output=True, text=True, timeout=timeout, check=False)
+        report = json.loads(result.stdout.strip().splitlines()[-1])
+    except (OSError, subprocess.TimeoutExpired, ValueError, IndexError) as error:
+        return {"ok": False, "class": "unknown", "error": str(error)}
+    return report if isinstance(report, dict) else {"ok": False, "class": "unknown", "error": "malformed report"}
+
+
+def kernel_version():
+    """The running kernel's __FreeBSD_version (kern.osreldate), or None elsewhere."""
+    try:
+        output = subprocess.run(["/sbin/sysctl", "-n", "kern.osreldate"], capture_output=True, text=True,
+                                timeout=2, check=False).stdout
+        return int(output.strip())
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
 
 
 def memory_budget(setting_mib=None, physical=None):
@@ -349,7 +373,12 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
             or (outcome and (any(records) or threats_present)):
         raise NativeError("FMAGG4 completion validation failed")
     refused = OUTCOMES[outcome] if outcome else None
-    return {"flows": flows, "candidates": candidates, "matches": matches,
+    # a sample that skipped unsupported states is semantically incomplete; event matches say so,
+    # since a skipped state could have shared their outside tuple
+    skipped = {"af_translation": telemetry["skipped_af_translation"]} if telemetry["skipped_af_translation"] else {}
+    for match in matches.values():
+        match["sample_degraded"] = bool(skipped)
+    return {"flows": flows, "skipped": skipped, "candidates": candidates, "matches": matches,
             "threat_remotes": threat_remotes, "threat_candidates": threat_candidates,
             "threat_summary": threats_present, "telemetry": telemetry,
             "baseline": telemetry["interval"] < 0,
@@ -620,7 +649,7 @@ def _decode_page(stream, process, timeout=None):
     raise NativeError("incomplete native snapshot page")
 
 
-_FLOW_TOTALS = struct.Struct("!IQQQQQQB")
+_FLOW_TOTALS = struct.Struct("!IQQQQQQQQB")
 _DETAIL_FOOTER = struct.Struct("!QQQQIIQIddd")
 
 
@@ -664,13 +693,15 @@ def _decode_detail(stream, process, identities, generation, byte_limit, state_li
             captured_by_flow[flow_id] += 1
             rows.setdefault(remote, []).append(row)
         elif data[0] == 2 and started and len(data) == 1 + _FLOW_TOTALS.size:
-            (flow_id, matching, captured, from_remote, to_remote, packets_from, packets_to,
-             reasons) = _FLOW_TOTALS.unpack_from(data, 1)
+            (flow_id, matching, captured, from_remote, to_remote, packets_from, packets_to, sample_matching,
+             quota, reasons) = _FLOW_TOTALS.unpack_from(data, 1)
             if flow_id != len(totals) or flow_id >= len(identities) or captured != captured_by_flow[flow_id] \
-                    or captured > matching or reasons & ~7 or bool(matching - captured) != bool(reasons):
+                    or captured > min(matching, quota) or reasons & ~7 \
+                    or bool(matching - captured) != bool(reasons):
                 raise NativeError("native snapshot flow totals")
             local, remote, required = identities[flow_id]
             totals[flow_id] = {"origin": local, "dest": remote, "required": required, "matching": matching,
+                               "matching_at_sample": sample_matching, "quota": quota,
                                "captured": captured, "omitted": matching - captured,
                                "complete": matching == captured,
                                "bytes_from_remote": from_remote, "bytes_to_remote": to_remote,

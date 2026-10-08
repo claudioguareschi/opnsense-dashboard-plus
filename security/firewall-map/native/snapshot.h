@@ -31,18 +31,29 @@
 #define FM_SNAPSHOT_BYTES (10u * 1024u * 1024u)
 #define FM_SNAPSHOT_STATES 5000
 /* FMSTATE2 omission reason bits (PROTOCOL.md). */
-#define SNAPSHOT_OMITTED_BYTES 1
-#define SNAPSHOT_OMITTED_STATES 2
-#define SNAPSHOT_OMITTED_FLOW_QUOTA 4
-/* FMSTATE2 exemplar selection policies. */
-#define SNAPSHOT_POLICY_ARRIVAL 1 /* traversal order, incidents displace ordinary */
+#define SNAPSHOT_OMITTED_BYTES 1      /* the encoded-size budget ran out */
+#define SNAPSHOT_OMITTED_STATES 2     /* the state budget left this flow no quota */
+#define SNAPSHOT_OMITTED_FLOW_QUOTA 4 /* more matching states than the flow's quota */
+/* FMSTATE2 exemplar selection policy: per flow, the exemplars with the most
+ * bytes, then the newest, then the lowest PF identity (creator, id). */
+#define SNAPSHOT_POLICY_BYTES_NEWEST 2
+/* Evidence budget policy. Incident flows (Python's required evidence) are
+ * guaranteed most of the state budget, so routine traffic cannot crowd out
+ * the flows a snapshot is usually taken for, while some room stays for the
+ * context around them. Each incident flow first gets a floor of exemplars,
+ * so one huge incident cannot starve the others; the rest is water-filled by
+ * demand, and every share a flow cannot use returns to the pool. */
+#define SNAPSHOT_INCIDENT_SHARE_PERCENT 80
+#define SNAPSHOT_INCIDENT_FLOOR 20
 struct snapshot;
 struct snapshot_flow {
   struct addr local, remote;
   bool incident;
+  uint64_t sample_states; /* matching states in the sample: the quota demand */
 };
 /* Borrows context; owns only bounded accepted evidence and a selected-flow index.
- * Call snapshot_write only after the PF reader has completed successfully. */
+ * Call snapshot_write only after the PF reader has completed successfully.
+ * Truncation never fails a snapshot: what was left out is reported. */
 struct snapshot *snapshot_create(const struct context *, const struct snapshot_flow *,
                                  size_t, size_t byte_limit, size_t state_limit,
                                  uint64_t generation, double sample_time,
@@ -50,6 +61,9 @@ struct snapshot *snapshot_create(const struct context *, const struct snapshot_f
 void snapshot_destroy(struct snapshot *);
 bool snapshot_add(const struct state *, void *, struct fm_error *);
 bool snapshot_write(struct snapshot *, FILE *, struct fm_error *);
+/* Per-flow exemplar quotas for a state budget (exposed for tests). */
+void snapshot_quotas(const struct snapshot_flow *, size_t count, size_t state_limit,
+                     size_t *quotas);
 /* Snapshot-only session following a sample explicitly requesting it. The
  * aggregate/ranking are borrowed until DETAIL or CANCEL closes the session;
  * the telemetry describes the sample the session belongs to. */

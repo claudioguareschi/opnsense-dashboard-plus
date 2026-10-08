@@ -504,6 +504,21 @@ class SnapshotSafetyTest(CollectorLoopTest):
             with self.assertRaises(COLLECTOR.SnapshotTooLarge):
                 self.collector.build_snapshot_payload(now)
 
+    def test_required_flows_over_the_byte_budget_are_truncated_and_flagged(self):
+        now = self.snapshot_fixture()
+        for flow in self.collector.tracker.flows.values():
+            flow["rule"] = "huge"
+        self.collector.descriptions["huge"] = "x" * 20000
+        self.collector.blocklists.index = COLLECTOR.BlocklistIndex.build(
+            {"Test list": [remote for _, remote in self.collector.tracker.flows]})
+        with mock.patch.object(COLLECTOR, "SNAPSHOT_BYTES", 30000):
+            payload = self.collector.build_snapshot_payload(now)
+        coverage = payload["capture"]["flows"]
+        self.assertEqual(coverage["required"], 6)
+        self.assertGreater(coverage["omitted_required"], 0)
+        self.assertFalse(payload["capture"]["required_evidence_complete"])
+        self.assertEqual(payload["capture"]["detail_status"], "truncated")
+
     def test_pf_byte_omissions_are_reported(self):
         now = self.snapshot_fixture(1)
         coverage = {"scope": "retained_logical_flows", "available": 2, "captured": 1,
@@ -861,6 +876,39 @@ class TimingContractTest(CollectorLoopTest):
         self.collector.step()
         self.assertTrue(self.collector.native_engine.baselines[-1])
         self.assertEqual(self.payload(), previous)
+
+    def test_incompatible_helper_publishes_its_status_and_retries_slowly(self):
+        self.collector.step()  # baseline
+        self.collector.step()
+        error = COLLECTOR.NativeError("PF state ABI version 9, helper built for 8", "incompatible")
+        with mock.patch.object(self.collector.native_engine, "sample", side_effect=error), \
+                mock.patch.object(COLLECTOR, "log_error"):
+            rest = self.collector.step()
+        self.assertGreaterEqual(rest, COLLECTOR.INCOMPATIBLE_RETRY_SECONDS)
+        payload = self.payload()
+        self.assertEqual((payload["status"], payload["error"]), ("native_incompatible", str(error)))
+        self.assertEqual(self.diagnostic()["native"]["incompatible"], str(error))
+        self.assertEqual(self.diagnostic()["native"]["last_error_class"], "incompatible")
+        self.collector.step()  # compatible again (a new helper): baseline, then normal pacing
+        self.assertIsNone(self.collector.native_incompatible)
+        self.assertLess(self.collector.step(), COLLECTOR.INCOMPATIBLE_RETRY_SECONDS)
+
+    def test_skipped_states_mark_the_map_incomplete(self):
+        self.collector.step()  # baseline
+        original = self.collector.native_engine.sample
+
+        def skipping(*args, **kwargs):
+            result = original(*args, **kwargs)
+            result["skipped"] = {"af_translation": 3}
+            return result
+
+        with mock.patch.object(self.collector.native_engine, "sample", skipping), \
+                mock.patch.object(COLLECTOR, "log_notice") as notice:
+            self.collector.step()
+        self.assertEqual(self.payload()["incomplete"], {"skipped_states": {"af_translation": 3}})
+        self.assertIn("3 af translation", notice.call_args.args[0])
+        self.collector.step()
+        self.assertNotIn("incomplete", self.payload())
 
     def test_refused_samples_publish_an_explicit_status(self):
         self.collector.step()  # baseline

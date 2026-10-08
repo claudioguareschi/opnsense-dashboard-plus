@@ -33,6 +33,7 @@ from datetime import datetime
 from heapq import nsmallest
 from itertools import islice
 
+from .native import EVENT_MATCH_CURRENT
 from .blocklists import IDS_LIST, threat_fields, threat_lists_for
 from .blocks import MAX_BLOCK_SOURCES
 from .common import (connection_target, host_port, location_fields, normalize_ip, public_ip,
@@ -101,6 +102,9 @@ def make_connection(key, **fields):
         "inside": None, "remote_started": None, "bytes_in": None, "bytes_out": None, "age": None,
         "rule": None, "rule_description": None, "interface": None, "state": None, "decision": None,
         "source": None, "seen": None,
+        # True when the PF sample behind it skipped unsupported states: another state, not
+        # modelled, may share the tuple, so the attribution may be incomplete
+        "attribution_incomplete": False,
     }
     connection.update(fields)
     return connection
@@ -151,14 +155,15 @@ class Correlator:
         descriptions = descriptions or {}
         current, ambiguous = {}, set()
         for key, value in matches.items():
-            if value["kind"] != 1:
+            if value["kind"] != EVENT_MATCH_CURRENT:
                 continue
             inside = host_port(value["inside"], value["inside_port"]) if value["inside"] else None
             connection = make_connection(
                 key, inside=inside, remote_started=value["remote_started"], bytes_in=value["bytes_in"],
                 bytes_out=value["bytes_out"], age=value["age"], rule=value["rule"],
                 rule_description=descriptions.get(value["rule"] or "", ""), interface=value["interface"],
-                state=f"{value['id']}/{value['creator']}", decision="pass", source="state", seen=now)
+                state=f"{value['id']}/{value['creator']}", decision="pass", source="state", seen=now,
+                attribution_incomplete=bool(value.get("sample_degraded")))
             current[key] = connection
             if value["ambiguous"]:
                 ambiguous.add(key)
@@ -253,7 +258,7 @@ class Correlator:
         # packet-source approximation (pending target verification).
         remote_started = alert["src"] == key[3]
         flow = alert.get("flow") or {}
-        # Suricata counts to_server/to_client; the map counts toward/away from the remote side
+        # Suricata counts to_server/to_client; the map counts bytes from/to the remote side
         to_server, to_client = flow.get("bytes_toserver"), flow.get("bytes_toclient")
         inside, description = forward_target(self.forwards, key[0], key[2]) if remote_started else (None, None)
         started = flow.get("start")

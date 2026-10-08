@@ -164,8 +164,41 @@ FMSTATE2 (`"FMSTATE2"`, frames, footer):
 | --- | --- | --- |
 | 0 | header | u32 version (2), u64 generation |
 | 1 | state | u32 flow index, JSON object |
-| 2 | flow totals | u32 flow index, u64 matching states, u64 captured states, u64 bytes_from_remote, u64 bytes_to_remote, u64 packets_from_remote, u64 packets_to_remote, u8 omission reasons (1 byte budget, 2 state budget, 4 per-flow quota) |
+| 2 | flow totals | u32 flow index, u64 matching states, u64 captured states, u64 bytes_from_remote, u64 bytes_to_remote, u64 packets_from_remote, u64 packets_to_remote, u64 matching states in the sample, u64 quota, u8 omission reasons (1 byte budget, 2 state budget left no quota, 4 per-flow quota) |
 | 255 | footer | u64 traversed, u64 matching, u64 captured, u64 encoded bytes, u32 omission reasons, u32 selection policy, u64 skipped states, u32 checksum, f64 sample time, f64 detail start, f64 detail end |
 
 Every selected flow has exactly one totals record. Totals are exact over all
 matching states, independent of how many exemplars were captured.
+
+Exemplar selection (policy 2): each flow gets a quota of the state budget
+before the traversal, from its matching-state count in the sample:
+incident flows (required evidence) share 80% of the budget, each first
+getting up to 20, the rest water-filled by demand; ordinary flows share the
+remainder; any share a class cannot use goes to the other. During the
+traversal each flow keeps its best exemplars in a bounded heap: most bytes,
+then newest, then lowest (creator, id). Rows are written incident flows
+first, best first, within the encoded-size budget. Truncation is reported per
+flow and never fails a snapshot; only structural errors do.
+
+## Command line
+
+    firewallmap-native --version     one JSON line: protocol, PF state ABI and
+                                     FreeBSD version built for, compiler
+    firewallmap-native --selftest    one GETSTATES dump with full validation and
+                                     no aggregation; one JSON line; exit status 0
+                                     compatible, 3 incompatible PF ABI, 1 other
+
+configd: `firewallmap native selftest`, `firewallmap native version`.
+
+## Unsupported states and failure classes
+
+A state the engine recognizes but does not model is skipped before any
+aggregation side effect and counted by reason in telemetry (today only
+`af_translation`: wire and stack keys of different families, with equal
+protocols or the ICMP/ICMPv6 pair). The sample is then semantically
+incomplete: Python marks the map document (`incomplete`) and event matches
+(`sample_degraded`). Any other unexpected state shape is a failure: an
+impossible PF direction or protocol pair is structural; key families the
+decoder cannot produce break an internal invariant; a PF state ABI version
+other than the build's is incompatible (Python then reports
+`native_incompatible` and retries only every 5 minutes).

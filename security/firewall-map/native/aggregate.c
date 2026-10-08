@@ -42,7 +42,7 @@ struct aggregate {
   size_t capacity;
   label_slot *lan_labels;
   size_t lan_label_capacity;
-  uint64_t seen, retained, mapped;
+  uint64_t seen, retained, mapped, skipped_af_translation;
   bool finished, correlate;
 };
 static void put32(unsigned char **p, uint32_t value) {
@@ -292,6 +292,10 @@ bool aggregate_add(struct aggregate *a, const struct state *s,
   if (!state_normalize(s, a->ctx, &v, error))
     return false;
   uint64_t seq = a->seen++;
+  if (v.pf.skip == SKIP_AF_TRANSLATION) {
+    a->skipped_af_translation++;
+    return true;
+  }
   if (!v.retained)
     return true;
   a->retained++;
@@ -354,7 +358,7 @@ bool aggregate_finish(struct aggregate *a, struct fm_error *error) {
   return true;
 }
 struct aggregate_counts aggregate_counts(const struct aggregate *a) {
-  return (struct aggregate_counts){a->seen, a->retained, a->mapped,
+  return (struct aggregate_counts){a->seen, a->retained, a->mapped, a->skipped_af_translation,
                                    a->flows.used, a->candidates.used};
 }
 const struct flow *aggregate_flow(const struct aggregate *a, size_t n) {

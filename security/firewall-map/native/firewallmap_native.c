@@ -336,6 +336,7 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   struct response response = {0};
   if (ok) {
     telemetry.processing_seconds = monotonic_seconds() - read_done;
+    telemetry.skipped_af_translation = aggregate_counts(sample.aggregate).skipped_af_translation;
     telemetry.event_history_evicted = event_history_evicted(e->events);
     measure_process(&telemetry);
     ok = response_begin(&response, error);
@@ -398,8 +399,57 @@ static void seed_hash(void) {
   index_set_hash_key(key);
 }
 
-int main(void) {
+#ifndef __VERSION__
+#define __VERSION__ "unknown"
+#endif
+static int print_version(void) {
+  printf("{\"helper\":\"firewallmap-native\",\"protocol\":\"FMAGG4\",\"banner\":\"FMNATIVE5\","
+         "\"pf_state_version\":%u,\"freebsd_version\":%u,\"compiler\":\"%s\"}\n",
+         pf_reader_state_version(), (unsigned)BUILD_FREEBSD_VERSION, __VERSION__);
+  return 0;
+}
+static bool count_state(const struct state *state, void *arg, struct fm_error *error) {
+  (void)state;
+  (void)error;
+  (*(uint64_t *)arg)++;
+  return true;
+}
+/* --selftest: can this helper read this kernel's PF states? One GETSTATES dump
+ * with full structural and ABI validation, no aggregation. Prints one JSON
+ * line; exit status 0 compatible, 3 incompatible PF ABI, 1 any other failure.
+ * With no states the ABI version cannot be checked; the result says so and
+ * the first real sample checks it. */
+static int self_test(void) {
+  struct fm_error error = {0};
+  uint64_t preflight = 0, states = 0;
+  bool status = pf_reader_state_count(&preflight);
+  bool ok = pf_reader_live(count_state, &states, NULL, NULL, &error);
+  const char *classes[] = {"", "structural", "internal", "incompatible", "resources", "request"};
+  if (!ok) {
+    char message[sizeof(error.message) * 6 + 1], *p = message;
+    for (const char *c = error.message; *c; c++) /* JSON-safe: drop quotes and controls */
+      if (*c != '"' && *c != '\\' && (unsigned char)*c >= 32) *p++ = *c;
+    *p = 0;
+    printf("{\"ok\":false,\"class\":\"%s\",\"error\":\"%s\"}\n",
+           error.failure_class > 0 && error.failure_class <= 5 ? classes[error.failure_class] : "unknown",
+           message);
+    return error.failure_class == FM_FAILURE_INCOMPATIBLE ? 3 : 1;
+  }
+  printf("{\"ok\":true,\"states\":%llu,\"abi_checked\":%s,\"preflight\":%s}\n",
+         (unsigned long long)states, states ? "true" : "false", status ? "true" : "false");
+  return 0;
+}
+
+int main(int argc, char **argv) {
   umask(0077);
+  if (argc == 2 && !strcmp(argv[1], "--version"))
+    return print_version();
+  if (argc == 2 && !strcmp(argv[1], "--selftest"))
+    return self_test();
+  if (argc != 1) {
+    fprintf(stderr, "usage: firewallmap-native [--version | --selftest]\n");
+    return 2;
+  }
   seed_hash();
   struct fm_error error = {0};
   struct engine engine = {

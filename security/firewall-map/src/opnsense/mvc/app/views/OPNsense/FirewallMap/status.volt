@@ -66,6 +66,16 @@
             hours: {{ lang._('%s h')|json_encode }},
             days: {{ lang._('%s days')|json_encode }},
             sample: {{ lang._('%s ms (CPU %s ms)')|json_encode }},
+            engine_helper: {{ lang._('Process %s, started %s times; built for PF state ABI %s')|json_encode }},
+            engine_version_warning: {{ lang._('Built on FreeBSD %s, running %s: compatibility is decided by the PF state check')|json_encode }},
+            engine_limit: {{ lang._('Up to %s states (memory budget %s)')|json_encode }},
+            engine_sample: {{ lang._('%s states: PF read %s ms, processing %s ms, memory peak %s')|json_encode }},
+            engine_baseline: {{ lang._('first sample of this process: no rates yet')|json_encode }},
+            engine_omitted: {{ lang._('%s states skipped (unsupported address-family translation), %s candidates and %s threat remotes over their budgets, %s recent tuples evicted')|json_encode }},
+            engine_rejected: {{ lang._('%s filter log and %s IDS lines rejected')|json_encode }},
+            engine_refused: {{ lang._('Last sample refused: %s')|json_encode }},
+            engine_incompatible: {{ lang._('Incompatible with this firewall: %s')|json_encode }},
+            none: {{ lang._('none')|json_encode }},
         });
         const PROVIDERS = plain({
             auto: {{ lang._('Automatic')|json_encode }}, maxmind: 'MaxMind GeoLite2', maxmind_paid: 'MaxMind GeoIP2 City', dbip: 'DB-IP Lite',
@@ -101,6 +111,31 @@
             const sample = c.last_sample;
             const ms = (seconds) => Math.round(seconds * 1000).toLocaleString();
             $('#collector-sample').text(sample ? T.sample.replace('%s', ms(sample.wall)).replace('%s', ms(sample.cpu)) : '—');
+
+            const engine = data.native || {};
+            const helper = engine.helper || {};
+            const telemetry = engine.telemetry || {};
+            const count = (value) => Number(value || 0).toLocaleString();
+            const fill = (template, ...values) => values.reduce((text, value) => text.replace('%s', value), template);
+            $('#engine-helper').html(helper.pid
+                ? escape(fill(T.engine_helper, helper.pid, count(helper.starts), helper.pf_state_version))
+                  + (engine.version_warning ? `<br><span class="text-warning">${escape(fill(T.engine_version_warning,
+                      helper.freebsd_version, engine.kernel_version))}</span>` : '')
+                : '—');
+            $('#engine-limit').text(engine.state_limit ? fill(T.engine_limit, count(engine.state_limit),
+                megabytes(telemetry.heap_budget || 0)) : '—');
+            $('#engine-sample').text(telemetry.sequence ? fill(T.engine_sample, count(engine.states),
+                ms(telemetry.dump_seconds || 0), ms(telemetry.processing_seconds || 0), megabytes(telemetry.heap_peak || 0))
+                + (engine.baseline ? ` (${T.engine_baseline})` : '') : '—');
+            $('#engine-omitted').text(telemetry.sequence ? fill(T.engine_omitted, count(telemetry.skipped_af_translation),
+                count(telemetry.candidates_omitted), count(telemetry.threat_remotes_omitted),
+                count(telemetry.event_history_evicted)) : '—');
+            const rejected = engine.ingest_rejected || {};
+            $('#engine-rejected').text(fill(T.engine_rejected, count(rejected.filterlog), count(rejected.eve)));
+            const problem = engine.incompatible ? fill(T.engine_incompatible, engine.incompatible)
+                : engine.refused ? fill(T.engine_refused, `${engine.refused.reason} (${count(engine.refused.actual)} / ${count(engine.refused.limit)})`)
+                : engine.last_error ? engine.last_error : null;
+            $('#engine-problem').html(problem ? state(problem) : escape(T.none));
 
             const db = data.database || {};
             const provider = PROVIDERS[db.provider] || db.provider || '';
@@ -187,6 +222,20 @@
             <tr><td>{{ lang._('Last map update') }}</td><td id="collector-update"></td></tr>
             <tr><td>{{ lang._('Background recording') }}</td><td id="collector-recording"></td></tr>
             <tr><td>{{ lang._('Last sample') }}</td><td id="collector-sample"></td></tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="content-box __mb">
+    <table class="table table-condensed">
+        <thead><tr><th colspan="2">{{ lang._('State engine') }}</th></tr></thead>
+        <tbody>
+            <tr><td style="width: 25%;">{{ lang._('Helper') }}</td><td id="engine-helper"></td></tr>
+            <tr><td>{{ lang._('State limit') }}</td><td id="engine-limit"></td></tr>
+            <tr><td>{{ lang._('Last native sample') }}</td><td id="engine-sample"></td></tr>
+            <tr><td>{{ lang._('Left out') }}</td><td id="engine-omitted"></td></tr>
+            <tr><td>{{ lang._('Rejected log lines') }}</td><td id="engine-rejected"></td></tr>
+            <tr><td>{{ lang._('Problems') }}</td><td id="engine-problem"></td></tr>
         </tbody>
     </table>
 </div>

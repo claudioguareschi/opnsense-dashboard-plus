@@ -408,6 +408,19 @@ static void datagram(struct reader *r, unsigned char *buffer, size_t left,
   }
 }
 
+#ifdef FM_DEVEL_TOOLS
+/* Fuzzing entry point (devel/fuzz/fuzz_netlink.c): one received datagram. */
+bool pf_reader_decode_datagram(unsigned char *buffer, size_t size, uint32_t seq, int family,
+                               pf_state_callback callback, void *arg, bool *done,
+                               struct fm_error *error) {
+  struct reader r = {.callback = callback, .arg = arg, .error = error};
+  int finished = 0;
+  datagram(&r, buffer, size, seq, family, &finished);
+  *done = finished;
+  return !error->code;
+}
+#endif
+
 bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
                     double *request_anchor, struct fm_error *error) {
   struct reader r = {.callback = callback, .arg = arg, .error = error};

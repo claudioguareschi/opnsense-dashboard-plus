@@ -202,7 +202,7 @@ def save(user, now=None, wait=WAIT_SECONDS, directory=SNAPSHOT_DIR, requests=SNA
         if json_size(payload, MAX_DOCUMENT_BYTES) > MAX_DOCUMENT_BYTES:
             release(now, previous, requests)
             return {"result": "failed", "error": "snapshot exceeds byte limit"}
-        write_json(document_path(snapshot_id, directory), payload)
+        write_json(document_path(snapshot_id, directory), payload, durable=True)
         partial = True
     payload = read_json(document_path(snapshot_id, directory))
     if payload.get("status") != "ok":
@@ -213,7 +213,7 @@ def save(user, now=None, wait=WAIT_SECONDS, directory=SNAPSHOT_DIR, requests=SNA
             "size": os.path.getsize(document_path(snapshot_id, directory))}
     if "capture" in payload:
         meta["capture"] = payload["capture"]
-    write_json(meta_path(snapshot_id, directory), meta)
+    write_json(meta_path(snapshot_id, directory), meta, durable=True)
     prune(directory=directory)
     return {"result": "saved", "snapshot": meta}
 
@@ -329,7 +329,7 @@ def set_note(snapshot_id, note, directory=SNAPSHOT_DIR):
     if not meta:
         return {"result": "failed", "error": "unknown snapshot"}
     meta["note"] = note
-    write_json(meta_path(snapshot_id, directory), meta)
+    write_json(meta_path(snapshot_id, directory), meta, durable=True)
     return {"result": "saved", "snapshot": meta}
 
 

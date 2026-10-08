@@ -44,6 +44,7 @@ import sqlite3
 import sys
 import time
 
+from lib import native
 from lib.common import (CACHE_DB, THREATS_DB, connection_target, log_error, protocol_name,
                         secure_umask, service_name, service_port_label)
 from lib.leases import host_names
@@ -168,12 +169,12 @@ def observe_aggregates(aggregate, lists_for):
         entry = seen.get(aggregate["threat_remotes"][remote_id]["address"])
         if entry is None:
             continue
-        if kind == 2:
+        if kind == native.INSIDE_HOST:
             address = _native_address(value)
             if address not in entry["_members"]["inside"]:
                 entry["_members"]["inside"].add(address)
                 entry["inside"].append(address)
-        elif kind == 4:
+        elif kind == native.SERVICE:
             number = (association >> 16) & 255
             protocol = _NATIVE_PROTOCOLS.get(number)
             if protocol is None:
@@ -188,7 +189,7 @@ def observe_aggregates(aggregate, lists_for):
                 label = service_port_label(protocol, str(port) if port else None)
                 if label:
                     entry["service_ports"][name] = label
-        elif kind == 5:
+        elif kind == native.REMOTE_TARGET:
             if len(value) != 20:
                 continue
             protocol = _NATIVE_PROTOCOLS.get(value[0]) or protocol_name(value[0])

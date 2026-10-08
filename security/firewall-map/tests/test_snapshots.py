@@ -242,5 +242,20 @@ class SnapshotTest(unittest.TestCase):
         self.assertIn('state.mode === "snapshot" && state.can.states', page)
 
 
+class DurableWriteTest(unittest.TestCase):
+    def test_durable_writes_reach_the_disk_and_live_ones_do_not_wait(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch("os.fsync") as fsync:
+            path = os.path.join(directory, "document.json")
+            COMMON.write_json(path, {"a": 1}, durable=True)
+            self.assertEqual(fsync.call_count, 2)  # the file, then the directory entry
+            COMMON.write_json(path, {"a": 2})
+            self.assertEqual(fsync.call_count, 2)
+            with open(path) as handle:
+                self.assertEqual(json.load(handle), {"a": 2})
+            with self.assertRaises(ValueError):
+                COMMON.write_json(path, {"a": float("nan")})
+            self.assertEqual(os.listdir(directory), ["document.json"])  # no temporary file left behind
+
+
 if __name__ == "__main__":
     unittest.main()
