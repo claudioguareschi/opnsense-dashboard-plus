@@ -43,7 +43,8 @@
  * optionally sleeping per_datagram_ms after each datagram. Every datagram goes
  * through the production decoder, so the state count is what the collector
  * would see. Prints one JSON line: the socket receive limits, the bytes the
- * socket reported queued after the delay, datagrams, bytes, decoded states,
+ * socket reported queued after the delay and the largest backlog seen after
+ * any read (max_queued), datagrams, bytes, decoded states,
  * serialized bytes per state, NLMSG_DONE/error status, and the GET_STATUS
  * state count before and after the dump (completeness cross-check). Kernel
  * memory is sampled outside the probe (vmstat -m / -z, netstat -m) while it
@@ -137,6 +138,7 @@ int main(int argc, char **argv) {
   struct fm_error error = {0};
   bool done = false, truncated = false;
   double first = 0;
+  int max_queued = queued; /* largest kernel backlog seen at any read */
   while (!done && !error.code) {
     ssize_t size = recv(ss.fd, buffer, ss.bufsize, 0);
     if (size < 0 && errno == EINTR)
@@ -151,6 +153,9 @@ int main(int argc, char **argv) {
     bytes += (uint64_t)size;
     if ((size_t)size == ss.bufsize)
       truncated = true; /* a full buffer may mean a cut datagram: report it */
+    int backlog;
+    if (!ioctl(ss.fd, FIONREAD, &backlog) && backlog > max_queued)
+      max_queued = backlog;
     pf_reader_decode_datagram(buffer, (size_t)size, seq, family, count_state, &states, &done,
                               &error);
     pause_ms(per_datagram_ms);
@@ -159,12 +164,13 @@ int main(int argc, char **argv) {
   getrusage(RUSAGE_SELF, &after_usage);
   bool have_after = pf_reader_state_count(&status_after);
   printf("{\"delay_s\":%.3f,\"per_datagram_ms\":%.3f,\"so_rcvbuf\":%d,\"read_buffer\":%zu,"
-         "\"queued_after_delay\":%d,\"datagrams\":%llu,\"bytes\":%llu,\"states\":%llu,"
+         "\"queued_after_delay\":%d,\"max_queued\":%d,\"datagrams\":%llu,\"bytes\":%llu,\"states\":%llu,"
          "\"bytes_per_state\":%.1f,\"done\":%s,\"error\":%d,\"error_class\":%d,"
          "\"error_message\":\"%s\",\"full_buffer_reads\":%s,"
          "\"status_before\":%lld,\"status_after\":%lld,"
          "\"first_datagram_s\":%.3f,\"total_s\":%.3f,\"user_cpu_s\":%.3f,\"system_cpu_s\":%.3f}\n",
-         delay, per_datagram_ms, rcvbuf, ss.bufsize, queued, (unsigned long long)datagrams,
+         delay, per_datagram_ms, rcvbuf, ss.bufsize, queued, max_queued,
+         (unsigned long long)datagrams,
          (unsigned long long)bytes, (unsigned long long)states,
          states ? (double)bytes / (double)states : 0.0, done ? "true" : "false", error.code,
          error.failure_class, error.message, truncated ? "true" : "false",
