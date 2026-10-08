@@ -1841,7 +1841,7 @@
 	/** Coverage is separate from legacy full/partial: old captures have unknown completeness. */
 	function captureText(meta) {
 		const capture = meta.capture;
-		if (!capture || capture.version !== 1 || !["complete", "truncated"].includes(capture.detail_status)) return T.snapshot_unknown;
+		if (!capture || ![1, 2].includes(capture.version) || !["complete", "truncated"].includes(capture.detail_status)) return T.snapshot_unknown;
 		const parts = [capture.detail_status === "truncated" ? T.snapshot_truncated : T.snapshot_complete];
 		const flows = capture.flows || {};
 		if (flows.available != null) parts.push(fill(T.snapshot_captured_flows, {
@@ -1854,6 +1854,12 @@
 			captured: states.captured,
 			available: states.available
 		}));
+		const context = capture.context || {};
+		if (context.flows_total != null && T.snapshot_population) {
+			const total = Number(context.flows_total).toLocaleString();
+			parts.push(fill(T.snapshot_population, { count: (context.flows_estimated ? "≈" : "") + total }));
+		}
+		if (context.quality?.ranking === "bounded" && T.snapshot_ranking_bounded) parts.push(T.snapshot_ranking_bounded);
 		return parts.join(" · ");
 	}
 	async function loadSnapshots() {
@@ -1895,7 +1901,8 @@
 	}
 	async function openSnapshot(id) {
 		try {
-			const result = await getJSON(`/api/firewallmap/snapshots/get/${encodeURIComponent(id)}?blocks_min=${state.settings?.blockMin ?? 3}`);
+			const focus = state.settings?.focus ? `&focus=${encodeURIComponent(state.settings.focus)}` : "";
+			const result = await getJSON(`/api/firewallmap/snapshots/get/${encodeURIComponent(id)}?blocks_min=${state.settings?.blockMin ?? 3}${focus}`);
 			if (result.result !== "ok") throw new Error(result.error || result.result);
 			enterSnapshotMode(result.snapshot, result.data);
 		} catch (error) {

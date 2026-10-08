@@ -37,7 +37,7 @@ from unittest.mock import Mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src/opnsense/scripts/OPNsense/FirewallMap"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import collector  # noqa: E402
+from lib import collector, evidence as EVIDENCE  # noqa: E402
 from collector_build import compile_worker  # noqa: E402
 
 
@@ -56,14 +56,13 @@ class CollectorSnapshotTest(unittest.TestCase):
         self.addCleanup(self.engine.close)
 
     def capture(self, mode="one", count=12, byte_limit=collector.SNAPSHOT_BYTES, state_limit=5000,
-                select=None, incident=False):
+                select=None, incident=False, evidence=None):
         with patch.dict(os.environ, FM_TEST_MODE=mode, FM_TEST_COUNT=str(count)):
             args = ({"8.8.8.1", "2001:4860::1"}, [], {}, None)
             cold = self.engine.sample(*args)
-            warm = self.engine.sample(*args, snapshot=True)
-            pages = [row for page in self.engine.snapshot_pages() for row in page]
-            identities = [(local, remote, incident) for local, remote, _rank, _order in pages
-                          if select is None or select(remote)]
+            warm = self.engine.sample(*args, snapshot=True, evidence=evidence)
+            identities = [(item["local"], item["remote"], incident) for item in warm["snapshot_candidates"]
+                          if select is None or select(item["remote"])]
             summary = self.engine.snapshot_selection(identities)
             rows, coverage = self.engine.snapshot_detail(identities, byte_limit, state_limit)
         return cold, warm, summary, rows, coverage
@@ -112,7 +111,9 @@ class CollectorSnapshotTest(unittest.TestCase):
         self.assertEqual({row["protocol"] for records in rows.values() for row in records}, {1, 6, 58})
 
     def test_unrelated_excluded_and_selection_beyond_live_150(self):
-        _, warm, selected, rows, meta = self.capture("many", 700, select=lambda remote: remote == "9.1.2.187")
+        # a flow outside the live 150 is a snapshot candidate through its evidence
+        _, warm, selected, rows, meta = self.capture("many", 700, select=lambda remote: remote == "9.1.2.187",
+                                                     evidence={"9.1.2.187": EVIDENCE.facts(5)})
         self.assertEqual(len(warm["flows"]), 150)
         self.assertEqual(selected["flows"][0]["key"], ("8.8.8.1", "9.1.2.187"))
         self.assertEqual(meta["captured"], 1)
@@ -220,20 +221,31 @@ class CollectorSnapshotTest(unittest.TestCase):
         with self.assertRaises(collector.CollectorError):
             decode(valid, (("8.8.8.1", "9.9.9.9", False), ("8.8.8.1", "9.9.9.8", False)))
 
-    def test_page_header_version(self):
-        def decode(version):
-            record = b"\0" + struct.pack("!IQQQI", version, 7, 0, 0, 0)
-            framed = struct.pack("!I", len(record)) + record
-            footer = b"\xff" + struct.pack("!I", zlib.crc32(framed))
-            with tempfile.TemporaryFile() as stream:
-                stream.write(b"FMPAGE1\0" + framed + struct.pack("!I", len(footer)) + footer)
-                stream.seek(0)
-                return collector._decode_page(stream, Mock(poll=lambda: 0))
+    def test_the_retired_page_command_is_refused(self):
+        with patch.dict(os.environ, FM_TEST_MODE="one", FM_TEST_COUNT="12"):
+            args = ({"8.8.8.1"}, [], {}, None)
+            self.engine.sample(*args)
+            self.engine.sample(*args, snapshot=True)
+            with self.assertRaises(collector.CollectorError) as raised:
+                self.engine._request("FMSNAP1 PAGE 0\n", lambda stream, process: collector._decode(
+                    stream, process, (), False))
+        self.assertEqual(raised.exception.failure_class, "request")
 
-        self.assertEqual(decode(collector.PROTOCOL_VERSION)["generation"], 7)
-        for version in (0, 2):
-            with self.subTest(version=version), self.assertRaises(collector.CollectorError):
-                decode(version)
+    def test_candidates_list_evidence_first_and_are_bounded(self):
+        """No all-flow paging: the sample opening a session lists its snapshot candidates, flows
+        with evidence first (strongest class, then score), then the profiles' union."""
+        facts = {"9.1.0.7": EVIDENCE.facts(ids_alerts=1, ids_severity=1), "9.1.0.9": EVIDENCE.facts(40)}
+        with patch.dict(os.environ, FM_TEST_MODE="many", FM_TEST_COUNT="6000"):
+            args = ({"8.8.8.1"}, [], {}, None)
+            self.engine.sample(*args)
+            warm = self.engine.sample(*args, snapshot=True, evidence=facts)
+        candidates = warm["snapshot_candidates"]
+        self.assertEqual([item["remote"] for item in candidates[:2]], ["9.1.0.7", "9.1.0.9"])
+        self.assertEqual([item["security_class"] for item in candidates[:2]], ["S3", "S2"])
+        union = {flow["key"] for flow in warm["flows"]}
+        self.assertTrue(union <= {(item["local"], item["remote"]) for item in candidates})
+        self.assertLessEqual(len(candidates), collector.SNAPSHOT_FLOWS)
+        self.engine.snapshot_cancel()
 
     def test_exact_encoded_budget(self):
         _, _, _, rows, meta = self.capture(count=1)

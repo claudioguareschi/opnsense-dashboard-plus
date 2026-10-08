@@ -35,7 +35,7 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from support import REFERENCE, COLLECTOR, COMMON, PF, SUMMARY, THREATS, Geo, nat_state  # noqa: E402
+from support import REFERENCE, COLLECTOR, COMMON, EVIDENCE, PF, SUMMARY, THREATS, Geo, nat_state  # noqa: E402
 from collector_fixture import CollectorFixture  # noqa: E402
 
 
@@ -476,6 +476,19 @@ class CollectorLoopTest(unittest.TestCase):
 
 
 class SnapshotSafetyTest(CollectorLoopTest):
+    def build_snapshot(self, now):
+        """The snapshot of the fixture's flows as the collector would list its candidates (evidence
+        from the sample's facts and the threat lists first, by rate; the rest by rate)."""
+        facts = self.collector.evidence_facts()
+        rows = []
+        for order, ((local, remote), flow) in enumerate(self.collector.tracker.flows.items()):
+            mask = facts.get(remote, (0,))[0] | (EVIDENCE.THREAT_LIST if self.collector.blocklists.lookup(remote) else 0)
+            rows.append({"local": local, "remote": remote, "evidence": mask, "security_class": "S1" if mask else "S0",
+                         "score": max(flow["rate"], 1.0), "order": order, "states": flow["states"]})
+        rows.sort(key=lambda row: (not row["evidence"], -row["score"], row["order"]))
+        self.collector.snapshot_candidates = rows
+        return self.collector.build_snapshot_payload(now)
+
     def snapshot_fixture(self, count=6):
         self.collector.step()
         self.bytes = 5000
@@ -494,7 +507,7 @@ class SnapshotSafetyTest(CollectorLoopTest):
         now = self.snapshot_fixture()
         self.threat_list(["34.1.1.5"])
         with mock.patch.object(COLLECTOR, "SNAPSHOT_FLOWS", 3):
-            payload = self.collector.build_snapshot_payload(now)
+            payload = self.build_snapshot(now)
         self.assertEqual([flow["dest"] for flow in payload["flows"]], ["34.1.1.5", "34.1.1.0", "34.1.1.1"])
         coverage = payload["capture"]["flows"]
         self.assertEqual((coverage["available"], coverage["captured"], coverage["omitted_limit"]), (6, 3, 3))
@@ -504,19 +517,20 @@ class SnapshotSafetyTest(CollectorLoopTest):
     def test_snapshot_priority_includes_alerts_and_reputation_with_stable_ties(self):
         now = self.snapshot_fixture()
         self.collector.reputation.flagged = {"34.1.1.5"}
-        self.collector.alerts.sources["34.1.1.4"] = {}
-        self.collector.correlator.flows[("tcp", "1.2.3.163", "123", "34.1.1.3", "443")] = {}
+        self.collector.alerts.sources["34.1.1.4"] = {"count": 1, "signatures": {1: {"severity": 3}}}
+        self.collector.correlator.flows[("tcp", "1.2.3.163", "123", "34.1.1.3", "443")] = {
+            "alerts": {1: {1: {"count": 1, "severity": 3}}}}
         for flow in self.collector.tracker.flows.values():
             flow["rate"] = 1
         with mock.patch.object(COLLECTOR, "SNAPSHOT_FLOWS", 4), \
                 mock.patch.object(self.collector.alerts, "summary", return_value=None), \
                 mock.patch.object(self.collector.correlator, "summary", return_value=[]):
-            payload = self.collector.build_snapshot_payload(now)
+            payload = self.build_snapshot(now)
         self.assertEqual([flow["dest"] for flow in payload["flows"]], ["34.1.1.3", "34.1.1.4", "34.1.1.5", "34.1.1.0"])
 
     def test_default_snapshot_ceiling_does_not_use_unlimited_visible_selection(self):
         now = self.snapshot_fixture(5002)
-        payload = self.collector.build_snapshot_payload(now)
+        payload = self.build_snapshot(now)
         self.assertEqual(len(payload["flows"]), 5000)
         self.assertEqual(payload["capture"]["flows"]["omitted_limit"], 2)
         self.assertEqual(COLLECTOR.MAX_FLOWS, 150)
@@ -526,7 +540,7 @@ class SnapshotSafetyTest(CollectorLoopTest):
         with mock.patch.object(COLLECTOR, "SNAPSHOT_BYTES", 12000), \
                 mock.patch.object(self.collector.correlator, "summary", return_value=[{"dest": self.REMOTE, "signature": "x" * 20000}]):
             with self.assertRaises(COLLECTOR.SnapshotTooLarge):
-                self.collector.build_snapshot_payload(now)
+                self.build_snapshot(now)
 
     def test_required_flows_over_the_byte_budget_are_truncated_and_flagged(self):
         now = self.snapshot_fixture()
@@ -535,7 +549,7 @@ class SnapshotSafetyTest(CollectorLoopTest):
         self.collector.descriptions["huge"] = "x" * 20000
         self.threat_list([remote for _, remote in self.collector.tracker.flows])
         with mock.patch.object(COLLECTOR, "SNAPSHOT_BYTES", 30000):
-            payload = self.collector.build_snapshot_payload(now)
+            payload = self.build_snapshot(now)
         coverage = payload["capture"]["flows"]
         self.assertEqual(coverage["required"], 6)
         self.assertGreater(coverage["omitted_required"], 0)
@@ -549,7 +563,7 @@ class SnapshotSafetyTest(CollectorLoopTest):
                     "complete": False, "truncated": True, "atomic": False,
                     "generation": 1, "omission_reasons": ["encoded_bytes"]}
         with mock.patch.object(self.collector.collector_engine, "snapshot_detail", return_value=({}, coverage)):
-            payload = self.collector.build_snapshot_payload(now)
+            payload = self.build_snapshot(now)
         self.assertEqual(payload["capture"]["states"]["omitted_bytes"], 1)
         self.assertTrue(payload["capture"]["states"]["truncated"])
 
@@ -558,7 +572,7 @@ class SnapshotSafetyTest(CollectorLoopTest):
         get = self.collector.geo.get
         with mock.patch.object(self.collector.geo, "get", side_effect=lambda ip: None if ip == "34.1.1.0" else get(ip)), \
                 mock.patch.object(COLLECTOR, "SNAPSHOT_FLOWS", 3):
-            payload = self.collector.build_snapshot_payload(now)
+            payload = self.build_snapshot(now)
         coverage = payload["capture"]["flows"]
         self.assertEqual((coverage["candidates"], coverage["available"], coverage["omitted_geo"], coverage["omitted_limit"]),
                          (6, 5, 1, 2))
@@ -572,7 +586,7 @@ class SnapshotSafetyTest(CollectorLoopTest):
             calls.append(list(addresses))
 
         with mock.patch.object(self.collector.geo, "resolve", side_effect=resolve):
-            payload = self.collector.build_snapshot_payload(now)
+            payload = self.build_snapshot(now)
         self.assertEqual(payload["capture"]["flows"]["captured"], 1)
         self.assertEqual([call for call in calls if call], [["34.1.1.0", "1.2.3.163"]])
 
@@ -583,7 +597,7 @@ class SnapshotSafetyTest(CollectorLoopTest):
         self.collector.descriptions["huge"] = "x" * 20000
         self.collector.tracker.flows[("1.2.3.163", "34.1.1.5")]["rule"] = ""
         with mock.patch.object(COLLECTOR, "SNAPSHOT_BYTES", 12000):
-            payload = self.collector.build_snapshot_payload(now)
+            payload = self.build_snapshot(now)
         self.assertEqual([flow["dest"] for flow in payload["flows"]], ["34.1.1.5"])
         self.assertEqual(payload["capture"]["flows"]["omitted_bytes"], 5)
         self.assertLessEqual(len(json.dumps(payload, separators=(",", ":")).encode()), 12000)
@@ -596,13 +610,13 @@ class SnapshotSafetyTest(CollectorLoopTest):
                     "truncated": True, "atomic": False, "generation": 1,
                     "omission_reasons": ["state_count"]}
         with mock.patch.object(self.collector.collector_engine, "snapshot_detail", return_value=({}, coverage)):
-            payload = self.collector.build_snapshot_payload(now)
+            payload = self.build_snapshot(now)
         self.assertEqual((payload["capture"]["states"]["available"], payload["capture"]["states"]["captured"]), (7, 2))
         self.assertTrue(payload["capture"]["states"]["truncated"])
 
     def test_small_snapshot_is_complete_and_live_output_has_no_capture_policy(self):
         now = self.snapshot_fixture(1)
-        payload = self.collector.build_snapshot_payload(now)
+        payload = self.build_snapshot(now)
         self.assertEqual(payload["capture"]["detail_status"], "complete")
         self.assertNotIn("capture", self.collector.build_payload(now))
         self.assertEqual(COLLECTOR.MAX_FLOWS, 150)

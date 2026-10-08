@@ -50,6 +50,7 @@ from lib import blocks as BLOCKS  # noqa: E402,F401
 from lib import cache as CACHE  # noqa: E402,F401
 from lib import common as COMMON  # noqa: E402,F401
 from lib import config as CONFIG  # noqa: E402,F401
+from lib import evidence as EVIDENCE  # noqa: E402,F401
 from lib import ids as IDS  # noqa: E402,F401
 from lib import leases as LEASES  # noqa: E402,F401
 sys.path.insert(0, str(SCRIPTS.parents[4] / "devel"))

@@ -54,6 +54,17 @@ test('snapshot coverage distinguishes legacy, fallback, complete and truncated d
     + ' · 5000 of 50000 matching PF rows saved across captured remotes');
 });
 
+test('a version 2 capture says what it chose among and whether the ranking was bounded', () => {
+  Object.assign(T, {snapshot_population: 'from {count} flows', snapshot_ranking_bounded: 'ranking was bounded'});
+  assert.equal(captureText({capture: {version: 2, detail_status: 'complete', flows: {captured: 40, available: 40},
+    context: {flows_total: 250000, flows_estimated: true, quality: {ranking: 'bounded'}}}}),
+  `Complete detail within capture scope · 40 flows captured of 40 available · from ≈${(250000).toLocaleString()} flows`
+    + ' · ranking was bounded');
+  assert.equal(captureText({capture: {version: 2, detail_status: 'complete', flows: {captured: 3, available: 3},
+    context: {flows_total: 12, flows_estimated: false, quality: {ranking: 'exact'}}}}),
+  'Complete detail within capture scope · 3 flows captured of 3 available · from 12 flows');
+});
+
 const summary = {
   status: 'ok',
   locations: [{id: '192.0.2.1', local: true}, {id: '203.0.113.1', country: 'Germany', asn: 64500}, {id: '198.51.100.1', country: 'Japan'}],

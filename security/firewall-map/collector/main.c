@@ -442,6 +442,61 @@ static void telemetry_track(struct telemetry *t, const struct tracker_report *re
   t->promoted = report->promoted;
 }
 
+/* The flows a snapshot of this sample may capture: tracked flows with
+ * evidence (strongest class first, then Classic score, then first seen),
+ * then the profiles' union in its order; at most FM_SNAPSHOT_FLOWS. */
+struct snapshot_rank {
+  uint32_t flow;
+  unsigned class;
+  double score;
+  uint64_t order;
+};
+static int snapshot_first(const void *left, const void *right) {
+  const struct snapshot_rank *a = left, *b = right;
+  if (a->class != b->class) return a->class > b->class ? -1 : 1;
+  if (a->score != b->score) return a->score > b->score ? -1 : 1;
+  return a->order < b->order ? -1 : a->order > b->order;
+}
+static bool snapshot_candidates(struct engine *e, const struct aggregate *a,
+                                const struct ranked_flow *selected, size_t selected_count,
+                                uint32_t **out, size_t *count, uint64_t *omitted,
+                                struct fm_error *error) {
+  size_t flows = aggregate_counts(a).flows, evidence = 0;
+  struct snapshot_rank *ranks = flows ? fm_calloc(flows, sizeof(*ranks)) : NULL;
+  unsigned char *taken = flows ? fm_calloc(flows, 1) : NULL;
+  *out = fm_calloc(FM_SNAPSHOT_FLOWS, sizeof(**out));
+  if ((flows && (!ranks || !taken)) || !*out) {
+    fm_free(ranks);
+    fm_free(taken);
+    return fm_error_set(error, errno ? errno : ENOMEM, "snapshot candidates");
+  }
+  for (size_t n = 0; n < flows; n++) {
+    const struct flow *flow = aggregate_flow(a, n);
+    struct flow_rates rates;
+    if (!flow->evidence.mask || !ranking_rates(e->ranking, n, &rates)) continue;
+    double rate = rates.rate_from_remote + rates.rate_to_remote;
+    ranks[evidence++] = (struct snapshot_rank){(uint32_t)n, security_class(&flow->evidence),
+                                               (rate > 1 ? rate : 1) * rates.activity, rates.order};
+  }
+  qsort(ranks, evidence, sizeof(*ranks), snapshot_first);
+  size_t kept = 0, wanted = 0;
+  for (size_t n = 0; n < evidence; n++, wanted++) {
+    taken[ranks[n].flow] = 1;
+    if (kept < FM_SNAPSHOT_FLOWS) (*out)[kept++] = ranks[n].flow;
+  }
+  for (size_t n = 0; n < selected_count; n++) {
+    if (taken[selected[n].flow]) continue;
+    taken[selected[n].flow] = 1;
+    wanted++;
+    if (kept < FM_SNAPSHOT_FLOWS) (*out)[kept++] = (uint32_t)selected[n].flow;
+  }
+  *count = kept;
+  *omitted = wanted - kept;
+  fm_free(ranks);
+  fm_free(taken);
+  return true;
+}
+
 /* The union of the profiles' selections (each flow once: profile 0's in its
  * order, then the flows each later profile adds) and what the tracked set
  * must know about them. */
@@ -579,7 +634,8 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
                             telemetry.interval, error);
   /* every enabled profile's selection, and their union for the response */
   struct ranked_flow *selected = NULL;
-  uint32_t *position = NULL;
+  uint32_t *position = NULL, *snapshot = NULL;
+  size_t snapshot_count = 0;
   struct track_hints hints = {0};
   ok = ok && profiles_select(e->profiles, sample.aggregate, e->ranking, telemetry.interval,
                              BUDGET_RANKED_FLOWS, error) &&
@@ -619,11 +675,15 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
     telemetry.skipped_af_translation = aggregate_counts(sample.aggregate).skipped_af_translation;
     telemetry.event_history_evicted = event_history_evicted(e->events);
     measure_process(&telemetry);
-    ok = response_begin(&response, error);
     struct class_report classes = {e->classifier, r->classify, r->classify_count, sample.aggregate,
                                    &evidence, r->evidence_facts,
                                    classifier_category(e->classifier, 'T')};
-    struct ranked_output ranked = {selected, hints.selected_count, e->profiles, position};
+    ok = !r->snapshot ||
+         snapshot_candidates(e, sample.aggregate, selected, hints.selected_count, &snapshot,
+                             &snapshot_count, &telemetry.snapshot_candidates_omitted, error);
+    ok = ok && response_begin(&response, error);
+    struct ranked_output ranked = {selected, hints.selected_count, e->profiles, position,
+                                   snapshot, snapshot_count, e->ranking};
     if (ok && !protocol_write_ranked(response.stream, sample.aggregate, &ranked, threats,
                                      matches, match_count, &classes, r->candidates_per_kind,
                                      &telemetry, error)) {
@@ -635,6 +695,7 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   fm_free(matches);
   fm_free(selected);
   fm_free(position);
+  fm_free(snapshot);
   map_clear(&evidence);
   threat_summary_destroy(threats);
   if (ok)

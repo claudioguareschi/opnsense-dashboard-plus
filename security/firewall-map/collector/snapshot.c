@@ -472,31 +472,6 @@ static bool identities(FILE *in, struct snapshot_flow *flows, size_t count,
   return line_read(in, line, error) && (!strcmp(line, "RUN\n") ||
          fm_error_fail(error, FM_FAILURE_REQUEST, EPROTO, "snapshot request terminator"));
 }
-static bool page_write(FILE *out, const struct aggregate *a, const struct ranking *r,
-                       size_t start, uint64_t generation, struct fm_error *error) {
-  size_t active = aggregate_counts(a).flows;
-  if (start > active) return fm_error_fail(error, FM_FAILURE_REQUEST, EINVAL, "snapshot page offset");
-  size_t count = active - start < 150 ? active - start : 150;
-  if (fwrite("FMPAGE1\0", 1, 8, out) != 8) return fm_error_set(error, EIO, "snapshot page header");
-  unsigned char b[128], *p = b; uint32_t crc = 0;
-  *p++ = 0; protocol_put(&p, FM_PROTOCOL_VERSION, 4); protocol_put(&p, generation, 8);
-  protocol_put(&p, active, 8); protocol_put(&p, start, 8); protocol_put(&p, count, 4);
-  if (!protocol_frame(out, b, p - b, &crc, error)) return false;
-  for (size_t n = 0; n < count; n++) {
-    struct ranked_flow row;
-    uint64_t order;
-    if (!ranking_snapshot_at(r, a, start + n, &row, &order))
-      return fm_error_fail(error, FM_FAILURE_INTERNAL, EINVAL, "snapshot rank");
-    const struct flow *flow = aggregate_flow(a, row.flow);
-    p = b; *p++ = 1; protocol_address_put(&p, flow->local); protocol_address_put(&p, flow->remote);
-    uint64_t bits; memcpy(&bits, &row.score, 8); protocol_put(&p, bits, 8);
-    protocol_put(&p, order, 8);
-    if (!protocol_frame(out, b, p - b, &crc, error)) return false;
-  }
-  p = b; *p++ = 255; protocol_put(&p, crc, 4);
-  return protocol_frame(out, b, p - b, NULL, error) &&
-         (fflush(out) == 0 || fm_error_set(error, errno, "snapshot page flush"));
-}
 static bool select_rows(const struct aggregate *a, const struct ranking *r,
                         const struct snapshot_flow *flows, size_t count,
                         struct ranked_flow *rows, struct fm_error *error) {
@@ -531,7 +506,7 @@ done:
 
 /* Each command's answer is rendered completely before any byte reaches the
  * collector: a failed command leaves the stream clean for FMFAIL1. */
-enum command { COMMAND_PAGE, COMMAND_SELECT, COMMAND_DETAIL };
+enum command { COMMAND_SELECT, COMMAND_DETAIL };
 struct command_args {
   const struct context *ctx;
   const struct aggregate *a;
@@ -541,13 +516,11 @@ struct command_args {
   const struct telemetry *telemetry;
   struct snapshot_flow *flows;
   struct ranked_flow *rows;
-  size_t count, bytes, states, offset;
+  size_t count, bytes, states;
 };
 static bool render(enum command command, const struct command_args *c, FILE *out,
                    struct fm_error *error) {
   switch (command) {
-  case COMMAND_PAGE:
-    return page_write(out, c->a, c->r, c->offset, c->generation, error);
   case COMMAND_SELECT:
     return protocol_write_selected(out, c->a, c->rows, c->count, c->telemetry, error);
   case COMMAND_DETAIL: {
@@ -591,9 +564,7 @@ bool snapshot_session(FILE *in, FILE *out, const struct context *ctx,
   for (;;) {
     if (!line_read(in, line, error)) goto done;
     if (!strcmp(line, "FMSNAP1 CANCEL\n")) { ok = true; goto done; }
-    if (sscanf(line, "FMSNAP1 PAGE %zu %c", &c.offset, &extra) == 1) {
-      if (!respond(COMMAND_PAGE, &c, out, error)) goto done;
-    } else if (sscanf(line, "FMSNAP1 SELECT %" SCNu64 " %zu %c", &requested, &c.count, &extra) == 2) {
+    if (sscanf(line, "FMSNAP1 SELECT %" SCNu64 " %zu %c", &requested, &c.count, &extra) == 2) {
       if (requested != generation || c.count > FM_SNAPSHOT_FLOWS) {
         fm_error_fail(error, FM_FAILURE_REQUEST, EPROTO, "snapshot selection generation or count");
         goto done;

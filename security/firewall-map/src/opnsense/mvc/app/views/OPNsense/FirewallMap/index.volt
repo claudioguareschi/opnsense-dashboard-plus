@@ -240,6 +240,8 @@
         peak: {{ lang._('peak')|json_encode }},
         seen_after_block: {{ lang._('Traffic was seen after it was marked blocked: check that a rule uses the alias.')|json_encode }},
         focus: {{ lang._('Focus')|json_encode }},
+        snapshot_population: {{ lang._('from {count} flows')|json_encode }},
+        snapshot_ranking_bounded: {{ lang._('ranking was bounded')|json_encode }},
         map_ranking_bounded: {{ lang._('the busiest of {count} flows')|json_encode }},
         map_ranking_warming: {{ lang._('ranking settling after a busy period')|json_encode }},
         listed_flows_one: {{ lang._('{count} to a listed address')|json_encode }},

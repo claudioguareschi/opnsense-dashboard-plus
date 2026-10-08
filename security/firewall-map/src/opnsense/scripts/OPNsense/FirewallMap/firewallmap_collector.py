@@ -47,6 +47,7 @@ A map snapshot (the camera button) is a request file in SNAPSHOT_REQUEST_DIR: th
 writes bounded incident detail beyond the live summary, plus PF rows and capture coverage.
 """
 
+import hashlib
 import json
 import ipaddress
 import os
@@ -62,7 +63,6 @@ import urllib.error
 import urllib.request
 import uuid
 from datetime import datetime, timezone
-from heapq import nsmallest
 
 import firewallmap_geodb as geodb
 import firewallmap_threats as threats
@@ -664,6 +664,7 @@ class Collector:
         self.evidence_omitted = 0
         self.sent_evidence = {}
         self.remote_answers = {}
+        self.snapshot_candidates, self.snapshot_candidates_omitted = [], 0
         # the last sample's timings (SampleTimer.report) and when they were last written
         self.timings = None
         self.timings_written = None
@@ -977,41 +978,31 @@ class Collector:
                 self.timings_written = now
 
     def build_snapshot_payload(self, now):
-        """Bounded incident-first detail. Scan candidates, but never build an uncapped document."""
-        evidence = set(self.alerts.sources) | {key[3] for key in self.correlator.flows}
+        """A bounded capture of selected flows (capture version 2): the flows with security
+        evidence first, then every enabled profile's selection, as the collector listed them for
+        the sample that opened the session; never all flows, never an uncapped document."""
+        candidates = self.snapshot_candidates
         # Truncation never fails a snapshot: what was left out is counted here, and required
-        # (incident) evidence that did not fit makes required_evidence_complete false.
-        coverage = {"candidates": 0, "available": 0, "captured": 0, "limit": SNAPSHOT_FLOWS,
-                    "selection": "incident_then_traffic_v1", "omitted_limit": 0, "omitted_bytes": 0, "omitted_geo": 0,
-                    "required": 0, "omitted_required": 0}
-
-        evidence.update(self.blocks.sources)
-
-        def ranked_candidates():
-            lookup_budget = GEO_LOOKUPS_PER_SAMPLE
-            for page in self.collector_engine.snapshot_pages():
-                addresses = list(dict.fromkeys(address for local, remote, _rank, _order in page
-                                               for address in (remote, local) if public_ip(address)))
-                unknown = sum(address not in self.geo.entries for address in addresses)
-                if lookup_budget:
-                    self.geo.resolve(addresses, budget=lookup_budget)
-                    lookup_budget -= min(lookup_budget, unknown)
-                for local, remote, rank, order in page:
-                    incident = remote in evidence or bool(threat_lists_for(remote, self.blocklists, self.reputation))
-                    if rank <= 0 and not incident:
-                        continue
-                    coverage["candidates"] += 1
-                    if self.geo.get(remote) is None:
-                        coverage["omitted_geo"] += 1
-                        continue
-                    coverage["available"] += 1
-                    coverage["required"] += int(incident)
-                    yield incident, rank, order, local, remote
-
-        identities = nsmallest(SNAPSHOT_FLOWS, ranked_candidates(),
-                               key=lambda item: (not item[0], -item[1], item[2]))
+        # (evidence) flows that did not fit make required_evidence_complete false.
+        coverage = {"candidates": len(candidates), "available": 0, "captured": 0, "limit": SNAPSHOT_FLOWS,
+                    "selection": "evidence_then_profiles_v2", "omitted_limit": 0, "omitted_bytes": 0,
+                    "omitted_geo": 0, "required": 0, "omitted_required": 0,
+                    "omitted_candidates": self.snapshot_candidates_omitted}
+        addresses = list(dict.fromkeys(address for item in candidates for address in (item["remote"], item["local"])
+                                       if public_ip(address)))
+        self.geo.resolve(addresses, budget=GEO_LOOKUPS_PER_SAMPLE)
+        identities = []
+        for item in candidates:
+            if self.geo.get(item["remote"]) is None:
+                coverage["omitted_geo"] += 1
+                continue
+            incident = bool(item["evidence"])
+            coverage["available"] += 1
+            coverage["required"] += int(incident)
+            if len(identities) < SNAPSHOT_FLOWS:
+                identities.append((incident, item["local"], item["remote"]))
         aggregate = self.collector_engine.snapshot_selection(
-            [(local, remote, incident) for incident, _rank, _order, local, remote in identities])
+            [(local, remote, incident) for incident, local, remote in identities])
         tracker = FlowTracker()
         tracker.update_aggregate(aggregate, now)
         selected = [(identity[0], *row) for identity, row in zip(identities, tracker.collector_visible)]
@@ -1025,8 +1016,9 @@ class Collector:
         payload["states"], payload["full"] = {}, True
         states = {"scope": "retained_logical_flows", "available": 0, "captured": 0,
                   "total_limit": SNAPSHOT_STATES_TOTAL, "truncated": False, "complete": False}
-        payload["capture"] = {"version": 1, "source": "collector", "detail_status": "complete",
-                              "encoded_limit": SNAPSHOT_BYTES, "flows": coverage, "states": states}
+        payload["capture"] = {"version": 2, "source": "collector", "detail_status": "complete",
+                              "encoded_limit": SNAPSHOT_BYTES, "flows": coverage, "states": states,
+                              "context": self.snapshot_context()}
         budget = DocumentBudget(payload, SNAPSHOT_BYTES)
         locations = {location["id"]: location for location in locations}
         kept_locations = {location["id"] for location in payload["locations"]}
@@ -1049,6 +1041,8 @@ class Collector:
             payload["hostnames"].update(hostnames)
         payload["locations"].sort(key=lambda location: location["id"])
         coverage["captured"] = len(payload["flows"])
+        # each Focus, among the captured flows: a snapshot opens in any of them
+        self.add_focus(payload)
         # required flows beyond the flow ceiling were never selected
         coverage["omitted_required"] += coverage["required"] - len(required_pairs)
         identities = [(flow["origin"], flow["dest"], (flow["origin"], flow["dest"]) in required_pairs)
@@ -1064,6 +1058,20 @@ class Collector:
         if json_size(payload, SNAPSHOT_BYTES) > SNAPSHOT_BYTES:
             raise SnapshotTooLarge("snapshot exceeds byte limit")
         return payload
+
+    def snapshot_context(self):
+        """What the capture was taken from (capture version 2): the sample, the population it
+        ranked, how exact that ranking was, and the classification and profile definitions."""
+        telemetry = (self.collector_status.get("state_collector") or {}).get("telemetry") or {}
+        rows = ranking_profiles.request_rows(self.profiles)
+        return {
+            "collector_generation": self.collector_status.get("generation"), "sequence": telemetry.get("sequence"),
+            "flows_total": self.tracker.total_flows, "flows_estimated": self.tracker.total_estimated,
+            "quality": self.tracker.quality, "regime": "bounded" if telemetry.get("regime") else "exact",
+            "classification_generation": self.blocklists.generation,
+            "profiles": {"keys": [profile["key"] for profile in self.profiles],
+                         "generation": hashlib.sha256("\n".join(rows).encode()).hexdigest()[:16]},
+        }
 
     def save_requested_snapshots(self, now):
         """Answer every camera request waiting in SNAPSHOT_REQUEST_DIR, from the open session.
@@ -1264,6 +1272,9 @@ class Collector:
         self.blocklists.observe(sample)
         if not sample["refused"]:
             self.remote_answers = sample.get("remotes") or {}
+            # a sample that opened a snapshot session lists what its snapshot may capture
+            self.snapshot_candidates = sample.get("snapshot_candidates") or []
+            self.snapshot_candidates_omitted = (sample.get("telemetry") or {}).get("snapshot_candidates_omitted", 0)
         self._record_collector(sample=sample)
         return sample
 

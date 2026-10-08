@@ -45,6 +45,7 @@ SUMMARY = {"status": "ok", "flows": [{"dest": "192.0.2.1", "threat": True}, {"de
            "locations": []}
 SNAPSHOTS_CONTROLLER = Path(__file__).resolve().parents[1] / "src/opnsense/mvc/app/controllers/OPNsense/FirewallMap/Api/SnapshotsController.php"
 MAP_PAGE = Path(__file__).resolve().parents[1] / "src/opnsense/www/js/firewall-map-page.js"
+FLOW_SUMMARY = Path(__file__).resolve().parents[1] / "src/opnsense/mvc/app/models/OPNsense/FirewallMap/FlowSummary.php"
 
 
 def controller_get(may_show_states):
@@ -71,6 +72,7 @@ namespace OPNsense\FirewallMap {
     }
 }
 namespace {
+    require $argv[3];
     require $argv[1];
     \OPNsense\Core\ACL::$mayShowStates = $argv[2] === "1";
     \OPNsense\Core\Backend::$response = [
@@ -83,7 +85,7 @@ namespace {
 }
 '''
     result = subprocess.run(
-        ["php", "-r", code, str(SNAPSHOTS_CONTROLLER), "1" if may_show_states else "0"],
+        ["php", "-r", code, str(SNAPSHOTS_CONTROLLER), "1" if may_show_states else "0", str(FLOW_SUMMARY)],
         capture_output=True, text=True, check=True,
     )
     return json.loads(result.stdout)

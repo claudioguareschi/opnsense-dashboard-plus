@@ -64,7 +64,8 @@ function countsText(meta) {
 /** Coverage is separate from legacy full/partial: old captures have unknown completeness. */
 export function captureText(meta) {
   const capture = meta.capture;
-  if (!capture || capture.version !== 1 || !['complete', 'truncated'].includes(capture.detail_status)) {
+  // version 1 (selected from every flow) and 2 (evidence and the profiles' selections) read alike
+  if (!capture || ![1, 2].includes(capture.version) || !['complete', 'truncated'].includes(capture.detail_status)) {
     return T.snapshot_unknown;
   }
   const parts = [capture.detail_status === 'truncated' ? T.snapshot_truncated : T.snapshot_complete];
@@ -78,6 +79,15 @@ export function captureText(meta) {
   const states = capture.states || {};
   if (states.truncated) {
     parts.push(fill(T.snapshot_captured_states, {captured: states.captured, available: states.available}));
+  }
+  // what the capture was taken from: the flows it chose among, and a bounded ranking said plainly
+  const context = capture.context || {};
+  if (context.flows_total != null && T.snapshot_population) {
+    const total = Number(context.flows_total).toLocaleString();
+    parts.push(fill(T.snapshot_population, {count: (context.flows_estimated ? '≈' : '') + total}));
+  }
+  if (context.quality?.ranking === 'bounded' && T.snapshot_ranking_bounded) {
+    parts.push(T.snapshot_ranking_bounded);
   }
   return parts.join(' · ');
 }
@@ -132,7 +142,8 @@ async function takeSnapshot() {
 
 async function openSnapshot(id) {
   try {
-    const result = await getJSON(`/api/firewallmap/snapshots/get/${encodeURIComponent(id)}?blocks_min=${state.settings?.blockMin ?? 3}`);
+    const focus = state.settings?.focus ? `&focus=${encodeURIComponent(state.settings.focus)}` : '';
+    const result = await getJSON(`/api/firewallmap/snapshots/get/${encodeURIComponent(id)}?blocks_min=${state.settings?.blockMin ?? 3}${focus}`);
     if (result.result !== 'ok') {
       throw new Error(result.error || result.result);
     }

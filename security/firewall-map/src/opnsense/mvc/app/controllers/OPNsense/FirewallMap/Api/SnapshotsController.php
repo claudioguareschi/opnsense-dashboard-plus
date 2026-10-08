@@ -31,6 +31,7 @@ use OPNsense\Core\ACL;
 use OPNsense\Core\Backend;
 use OPNsense\FirewallMap\AuditLog;
 use OPNsense\FirewallMap\ConfigdArgument;
+use OPNsense\FirewallMap\FlowSummary;
 
 /**
  * Saved map snapshots: everyone who may view the map takes, lists, reads and annotates them (see ACL);
@@ -75,6 +76,13 @@ class SnapshotsController extends ApiControllerBase
         }
         $minimum = max(1, min(100, (int)($this->request->get('blocks_min') ?? 1)));
         $result = $this->run('get', [(string)$id, (string)$minimum]);
+        /* a capture (version 2) keeps every Focus: the viewer sees its own, as on the live map;
+         * older captures have one flow list and are returned as saved */
+        $focus = $this->request->get('focus');
+        $focus = is_string($focus) && preg_match('/^[a-z0-9_-]{1,32}$/', $focus) ? $focus : null;
+        if (isset($result['data']) && is_array($result['data'])) {
+            $result['data'] = FlowSummary::applyFocus($result['data'], $focus);
+        }
         /* Snapshots are shared incident records. Keep complete captures on disk, but never disclose
          * their embedded PF states to a user who cannot use Diagnostics: Show States. */
         if (!$this->mayShowStates() && isset($result['data']) && is_array($result['data'])) {

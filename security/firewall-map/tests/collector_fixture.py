@@ -147,6 +147,12 @@ class CollectorFixture:
         # like the helper: every profile's selection (here each the whole visible list)
         result["selections"] = [[(index, row["score"]) for index, row in enumerate(result["flows"])]
                                 for _ in options.get("profiles") or [None]]
+        # a sample opening a snapshot session lists what it may capture (here every flow, by rate)
+        result["snapshot_candidates"] = [
+            {"local": local, "remote": remote, "evidence": 0, "security_class": "S0",
+             "score": max(flow["rate"], 1.0), "order": index, "states": flow["states"]}
+            for index, ((local, remote), flow) in enumerate(self.tracker.flows.items())
+        ] if options.get("snapshot") else []
         return result
 
     def mask(self, value, sets):
@@ -172,11 +178,6 @@ class CollectorFixture:
                                  "status": "ok" if table in self.tables else "missing",
                                  "entries": len(self.tables.get(table, ()))}
                                 for bit, (category, table) in enumerate(sets)]
-
-    def snapshot_pages(self):
-        flows = self.snapshot_flows if self.snapshot_flows is not None else self.tracker.flows
-        yield [(local, remote, max(flow["rate"], 1.0), index)
-               for index, ((local, remote), flow) in enumerate(flows.items())]
 
     def snapshot_selection(self, identities):
         flows = self.snapshot_flows if self.snapshot_flows is not None else self.tracker.flows

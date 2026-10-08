@@ -32,7 +32,7 @@
 #include <stdio.h>
 /* Wire formats are specified in PROTOCOL.md. No C structure is serialized.
  * The collector speaks exactly one protocol: it is announced in the banner and
- * carried by every response header (FMAGG4, FMSTATE2, FMPAGE1). */
+ * carried by every response header (FMAGG4, FMSTATE2). */
 #define FM_PROTOCOL_VERSION 1
 #define FM_FRAME_MAX 4096
 enum record_kind {
@@ -46,6 +46,7 @@ enum record_kind {
   RECORD_CLASSIFIED = 7,
   RECORD_CLASS_SET = 8,
   RECORD_SELECTION = 9,
+  RECORD_SNAPSHOT_CANDIDATE = 10,
   RECORD_FAILURE = 254,
   RECORD_FOOTER = 255,
 };
@@ -66,7 +67,7 @@ struct telemetry {
   uint64_t max_rss, heap_bytes, heap_peak, heap_blocks, heap_budget, state_limit,
       preflight_states, skipped_af_translation, candidates_omitted,
       threat_remotes_omitted, threat_candidates_omitted, event_history_evicted,
-      classifier_bytes;
+      classifier_bytes, snapshot_candidates_omitted;
   /* the tracked set and the quality axes (tracker.h) */
   uint64_t regime, next_regime, quality_discovery, quality_ranking, quality_attribution,
       discovery_error, flows_total, flows_estimated, tracked_flows, tracked_limit,
@@ -102,6 +103,11 @@ struct ranked_output {
   size_t count;
   const struct profiles *profiles;
   const uint32_t *position; /* position[aggregate flow] = union position + 1, 0 if absent */
+  /* a sample that opens a snapshot session: the flows a snapshot may
+   * capture (aggregate flow indexes, in priority order) */
+  const uint32_t *snapshot;
+  size_t snapshot_count;
+  const struct ranking *ranking; /* the candidates' rates */
 };
 /* FMAGG4 sample response. */
 /* Fills the telemetry's omission counters before writing it. */

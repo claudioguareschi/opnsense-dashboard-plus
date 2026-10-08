@@ -126,8 +126,7 @@ class CollectorEngineSpecificationTest(unittest.TestCase):
             sample = self.engine.sample(*CONTEXT, snapshot=True)
             labels = [value for _, kind, _, _, _, value in sample["candidates"] if kind == collector.RULE_LABEL]
             self.assertEqual(labels, [b"caf\xc3"])
-            pages = [row for page in self.engine.snapshot_pages() for row in page]
-            identities = [(local, remote, False) for local, remote, _, _ in pages]
+            identities = [(item["local"], item["remote"], False) for item in sample["snapshot_candidates"]]
             self.engine.snapshot_selection(identities)
             rows, _ = self.engine.snapshot_detail(identities, collector.SNAPSHOT_BYTES)
         self.assertEqual(rows["9.9.9.9"][0]["rule_label"], "caf\ufffd")

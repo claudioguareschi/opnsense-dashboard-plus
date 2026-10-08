@@ -119,13 +119,15 @@ bool protocol_frame(FILE *f, const void *data, size_t len, uint32_t *checksum,
 /* Sizes of the fixed FMAGG4 records (PROTOCOL.md). */
 #define FLOW_RECORD_SIZE 178
 #define EVENT_RECORD_SIZE 194
-#define TELEMETRY_RECORD_SIZE 365
-#define FOOTER_RECORD_SIZE 117
+#define TELEMETRY_RECORD_SIZE 373
+#define SNAPSHOT_CANDIDATE_RECORD_SIZE 61
+#define FOOTER_RECORD_SIZE 125
 #define CLASSIFIED_RECORD_SIZE 36
 #define CLASS_SET_RECORD_SIZE 12
 
 struct sent {
-  uint64_t flows, candidates, matches, remotes, remote_candidates, classified, class_sets;
+  uint64_t flows, candidates, matches, remotes, remote_candidates, classified, class_sets,
+      snapshot_candidates;
 };
 
 static bool write_header(FILE *f, bool threats, uint32_t *checksum,
@@ -243,6 +245,7 @@ static bool write_telemetry(FILE *f, const struct telemetry *t,
                              t->threat_candidates_omitted,
                              t->event_history_evicted,
                              t->classifier_bytes,
+                             t->snapshot_candidates_omitted,
                              t->regime,
                              t->next_regime,
                              t->quality_discovery,
@@ -293,6 +296,7 @@ static bool write_footer(FILE *f, struct sample_outcome outcome,
   protocol_put(&p, sent->remote_candidates, 8);
   protocol_put(&p, sent->classified, 8);
   protocol_put(&p, sent->class_sets, 8);
+  protocol_put(&p, sent->snapshot_candidates, 8);
   protocol_put(&p, checksum, 4);
   return protocol_frame(f, b, p - b, NULL, error) &&
          (fflush(f) == 0 || fm_error_set(error, errno, "FMAGG4 flush"));
@@ -549,6 +553,26 @@ bool protocol_write_ranked(FILE *f, const struct aggregate *a,
   }
   if (classes && !write_classification(f, classes, &checksum, &sent, error))
     return false;
+  for (size_t n = 0; n < ranked->snapshot_count; n++) {
+    /* identity and priority only: a snapshot SELECT fetches the chosen flows */
+    const struct flow *flow = aggregate_flow(a, ranked->snapshot[n]);
+    struct flow_rates rates;
+    if (!flow || !ranking_rates(ranked->ranking, ranked->snapshot[n], &rates))
+      return fm_error_fail(error, FM_FAILURE_INTERNAL, EINVAL, "snapshot candidate");
+    double rate = rates.rate_from_remote + rates.rate_to_remote;
+    unsigned char b[SNAPSHOT_CANDIDATE_RECORD_SIZE], *p = b;
+    *p++ = RECORD_SNAPSHOT_CANDIDATE;
+    protocol_address_put(&p, flow->local);
+    protocol_address_put(&p, flow->remote);
+    *p++ = flow->evidence.mask;
+    *p++ = (unsigned char)security_class(&flow->evidence);
+    put_double(&p, (rate > 1 ? rate : 1) * rates.activity);
+    protocol_put(&p, rates.order, 8);
+    protocol_put(&p, flow->states, 8);
+    if (!protocol_frame(f, b, p - b, &checksum, error))
+      return false;
+    sent.snapshot_candidates++;
+  }
   return write_telemetry(f, telemetry, &checksum, error) &&
          write_footer(f, (struct sample_outcome){OUTCOME_SAMPLE, 0, 0, 0},
                       footer_counts(a, telemetry), &sent, checksum, error);

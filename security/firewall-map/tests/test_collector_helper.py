@@ -87,9 +87,9 @@ def class_set(set_id=0, category="T", status=0, entries=12):
 
 
 def telemetry(interval=2.0, quality=(0,) * 26):
-    values = (42, 7, interval, 0.01, 0.002, 1.0, 0.5, 1 << 20, 4096, 8192, 10, 0, 100000, 0, 0, 0, 0, 0, 0, 0,
+    values = (42, 7, interval, 0.01, 0.002, 1.0, 0.5, 1 << 20, 4096, 8192, 10, 0, 100000, 0, 0, 0, 0, 0, 0, 0, 0,
               *quality)
-    return b"\x06" + struct.pack("!IQddddd" + "Q" * 39, *values)
+    return b"\x06" + struct.pack("!IQddddd" + "Q" * 40, *values)
 
 
 def response(records, outcome=(0, 0, 0, 0), counts=None, corrupt=0, magic=b"FMAGG4\0\0", footer=True):
@@ -100,9 +100,9 @@ def response(records, outcome=(0, 0, 0, 0), counts=None, corrupt=0, magic=b"FMAG
         checksum = zlib.crc32(encoded, checksum)
     kinds = [record[0] for record in records if record]
     sent = counts or (kinds.count(1), kinds.count(2), kinds.count(5), kinds.count(3), kinds.count(4),
-                      kinds.count(7), kinds.count(8))
+                      kinds.count(7), kinds.count(8), kinds.count(10))
     seen = (1, 1, 1, sent[0])
-    tail = b"\xff" + struct.pack("!IIQQQQQQQQQQQQQI", *outcome, *seen, *sent, (checksum + corrupt) & 0xffffffff)
+    tail = b"\xff" + struct.pack("!IIQQQQQQQQQQQQQQI", *outcome, *seen, *sent, (checksum + corrupt) & 0xffffffff)
     return magic + body + (frame(tail) if footer else b"")
 
 
@@ -180,7 +180,7 @@ class CollectorProtocolTest(unittest.TestCase):
             "event tuple": response([header(), event(protocol=17), telemetry()]),
             "event query id": response([header(), event(query=3), telemetry()]),
             "event flags": response([header(), event(flags=b"\x02\x00"), telemetry()]),
-            "count mismatch": response(VALID, counts=(2, 1, 1, 1, 1, 0, 0)),
+            "count mismatch": response(VALID, counts=(2, 1, 1, 1, 1, 0, 0, 0)),
             "refusal with records": response(VALID, outcome=(1, 0, 10, 5)),
             "unknown outcome": response([header(), telemetry()], outcome=(9, 0, 0, 0)),
             "unknown record": response([header(), b"\x09" + b"x", telemetry()]),
