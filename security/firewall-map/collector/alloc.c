@@ -27,11 +27,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Every block carries its requested size in a header padded to max_align_t, so
- * the returned pointer keeps malloc's alignment guarantee. */
+/* Every block carries its requested size in a header padded to max_align_t and
+ * at least 16 bytes, so the returned pointer keeps malloc's alignment guarantee
+ * (16 on the supported platforms) even where max_align_t is smaller. */
 union header {
   size_t size;
   max_align_t align;
+  _Alignas(16) unsigned char wide[16]; /* 128-bit keys (classify.c) on every platform */
 };
 static struct fm_heap_usage usage;
 
