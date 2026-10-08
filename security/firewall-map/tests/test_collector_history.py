@@ -19,7 +19,8 @@
 # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 
-"""The compact state baseline equals a naive reference under churn, duplicates and resizes (collector_history_check.c)."""
+"""The compact state baseline equals a naive reference under churn, duplicates and resizes
+(collector_history_check.c)."""
 
 import shutil
 import subprocess
