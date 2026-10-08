@@ -408,6 +408,43 @@ class CollectorLoopTest(unittest.TestCase):
         # the helper was started with the active profile
         self.assertEqual(self.collector.collector_engine.profile, balanced)
 
+    def test_a_profile_change_on_reload_resumes_gracefully(self):
+        """Apply reloads in place: a new active profile restarts only the collector process (its
+        flow and rate state is dropped; the next sample is its baseline under the new profile),
+        while the map, threat history and evidence the service holds carry on. The map is never
+        empty or unavailable across the change, and names the new profile from then on."""
+        profiles = COLLECTOR.ranking_profiles
+        engine = self.collector.collector_engine
+        self.collector.step()
+        self.bytes = 5000
+        self.collector.recorder.recorded = None
+        self.collector.step()
+        self.assertEqual(self.queued(), [self.REMOTE])
+        with mock.patch.object(COLLECTOR, "settings",
+                               lambda: {"provider": "dbip", "ranking_profile": profiles.SECURITY}):
+            self.collector.checked["settings"] = None
+            self.collector.step()
+            with open(self.output) as handle:
+                during = json.load(handle)
+            self.bytes = 9000
+            self.collector.step()
+            with open(self.output) as handle:
+                after = json.load(handle)
+        # one restart, whose first sample is the new collector's baseline
+        self.assertEqual((engine.restarts, engine.baselines), (1, [True, False, True, False]))
+        # the baseline has no rates to rank by: the map keeps the document the old profile ranked
+        # (so labeled) for that one interval, then the new profile's ranking replaces it
+        balanced = profiles.descriptor(profiles.validate(profiles.BY_UUID[profiles.BALANCED]))
+        security = profiles.descriptor(profiles.validate(profiles.BY_UUID[profiles.SECURITY]))
+        for payload, profile in ((during, balanced), (after, security)):
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual([flow["dest"] for flow in payload["flows"]], [self.REMOTE])
+            self.assertEqual(payload["ranking_profile"], profile)
+        self.assertNotEqual(during["sampled_at"], after["sampled_at"])
+        # rates resume from the new collector's own history
+        self.assertGreater(after["flows"][0]["rate"], 0)
+        self.assertEqual(self.queued(), [self.REMOTE])
+
     def test_a_ranking_profile_change_restarts_the_collector(self):
         self.collector.step()
         engine = self.collector.collector_engine

@@ -159,9 +159,6 @@ class CollectorFixture:
         result["telemetry"] = {"interval": -1.0 if baseline else 2.0, "sequence": len(self.baselines)}
         self.snapshot_open = options.get("snapshot", False)
         self.classify(result, options.get("classification"), options.get("classify", ()))
-        # like the helper: every profile's selection (here each the whole visible list)
-        result["selections"] = [[(index, row["score"]) for index, row in enumerate(result["flows"])]
-                                for _ in options.get("profiles") or [None]]
         # a sample opening a snapshot session lists what it may capture (here every flow, by rate)
         result["snapshot_candidates"] = [
             {"local": local, "remote": remote, "evidence": 0, "security_class": "S0",
