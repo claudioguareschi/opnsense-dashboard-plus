@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 dist-firewall-map*/
 .DS_Store
+# internal developer docs: kept locally, never published
+security/firewall-map/collector/CONTRACTS.md
+security/firewall-map/collector/PROTOCOL.md
