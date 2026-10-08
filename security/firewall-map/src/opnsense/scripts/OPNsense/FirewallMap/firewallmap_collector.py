@@ -659,6 +659,8 @@ class Collector:
         # per-source counts of log lines rejected by per-line containment, and the last reason
         self.ingest_rejected = {"filterlog": 0, "eve": 0}
         self.ingest_last_rejection = None
+        # evidence remotes over the request's cap in the last sample (the strongest are sent)
+        self.evidence_omitted = 0
         # the last sample's timings (SampleTimer.report) and when they were last written
         self.timings = None
         self.timings_written = None
@@ -1247,7 +1249,9 @@ class Collector:
     def evidence_facts(self):
         """{remote: facts} of IDS, blocked-attempt and reputation evidence (lib/evidence.py), for the
         collector's ranking, forced tracking and threat summary."""
-        return evidence_facts.gather(self.alerts, self.correlator, self.blocks, self.reputation)
+        facts = evidence_facts.gather(self.alerts, self.correlator, self.blocks, self.reputation)
+        self.evidence_omitted = max(0, len(facts) - state_collector.THREAT_REMOTES)
+        return facts
 
     def evidence_remotes(self):
         """Remotes the threat summary keeps first: IDS, reputation and blocked-attempt evidence."""
@@ -1283,6 +1287,17 @@ class Collector:
             current["incompatible"] = self.collector_incompatible
             current["classification"] = self.blocklists.report()
             current["ingest_rejected"] = dict(self.ingest_rejected)
+            # what the bounded evidence trackers left out (Phase F boundedness)
+            current["evidence_omitted"] = {
+                "filterlog_skipped_bytes": self.log.skipped_bytes, "eve_skipped_bytes": self.eve.skipped_bytes,
+                "blocked_sources_evicted": self.blocks.evicted_sources,
+                "blocked_ports_dropped": self.blocks.dropped_ports,
+                "alert_sources_evicted": self.alerts.evicted_sources,
+                "alert_signatures_dropped": self.alerts.dropped_signatures,
+                "alert_targets_dropped": self.alerts.dropped_targets,
+                "blocked_attempts_evicted": self.correlator.stats.get("blocked_evicted", 0),
+                "ids_flows_evicted": self.correlator.stats.get("ids_flows_evicted", 0),
+                "evidence_remotes_omitted": self.evidence_omitted}
             current["ingest_last_rejection"] = self.ingest_last_rejection
             self.collector_status["state_collector"] = current
 

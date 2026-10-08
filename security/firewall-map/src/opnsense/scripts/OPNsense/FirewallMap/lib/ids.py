@@ -234,10 +234,12 @@ class Correlator:
             excess = max(0, len(store) - MAX_CORRELATION_KEYS)
             for key in list(islice(store, excess)):
                 del store[key]
+            self.stats["blocked_evicted"] = self.stats.get("blocked_evicted", 0) + excess
         for key in [key for key, flow in self.flows.items() if now - flow["last"] > ALERT_WINDOW_SECONDS]:
             del self.flows[key]
         while len(self.flows) > MAX_IDS_FLOWS:
             del self.flows[min(self.flows, key=lambda key: self.flows[key]["last"])]
+            self.stats["ids_flows_evicted"] = self.stats.get("ids_flows_evicted", 0) + 1
 
     @staticmethod
     def alert_key(alert, local_addresses, networks=None):
@@ -477,6 +479,10 @@ class AlertTracker:
         self.window = window
         self.max_sources = max_sources
         self.sources = {}
+        # omission telemetry: sources evicted at the cap, signatures and targets not kept per source
+        self.evicted_sources = 0
+        self.dropped_signatures = 0
+        self.dropped_targets = 0
 
     def add(self, alert, local_addresses, now=None, networks=None):
         at = alert["time"] if alert["time"] is not None else (now or time.time())
@@ -497,6 +503,7 @@ class AlertTracker:
         if entry is None:
             if len(self.sources) >= self.max_sources:
                 del self.sources[next(iter(self.sources))]
+                self.evicted_sources += 1
             entry = {"first": at, "last": at, "count": 0, "signatures": {}, "targets": {}, "inbound": False,
                      "outbound": False}
         self.sources[remote] = entry  # most recently alerting last, so eviction drops the stalest
@@ -514,10 +521,14 @@ class AlertTracker:
             signature["count"] += 1
             signature["last"] = max(signature["last"], at)
             signature["action"] = alert["action"]
+        else:
+            self.dropped_signatures += 1
         port = alert["dst_port"] if inbound else alert["src_port"]
         target = f'{host_port(local, port)}/{alert["protocol"]}' if port else f'{local}/{alert["protocol"]}'
         if target in entry["targets"] or len(entry["targets"]) < MAX_SIGNATURES_PER_SOURCE:
             entry["targets"][target] = entry["targets"].get(target, 0) + 1
+        else:
+            self.dropped_targets += 1
 
     def expire(self, now):
         for address in [address for address, entry in self.sources.items() if now - entry["last"] > self.window]:

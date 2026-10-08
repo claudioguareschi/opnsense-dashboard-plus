@@ -64,6 +64,8 @@ class FilterLogTail:
         self.handle = None
         self.inode = None
         self.pending = b""
+        # bytes of bursts too large to read, skipped (omission telemetry)
+        self.skipped_bytes = 0
 
     def _open(self, at_end):
         try:
@@ -106,7 +108,9 @@ class FilterLogTail:
         if len(data) >= limit_bytes:
             # a burst larger than we can draw: skip ahead instead of falling behind, keeping only
             # whole lines (the pending fragment no longer lines up with what follows)
+            position = self.handle.tell()
             self.handle.seek(0, os.SEEK_END)
+            self.skipped_bytes += max(0, self.handle.tell() - position)
             data = data.split(b"\n", 1)[-1] if self.pending else data
             self.pending = b""
             data = data.rsplit(b"\n", 1)[0] + b"\n"
@@ -176,6 +180,9 @@ class BlockTracker:
         self.window = window
         self.max_sources = max_sources
         self.sources = {}
+        # omission telemetry: sources evicted at the cap, port hits not kept per source
+        self.evicted_sources = 0
+        self.dropped_ports = 0
 
     def add(self, event, now):
         if not public_ip(event["source"]):
@@ -186,6 +193,7 @@ class BlockTracker:
         if entry is None:
             if len(self.sources) >= self.max_sources:
                 del self.sources[next(iter(self.sources))]
+                self.evicted_sources += 1
             entry = {"buckets": {}, "total": 0, "ports": {}, "first": now}
         self.sources[event["source"]] = entry
         bucket = int(now // BLOCK_BUCKET_SECONDS)
@@ -198,6 +206,8 @@ class BlockTracker:
         port = f'{event["protocol"]}/{event["port"]}' if event["port"] else event["protocol"]
         if port in entry["ports"] or len(entry["ports"]) < MAX_PORTS_PER_SOURCE:
             entry["ports"][port] = entry["ports"].get(port, 0) + 1
+        else:
+            self.dropped_ports += 1
 
     def hits(self, entry):
         return sum(entry["buckets"].values())

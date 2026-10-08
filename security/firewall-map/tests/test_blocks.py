@@ -112,6 +112,21 @@ class BlockTest(unittest.TestCase):
         for port in range(100):
             blocks.add({**event, "port": str(port)}, now=20.0)
         self.assertEqual(len(blocks.sources["45.56.79.53"]["ports"]), BLOCKS.MAX_PORTS_PER_SOURCE)
+        # what the caps left out is counted
+        self.assertEqual(blocks.evicted_sources, 8)
+        self.assertEqual(blocks.dropped_ports, 100 - BLOCKS.MAX_PORTS_PER_SOURCE)
+
+    def test_log_tail_counts_skipped_bursts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "latest.log")
+            open(path, "w").close()
+            tail = BLOCKS.FilterLogTail(path)
+            tail.lines()
+            with open(path, "a") as handle:
+                handle.write("x" * 99 + "\n" + "y" * 99 + "\n" + "z" * 99 + "\n")
+            lines = tail.lines(limit_bytes=150)
+            self.assertEqual(lines, ["x" * 99])
+            self.assertEqual(tail.skipped_bytes, 150)
 
     def test_log_tail_returns_complete_lines_only(self):
         with tempfile.TemporaryDirectory() as directory:

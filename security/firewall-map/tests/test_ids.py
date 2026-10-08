@@ -72,6 +72,15 @@ class AlertTest(unittest.TestCase):
         self.assertIn("MalformedAlert", alerts.last_rejection)
         self.assertEqual(alerts.summary("94.154.43.203")["count"], 1)
 
+    def test_caps_are_counted(self):
+        alerts = IDS.AlertTracker(max_sources=2)
+        lines = [self.LINE.replace("94.154.43.203", f"94.154.43.{n}") for n in range(5)]
+        alerts.feed(lines, {"1.2.3.163"})
+        self.assertEqual((len(alerts.sources), alerts.evicted_sources), (2, 3))
+        signatures = [self.LINE.replace("2001219", str(2001219 + n)) for n in range(IDS.MAX_SIGNATURES_PER_SOURCE + 4)]
+        alerts.feed(signatures, {"1.2.3.163"})
+        self.assertEqual(alerts.dropped_signatures, 4)
+
     def test_tracks_per_remote_address_and_flags(self):
         alerts = IDS.AlertTracker()
         alerts.feed([self.LINE, self.LINE, '{"event_type":"flow"}'], {"1.2.3.163"})
