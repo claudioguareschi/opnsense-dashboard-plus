@@ -471,6 +471,12 @@ class CollectorLoopTest(unittest.TestCase):
         self.assertEqual((saved["capture"]["version"], context["ranking_profile"]),
                          (2, profiles.descriptor(balanced)))
         self.assertEqual(context["ranking_profile"]["fingerprint"], profiles.fingerprint(balanced))
+        # Status names the active profile and the evidence sources with their caps
+        engine = self.collector.collector_status["state_collector"]
+        self.assertEqual(engine["ranking_profile"], dict(profiles.descriptor(balanced), problem=None))
+        self.assertEqual(engine["collector_generation"], self.collector.collector_status["generation"])
+        self.assertEqual(set(engine["evidence_sources"]), {"blocks", "ids", "reputation", "remotes"})
+        self.assertEqual(engine["evidence_sources"]["remotes"]["cap"], COLLECTOR.state_collector.THREAT_REMOTES)
         self.assertFalse({"focus", "focus_default", "profiles"} & set(saved))
         self.assertNotIn("profiles", context)
 

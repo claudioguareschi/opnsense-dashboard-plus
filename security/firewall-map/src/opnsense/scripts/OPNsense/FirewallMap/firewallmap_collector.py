@@ -66,7 +66,7 @@ from datetime import datetime, timezone
 import firewallmap_geodb as geodb
 import firewallmap_threats as threats
 from lib.blocklists import (
-    REPUTATION_LIST, Reputation, ThreatClassification, chosen_threat_lists, tables_report, threat_fields,
+    REPUTATION_LIST, Reputation, ThreatClassification, chosen_sets, chosen_threat_lists, tables_report, threat_fields,
     threat_lists_for,
 )
 from lib import evidence as evidence_facts
@@ -746,7 +746,10 @@ class Collector:
             self.checked["metadata"] = now
         if self._due("blocklists", now, BLOCKLIST_REFRESH_SECONDS):
             tables, unavailable = chosen_threat_lists(self.values.get("threat_lists"))
-            self.blocklists.configure(tables, now, unavailable)
+            countries, missing_countries = chosen_sets(self.values.get("country_sets"))
+            operational, missing_operational = chosen_sets(self.values.get("operational_sets"))
+            self.blocklists.configure(tables, now, unavailable, countries, operational,
+                                      missing_countries | missing_operational)
             self.checked["blocklists"] = now
         self.reputation.refresh(now)
 
@@ -1306,7 +1309,22 @@ class Collector:
                 current.update(last_error=str(error), last_error_class=getattr(error, "failure_class", None),
                                last_error_at=time.time())
             current["incompatible"] = self.collector_incompatible
+            # the one active ranking policy and the generations a sample was taken under
+            current["ranking_profile"] = dict(ranking_profiles.descriptor(self.profile), problem=self.profile_problem)
+            current["collector_generation"] = self.collector_status.get("generation")
+            current["classification_generation"] = self.blocklists.generation
             current["classification"] = self.blocklists.report()
+            # the evidence sources: what each watches, over which window, how many it holds of its cap
+            current["evidence_sources"] = {
+                "blocks": {"log": self.log.path, "available": os.path.exists(self.log.path),
+                           "window": self.blocks.window, "sources": len(self.blocks.sources),
+                           "cap": self.blocks.max_sources},
+                "ids": {"log": self.eve.path, "available": os.path.exists(self.eve.path),
+                        "window": self.alerts.window, "sources": len(self.alerts.sources),
+                        "cap": self.alerts.max_sources},
+                "reputation": {"flagged": len(self.reputation.flagged)},
+                "remotes": {"sent": len(self.sent_evidence), "omitted": self.evidence_omitted,
+                            "cap": state_collector.THREAT_REMOTES}}
             current["ingest_rejected"] = dict(self.ingest_rejected)
             # what the bounded evidence trackers left out (Phase F boundedness)
             current["evidence_omitted"] = {

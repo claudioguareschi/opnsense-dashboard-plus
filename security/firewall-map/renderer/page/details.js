@@ -77,6 +77,9 @@ function reputationCard(item) {
     ['ASN', item.asn ? escapeHtml(`AS${item.asn}`) : ''],
     [T.organization, escapeHtml(plain(item.as_org || ''))],
     [T.country, item.country ? `${flagHtml(item.country_code)} ${escapeHtml(plain(item.country))}` : ''],
+    // PF membership, shown apart from the geolocation it may disagree with
+    [T.pf_sets, (item.sets || []).map((set) => `<span class="label label-default fwmap-pill" title="${escapeHtml(
+      set.category === 'country' ? T.set_country : T.set_operational)}">${escapeHtml(set.name)}</span>`).join(' ')],
   ]);
   return card('layer-group', T.sec_reputation, `<div class="fwmap-two">${left}${right}</div>`,
     state.can.manage ? {cls: 'fwmap-investigate', address, title: T.investigate} : null);
@@ -149,7 +152,7 @@ function flowModel(flow, context) {
         : target && !target.firewall ? escapeHtml(`${T.port_forward} (${flow.origin} → ${hostPort(target.ip, target.port)})`) : escapeHtml(T.no)],
     ]),
     ids: idsCard(flow.ids, null),
-    reputation: reputationCard({...item, address, lists: flow.lists, abuseipdb: flow.abuseipdb}),
+    reputation: reputationCard({...item, address, lists: flow.lists, abuseipdb: flow.abuseipdb, sets: flow.sets}),
   };
 }
 

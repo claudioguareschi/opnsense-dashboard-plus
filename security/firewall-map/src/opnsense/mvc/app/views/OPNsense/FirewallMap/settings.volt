@@ -56,6 +56,10 @@
                 keyField('abuseipdb_key').attr('placeholder', status.abuseipdb_configured ? stored : '');
                 keyField('remove_license_key').prop('checked', false);
                 keyField('remove_abuseipdb_key').prop('checked', false);
+                // a chosen threat list or set without a PF table classifies nothing: say so here too
+                const unused = (status.threat_lists_unavailable || []).concat(status.sets_missing || []);
+                $('#classificationWarning').toggleClass('hidden', !unused.length)
+                    .find('.names').text(unused.join(', '));
                 showRows();
             });
         };
@@ -224,11 +228,17 @@
     });
 </script>
 
-<div class="content-box">
+<div class="alert alert-warning hidden" role="alert" id="classificationWarning">
+    <i class="fa fa-triangle-exclamation fa-fw"></i>
+    {{ lang._('Not used, because they have no PF table:') }} <strong class="names"></strong>.
+    {{ lang._('Enable Maintain blocklist aliases for the curated feeds and the AbuseIPDB blacklist, or create the aliases.') }}
+</div>
+
+<div class="content-box __mb">
     {{ partial("layout_partials/base_form", ['fields': formSettings, 'id': 'frm_settings']) }}
 </div>
 
-<div class="content-box" id="rankingProfiles">
+<div class="content-box __mb" id="rankingProfiles">
     <div class="table-responsive">
         <table class="table table-condensed" id="profileTable">
             <thead>
@@ -244,6 +254,15 @@
             <tbody></tbody>
         </table>
     </div>
+</div>
+
+<div class="content-box __mb">
+    <table class="table table-condensed">
+        <thead><tr><th>{{ lang._('Security evidence') }}</th></tr></thead>
+        <tbody><tr><td class="text-muted">
+            {{ lang._('Flows with security evidence are flagged, kept tracked and can have places reserved in the ranking (Security visibility in each profile). The evidence comes from blocked attempts in the firewall log (the last 10 minutes), Suricata alerts (the last hour), the threat lists above and AbuseIPDB lookups. Only block rules with logging enabled are seen, and IDS evidence needs Services: Intrusion Detection. The Status page shows each source and its limits.') }}
+        </td></tr></tbody>
+    </table>
 </div>
 
 <div class="modal fade" id="profileEditor" tabindex="-1" role="dialog" aria-labelledby="profileEditorTitle">
@@ -313,6 +332,7 @@
 
 <style>
     .profile-pill { border-radius: 10px; }
+    #profileTable .btn-group { display: inline-flex; }
     #profileRules input { min-width: 0; }
 </style>
 

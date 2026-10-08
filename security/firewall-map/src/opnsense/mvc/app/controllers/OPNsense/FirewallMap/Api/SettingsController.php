@@ -228,7 +228,12 @@ class SettingsController extends ApiMutableModelControllerBase
     public function statusAction()
     {
         $general = $this->getModel()->general;
+        /* chosen threat lists and sets the collector could not use (no PF table): never silent */
+        $overview = json_decode((string)(new Backend())->configdRun('firewallmap overview'), true);
+        $classification = is_array($overview) ? ($overview['threat_lists'] ?? []) : [];
         return [
+            'threat_lists_unavailable' => array_column($classification['unavailable'] ?? [], 'name'),
+            'sets_missing' => $classification['missing'] ?? [],
             'license_key_set' => $general->license_key->getValue() !== '',
             'abuseipdb_configured' => $general->abuseipdb_key->getValue() !== '',
             'record_threats' => (string)$general->record_threats,

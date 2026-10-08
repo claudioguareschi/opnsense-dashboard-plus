@@ -73,6 +73,41 @@ class BlocklistTest(unittest.TestCase):
         lists.observe({"refused": {"reason": "refused_states"}, "flows": [], "threat_remotes": []})
         self.assertEqual(lists.lookup("203.0.113.7"), ["spamhaus_drop"])
 
+    def test_country_and_operational_sets_describe_without_flagging(self):
+        """Country and operational sets follow the threat lists in set-ID order; they describe a
+        remote (PF membership, not GeoIP) and never make it a threat. A table chosen twice keeps
+        its first category; a set matching most of the ranked flows is reported broad."""
+        sets = BLOCKLISTS.ThreatClassification()
+        with mock.patch.object(BLOCKLISTS, "log_warning"):
+            sets.configure({"spamhaus_drop"}, 0.0, (), {"Country_CN", "Country_US"}, {"Partners", "spamhaus_drop"},
+                           {"Country_XX"})
+        self.assertEqual(sets.request()[1], [("T", "spamhaus_drop"), ("C", "Country_CN"), ("C", "Country_US"),
+                                             ("O", "Partners")])
+        flows = [{"key": ("192.168.1.2", f"45.56.79.{n}"), "classes": 0b0100} for n in range(30)]
+        flows[0]["classes"] = 0b1011
+        sets.observe({"refused": None, "flows": flows, "threat_remotes": [], "classified": {},
+                      "class_sets": [{"id": n, "status": "ok", "entries": 10} for n in range(4)]})
+        self.assertEqual(sets.lookup("45.56.79.0"), ["spamhaus_drop"])
+        self.assertEqual(sets.described("45.56.79.0"), [{"name": "Country_CN", "category": "country"},
+                                                       {"name": "Partners", "category": "operational"}])
+        self.assertEqual(sets.lookup("45.56.79.1"), [])
+        self.assertEqual(sets.described("45.56.79.1"), [{"name": "Country_US", "category": "country"}])
+        report = sets.report()
+        self.assertEqual([(row["name"], row["category"], row["matched"], row["broad"]) for row in report["sets"]],
+                         [("Country_CN", "country", 1, False), ("Country_US", "country", 29, True),
+                          ("Partners", "operational", 1, False)])
+        self.assertEqual((report["missing"], report["duplicates"], report["ranked"]), (["Country_XX"], ["spamhaus_drop"], 30))
+        self.assertEqual([row["name"] for row in report["lists"]], ["spamhaus_drop"])
+        fields = BLOCKLISTS.threat_fields("45.56.79.1", sets, None)
+        self.assertEqual(fields, {"lists": [], "abuseipdb": None, "sets": [{"name": "Country_US", "category": "country"}]})
+        self.assertNotIn("sets", BLOCKLISTS.threat_fields("45.56.79.200", sets, None))
+
+    def test_set_candidates_skip_internal_tables(self):
+        aliases = [{"name": "Country_CN", "type": "geoip", "enabled": True, "description": "China"}]
+        self.assertEqual(BLOCKLISTS.set_candidates(["__lan_network", "Country_CN", "bogons"], aliases),
+                         [{"name": "bogons", "type": "table", "description": ""},
+                          {"name": "Country_CN", "type": "geoip", "description": "China"}])
+
     def test_generation_follows_the_table_sources(self):
         with tempfile.TemporaryDirectory() as directory, \
                 mock.patch.object(BLOCKLISTS, "ALIAS_TABLE_DIR", directory), \

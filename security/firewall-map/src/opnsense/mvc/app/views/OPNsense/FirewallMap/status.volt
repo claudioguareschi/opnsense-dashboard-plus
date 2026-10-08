@@ -56,6 +56,24 @@
             list_pending: {{ lang._('not read yet')|json_encode }},
             list_unavailable: {{ lang._('Not used: no PF table. Enable Maintain blocklist aliases in the settings, or create the alias.')|json_encode }},
             lists_none: {{ lang._('No threat lists: choose them in the settings.')|json_encode }},
+            sets_none: {{ lang._('No country or operational sets: choose them in the settings.')|json_encode }},
+            lists_title: {{ lang._('a threat list')|json_encode }},
+            set_country: {{ lang._('Country')|json_encode }},
+            set_operational: {{ lang._('Operational')|json_encode }},
+            set_missing: {{ lang._('Not used: no PF table (the alias does not exist or is not loaded)')|json_encode }},
+            set_duplicate: {{ lang._('Chosen in more than one category: used as %s only')|json_encode }},
+            set_broad: {{ lang._('Broad: contains %s of the %s ranked flows')|json_encode }},
+            set_matched: {{ lang._('%s of %s ranked flows')|json_encode }},
+            sets_ignored: {{ lang._('Over the limit of 64 tables, not used: %s')|json_encode }},
+            profile_builtin: {{ lang._('built-in')|json_encode }},
+            profile_custom: {{ lang._('custom')|json_encode }},
+            profile_details: {{ lang._('UUID %s · definition %s')|json_encode }},
+            generations: {{ lang._('collector %s · classification %s')|json_encode }},
+            evidence_unavailable: {{ lang._('Not available: %s does not exist')|json_encode }},
+            evidence_blocks: {{ lang._('%s sources in the last %s (at most %s); only rules with logging enabled are seen')|json_encode }},
+            evidence_ids: {{ lang._('%s sources in the last %s (at most %s)')|json_encode }},
+            evidence_reputation: {{ lang._('%s addresses rated abusive by an AbuseIPDB lookup')|json_encode }},
+            evidence_remotes: {{ lang._('%s remotes with evidence sent to the collector (at most %s), %s left out')|json_encode }},
             no_key: {{ lang._('No AbuseIPDB API key')|json_encode }},
             key_plugin: {{ lang._('Stored in the Firewall Map settings')|json_encode }},
             key_alias: {{ lang._('Taken from the GeoIP alias')|json_encode }},
@@ -186,6 +204,22 @@
                 : engine.refused ? fill(T.engine_refused, `${engine.refused.reason} (${count(engine.refused.actual)} / ${count(engine.refused.limit)})`)
                 : engine.last_error ? engine.last_error : null;
             $('#engine-problem').html(problem ? state(problem) : escape(T.none));
+            // the one active ranking policy, and what a sample was taken under
+            const profile = engine.ranking_profile;
+            $('#engine-profile').html(profile ? `<strong>${escape(profile.name)}</strong> (${escape(profile.builtin
+                ? T.profile_builtin : T.profile_custom)})<br><small class="text-muted">${escape(fill(T.profile_details,
+                profile.uuid, profile.fingerprint))}</small>` + (profile.problem ? `<br>${state(profile.problem)}` : '') : '—');
+            $('#engine-generations').text(engine.collector_generation ? fill(T.generations,
+                String(engine.collector_generation).slice(0, 12), String(engine.classification_generation || '—').slice(0, 12)) : '—');
+            const sources = engine.evidence_sources || {};
+            const span = (seconds) => seconds >= 3600 ? fill(T.hours, Math.round(seconds / 3600)) : fill(T.minutes, Math.round(seconds / 60));
+            const source = (item, template) => !item ? '—' : !item.available ? state(fill(T.evidence_unavailable, item.log))
+                : escape(fill(template, count(item.sources), span(item.window), count(item.cap)));
+            $('#evidence-blocks').html(source(sources.blocks, T.evidence_blocks));
+            $('#evidence-ids').html(source(sources.ids, T.evidence_ids));
+            $('#evidence-reputation').text(sources.reputation ? fill(T.evidence_reputation, count(sources.reputation.flagged)) : '—');
+            $('#evidence-remotes').text(sources.remotes ? fill(T.evidence_remotes, count(sources.remotes.sent),
+                count(sources.remotes.cap), count(sources.remotes.omitted)) : '—');
 
             const db = data.database || {};
             const provider = PROVIDERS[db.provider] || db.provider || '';
@@ -222,6 +256,21 @@
                 <td>${listName(row)}</td><td>—</td><td>${state(T.list_unavailable)}</td></tr>`));
             $('#threat-lists').html(rows.length ? rows.join('')
                 : `<tr><td colspan="3" class="text-muted">${escape(T.lists_none)}</td></tr>`);
+            // country and operational sets: what each holds and how much of the ranked population it
+            // matched (a set matching most of it is broad: it describes nearly everything)
+            const ranked = lists.ranked || 0;
+            const setRows = (lists.sets || []).map((row) => `<tr>
+                <td>${escape(row.name)}<br><small class="text-muted">${escape(T[`set_${row.category}`] || row.category)}</small></td>
+                <td>${row.status === 'ok' ? escape(Number(row.entries).toLocaleString()) : '—'}</td>
+                <td>${row.status !== 'ok' ? (row.status === 'pending' ? escape(T.list_pending) : state(T[`list_${row.status}`] || row.status))
+                    : row.broad ? `<span class="text-warning"><i class="fa fa-triangle-exclamation fa-fw"></i> ${escape(fill(T.set_broad, count(row.matched), count(ranked)))}</span>`
+                    : `${state(null)} <small class="text-muted">${escape(fill(T.set_matched, count(row.matched), count(ranked)))}</small>`}</td></tr>`)
+                .concat((lists.missing || []).map((name) => `<tr><td>${escape(name)}</td><td>—</td><td>${state(T.set_missing)}</td></tr>`))
+                .concat((lists.duplicates || []).map((name) => `<tr><td>${escape(name)}</td><td>—</td><td>${escape(fill(T.set_duplicate,
+                    (lists.lists || []).some((row) => row.name === name) ? T.lists_title : T.set_country))}</td></tr>`))
+                .concat((lists.ignored || []).length ? [`<tr><td colspan="3">${state(fill(T.sets_ignored, lists.ignored.join(', ')))}</td></tr>`] : []);
+            $('#class-sets').html(setRows.length ? setRows.join('')
+                : `<tr><td colspan="3" class="text-muted">${escape(T.sets_none)}</td></tr>`);
 
             const abuse = data.abuseipdb || {};
             $('#abuse-count').text(abuse.count ? `${Number(abuse.count).toLocaleString()} (IPv4 ${Number(abuse.count_v4 || 0).toLocaleString()}, IPv6 ${Number(abuse.count_v6 || 0).toLocaleString()})` : '—');
@@ -301,6 +350,8 @@
             <tr><td>{{ lang._('Flows') }}</td><td id="engine-tracking"></td></tr>
             <tr><td>{{ lang._('Left out') }}</td><td id="engine-omitted"></td></tr>
             <tr><td>{{ lang._('Rejected log lines') }}</td><td id="engine-rejected"></td></tr>
+            <tr><td>{{ lang._('Ranking profile') }}</td><td id="engine-profile"></td></tr>
+            <tr><td>{{ lang._('Generations') }}</td><td id="engine-generations"></td></tr>
             <tr><td>{{ lang._('Problems') }}</td><td id="engine-problem"></td></tr>
         </tbody>
     </table>
@@ -326,6 +377,25 @@
         <thead><tr><th style="width: 25%;">{{ lang._('Threat lists') }}</th><th>{{ lang._('Entries') }}</th>
             <th class="text-right"><button type="button" class="btn btn-default btn-xs update-now" id="update-lists" data-what="lists"><i class="fa fa-download fa-fw"></i> {{ lang._('Update now') }}</button></th></tr></thead>
         <tbody id="threat-lists"></tbody>
+    </table>
+</div>
+
+<div class="content-box __mb">
+    <table class="table table-condensed">
+        <thead><tr><th style="width: 25%;">{{ lang._('Country and operational sets') }}</th><th>{{ lang._('Entries') }}</th><th></th></tr></thead>
+        <tbody id="class-sets"></tbody>
+    </table>
+</div>
+
+<div class="content-box __mb">
+    <table class="table table-condensed">
+        <thead><tr><th colspan="2">{{ lang._('Security evidence') }}</th></tr></thead>
+        <tbody>
+            <tr><td style="width: 25%;">{{ lang._('Logged blocks') }}</td><td id="evidence-blocks"></td></tr>
+            <tr><td>{{ lang._('IDS alerts') }}</td><td id="evidence-ids"></td></tr>
+            <tr><td>{{ lang._('Reputation') }}</td><td id="evidence-reputation"></td></tr>
+            <tr><td>{{ lang._('Sent to the collector') }}</td><td id="evidence-remotes"></td></tr>
+        </tbody>
     </table>
 </div>
 

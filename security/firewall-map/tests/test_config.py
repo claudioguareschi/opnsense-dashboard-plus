@@ -50,14 +50,16 @@ class SettingsFileTest(unittest.TestCase):
             self.write(path, {
                 "general": {"provider": "dbip", "license_key": "", "abuseipdb_key": " key ", "update_days": "7",
                             "threat_lists": "", "record_threats": "1", "blocklist_aliases": "0",
-                            "ranking_profile": "6c02d03d-4087-46a9-b5bc-6378fb5eeada"},
+                            "ranking_profile": "6c02d03d-4087-46a9-b5bc-6378fb5eeada", "country_sets": "Country_CN",
+                            "operational_sets": " "},
                 "aliases": [{"name": "Drop", "type": "urltable", "enabled": True, "description": ""}, {"name": ""}],
                 "interfaces": {"igb1": "WAN", "vlan01": "LAN"},
                 "topology": {"primary_wan_device": "igb1"},
             })
             expected = {"provider": "dbip", "license_key": "", "update_days": 7, "threat_lists": "",
                         "record_threats": "1", "blocklist_aliases": "0", "helper_memory": None,
-                        "ranking_profile": "6c02d03d-4087-46a9-b5bc-6378fb5eeada"}
+                        "ranking_profile": "6c02d03d-4087-46a9-b5bc-6378fb5eeada", "country_sets": "Country_CN",
+                        "operational_sets": ""}
             self.assertEqual(CONFIG.settings(path), expected)
             self.assertEqual(CONFIG.abuseipdb_key(path), "key")
             self.assertEqual([alias["name"] for alias in CONFIG.aliases(path)], ["Drop"])

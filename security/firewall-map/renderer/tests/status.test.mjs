@@ -27,7 +27,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {test} from 'node:test';
-import {problemText} from '../src/host.js';
+import {problemText, statusParts} from '../src/host.js';
 
 // the widget and the map page pass these translations (Metadata/FirewallMap.xml) as the text table
 const xml = fs.readFileSync(new URL('../../src/opnsense/www/js/widgets/Metadata/FirewallMap.xml', import.meta.url), 'utf8');
@@ -51,4 +51,17 @@ test('an incompatible collector names the package problem, not generic unavailab
   // other problems are unchanged
   assert.equal(problemText({status: 'failed'}, TEXT), TEXT.unavailable);
   assert.equal(problemText({status: 'ok'}, TEXT), null);
+});
+
+test('the status line names the one active ranking profile and an honest bounded ranking', () => {
+  const text = {active_flows_one: '{count} active flow', active_flows_many: '{count} active flows', no_flows: 'No flows',
+    map_profile: translation('map_profile'), map_ranking_bounded: translation('map_ranking_bounded'),
+    map_ranking_warming: translation('map_ranking_warming')};
+  const shown = {flows: [{}, {}]};
+  const summary = {ranking_profile: {uuid: 'u', name: 'Mail <Security>', fingerprint: 'f'}, tracked_flows: 120000,
+    tracked_flows_estimated: true, quality: {ranking: 'bounded'}};
+  assert.deepEqual(statusParts(summary, shown, {}, text),
+    ['2 active flows', 'Mail &#60;Security&#62; ranking', `the top-ranked of ≈${(120000).toLocaleString()} flows`]);
+  // a document without a profile (an older collector) says nothing about one
+  assert.deepEqual(statusParts({quality: {ranking: 'exact'}}, shown, {}, text), ['2 active flows']);
 });

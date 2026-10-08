@@ -77,7 +77,8 @@ class StatusTest(unittest.TestCase):
         # an upgrade with alias maintenance off: the lists that no longer classify are named
         self.assertEqual([(row["name"], row["label"]) for row in lists["unavailable"]],
                          [("FWMAP_AbuseIPDB", "AbuseIPDB blacklist"), ("FWMAP_Spamhaus_DROP", "FWMAP_Spamhaus_DROP")])
-        self.assertEqual(STATUS.threat_lists(None), {"lists": [], "unavailable": [], "ignored": []})
+        self.assertEqual(STATUS.threat_lists(None), {"lists": [], "unavailable": [], "ignored": [], "sets": [],
+                                                     "missing": [], "duplicates": [], "ranked": 0})
 
     def test_state_collector_status_and_version_warning(self):
         timing = {"state_collector": {"helper": {"pid": 7, "starts": 2, "protocol": 1, "pf_state_version": 20230404,

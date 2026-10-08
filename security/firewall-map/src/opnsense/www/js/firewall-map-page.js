@@ -164,7 +164,8 @@
 		geo_err_disk_full: "The database could not be saved: the firewall's disk is full.",
 		geo_err_http: "{provider} answered with an error.",
 		geo_err_other: "The download failed.",
-		map_ranking_bounded: "the busiest of {count} flows",
+		map_profile: "{profile} ranking",
+		map_ranking_bounded: "the top-ranked of {count} flows",
 		map_ranking_warming: "ranking settling after a busy period",
 		map_started_inside: "Outbound",
 		map_started_outside: "Inbound",
@@ -811,7 +812,8 @@
 		const right = rows([
 			["ASN", item.asn ? escapeHtml(`AS${item.asn}`) : ""],
 			[T.organization, escapeHtml(plain(item.as_org || ""))],
-			[T.country, item.country ? `${flagHtml(item.country_code)} ${escapeHtml(plain(item.country))}` : ""]
+			[T.country, item.country ? `${flagHtml(item.country_code)} ${escapeHtml(plain(item.country))}` : ""],
+			[T.pf_sets, (item.sets || []).map((set) => `<span class="label label-default fwmap-pill" title="${escapeHtml(set.category === "country" ? T.set_country : T.set_operational)}">${escapeHtml(set.name)}</span>`).join(" ")]
 		]);
 		return card("layer-group", T.sec_reputation, `<div class="fwmap-two">${left}${right}</div>`, state.can.manage ? {
 			cls: "fwmap-investigate",
@@ -889,7 +891,8 @@
 				...item,
 				address,
 				lists: flow.lists,
-				abuseipdb: flow.abuseipdb
+				abuseipdb: flow.abuseipdb,
+				sets: flow.sets
 			})
 		};
 	}

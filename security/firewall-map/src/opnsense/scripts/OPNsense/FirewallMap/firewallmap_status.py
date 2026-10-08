@@ -136,8 +136,9 @@ def database():
 
 
 def threat_lists(timing):
-    """The PF tables the collector classifies threats with, as it last read them, and the chosen
-    lists it cannot use (no PF table: the alias is missing or alias maintenance is off)."""
+    """The PF tables the collector classifies with, as it last read them: threat lists, the chosen
+    lists it cannot use (no PF table: the alias is missing or alias maintenance is off), and the
+    country and operational sets with how much of the ranked population each matched."""
     report = ((timing or {}).get("state_collector") or {}).get("classification") or {}
     labels = {feed["name"]: feed["label"] for feed in FEEDS}
     return {
@@ -145,6 +146,10 @@ def threat_lists(timing):
         "unavailable": [{"name": name, "label": list_label(name), "description": labels.get(name)}
                         for name in report.get("unavailable") or []],
         "ignored": list(report.get("ignored") or []),
+        "sets": list(report.get("sets") or []),
+        "missing": list(report.get("missing") or []),
+        "duplicates": list(report.get("duplicates") or []),
+        "ranked": report.get("ranked") or 0,
     }
 
 

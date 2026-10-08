@@ -125,12 +125,17 @@ export function statusParts(summary, shown, settings, text) {
       }
     }
   }
+  // the one ranking every viewer sees (an administrative setting, never a viewer's choice)
+  const profile = summary.ranking_profile?.name;
+  if (profile && text.map_profile) {
+    parts.push(escapeHtml(fill(text.map_profile, {profile: plain(profile)})));
+  }
   const threats = shown.flows.filter((flow) => flow.threat).length;
   if (threats && text.listed_flows_many) {
     parts.push(escapeHtml(plural(text, 'listed_flows', threats)));
   }
-  // the ranking is honest about its limits: past the tracked set it ranks the busiest of the
-  // flows it tracks (an estimate of the total marked ≈), and settles for a fade window afterwards
+  // the ranking is honest about its limits: past the tracked set it ranks the best of the flows
+  // it tracks (an estimate of the total marked ≈), and settles for a fade window afterwards
   const quality = summary.quality || {};
   if (quality.ranking === 'bounded' && text.map_ranking_bounded) {
     const total = Number(summary.tracked_flows || 0).toLocaleString();

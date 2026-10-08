@@ -65,7 +65,8 @@
             <geo_err_other>The download failed.</geo_err_other>
             <database_downloading>Downloading the geolocation database…</database_downloading>
             <carp_backup>CARP backup: traffic is passing through the master</carp_backup>
-            <map_ranking_bounded>the busiest of {count} flows</map_ranking_bounded>
+            <map_profile>{profile} ranking</map_profile>
+            <map_ranking_bounded>the top-ranked of {count} flows</map_ranking_bounded>
             <map_ranking_warming>ranking settling after a busy period</map_ranking_warming>
             <too_many_states>The state table is too large to map ({count} states). The map resumes below {limit}.</too_many_states>
             <collector_incompatible>Firewall Map collector incompatible — The Firewall Map application and its state collector use incompatible protocols. Reinstall or upgrade the Firewall Map package so both components come from the same version.</collector_incompatible>

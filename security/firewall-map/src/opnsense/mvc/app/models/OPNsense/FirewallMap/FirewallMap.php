@@ -143,6 +143,13 @@ class FirewallMap extends BaseModel
                 $messages->appendMessage(new Message($error, 'general.blocklist_aliases'));
             }
         }
+        $sets = array_filter(explode(',', (string)$general->country_sets . ',' . (string)$general->operational_sets));
+        if (count($sets) > 64) {
+            $messages->appendMessage(new Message(
+                gettext('Choose at most 64 country and operational sets (threat lists count toward the same limit).'),
+                'general.country_sets'
+            ));
+        }
         /* a handful of rows: every custom profile is checked on every save */
         foreach ($this->profiles->profile->iterateItems() as $profile) {
             $this->validateProfile($profile, $messages);
