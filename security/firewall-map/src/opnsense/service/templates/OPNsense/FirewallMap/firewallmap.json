@@ -12,6 +12,8 @@
         "abuseipdb_key": {{ general.abuseipdb_key | default('', true) | tojson }},
         "update_days": {{ general.update_days | default('3', true) | tojson }},
         "helper_memory": {{ general.helper_memory | default('', true) | tojson }},
+        "interval_min": {{ general.interval_min | default('2', true) | tojson }},
+        "interval_max": {{ general.interval_max | default('60', true) | tojson }},
         "threat_lists": {{ general.threat_lists | default('', true) | tojson }},
         "country_sets": {{ general.country_sets | default('', true) | tojson }},
         "operational_sets": {{ general.operational_sets | default('', true) | tojson }},

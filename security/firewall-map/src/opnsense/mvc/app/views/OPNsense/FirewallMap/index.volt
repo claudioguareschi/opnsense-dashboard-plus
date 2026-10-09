@@ -245,6 +245,7 @@
         snapshot_population: {{ lang._('from {count} flows')|json_encode }},
         snapshot_ranking_bounded: {{ lang._('ranking was bounded')|json_encode }},
         map_profile: {{ lang._('{profile} ranking')|json_encode }},
+        map_interval: {{ lang._('refreshed every {seconds} s')|json_encode }},
         map_carp_backup: {{ lang._('CARP backup: traffic is passing through the master')|json_encode }},
         map_carp_mirror: {{ lang._("CARP backup: mirroring the master's connections (no traffic data)")|json_encode }},
         map_waiting_restart: {{ lang._('The collector is restarting: the map resumes with its first ranked sample')|json_encode }},

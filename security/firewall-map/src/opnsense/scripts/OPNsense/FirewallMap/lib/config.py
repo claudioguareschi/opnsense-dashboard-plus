@@ -80,13 +80,17 @@ def readable(path=SETTINGS_FILE):
 
 HELPER_MEMORY_MIN_MIB = 64
 HELPER_MEMORY_MAX_MIB = 16384
+# the sampling interval bounds an administrator may set (seconds); the collector recommends within them
+INTERVAL_MIN_SECONDS = 2
+INTERVAL_MAX_SECONDS = 300
 
 
 def settings(path=SETTINGS_FILE):
     """The plugin's settings, with their defaults."""
     values = {"provider": "auto", "license_key": "", "update_days": 3, "threat_lists": "",
               "record_threats": "1", "blocklist_aliases": "0", "helper_memory": "", "ranking_profile": "",
-              "country_sets": "", "operational_sets": "", "carp_backup_view": "mirror"}
+              "country_sets": "", "operational_sets": "", "carp_backup_view": "mirror",
+              "interval_min": "2", "interval_max": "60"}
     general = _read(path).get("general") or {}
     for field in values:
         if str(general.get(field) or "").strip():
@@ -99,6 +103,13 @@ def settings(path=SETTINGS_FILE):
         values["provider"] = "auto"
     if values["carp_backup_view"] not in ("mirror", "own"):
         values["carp_backup_view"] = "mirror"
+    # seconds; out of range or inverted bounds (the model validates them) fall back to the defaults
+    try:
+        low, high = int(values["interval_min"]), int(values["interval_max"])
+        valid = INTERVAL_MIN_SECONDS <= low <= high <= INTERVAL_MAX_SECONDS
+    except ValueError:
+        valid = False
+    values["interval_min"], values["interval_max"] = (low, high) if valid else (2, 60)
     # MiB, or None for automatic; out-of-range values (the model validates them) fall back to automatic
     try:
         memory = int(values["helper_memory"])

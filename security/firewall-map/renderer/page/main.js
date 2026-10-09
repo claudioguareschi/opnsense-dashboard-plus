@@ -84,7 +84,8 @@ function updatedLine() {
   }
   const seconds = Math.max(0, Math.round((Date.now() - state.updatedAt) / 1000));
   $('#fwmap-updated').html(`${escapeHtml(fill(T.last_updated_ago, {time: fill(TEXT.map_seconds, {count: seconds})}))} `
-    + `<i class="fwmap-live${seconds > 10 ? ' stale' : ''}"></i>`);
+    // stale: several refresh intervals without an update (adaptive refresh may stretch the interval)
+    + `<i class="fwmap-live${seconds > Math.max(10, 2.5 * (state.data?.interval || 2)) ? ' stale' : ''}"></i>`);
 }
 
 /**

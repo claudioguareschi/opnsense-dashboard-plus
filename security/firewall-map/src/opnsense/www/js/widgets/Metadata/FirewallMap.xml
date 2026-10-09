@@ -66,6 +66,7 @@
             <database_downloading>Downloading the geolocation database…</database_downloading>
             <map_carp_backup>CARP backup: traffic is passing through the master</map_carp_backup>
             <map_profile>{profile} ranking</map_profile>
+            <map_interval>refreshed every {seconds} s</map_interval>
             <map_carp_mirror>CARP backup: mirroring the master's connections (no traffic data)</map_carp_mirror>
             <map_waiting_restart>The collector is restarting: the map resumes with its first ranked sample</map_waiting_restart>
             <map_waiting_profile>Applying the {profile} ranking profile: the map resumes with its first ranked sample</map_waiting_profile>

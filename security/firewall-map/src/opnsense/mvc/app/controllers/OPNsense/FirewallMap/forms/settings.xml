@@ -117,6 +117,18 @@
         <label>Collector resources</label>
     </field>
     <field>
+        <id>firewallmap.general.interval_min</id>
+        <label>Shortest refresh interval (s)</label>
+        <type>text</type>
+        <help>How often an open map is refreshed at most. The collector measures what each sample costs and, on a busy firewall, asks for a longer interval so it stays a small share of the CPU; the interval never goes below this.</help>
+    </field>
+    <field>
+        <id>firewallmap.general.interval_max</id>
+        <label>Longest refresh interval (s)</label>
+        <type>text</type>
+        <help>The longest the collector may stretch the interval to, however costly a sample is.</help>
+    </field>
+    <field>
         <id>firewallmap.general.helper_memory</id>
         <label>Memory budget (MiB)</label>
         <type>text</type>

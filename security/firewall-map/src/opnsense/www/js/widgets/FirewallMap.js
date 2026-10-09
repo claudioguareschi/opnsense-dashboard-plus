@@ -28,7 +28,7 @@
 const AUTO_HEIGHT = 10000;
 // the renderer's content hash, written by tools/build-renderer.sh: a new renderer has a new
 // address, so a browser never runs an old cached copy with a newer widget
-const RENDERER_VERSION = 'ae0c3c403534';
+const RENDERER_VERSION = '4bf55d5630a9';
 // follow traffic is the map's own toggle, remembered per browser (as on the full-size map)
 const FOLLOW_KEY = 'firewallmap.widget.follow';
 

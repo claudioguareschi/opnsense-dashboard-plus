@@ -892,6 +892,8 @@ class Collector:
                 "id": origin, "name": origin, "lat": location["lat"], "lon": location["lon"], "local": True,
             })
         payload["ranking_profile"] = ranking_profiles.descriptor(self.profile)
+        # how often the map is refreshed while it is watched (adaptive refresh)
+        payload["interval"] = self.sampling_interval(INTERVAL)
         # on a CARP backup: whether the master's (synchronized) flows are mirrored on the map
         if self.carp_backup:
             payload["carp_view"] = self.values.get("carp_backup_view", "mirror")
@@ -1330,6 +1332,15 @@ class Collector:
                 current.update(last_error=str(error), last_error_class=getattr(error, "failure_class", None),
                                last_error_at=time.time())
             current["incompatible"] = self.collector_incompatible
+            # adaptive refresh: the collector's recommendation, why, and the interval used
+            telemetry = current.get("telemetry") or {}
+            reason = telemetry.get("cadence_reason")
+            current["cadence"] = {
+                "recommended": (telemetry.get("recommended_interval_ms") or 0) / 1000.0 or None,
+                "reason": state_collector.CADENCE_REASONS[reason]
+                if isinstance(reason, int) and reason < len(state_collector.CADENCE_REASONS) else None,
+                "interval": self.sampling_interval(INTERVAL),
+                "bounds": [self.values.get("interval_min", 2), self.values.get("interval_max", 60)]}
             # the one active ranking policy and the generations a sample was taken under
             current["ranking_profile"] = dict(ranking_profiles.descriptor(self.profile), problem=self.profile_problem)
             current["collector_generation"] = self.collector_status.get("generation")
@@ -1413,12 +1424,21 @@ class Collector:
         timer.phases["collector_flows"] = sample["counts"]["flows"]
         self.save_timings(timer, sample["counts"]["states"], background, now)
 
+    def sampling_interval(self, base):
+        """The interval to sample at (seconds): the collector's recommendation (adaptive refresh,
+        collector/cadence.h) or `base`, whichever is longer, within the administrator's bounds."""
+        telemetry = (self.collector_status.get("state_collector") or {}).get("telemetry") or {}
+        recommended = (telemetry.get("recommended_interval_ms") or 0) / 1000.0
+        low = self.values.get("interval_min", 2)
+        high = self.values.get("interval_max", 60)
+        return min(max(base, recommended, low), high)
+
     def _rest(self, started, background):
         took = time.monotonic() - started
         if background:
-            rest = max(BACKGROUND_INTERVAL - took, 0.05)
+            rest = max(max(BACKGROUND_INTERVAL, self.sampling_interval(0)) - took, 0.05)
             return max(rest, INCOMPATIBLE_RETRY_SECONDS) if self.collector_incompatible is not None else rest
-        interval = INTERVAL if requested(REQUEST_MARKER, ACTIVE_VIEWER_SECONDS) else IDLE_INTERVAL
+        interval = self.sampling_interval(INTERVAL if requested(REQUEST_MARKER, ACTIVE_VIEWER_SECONDS) else IDLE_INTERVAL)
         with self._status_lock:
             # samples slower than the interval: the map updates at the rest floor below instead
             self.collector_status["slow_sampling"] = took > interval

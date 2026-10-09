@@ -74,6 +74,8 @@ struct telemetry {
   /* accounted bytes by structure at the end of the sample */
   uint64_t baseline_bytes, tracked_bytes, candidate_bytes, join_bytes, ranking_bytes,
       discovery_bytes;
+  /* the recommended sampling interval and why (cadence.h) */
+  uint64_t recommended_interval_ms, cadence_reason;
 };
 /* The sample's classification: set statuses, and the masks of the addresses
  * the request asked about (K rows). */

@@ -116,7 +116,7 @@ SECURITY_CLASSES = ("S0", "S1", "S2", "S3")
 PRESENCES = ("none", "traffic", "probe", "mirror")
 # CARP addresses a request may name (CARP rows)
 CARP_ADDRESSES_MAX = 256
-_TELEMETRY = struct.Struct("!IQddddd" + "Q" * 40)
+_TELEMETRY = struct.Struct("!IQddddd" + "Q" * 42)
 _TELEMETRY_FIELDS = ("pid", "sequence", "interval", "dump_seconds", "processing_seconds", "user_cpu",
                      "system_cpu", "max_rss", "heap_bytes", "heap_peak", "heap_blocks", "heap_budget",
                      "state_limit", "preflight_states", "skipped_af_translation", "candidates_omitted",
@@ -126,7 +126,9 @@ _TELEMETRY_FIELDS = ("pid", "sequence", "interval", "dump_seconds", "processing_
                      "tracked_flows", "tracked_limit", "exit_threshold", "forced_limit", "forced_flows",
                      "forced_refused", "candidate_limit", "candidate_evictions", "join_limit", "join_refused",
                      "untracked_states", "promoted", "baseline_bytes", "tracked_bytes", "candidate_bytes",
-                     "join_bytes", "ranking_bytes", "discovery_bytes")
+                     "join_bytes", "ranking_bytes", "discovery_bytes", "recommended_interval_ms", "cadence_reason")
+# why the collector recommends its sampling interval (collector/cadence.h)
+CADENCE_REASONS = ("floor", "duty", "memory", "refused")
 # the quality axes (collector/CONTRACTS.md), as the telemetry numbers them
 REGIMES = ("exact", "bounded")
 QUALITY = {"discovery": ("exact", "bounded"), "ranking": ("exact", "warming", "bounded"),

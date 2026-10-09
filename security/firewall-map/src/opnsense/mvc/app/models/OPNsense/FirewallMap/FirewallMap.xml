@@ -79,6 +79,22 @@
                 <MinimumValue>1</MinimumValue>
                 <MaximumValue>31</MaximumValue>
             </update_days>
+            <!-- adaptive refresh: the sampling interval stays within these bounds (seconds); the collector
+                 recommends how often to sample from what a sample costs -->
+            <interval_min type="IntegerField">
+                <Required>Y</Required>
+                <Default>2</Default>
+                <MinimumValue>2</MinimumValue>
+                <MaximumValue>300</MaximumValue>
+                <ValidationMessage>The interval is between 2 and 300 seconds.</ValidationMessage>
+            </interval_min>
+            <interval_max type="IntegerField">
+                <Required>Y</Required>
+                <Default>60</Default>
+                <MinimumValue>2</MinimumValue>
+                <MaximumValue>300</MaximumValue>
+                <ValidationMessage>The interval is between 2 and 300 seconds.</ValidationMessage>
+            </interval_max>
             <!-- empty: automatic, 5% of physical memory capped at 1024 MiB -->
             <helper_memory type="IntegerField">
                 <MinimumValue>64</MinimumValue>

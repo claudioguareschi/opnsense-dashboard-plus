@@ -194,6 +194,10 @@ export function statusParts(summary, shown, settings, text) {
   } else if (quality.ranking === 'warming' && text.map_ranking_warming) {
     parts.push(escapeHtml(text.map_ranking_warming));
   }
+  // adaptive refresh: say so when a busy firewall samples less often than every 2 seconds
+  if (summary.interval > 2.5 && text.map_interval) {
+    parts.push(escapeHtml(fill(text.map_interval, {seconds: Math.round(summary.interval)})));
+  }
   if (summary.carp === 'backup') {
     parts.push(escapeHtml(summary.carp_view === 'mirror' ? text.map_carp_mirror : text.map_carp_backup));
   }

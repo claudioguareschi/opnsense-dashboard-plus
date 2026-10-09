@@ -35,6 +35,7 @@
 #include "index.h"
 #include "pf_reader.h"
 #include "profile.h"
+#include "cadence.h"
 #include "protocol.h"
 #include "ranking.h"
 #include "response.h"
@@ -84,6 +85,8 @@ struct engine {
   struct class_config classes;
   bool classes_loaded;
   uint64_t sequence;
+  /* the recommended sampling interval (cadence.h), across samples */
+  struct cadence cadence;
 };
 /* CARP addresses a request may name (CARP rows) */
 #define REQUEST_CARP_MAX 256
@@ -369,6 +372,10 @@ static bool refuse(struct engine *e, struct sample_outcome refusal, uint64_t see
   ranker_reset(e->ranker);
   tracker_reset(e->tracker);
   measure_process(telemetry);
+  telemetry->recommended_interval_ms =
+      cadence_update(&e->cadence, telemetry->dump_seconds + telemetry->processing_seconds, telemetry->heap_peak,
+                     telemetry->heap_budget, true);
+  telemetry->cadence_reason = e->cadence.reason;
   struct response response;
   if (!response_begin(&response, error))
     return false;
@@ -642,6 +649,10 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
     telemetry.skipped_af_translation = aggregate_counts(sample.aggregate).skipped_af_translation;
     telemetry.event_history_evicted = event_history_evicted(e->events);
     measure_process(&telemetry);
+    telemetry.recommended_interval_ms =
+        cadence_update(&e->cadence, telemetry.dump_seconds + telemetry.processing_seconds, telemetry.heap_peak,
+                       telemetry.heap_budget, false);
+    telemetry.cadence_reason = e->cadence.reason;
     struct class_report classes = {e->classifier, r->classify, r->classify_count, sample.aggregate,
                                    &evidence, r->evidence_facts,
                                    classifier_category(e->classifier, 'T')};

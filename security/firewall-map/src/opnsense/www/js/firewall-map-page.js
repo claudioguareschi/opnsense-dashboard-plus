@@ -166,6 +166,7 @@
 		geo_err_other: "The download failed.",
 		map_carp_backup: "CARP backup: traffic is passing through the master",
 		map_profile: "{profile} ranking",
+		map_interval: "refreshed every {seconds} s",
 		map_carp_mirror: "CARP backup: mirroring the master's connections (no traffic data)",
 		map_waiting_restart: "The collector is restarting: the map resumes with its first ranked sample",
 		map_waiting_profile: "Applying the {profile} ranking profile: the map resumes with its first ranked sample",
@@ -2662,7 +2663,7 @@
 		}
 		if (!state.updatedAt) return;
 		const seconds = Math.max(0, Math.round((Date.now() - state.updatedAt) / 1e3));
-		$("#fwmap-updated").html(`${escapeHtml(fill(T.last_updated_ago, { time: fill(TEXT.map_seconds, { count: seconds }) }))} <i class="fwmap-live${seconds > 10 ? " stale" : ""}"></i>`);
+		$("#fwmap-updated").html(`${escapeHtml(fill(T.last_updated_ago, { time: fill(TEXT.map_seconds, { count: seconds }) }))} <i class="fwmap-live${seconds > Math.max(10, 2.5 * (state.data?.interval || 2)) ? " stale" : ""}"></i>`);
 	}
 	/**
 	* The map's one wait state (host.wait): while a capture loads, or while the live map waits for

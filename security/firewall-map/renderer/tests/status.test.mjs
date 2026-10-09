@@ -80,3 +80,11 @@ test('one wait state: waiting summaries are not problems, and say why the map wa
   assert.equal(waitText({status: 'ok'}, text), null);
   assert.equal(waitText(undefined, text), null);
 });
+
+test('a stretched refresh interval is said on the status line; the 2-second default is not', () => {
+  const text = {active_flows_one: '{count} active flow', active_flows_many: '{count} active flows', no_flows: 'No flows',
+    map_interval: translation('map_interval')};
+  const shown = {flows: [{}]};
+  assert.deepEqual(statusParts({interval: 2}, shown, {}, text), ['1 active flow']);
+  assert.deepEqual(statusParts({interval: 12}, shown, {}, text), ['1 active flow', 'refreshed every 12 s']);
+});

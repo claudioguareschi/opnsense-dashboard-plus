@@ -59,13 +59,20 @@ class SettingsFileTest(unittest.TestCase):
             expected = {"provider": "dbip", "license_key": "", "update_days": 7, "threat_lists": "",
                         "record_threats": "1", "blocklist_aliases": "0", "helper_memory": None,
                         "ranking_profile": "6c02d03d-4087-46a9-b5bc-6378fb5eeada", "country_sets": "Country_CN",
-                        "operational_sets": "", "carp_backup_view": "mirror"}
+                        "operational_sets": "", "carp_backup_view": "mirror", "interval_min": 2, "interval_max": 60}
             self.assertEqual(CONFIG.settings(path), expected)
             self.assertEqual(CONFIG.abuseipdb_key(path), "key")
             self.assertEqual([alias["name"] for alias in CONFIG.aliases(path)], ["Drop"])
             self.assertEqual(CONFIG.interface_names(path), {"igb1": "WAN", "vlan01": "LAN"})
             self.assertEqual(CONFIG.topology(path), {"primary_wan_device": "igb1", "discover_external_ip": False,
                                                       "latitude": None, "longitude": None})
+            # sampling interval bounds: valid ones kept, inverted or out of range ones back to the defaults
+            for low, high, expected in (("5", "30", (5, 30)), ("30", "5", (2, 60)), ("1", "30", (2, 60)),
+                                        ("2", "301", (2, 60)), ("x", "30", (2, 60))):
+                self.write(path, {"general": {"interval_min": low, "interval_max": high}})
+                os.utime(path, ns=(len(low) + len(high), int(low) if low.isdigit() else 7))
+                values = CONFIG.settings(path)
+                self.assertEqual((values["interval_min"], values["interval_max"]), expected, (low, high))
             # read again when the file changes
             self.write(path, {"general": {"provider": "nonsense", "update_days": "x"}})
             os.utime(path, ns=(1, 2))

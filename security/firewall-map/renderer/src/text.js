@@ -59,6 +59,7 @@ export const DEFAULT_TEXT = {
   geo_err_other: "The download failed.",
   map_carp_backup: "CARP backup: traffic is passing through the master",
   map_profile: "{profile} ranking",
+  map_interval: "refreshed every {seconds} s",
   map_carp_mirror: "CARP backup: mirroring the master's connections (no traffic data)",
   map_waiting_restart: "The collector is restarting: the map resumes with its first ranked sample",
   map_waiting_profile: "Applying the {profile} ranking profile: the map resumes with its first ranked sample",

@@ -69,6 +69,11 @@
             profile_custom: {{ lang._('custom')|json_encode }},
             profile_details: {{ lang._('UUID %s · definition %s')|json_encode }},
             generations: {{ lang._('collector %s · classification %s')|json_encode }},
+            cadence: {{ lang._('Every %s s (the collector recommends %s s: %s); limits %s–%s s')|json_encode }},
+            cadence_floor: {{ lang._('samples are quick')|json_encode }},
+            cadence_duty: {{ lang._('keeps sampling to about 10% of the time')|json_encode }},
+            cadence_memory: {{ lang._('memory is close to the budget')|json_encode }},
+            cadence_refused: {{ lang._('the last sample was refused')|json_encode }},
             evidence_unavailable: {{ lang._('Not available: %s does not exist')|json_encode }},
             evidence_blocks: {{ lang._('%s sources in the last %s (at most %s); only rules with logging enabled are seen')|json_encode }},
             evidence_ids: {{ lang._('%s sources in the last %s (at most %s)')|json_encode }},
@@ -211,6 +216,10 @@
                 profile.uuid, profile.fingerprint))}</small>` + (profile.problem ? `<br>${state(profile.problem)}` : '') : '—');
             $('#engine-generations').text(engine.collector_generation ? fill(T.generations,
                 String(engine.collector_generation).slice(0, 12), String(engine.classification_generation || '—').slice(0, 12)) : '—');
+            // adaptive refresh: the interval used, and what the collector recommends and why
+            const cadence = engine.cadence || {};
+            $('#engine-cadence').text(cadence.interval ? fill(T.cadence, cadence.interval, cadence.recommended ?? '—',
+                T[`cadence_${cadence.reason}`] || '—', (cadence.bounds || [])[0] ?? '—', (cadence.bounds || [])[1] ?? '—') : '—');
             const sources = engine.evidence_sources || {};
             const span = (seconds) => seconds >= 3600 ? fill(T.hours, Math.round(seconds / 3600)) : fill(T.minutes, Math.round(seconds / 60));
             const source = (item, template) => !item ? '—' : !item.available ? state(fill(T.evidence_unavailable, item.log))
@@ -352,6 +361,7 @@
             <tr><td>{{ lang._('Rejected log lines') }}</td><td id="engine-rejected"></td></tr>
             <tr><td>{{ lang._('Ranking profile') }}</td><td id="engine-profile"></td></tr>
             <tr><td>{{ lang._('Generations') }}</td><td id="engine-generations"></td></tr>
+            <tr><td>{{ lang._('Refresh interval') }}</td><td id="engine-cadence"></td></tr>
             <tr><td>{{ lang._('Problems') }}</td><td id="engine-problem"></td></tr>
         </tbody>
     </table>

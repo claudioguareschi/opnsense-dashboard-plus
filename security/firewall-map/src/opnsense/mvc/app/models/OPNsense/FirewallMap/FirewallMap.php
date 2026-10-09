@@ -143,6 +143,12 @@ class FirewallMap extends BaseModel
                 $messages->appendMessage(new Message($error, 'general.blocklist_aliases'));
             }
         }
+        if ((int)(string)$general->interval_min > (int)(string)$general->interval_max) {
+            $messages->appendMessage(new Message(
+                gettext('The shortest interval cannot be longer than the longest.'),
+                'general.interval_min'
+            ));
+        }
         $sets = array_filter(explode(',', (string)$general->country_sets . ',' . (string)$general->operational_sets));
         if (count($sets) > 64) {
             $messages->appendMessage(new Message(
