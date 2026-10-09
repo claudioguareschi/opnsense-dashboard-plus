@@ -114,6 +114,7 @@
         <!-- custom ranking profiles (the built-ins are fixed and live in the scripts); each row is
              one complete operational policy, referenced by its UUID (general.ranking_profile) -->
         <profiles>
+            <!-- a new custom profile starts with Balanced's policy (a valid one: the weights total 100) -->
             <profile type="ArrayField">
                 <name type="TextField">
                     <Required>Y</Required>
@@ -126,77 +127,77 @@
                 </description>
                 <byte_rate type="IntegerField">
                     <Required>Y</Required>
-                    <Default>0</Default>
+                    <Default>25</Default>
                     <MinimumValue>0</MinimumValue>
                     <MaximumValue>100</MaximumValue>
                     <ValidationMessage>A ranking priority is a whole percentage from 0 to 100.</ValidationMessage>
                 </byte_rate>
                 <packet_rate type="IntegerField">
                     <Required>Y</Required>
-                    <Default>0</Default>
+                    <Default>5</Default>
                     <MinimumValue>0</MinimumValue>
                     <MaximumValue>100</MaximumValue>
                     <ValidationMessage>A ranking priority is a whole percentage from 0 to 100.</ValidationMessage>
                 </packet_rate>
                 <active_states type="IntegerField">
                     <Required>Y</Required>
-                    <Default>0</Default>
+                    <Default>15</Default>
                     <MinimumValue>0</MinimumValue>
                     <MaximumValue>100</MaximumValue>
                     <ValidationMessage>A ranking priority is a whole percentage from 0 to 100.</ValidationMessage>
                 </active_states>
                 <new_state_rate type="IntegerField">
                     <Required>Y</Required>
-                    <Default>0</Default>
+                    <Default>15</Default>
                     <MinimumValue>0</MinimumValue>
                     <MaximumValue>100</MaximumValue>
                     <ValidationMessage>A ranking priority is a whole percentage from 0 to 100.</ValidationMessage>
                 </new_state_rate>
                 <flow_volume type="IntegerField">
                     <Required>Y</Required>
-                    <Default>0</Default>
+                    <Default>15</Default>
                     <MinimumValue>0</MinimumValue>
                     <MaximumValue>100</MaximumValue>
                     <ValidationMessage>A ranking priority is a whole percentage from 0 to 100.</ValidationMessage>
                 </flow_volume>
                 <pf_blocked type="IntegerField">
                     <Required>Y</Required>
-                    <Default>0</Default>
+                    <Default>8</Default>
                     <MinimumValue>0</MinimumValue>
                     <MaximumValue>100</MaximumValue>
                     <ValidationMessage>A ranking priority is a whole percentage from 0 to 100.</ValidationMessage>
                 </pf_blocked>
                 <threat_intelligence type="IntegerField">
                     <Required>Y</Required>
-                    <Default>0</Default>
+                    <Default>8</Default>
                     <MinimumValue>0</MinimumValue>
                     <MaximumValue>100</MaximumValue>
                     <ValidationMessage>A ranking priority is a whole percentage from 0 to 100.</ValidationMessage>
                 </threat_intelligence>
                 <ids_evidence type="IntegerField">
                     <Required>Y</Required>
-                    <Default>0</Default>
+                    <Default>9</Default>
                     <MinimumValue>0</MinimumValue>
                     <MaximumValue>100</MaximumValue>
                     <ValidationMessage>A ranking priority is a whole percentage from 0 to 100.</ValidationMessage>
                 </ids_evidence>
                 <s3_min_percent type="IntegerField">
                     <Required>Y</Required>
-                    <Default>0</Default>
+                    <Default>4</Default>
                     <MinimumValue>0</MinimumValue>
                     <MaximumValue>100</MaximumValue>
                     <ValidationMessage>A security share is a whole percentage from 0 to 100.</ValidationMessage>
                 </s3_min_percent>
                 <s2_min_percent type="IntegerField">
                     <Required>Y</Required>
-                    <Default>0</Default>
+                    <Default>2</Default>
                     <MinimumValue>0</MinimumValue>
                     <MaximumValue>100</MaximumValue>
                     <ValidationMessage>A security share is a whole percentage from 0 to 100.</ValidationMessage>
                 </s2_min_percent>
                 <s1_min_percent type="IntegerField">
                     <Required>Y</Required>
-                    <Default>0</Default>
+                    <Default>1</Default>
                     <MinimumValue>0</MinimumValue>
                     <MaximumValue>100</MaximumValue>
                     <ValidationMessage>A security share is a whole percentage from 0 to 100.</ValidationMessage>

@@ -26,6 +26,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -127,6 +128,21 @@ class SettingsFormTest(unittest.TestCase):
         general = ET.parse(MODEL).getroot().find("./items/general")
         self.assertEqual(general.find("country_sets").findtext("AliasType"), "geoip")
         self.assertIsNone(general.find("operational_sets").find("AliasType"))
+
+    def test_a_new_profile_starts_as_balanced(self):
+        """The grid's + adds a profile from the model's defaults: Balanced's weights and shares, a
+        valid policy to edit (the weights total 100), never eleven zeros."""
+        sys.path.insert(0, str(MVC.parents[1] / "scripts/OPNsense/FirewallMap"))
+        from lib import profiles
+        balanced = profiles.BY_UUID[profiles.BALANCED]
+        row = ET.parse(MODEL).getroot().find("./items/profiles/profile")
+        weights = {key: int(row.find(key).findtext("Default")) for key in profiles.FEATURES}
+        floors = {key: int(row.find(key).findtext("Default")) for key in profiles.FLOORS}
+        self.assertEqual(weights, {key: int(value) for key, value in balanced["weights"].items()})
+        self.assertEqual(floors, {key: int(value) for key, value in balanced["floors"].items()})
+        self.assertEqual(sum(weights.values()), 100)
+        page = (MVC / "views/OPNsense/FirewallMap/settings.volt").read_text()
+        self.assertNotIn("add: {filter", page, "the grid's + is OPNsense's own add command")
 
     def test_profile_grid_columns(self):
         """Active (the native row toggle) and Type are grid-only columns, never dialog fields."""

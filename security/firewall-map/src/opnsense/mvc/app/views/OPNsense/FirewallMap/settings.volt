@@ -73,8 +73,9 @@
             describeKeys();
         });
 
-        // ranking profiles: built-ins can be activated and cloned; custom profiles also edited and
-        // deleted (never the active one). Changes take effect on Apply, like every other setting.
+        // ranking profiles: built-ins can be activated and cloned; custom profiles (added with the
+        // grid's + or cloned) also edited and deleted (never the active one). Changes take effect on
+        // Apply, like every other setting.
         // looked up each time: initializing the grid replaces the table element
         const profileGrid = () => $("#{{ formGridProfile['table_id'] }}");
         const escape = (text) => $('<div/>').text(text).html();
@@ -108,8 +109,6 @@
                         title: (cell) => cell.getData().active === '1'
                             ? {{ lang._('Active profile')|json_encode }} : {{ lang._('Activate')|json_encode }}
                     },
-                    // a custom profile starts as a clone of another one
-                    add: {filter: () => false},
                     edit: {filter: (cell) => cell.getData().builtin !== '1'},
                     delete: {filter: (cell) => cell.getData().builtin !== '1' && cell.getData().active !== '1'}
                 },
