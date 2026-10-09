@@ -286,6 +286,14 @@ class TrackerTest(unittest.TestCase):
         discover.assert_called_once_with()
 
 
+class SystemLogTest(unittest.TestCase):
+    def test_the_tests_never_write_the_system_log(self):
+        """Run on a firewall, the suite's messages would land in the real Firewall Map log."""
+        import support
+        COMMON.log_notice("a test message")
+        self.assertEqual(support.SYSLOG[-1], "a test message")
+
+
 class IdleTest(unittest.TestCase):
     def test_stops_only_after_grace_period_without_requests(self):
         with tempfile.TemporaryDirectory() as directory:

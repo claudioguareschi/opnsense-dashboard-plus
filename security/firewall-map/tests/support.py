@@ -28,11 +28,20 @@ The scripts import each other by module name from their own directory, so the te
 them the same way: there is one copy of each module, and patching it affects every caller.
 """
 
+import collections
 import sys
+import syslog
 from pathlib import Path
 
 # never leave bytecode next to the scripts (it would ship in the package)
 sys.dont_write_bytecode = True
+
+# The scripts log through syslog (lib/common.py). On a firewall that is the real Firewall Map log,
+# so the tests keep their messages here instead. Discovery imports every test module before any
+# test runs, so this covers the whole suite.
+SYSLOG = collections.deque(maxlen=1000)
+syslog.openlog = lambda *args, **kwargs: None
+syslog.syslog = lambda *args: SYSLOG.append(args[-1])
 SCRIPTS = Path(__file__).resolve().parents[1] / "src/opnsense/scripts/OPNsense/FirewallMap"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
