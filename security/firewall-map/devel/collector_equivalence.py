@@ -501,6 +501,14 @@ def reader_checks(directory, helper, pf):
             continue
         expected_header = state_text(s).splitlines()[0].split()
         actual_header = block.splitlines()[0].split()
+        # pfctl names ICMPv6 peer states like other protocols' (NO_TRAFFIC, SINGLE, MULTIPLE) when
+        # pf_print_state.c is built without INET6 (OPNsense's pfctl is), else prints the numbers:
+        # either rendering of the same decoded peers is the same state
+        if s['keys'][0][0] == 58 and max(s['peer']) < 3 and actual_header[-1:] != expected_header[-1:]:
+            peers = s['peer'] if s['direction'] == 2 else s['peer'][::-1]
+            named = ':'.join(('NO_TRAFFIC', 'SINGLE', 'MULTIPLE')[p] for p in peers)
+            if actual_header[-1:] == [named]:
+                expected_header = expected_header[:-1] + [named]
         record = pf.parse_states(block)
         if not record:
             continue  # production intentionally skips internal/multicast-only headers

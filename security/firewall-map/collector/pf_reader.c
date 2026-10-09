@@ -454,6 +454,23 @@ bool pf_reader_decode_datagram(unsigned char *buffer, size_t size, uint32_t seq,
 }
 #endif
 
+#ifdef FM_DEVEL_TOOLS
+/* FMNLLE1 captures (devel tools): each received netlink datagram as it came,
+ * behind its length. Kernel datagrams outgrow the collector protocol's
+ * FM_FRAME_MAX frames, so captures have their own framing and limit (the
+ * same one pf_reader_wire reads with). */
+#define WIRE_FRAME_MAX (4u * 1024 * 1024)
+static bool wire_frame(FILE *f, const unsigned char *data, size_t size, struct fm_error *error) {
+  if (!size || size > WIRE_FRAME_MAX)
+    return fm_error_set(error, EOVERFLOW, "wire frame size");
+  unsigned char length[4], *p = length;
+  protocol_put(&p, size, 4);
+  if (fwrite(length, 1, 4, f) != 4 || fwrite(data, 1, size, f) != size)
+    return fm_error_set(error, errno ? errno : EIO, "wire frame write");
+  return true;
+}
+#endif
+
 bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
                     double *request_anchor, struct fm_error *error) {
   struct reader r = {.callback = callback, .arg = arg, .error = error};
@@ -544,7 +561,7 @@ bool pf_reader_live(pf_state_callback callback, void *arg, FILE *raw,
       break;
     }
 #ifdef FM_DEVEL_TOOLS
-    if (raw && !protocol_frame(raw, buffer, size, NULL, error))
+    if (raw && !wire_frame(raw, buffer, (size_t)size, error))
       break;
 #endif
 #ifdef FM_DEVEL_TOOLS
@@ -1044,7 +1061,7 @@ bool pf_reader_wire(const char *path, pf_state_callback callback, void *arg,
     }
     p = size;
     size_t n = protocol_get(&p, 4);
-    if (!n || n > 4 * 1024 * 1024) {
+    if (!n || n > WIRE_FRAME_MAX) {
       fm_error_set(error, EPROTO, "wire frame limit");
       break;
     }

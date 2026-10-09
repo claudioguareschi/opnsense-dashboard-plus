@@ -197,12 +197,16 @@ fail:
   return false;
 }
 
+/* FMPFS2 ends with an empty frame (a zero length) and the state count. The
+ * collector protocol's frames are never empty (protocol_frame refuses one),
+ * so the end marker is written here. */
 static bool write_capture_footer(FILE *f, uint64_t count,
                                  struct fm_error *error) {
-  unsigned char footer[8], *p = footer;
+  unsigned char footer[12] = {0}, *p = footer + 4;
   protocol_put(&p, count, 8);
-  return protocol_frame(f, "", 0, NULL, error) &&
-         fwrite(footer, 1, sizeof(footer), f) == sizeof(footer);
+  if (fwrite(footer, 1, sizeof(footer), f) != sizeof(footer))
+    return fm_error_set(error, errno ? errno : EIO, "capture footer");
+  return true;
 }
 static int report_error(const struct fm_error *error) {
   fprintf(stderr, "%s: %s\n", error->message, strerror(error->code));

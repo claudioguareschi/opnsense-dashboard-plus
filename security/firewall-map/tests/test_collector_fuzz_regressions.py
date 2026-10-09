@@ -60,6 +60,10 @@ class FuzzRegressionTest(unittest.TestCase):
             result = subprocess.run([str(program), str(inputs)], capture_output=True, text=True, timeout=300)
         self.assertEqual((result.returncode, result.stdout.strip()), (0, f"replayed {len(kept)}"), result.stderr)
 
+    def test_state_engine_regressions(self):
+        """Portable: the state target links from the current collector sources and replays clean."""
+        self.replay("state")
+
     def test_netlink_decoder_regressions(self):
         if platform.system() != "FreeBSD":
             raise unittest.SkipTest("the netlink decoder needs FreeBSD's pf headers")

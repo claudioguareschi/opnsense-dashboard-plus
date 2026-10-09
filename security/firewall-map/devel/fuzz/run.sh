@@ -45,7 +45,8 @@ state)
     ;;
 netlink)
     [ "$(uname -s)" = "FreeBSD" ] || { echo "the netlink target needs FreeBSD's pf headers" >&2; exit 1; }
-    SOURCES="${COLLECTOR}/pf_reader.c ${COLLECTOR}/error.c ${COLLECTOR}/protocol.c ${COLLECTOR}/alloc.c"
+    # the decoder's dependencies follow the collector's: link it as the state target is linked
+    SOURCES="$(ls "${COLLECTOR}"/*.c | grep -v "/main\.c$")"
     ;;
 *)
     echo "usage: $0 state|netlink [seconds]" >&2
@@ -59,6 +60,10 @@ esac
 mkdir -p "${WORK}/corpus" "${WORK}/artifacts"
 if [ -n "${FUZZ_SEEDS:-}" ]; then
     cp "${FUZZ_SEEDS}"/* "${WORK}/corpus/"
+fi
+# the kept regression inputs always seed the corpus
+if [ -d "${HERE}/regressions/${TARGET}" ]; then
+    cp "${HERE}/regressions/${TARGET}"/* "${WORK}/corpus/" 2>/dev/null || true
 fi
 echo "fuzzing ${TARGET} for ${SECONDS_BUDGET} s in ${WORK}"
 "${WORK}/fuzz_${TARGET}" -max_total_time="${SECONDS_BUDGET}" -seed="${FUZZ_SEED:-1}" \
