@@ -64,7 +64,7 @@ class CollectorEngineSpecificationTest(unittest.TestCase):
         cls.directory.cleanup()
 
     def setUp(self):
-        self.engine = collector.CollectorEngine(self.worker)
+        self.engine = collector.CollectorEngine(self.worker, profile=None)
         self.addCleanup(self.engine.close)
 
     def samples(self, count, mode="one", states=12, **options):
@@ -269,7 +269,7 @@ for line in sys.stdin.buffer:
         return len(self.runs.read_text()) if self.runs.exists() else 0
 
     def engine(self):
-        engine = collector.CollectorEngine(str(self.path))
+        engine = collector.CollectorEngine(str(self.path), profile=None)
         self.addCleanup(engine.close)
         return engine
 
@@ -370,7 +370,7 @@ class CollectorMemoryTest(unittest.TestCase):
         cls.directory.cleanup()
 
     def run_samples(self, count, states=2000, mode="many"):
-        engine = collector.CollectorEngine(self.worker)
+        engine = collector.CollectorEngine(self.worker, profile=None)
         self.addCleanup(engine.close)
         with patch.dict(os.environ, FM_TEST_MODE=mode, FM_TEST_COUNT=str(states), FM_TEST_INTERVAL="2"):
             telemetry = [engine.sample(*CONTEXT, threat_summary=True,

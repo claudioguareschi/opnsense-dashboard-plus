@@ -81,7 +81,8 @@ def main():
 
     local, _role, networks, interfaces = pf.host_info()
     wan = config.topology().get("primary_wan_device")
-    engine = collector.CollectorEngine(sys.argv[1])
+    # the base ranking (no profile): this check is about classification, not ranking
+    engine = collector.CollectorEngine(sys.argv[1], profile=None)
     failures = 0
     try:
         engine._start()

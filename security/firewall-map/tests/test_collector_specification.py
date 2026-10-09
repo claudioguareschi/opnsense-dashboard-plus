@@ -74,7 +74,7 @@ class SpecificationTest(unittest.TestCase):
         path = Path(self.directory.name) / f"{self._testMethodName}.txt"
         path.write_text("".join(f"sample {number}\n" + "".join(line + "\n" for line in lines)
                                 for number, lines in samples.items()))
-        engine = collector.CollectorEngine(self.worker)
+        engine = collector.CollectorEngine(self.worker, profile=None)
         self.addCleanup(engine.close)
         with patch.dict(os.environ, FM_TEST_STATES=str(path), FM_TEST_INTERVAL="2"):
             return [engine.sample(context["local"], context["networks"], context["assigned"], context["wan"],

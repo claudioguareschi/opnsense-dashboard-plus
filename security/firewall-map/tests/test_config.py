@@ -147,5 +147,17 @@ class RankingProfileSettingTest(unittest.TestCase):
         resolved, problem = profiles.resolve({"ranking_profile": "not-a-profile"})
         self.assertEqual((resolved["uuid"], bool(problem)), (profiles.DEFAULT, True))
 
+    def test_the_service_never_starts_the_collector_without_a_profile(self):
+        """Classic is a test oracle only: the engine has no default profile, so production code cannot
+        reach the base ranking by omission, and resolution always yields a validated profile (the
+        configured one, or Balanced with the reason) for the service to pass."""
+        with self.assertRaises(TypeError):
+            COLLECTOR.state_collector.CollectorEngine("/nonexistent/firewallmap-collector")
+        profiles = COLLECTOR.ranking_profiles
+        for values, rows in (({}, []), ({"ranking_profile": profiles.SECURITY}, []),
+                             ({"ranking_profile": "missing"}, []), ({"ranking_profile": "x"}, [{"uuid": "x"}])):
+            profile, _problem = profiles.resolve(values, rows)
+            self.assertEqual(profiles.validate(profile), profile)
+
 if __name__ == "__main__":
     unittest.main()

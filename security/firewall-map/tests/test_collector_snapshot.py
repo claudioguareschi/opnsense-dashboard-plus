@@ -52,7 +52,7 @@ class CollectorSnapshotTest(unittest.TestCase):
         cls.directory.cleanup()
 
     def setUp(self):
-        self.engine = collector.CollectorEngine(self.worker)
+        self.engine = collector.CollectorEngine(self.worker, profile=None)
         self.addCleanup(self.engine.close)
 
     def capture(self, mode="one", count=12, byte_limit=collector.SNAPSHOT_BYTES, state_limit=5000,

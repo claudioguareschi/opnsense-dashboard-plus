@@ -652,11 +652,12 @@ class CollectorEngine:
     flight), leaves the stream in an unknown position, so the helper is closed.
     """
 
-    def __init__(self, path=HELPER, profile=None, profile_dir=None):
+    def __init__(self, path=HELPER, *, profile, profile_dir=None):
         self.path = path
         # the active ranking profile (a validated lib/profiles.py profile): startup configuration,
-        # written as the schema-v1 document the helper compiles once; None starts the base ranking
-        # (the regression oracle, tests only)
+        # written as the schema-v1 document the helper compiles once. Required, never defaulted:
+        # the service always passes the resolved active profile; only tests and devel tools pass
+        # None, explicitly, for the base ranking (Classic, the regression oracle)
         self.profile = profile
         self.profile_dir = profile_dir
         self.process = None
