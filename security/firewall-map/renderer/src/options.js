@@ -29,7 +29,7 @@
  * one parser for the values the dashboard stores (strings from the options dialog).
  */
 export const DEFAULT_OPTIONS = {
-  heavyTop: 5, heavyRate: 1000000, maxArcs: 100, labels: true, hostnames: false, asn: true, blocks: true,
+  heavyTop: 5, heavyRate: 1000000, labels: true, hostnames: false, asn: true, blocks: true,
   blockMin: 3, colorMode: 'initiator', follow: false,
 };
 
@@ -42,7 +42,6 @@ export function parseSettings(config = {}) {
   return {
     heavyTop: number(config.heavy_top, DEFAULT_OPTIONS.heavyTop),
     heavyRate: number(config.heavy_rate, DEFAULT_OPTIONS.heavyRate),
-    maxArcs: number(config.max_arcs, DEFAULT_OPTIONS.maxArcs),
     labels: config.labels !== '0',
     hostnames: config.hostnames === '1',
     asn: config.asn !== '0',

@@ -143,7 +143,6 @@ SETTINGS_REFRESH_SECONDS = 30
 # one PF walk every 2 s: the dashboard polls every 2 s, so faster sampling only costs CPU
 INTERVAL = 2.0
 FADE_SECONDS = 20.0
-MAX_FLOWS = 150
 HOST_REFRESH_SECONDS = 30.0
 MAX_SERVICES = 4
 MAX_INSIDE = 3
@@ -358,7 +357,7 @@ def _location_entry(address, location, local_addresses):
     return entry
 
 
-def summarize_flows(tracker, geo, local_addresses, role, now, wall_time, hostnames=None, context=None, limit=MAX_FLOWS,
+def summarize_flows(tracker, geo, local_addresses, role, now, wall_time, hostnames=None, context=None,
                     anchor=None, visible=None):
     context = context or {}
     if visible is None:
@@ -735,6 +734,14 @@ class Collector:
             if changed and self.collector_engine.starts:
                 log_notice(f"ranking profile {self.profile['name']}: restarting the collector; the next sample "
                            "is a baseline")
+            # ranked flows per sample (--flows) are startup configuration too
+            flows = self.values.get("max_flows", state_collector.RANKED_FLOWS_DEFAULT)
+            flows_changed = self.collector_engine.set_flows(flows)
+            if flows_changed and not changed and self.wait_reason != "start":
+                self.wait_reason = "restart"
+            if flows_changed and self.collector_engine.starts:
+                log_notice(f"{flows} flows on the map: restarting the collector; the next sample "
+                           "is a baseline")
             # DB-IP while it stands in for a failing MaxMind download (its credit is then shown)
             self.provider = geodb.lookup_provider(self.values)
             city, asn, problem = database_state(self.values)
@@ -848,8 +855,8 @@ class Collector:
         """Configured DHCP names override the short-lived PTR fallback."""
         return host_names(self.leases, self.store)
 
-    def build_payload(self, now, limit=MAX_FLOWS, visible=None, snapshot=False):
-        """The map document: flows (the strongest `limit`, None for all), blocked sources, alerts."""
+    def build_payload(self, now, visible=None, snapshot=False):
+        """The map document: the collector's ranked flows (or a snapshot's), blocked sources, alerts."""
         resolver = self.hostnames if requested(HOSTNAME_MARKER, HOSTNAME_REQUEST_SECONDS) else None
         geo = self.geo
         if visible is None and not snapshot:
@@ -862,7 +869,7 @@ class Collector:
             "descriptions": self.descriptions,
         }
         payload = summarize_flows(self.tracker, geo, self.local_addresses, self.role, now, time.time(), resolver, context,
-                                  limit, self.map_anchor(now), visible)
+                                  self.map_anchor(now), visible)
         origin = next((location["id"] for location in payload["locations"] if location["local"]), None)
         if origin is None and self.local_addresses:
             origin = sorted(self.local_addresses)[0]
@@ -1353,11 +1360,14 @@ class Collector:
                 current.update(helper=sample.get("helper"), telemetry=telemetry or None,
                                baseline=sample["baseline"], refused=refused, states=sample["counts"]["states"],
                                threat_remotes_omitted=omitted, last_sample_at=time.time(),
-                               state_limit=telemetry.get("state_limit", current.get("state_limit")))
+                               state_limit=telemetry.get("state_limit", current.get("state_limit")),
+                               ranked_flows=None if refused else len(sample.get("flows") or []))
             if error is not None:
                 current.update(last_error=str(error), last_error_class=getattr(error, "failure_class", None),
                                last_error_at=time.time())
             current["incompatible"] = self.collector_incompatible
+            # the flows on the map: the last sample's ranked flows of the collector's --flows
+            current["ranked_flows_limit"] = self.collector_engine.flows
             # adaptive refresh: the collector's recommendation, why, and the interval used
             telemetry = current.get("telemetry") or {}
             reason = telemetry.get("cadence_reason")

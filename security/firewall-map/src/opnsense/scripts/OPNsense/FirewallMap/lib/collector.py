@@ -74,7 +74,8 @@ SNAPSHOT_STATES = 5000
 MAX_EVENT_QUERIES = 2500
 
 # Resource budgets (collector/budget.h): the helper enforces the same maxima.
-RANKED_FLOWS = 150
+# ranked flows per sample: the "Maximum flows on the map" setting, passed as --flows
+RANKED_FLOWS_DEFAULT, RANKED_FLOWS_MIN, RANKED_FLOWS_MAX = 150, 25, 1000
 CANDIDATES_PER_KIND = 16
 THREAT_REMOTES = 20000
 MEMORY_MIN_MIB, MEMORY_MAX_MIB, MEMORY_AUTO_MAX_MIB = 64, 16384, 1024
@@ -244,9 +245,10 @@ def memory_budget(setting_mib=None, physical=None):
 
 
 def response_byte_limit(candidates_per_kind=CANDIDATES_PER_KIND, threat_remotes=THREAT_REMOTES,
-                        queries=MAX_EVENT_QUERIES, classify=CLASS_MAX_ADDRESSES, class_sets=CLASS_MAX_SETS):
+                        queries=MAX_EVENT_QUERIES, classify=CLASS_MAX_ADDRESSES, class_sets=CLASS_MAX_SETS,
+                        ranked_flows=RANKED_FLOWS_DEFAULT):
     """The largest FMAGG4 response the budgets allow (framing included); more is a helper bug."""
-    flows = RANKED_FLOWS * (_FLOW_RECORD + RULE_LABEL * candidates_per_kind * _CANDIDATE_RECORD)
+    flows = ranked_flows * (_FLOW_RECORD + RULE_LABEL * candidates_per_kind * _CANDIDATE_RECORD)
     threats = threat_remotes * (_THREAT_REMOTE_RECORD + len(THREAT_CANDIDATE_KINDS) * candidates_per_kind
                                 * _THREAT_CANDIDATE_RECORD)
     classes = classify * _CLASSIFIED_RECORD + class_sets * _CLASS_SET_RECORD
@@ -443,7 +445,7 @@ def _class_mask(mask, categories):
     return mask
 
 
-def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANKED_FLOWS, byte_limit=None,
+def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANKED_FLOWS_DEFAULT, byte_limit=None,
             timeout=None, categories=(), asked=frozenset()):
     """Read one complete FMAGG4 response."""
     deadline = time.monotonic() + (timeout or READ_TIMEOUT)
@@ -660,6 +662,13 @@ def _event_match(data, query_keys):
                  "interface": _text(data[114:130], "ascii"), "rule": _text(data[130:194]) or None}
 
 
+def valid_flows(flows):
+    """--flows as the helper accepts it: a whole number within the bounds, never clamped."""
+    if isinstance(flows, bool) or not isinstance(flows, int) or not RANKED_FLOWS_MIN <= flows <= RANKED_FLOWS_MAX:
+        raise ValueError(f"ranked flows must be a whole number from {RANKED_FLOWS_MIN} to {RANKED_FLOWS_MAX}")
+    return flows
+
+
 class CollectorEngine:
     """One collector process owned by the Python service; its history lives across samples.
 
@@ -668,8 +677,10 @@ class CollectorEngine:
     flight), leaves the stream in an unknown position, so the helper is closed.
     """
 
-    def __init__(self, path=HELPER, *, profile, profile_dir=None):
+    def __init__(self, path=HELPER, *, profile, profile_dir=None, flows=RANKED_FLOWS_DEFAULT):
         self.path = path
+        # ranked flows per sample (--flows): startup configuration like the profile
+        self.flows = valid_flows(flows)
         # the active ranking profile (a validated lib/profiles.py profile): startup configuration,
         # written as the schema-v1 document the helper compiles once. Required: the collector has
         # no ranking of its own
@@ -711,7 +722,7 @@ class CollectorEngine:
         try:
             startup = self._startup_file()
             try:
-                arguments = [self.path, "--profile", startup]
+                arguments = [self.path, "--profile", startup, "--flows", str(self.flows)]
                 self.process = subprocess.Popen(arguments, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                                 bufsize=0)
                 self.starts += 1
@@ -811,10 +822,11 @@ class CollectorEngine:
             rows.append(f"Q {len(query_keys) - 1} {number} {public} {int(public_port or 0)} "
                         f"{remote} {int(remote_port or 0)}")
         text = "FMCONF2\n%sRUN\n" % "".join(row + "\n" for row in rows)
-        limit = response_byte_limit(queries=len(query_keys), classify=len(asked), class_sets=len(categories))
+        limit = response_byte_limit(queries=len(query_keys), classify=len(asked), class_sets=len(categories),
+                                    ranked_flows=self.flows)
 
         def decode(stream, process):
-            decoded = _decode(stream, process, query_keys, threat_summary, byte_limit=limit,
+            decoded = _decode(stream, process, query_keys, threat_summary, flow_limit=self.flows, byte_limit=limit,
                               timeout=self.read_timeout, categories=categories, asked=asked)
             # a sample reports every requested set's status
             if not decoded["refused"] and len(decoded["class_sets"]) != len(categories):
@@ -853,6 +865,16 @@ class CollectorEngine:
             raise ValueError("a ranking profile is required")
         changed = self._profile_key(profile) != self._profile_key(self.profile)
         self.profile = profile
+        if changed:
+            self.close()
+        return changed
+
+    def set_flows(self, flows):
+        """Ranked flows per sample. Another number closes the helper, which took it at startup: the
+        next sample starts one with the new number (a baseline)."""
+        flows = valid_flows(flows)
+        changed = flows != self.flows
+        self.flows = flows
         if changed:
             self.close()
         return changed

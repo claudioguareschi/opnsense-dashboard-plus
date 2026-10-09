@@ -97,7 +97,6 @@
 	var DEFAULT_OPTIONS = {
 		heavyTop: 5,
 		heavyRate: 1e6,
-		maxArcs: 100,
 		labels: true,
 		hostnames: false,
 		asn: true,
@@ -115,7 +114,6 @@
 		return {
 			heavyTop: number(config.heavy_top, DEFAULT_OPTIONS.heavyTop),
 			heavyRate: number(config.heavy_rate, DEFAULT_OPTIONS.heavyRate),
-			maxArcs: number(config.max_arcs, DEFAULT_OPTIONS.maxArcs),
 			labels: config.labels !== "0",
 			hostnames: config.hostnames === "1",
 			asn: config.asn !== "0",

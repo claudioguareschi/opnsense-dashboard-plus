@@ -94,10 +94,10 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
       });
     }
   }
-  // IDS connections first so the arc limit never hides them
+  // every flow the collector sent becomes an arch (it decides how many: the map has no limit of
+  // its own); IDS connections and the busiest take their lanes first
   const flows = [...merged.values()]
-    .sort((a, b) => (b.members[0].ids_flow ? 1 : 0) - (a.members[0].ids_flow ? 1 : 0) || b.flow.rate - a.flow.rate)
-    .slice(0, options.maxArcs);
+    .sort((a, b) => (b.members[0].ids_flow ? 1 : 0) - (a.members[0].ids_flow ? 1 : 0) || b.flow.rate - a.flow.rate);
   // lanes stay put across refreshes: an arch keeps its bend while it lives, new arches take the
   // first free lane of their cell, so nothing jumps when rankings change
   const cellOf = ({flow, dest}) => `${flow.origin}|${Math.round(dest.lat * 2)}|${Math.round(dest.lon * 2)}`;

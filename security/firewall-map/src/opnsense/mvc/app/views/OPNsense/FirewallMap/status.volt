@@ -98,6 +98,7 @@
             engine_version_warning: {{ lang._('Built on FreeBSD %s, running %s: compatibility is decided by the PF state check')|json_encode }},
             engine_limit: {{ lang._('Up to %s states (memory budget %s)')|json_encode }},
             engine_tracking: {{ lang._('%s: %s of up to %s flows tracked, %s flows in all')|json_encode }},
+            engine_ranked: {{ lang._('%s of up to %s ranked flows sent each sample')|json_encode }},
             engine_quality: {{ lang._('discovery %s, ranking %s, attribution %s')|json_encode }},
             regime_exact: {{ lang._('Every flow tracked')|json_encode }},
             regime_bounded: {{ lang._('Bounded')|json_encode }},
@@ -204,6 +205,8 @@
                     axis(telemetry.quality_discovery, ['exact', 'bounded']),
                     axis(telemetry.quality_ranking, ['exact', 'warming', 'bounded']),
                     axis(telemetry.quality_attribution, ['exact', 'warming', 'partial'])))}</small>` : '—');
+            $('#engine-ranked').text(Number.isInteger(engine.ranked_flows) && engine.ranked_flows_limit
+                ? fill(T.engine_ranked, count(engine.ranked_flows), count(engine.ranked_flows_limit)) : '—');
             $('#engine-omitted').text(telemetry.sequence ? fill(T.engine_omitted, count(telemetry.skipped_af_translation),
                 count(telemetry.candidates_omitted), count(telemetry.threat_remotes_omitted),
                 count(telemetry.event_history_evicted)) : '—');
@@ -375,6 +378,7 @@
             <tr><td>{{ lang._('State limit') }}</td><td id="engine-limit"></td></tr>
             <tr><td>{{ lang._('Last collector sample') }}</td><td id="engine-sample"></td></tr>
             <tr><td>{{ lang._('Flows') }}</td><td id="engine-tracking"></td></tr>
+            <tr><td>{{ lang._('Flows on the map') }}</td><td id="engine-ranked"></td></tr>
             <tr><td>{{ lang._('Left out') }}</td><td id="engine-omitted"></td></tr>
             <tr><td>{{ lang._('PF state lifetimes') }}</td><td id="engine-lifetimes"></td></tr>
             <tr><td>{{ lang._('Classification snapshot') }}</td><td id="engine-classifier"></td></tr>

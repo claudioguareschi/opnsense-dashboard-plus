@@ -122,7 +122,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     if (offset + RECORD > size) offset = size;
     ok = ok && aggregate_finish(aggregate, &error) &&
          ranking_update(ranking, aggregate, anchor, history_interval(history), &error) &&
-         ranker_select(ranker, aggregate, ranking, history_interval(history), BUDGET_RANKED_FLOWS, &error);
+         ranker_select(ranker, aggregate, ranking, history_interval(history), BUDGET_RANKED_FLOWS_DEFAULT, &error);
     struct threat_limits limits = {NULL, 0, 100, 4, classifier_category(classes, 'T')};
     struct threat_summary *threats = ok ? threat_summary_create(aggregate, limits, &error) : NULL;
     ok = ok && threats;
@@ -138,7 +138,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       struct telemetry telemetry = {0};
       if (out) {
         struct class_report report = {classes, NULL, 0, aggregate, NULL, NULL, classifier_category(classes, 'T')};
-        struct ranked_flow rows[BUDGET_RANKED_FLOWS];
+        struct ranked_flow rows[BUDGET_RANKED_FLOWS_DEFAULT];
         size_t count = fm_selection_rows(ranker, ranking, aggregate, rows);
         struct ranked_output ranked = {rows, count, NULL, 0, ranking, ranker};
         protocol_write_ranked(out, aggregate, &ranked, threats, NULL, 0, &report, 4, &telemetry, &error);

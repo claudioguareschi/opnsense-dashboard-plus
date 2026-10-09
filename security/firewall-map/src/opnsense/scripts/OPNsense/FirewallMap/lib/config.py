@@ -32,6 +32,7 @@ import json
 import os
 import time
 
+from .collector import RANKED_FLOWS_DEFAULT, RANKED_FLOWS_MAX, RANKED_FLOWS_MIN
 from .common import STATE_DIR
 
 SETTINGS_FILE = "/usr/local/etc/firewallmap/firewallmap.json"
@@ -90,7 +91,7 @@ def settings(path=SETTINGS_FILE):
     values = {"provider": "auto", "license_key": "", "update_days": 3, "threat_lists": "",
               "record_threats": "1", "blocklist_aliases": "0", "helper_memory": "", "ranking_profile": "",
               "country_sets": "", "operational_sets": "", "carp_backup_view": "mirror",
-              "interval_min": "2", "interval_max": "60"}
+              "interval_min": "2", "interval_max": "60", "max_flows": str(RANKED_FLOWS_DEFAULT)}
     general = _read(path).get("general") or {}
     for field in values:
         if str(general.get(field) or "").strip():
@@ -110,6 +111,12 @@ def settings(path=SETTINGS_FILE):
     except ValueError:
         valid = False
     values["interval_min"], values["interval_max"] = (low, high) if valid else (2, 60)
+    # ranked flows per sample (the collector's --flows); out of range (the model validates it) is the default
+    try:
+        flows = int(values["max_flows"])
+        values["max_flows"] = flows if RANKED_FLOWS_MIN <= flows <= RANKED_FLOWS_MAX else RANKED_FLOWS_DEFAULT
+    except ValueError:
+        values["max_flows"] = RANKED_FLOWS_DEFAULT
     # MiB, or None for automatic; out-of-range values (the model validates them) fall back to automatic
     try:
         memory = int(values["helper_memory"])

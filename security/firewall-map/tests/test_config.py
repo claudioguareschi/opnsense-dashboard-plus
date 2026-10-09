@@ -59,7 +59,8 @@ class SettingsFileTest(unittest.TestCase):
             expected = {"provider": "dbip", "license_key": "", "update_days": 7, "threat_lists": "",
                         "record_threats": "1", "blocklist_aliases": "0", "helper_memory": None,
                         "ranking_profile": "6c02d03d-4087-46a9-b5bc-6378fb5eeada", "country_sets": "Country_CN",
-                        "operational_sets": "", "carp_backup_view": "mirror", "interval_min": 2, "interval_max": 60}
+                        "operational_sets": "", "carp_backup_view": "mirror", "interval_min": 2, "interval_max": 60,
+                        "max_flows": 150}
             self.assertEqual(CONFIG.settings(path), expected)
             self.assertEqual(CONFIG.abuseipdb_key(path), "key")
             self.assertEqual([alias["name"] for alias in CONFIG.aliases(path)], ["Drop"])
@@ -82,6 +83,13 @@ class SettingsFileTest(unittest.TestCase):
                 self.write(path, {"general": {"helper_memory": memory}})
                 os.utime(path, ns=(stamp, stamp))  # a distinct mtime: the reader caches by it
                 self.assertEqual(CONFIG.settings(path)["helper_memory"], expected)
+            # flows on the map (the collector's --flows): in range kept, anything else the default 150
+            for stamp, (flows, expected) in enumerate((("50", 50), ("500", 500), ("25", 25), ("1000", 1000),
+                                                       ("24", 150), ("1001", 150), ("-5", 150), ("lots", 150),
+                                                       ("", 150)), start=20):
+                self.write(path, {"general": {"max_flows": flows}})
+                os.utime(path, ns=(stamp, stamp))
+                self.assertEqual(CONFIG.settings(path)["max_flows"], expected, flows)
 
     def test_a_file_being_written_keeps_the_last_good_values(self):
         with tempfile.TemporaryDirectory() as directory:

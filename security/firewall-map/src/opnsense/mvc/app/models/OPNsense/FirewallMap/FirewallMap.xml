@@ -102,6 +102,14 @@
                 <MaximumValue>16384</MaximumValue>
                 <ValidationMessage>The collector memory budget is between 64 and 16384 MiB.</ValidationMessage>
             </helper_memory>
+            <!-- ranked flows per sample: the collector's flows option (collector/budget.h bounds) -->
+            <max_flows type="IntegerField">
+                <Required>Y</Required>
+                <Default>150</Default>
+                <MinimumValue>25</MinimumValue>
+                <MaximumValue>1000</MaximumValue>
+                <ValidationMessage>The map shows between 25 and 1000 flows.</ValidationMessage>
+            </max_flows>
         </general>
         <!-- custom ranking profiles (the built-ins are fixed and live in the scripts); each row is
              one complete operational policy, referenced by its UUID (general.ranking_profile) -->

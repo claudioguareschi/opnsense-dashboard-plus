@@ -28,7 +28,7 @@
 const AUTO_HEIGHT = 10000;
 // the renderer's content hash, written by tools/build-renderer.sh: a new renderer has a new
 // address, so a browser never runs an old cached copy with a newer widget
-const RENDERER_VERSION = '160946f6a86a';
+const RENDERER_VERSION = 'fb02cabccce1';
 // follow traffic is the map's own toggle, remembered per browser (as on the full-size map)
 const FOLLOW_KEY = 'firewallmap.widget.follow';
 
@@ -120,13 +120,6 @@ export default class FirewallMap extends BaseWidget {
                     ['5000000', '5 MB/s'], ['10000000', '10 MB/s'],
                 ]),
                 default: String(defaults.heavyRate ?? 1000000),
-            },
-            max_arcs: {
-                id: `${this.id}-option-max-arcs`,
-                title: this.translations.max_arcs,
-                type: 'select',
-                options: choices([['50', '50'], ['100', '100'], ['150', '150']]),
-                default: String(defaults.maxArcs ?? 100),
             },
             labels: {
                 id: `${this.id}-option-labels`,

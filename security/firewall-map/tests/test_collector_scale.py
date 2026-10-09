@@ -113,7 +113,7 @@ class CollectorScaleTest(unittest.TestCase):
         self.assertTrue(last["counts"]["flows_estimated"])
         self.assertLess(abs(last["counts"]["flows"] - count), count * 0.05)
         self.assertEqual(last["quality"]["discovery"], "bounded")
-        self.assertEqual(len(last["flows"]), collector.RANKED_FLOWS)
+        self.assertEqual(len(last["flows"]), collector.RANKED_FLOWS_DEFAULT)
         self.assertEqual(len(last["threat_remotes"]), collector.THREAT_REMOTES)
         self.assertEqual(telemetry["threat_remotes_omitted"], telemetry["tracked_flows"] - collector.THREAT_REMOTES)
 
@@ -206,7 +206,7 @@ class CollectorScaleTest(unittest.TestCase):
             with self.subTest(profile=profiles.BY_UUID[uuid]["name"]):
                 (_, last), _ = self.run_mode("mixed", 5000, profile=self.profile(uuid))
                 scores = [flow["score"] for flow in last["flows"]]
-                self.assertLessEqual(len(scores), collector.RANKED_FLOWS)
+                self.assertLessEqual(len(scores), collector.RANKED_FLOWS_DEFAULT)
                 self.assertEqual(scores, sorted(scores, reverse=True))
                 self.assertNotIn("selections", last)
 
@@ -412,7 +412,7 @@ class CollectorScaleTest(unittest.TestCase):
         self.assertTrue(all(abs(flow["score"] - base) < 1e-9 for flow in before["flows"]))
         ratios = [round(flow["score"] / base, 6) for flow in after["flows"]]
         self.assertEqual(after["flows"][0]["key"][1], "9.0.1.7")
-        self.assertEqual(ratios, [10.0] + [2.0] * (collector.RANKED_FLOWS - 1))
+        self.assertEqual(ratios, [10.0] + [2.0] * (collector.RANKED_FLOWS_DEFAULT - 1))
         # the class of a flow never depends on its asset
         self.assertTrue(all(flow["security_class"] == "S0" for flow in after["flows"]))
 

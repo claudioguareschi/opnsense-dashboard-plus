@@ -42,8 +42,13 @@
  *    remotes and their candidates per (remote, kind), and event matches. It
  *    bounds the response and therefore all of Python's per-sample work. */
 
-/* Ranked flows sent per sample (the map's own limit). */
-#define BUDGET_RANKED_FLOWS 150
+/* Ranked flows sent per sample: the map's flows (--flows, the "Maximum flows on
+ * the map" setting). The minimum keeps the security floors meaningful (S3's
+ * 10% of 25 is 3 places); the maximum stays within BUDGET_TRACKED_MIN, since
+ * the selected flows are pinned in the tracked set whatever its share. */
+#define BUDGET_RANKED_FLOWS_DEFAULT 150
+#define BUDGET_RANKED_FLOWS_MIN 25
+#define BUDGET_RANKED_FLOWS_MAX 1000
 /* Candidates per (flow, kind) and per (threat remote, kind): the request may
  * lower the default, never exceed the maximum. */
 #define BUDGET_CANDIDATES_DEFAULT 16
@@ -81,6 +86,7 @@
 #define BUDGET_BYTES_PER_JOIN 224
 /* The tracked set never shrinks below this (very small budgets). */
 #define BUDGET_TRACKED_MIN 1000
+_Static_assert(BUDGET_RANKED_FLOWS_MAX <= BUDGET_TRACKED_MIN, "the selected flows fit the smallest tracked set");
 
 /* What the shares come to for a budget less the classification snapshot. */
 struct budget_limits {

@@ -331,14 +331,14 @@ static int correlate_fixture(const char *context_path, const char *input_path,
   if (!error->code)
     ranker_configure(ranker, &profile);
   if (error->code || !ranking_update(ranking, aggregate, 100.0, -1.0, error) ||
-      !ranker_select(ranker, aggregate, ranking, -1.0, BUDGET_RANKED_FLOWS, error)) {
+      !ranker_select(ranker, aggregate, ranking, -1.0, BUDGET_RANKED_FLOWS_DEFAULT, error)) {
     aggregate_destroy(aggregate);
     goto fail_history;
   }
   FILE *output = fopen(output_path, "wb");
   struct telemetry telemetry = {.interval = -1};
   /* the Balanced profile's selection, in rank order */
-  struct ranked_flow rows[BUDGET_RANKED_FLOWS];
+  struct ranked_flow rows[BUDGET_RANKED_FLOWS_DEFAULT];
   size_t count = fm_selection_rows(ranker, ranking, aggregate, rows);
   struct ranked_output ranked = {rows, count, NULL, 0, ranking, ranker};
   bool ok = output && protocol_write_ranked(output, aggregate, &ranked, NULL,

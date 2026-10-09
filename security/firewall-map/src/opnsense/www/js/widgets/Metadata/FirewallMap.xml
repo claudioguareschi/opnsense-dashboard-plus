@@ -16,7 +16,6 @@
             <collector_starting>Starting flow collector…</collector_starting>
             <heavy_top>Highlight the busiest links</heavy_top>
             <heavy_rate>Also highlight any link faster than</heavy_rate>
-            <max_arcs>Maximum links shown</max_arcs>
             <labels>City labels</labels>
             <labels_zoomed>When zoomed in</labels_zoomed>
             <on>On</on>

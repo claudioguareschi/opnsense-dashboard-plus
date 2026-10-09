@@ -14,6 +14,7 @@
         "helper_memory": {{ general.helper_memory | default('', true) | tojson }},
         "interval_min": {{ general.interval_min | default('2', true) | tojson }},
         "interval_max": {{ general.interval_max | default('60', true) | tojson }},
+        "max_flows": {{ general.max_flows | default('150', true) | tojson }},
         "threat_lists": {{ general.threat_lists | default('', true) | tojson }},
         "country_sets": {{ general.country_sets | default('', true) | tojson }},
         "operational_sets": {{ general.operational_sets | default('', true) | tojson }},

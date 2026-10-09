@@ -79,10 +79,12 @@ class SettingsFormTest(unittest.TestCase):
                 sections[section] = [field.findtext("advanced") == "true"]
             else:
                 sections[section].append(field.findtext("advanced") == "true")
-        for label in ("Firewall map location", "High availability", "Collector resources"):
+        for label in ("Firewall map location", "High availability"):
             self.assertTrue(all(sections[label]), label)
         for label in (None, "Classification sets", "Logging"):
             self.assertFalse(any(sections[label]), label)
+        # Collector: its header and the flows on the map stay visible, the tuning is advanced
+        self.assertEqual(sections["Collector"], [False, False, True, True, True])
         # first, before any section: recording threats with the map closed
         self.assertEqual(general.find("field").findtext("id"), "firewallmap.general.record_threats")
         for tab in ("geolocation", "security"):
@@ -101,6 +103,21 @@ class SettingsFormTest(unittest.TestCase):
         self.assertIn("geolocated with the configured geolocation service", discovery.findtext("help"))
         for key in ("latitude", "longitude"):
             self.assertIn("leave both empty to locate the firewall from its public IP", self.field(key).findtext("help"))
+
+    def test_maximum_flows_on_the_map(self):
+        """The collector's --flows: 25 to 1000 ranked flows, 150 when the setting is absent."""
+        flows = self.field("max_flows")
+        self.assertEqual(flows.findtext("label"), "Maximum flows on the map")
+        self.assertIsNone(flows.findtext("advanced"))
+        self.assertIn("does not limit firewall states", flows.findtext("help"))
+        self.assertNotIn("tracked", flows.findtext("help").lower())
+        model = ET.parse(MODEL).getroot().find("./items/general/max_flows")
+        self.assertEqual((model.get("type"), model.findtext("Required"), model.findtext("Default"),
+                          model.findtext("MinimumValue"), model.findtext("MaximumValue")),
+                         ("IntegerField", "Y", "150", "25", "1000"))
+        budget = (MVC.parents[3] / "collector/budget.h").read_text()
+        for name, value in (("DEFAULT", "150"), ("MIN", "25"), ("MAX", "1000")):
+            self.assertIn(f"#define BUDGET_RANKED_FLOWS_{name} {value}\n", budget)
 
     def test_country_blocklists_keep_their_key(self):
         """Renamed in the form only: the configuration keys stay country_sets and operational_sets."""

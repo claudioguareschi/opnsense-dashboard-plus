@@ -99,6 +99,8 @@ struct engine {
    * its rules are read again only when a ruleset's ticket changes */
   struct pf_rule_cache *rules;
   struct lifetime_bound lifetime;
+  /* ranked flows per sample (--flows): startup configuration, like the profile */
+  size_t ranked_flows;
 };
 /* CARP addresses a request may name (CARP rows) */
 #define REQUEST_CARP_MAX 256
@@ -729,7 +731,7 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   size_t snapshot_count = 0;
   struct track_hints hints = {0};
   ok = ok && ranker_select(e->ranker, sample.aggregate, e->ranking, telemetry.interval,
-                           BUDGET_RANKED_FLOWS, error) &&
+                           e->ranked_flows, error) &&
        selection_rows(e, sample.aggregate, &selected, &hints, error);
   struct tracker_report report = {0};
   ok = ok && tracker_finish(e->tracker, sample.aggregate, e->ranking, sample.anchor,
@@ -899,21 +901,67 @@ static int self_test(void) {
   return 0;
 }
 
+#define USAGE "usage: firewallmap-collector --profile <file> [--flows <N>] | --version | --selftest | --help"
+#define HELP                                                                                      \
+  "  --profile <file>  the active ranking profile (schema-v1 JSON), required\n"                    \
+  "  --flows <N>       ranked flows sent per sample, " BUDGET_TEXT(BUDGET_RANKED_FLOWS_MIN) " to "    \
+  BUDGET_TEXT(BUDGET_RANKED_FLOWS_MAX) " (default " BUDGET_TEXT(BUDGET_RANKED_FLOWS_DEFAULT) ")\n"     \
+  "  --version         the build's protocol and PF ABI, as JSON\n"                                \
+  "  --selftest        read PF once and report, as JSON\n"                                         \
+  "The requests come on standard input, the responses go to standard output.\n"
+#define BUDGET_TEXT_(n) #n
+#define BUDGET_TEXT(n) BUDGET_TEXT_(n)
+
+/* --flows: decimal digits only (no sign, space or prefix), within the bounds */
+static bool parse_flows(const char *text, size_t *flows) {
+  size_t value = 0;
+  if (!*text) return false;
+  for (const char *c = text; *c; c++) {
+    if (*c < '0' || *c > '9' || value > BUDGET_RANKED_FLOWS_MAX) return false;
+    value = value * 10 + (size_t)(*c - '0');
+  }
+  if (value < BUDGET_RANKED_FLOWS_MIN || value > BUDGET_RANKED_FLOWS_MAX) return false;
+  *flows = value;
+  return true;
+}
+
 int main(int argc, char **argv) {
   umask(0077);
   if (argc == 2 && !strcmp(argv[1], "--version"))
     return print_version();
   if (argc == 2 && !strcmp(argv[1], "--selftest"))
     return self_test();
+  if (argc == 2 && !strcmp(argv[1], "--help")) {
+    printf(USAGE "\n" HELP);
+    return 0;
+  }
   /* --profile <file>: the active ranking profile (schema-v1 JSON), required:
    * startup configuration compiled once and immutable for this process
    * (profile.h); a changed profile is a new process. Every ranking comes from
-   * the profile: there is no other. */
+   * the profile: there is no other. --flows <N>: ranked flows per sample,
+   * likewise fixed for the process. Each option at most once. */
   struct profile profile = {0};
   char why[256] = "";
-  if (argc != 3 || strcmp(argv[1], "--profile") || !profile_load(argv[2], &profile, why, sizeof(why))) {
+  const char *profile_path = NULL, *flows_text = NULL;
+  bool usage = false;
+  for (int i = 1; i < argc && !usage; i += 2) {
+    const char **target = !strcmp(argv[i], "--profile") ? &profile_path
+                          : !strcmp(argv[i], "--flows") ? &flows_text
+                                                        : NULL;
+    if (!target || *target || i + 1 >= argc)
+      usage = true;
+    else
+      *target = argv[i + 1];
+  }
+  size_t ranked_flows = BUDGET_RANKED_FLOWS_DEFAULT;
+  if (!usage && flows_text && !parse_flows(flows_text, &ranked_flows)) {
+    snprintf(why, sizeof(why), "--flows must be a whole number from %u to %u",
+             (unsigned)BUDGET_RANKED_FLOWS_MIN, (unsigned)BUDGET_RANKED_FLOWS_MAX);
+    usage = true;
+  }
+  if (usage || !profile_path || !profile_load(profile_path, &profile, why, sizeof(why))) {
     if (why[0]) fprintf(stderr, "firewallmap-collector: %s\n", why);
-    fprintf(stderr, "usage: firewallmap-collector --profile <file> | --version | --selftest\n");
+    fprintf(stderr, USAGE "\n");
     return 2;
   }
   seed_hash();
@@ -923,7 +971,8 @@ int main(int argc, char **argv) {
       .ranking = ranking_create(FADE_SECONDS, RATE_SMOOTHING, &error),
       .tracker = tracker_create(FADE_SECONDS, RATE_SMOOTHING, &error),
       .ranker = ranker_create(&error),
-      .events = event_history_create(&error)};
+      .events = event_history_create(&error),
+      .ranked_flows = ranked_flows};
   if (!engine.history || !engine.ranking || !engine.tracker || !engine.ranker || !engine.events) {
     fprintf(stderr, "firewallmap-collector: %s\n", error.message);
     close_engine(&engine);

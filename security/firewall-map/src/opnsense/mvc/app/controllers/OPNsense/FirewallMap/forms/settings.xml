@@ -46,8 +46,13 @@
         </field>
         <field>
             <type>header</type>
-            <label>Collector resources</label>
-            <advanced>true</advanced>
+            <label>Collector</label>
+        </field>
+        <field>
+            <id>firewallmap.general.max_flows</id>
+            <label>Maximum flows on the map</label>
+            <type>text</type>
+            <help>How many flows the collector ranks and sends to the map each sample, from 25 to 1000. Higher values show more flows but take more processing time and memory. This does not limit firewall states or connections.</help>
         </field>
         <field>
             <id>firewallmap.general.interval_min</id>

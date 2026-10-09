@@ -116,6 +116,7 @@ class CollectorFixture:
         # the ranking profile it was started with (None until the service configures it), and how
         # often a new one restarted it
         self.profile, self.restarts, self.starts = None, 0, 0
+        self.flows = COLLECTOR.state_collector.RANKED_FLOWS_DEFAULT
         # PF tables the fixture classifies with, {table: [network...]}, like the helper's own
         self.tables = {}
         # more telemetry each sample reports (a pid, a cadence recommendation), like the helper's
@@ -124,6 +125,16 @@ class CollectorFixture:
     def close(self):
         self.process = None
         self.snapshot_open = False
+
+    def set_flows(self, flows):
+        """Like the engine: another number restarts it (counted), the same one changes nothing."""
+        flows = COLLECTOR.state_collector.valid_flows(flows)
+        if flows == self.flows:
+            return False
+        self.flows = flows
+        self.restarts += 1
+        self.close()
+        return True
 
     def set_profile(self, profile):
         """Like the engine: another UUID or definition (fingerprint) restarts it (counted), the same

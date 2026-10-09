@@ -47,7 +47,7 @@ static inline bool fm_balanced_profile(struct profile *profile) {
 }
 
 /* The ranker's selection as response rows (rank order), as the engine
- * writes them; rows holds BUDGET_RANKED_FLOWS. */
+ * writes them; rows holds BUDGET_RANKED_FLOWS_DEFAULT. */
 static inline size_t fm_selection_rows(const struct ranker *ranker, const struct ranking *ranking,
                                        const struct aggregate *a, struct ranked_flow *rows) {
   const struct selected *chosen;

@@ -604,6 +604,36 @@ class CollectorLoopTest(unittest.TestCase):
         self.assertEqual(engine.profile["uuid"], profiles.DEFAULT)
         self.assertIn("weights total", self.collector.profile_problem)
 
+    def test_the_flows_setting_restarts_the_collector_with_it(self):
+        """Maximum flows on the map reaches the collector as --flows: a new number restarts it (the
+        map waits for its first ranked sample), the same number changes nothing, and the status
+        names the number in force."""
+        self.collector.step()
+        engine = self.collector.collector_engine
+
+        def step(flows):
+            values = {"provider": "dbip", "max_flows": flows}
+            with mock.patch.object(COLLECTOR, "settings", lambda: values):
+                self.collector.checked["settings"] = None
+                self.collector.step()
+        restarts = engine.restarts
+        step(150)
+        self.assertEqual((engine.flows, engine.restarts), (150, restarts))
+        for flows in (50, 500):
+            step(flows)
+            self.assertEqual(engine.flows, flows)
+        self.assertEqual(engine.restarts, restarts + 2)
+        self.assertEqual(self.collector.wait_reason, "restart")
+        step(500)
+        self.assertEqual(engine.restarts, restarts + 2)
+        status = self.collector.collector_status["state_collector"]
+        self.assertEqual(status["ranked_flows_limit"], 500)
+        self.assertEqual(status["ranked_flows"], len(self.collector.tracker.collector_visible))
+        # the rendered settings are already validated (lib/config.py falls back to 150): an
+        # invalid number cannot reach the command line
+        with self.assertRaises(ValueError):
+            engine.set_flows(5000)
+
     def test_camera_request_saves_every_flow_and_its_states(self):
         snapshots = os.path.join(self.directory, "snapshots")
         requests = os.path.join(self.directory, "requests")
@@ -743,7 +773,6 @@ class SnapshotSafetyTest(CollectorLoopTest):
         payload = self.build_snapshot(now)
         self.assertEqual(len(payload["flows"]), 5000)
         self.assertEqual(payload["capture"]["flows"]["omitted_limit"], 2)
-        self.assertEqual(COLLECTOR.MAX_FLOWS, 150)
 
     def test_required_evidence_cannot_be_silently_dropped_for_the_byte_budget(self):
         now = self.snapshot_fixture(1)
@@ -829,7 +858,6 @@ class SnapshotSafetyTest(CollectorLoopTest):
         payload = self.build_snapshot(now)
         self.assertEqual(payload["capture"]["detail_status"], "complete")
         self.assertNotIn("capture", self.collector.build_payload(now))
-        self.assertEqual(COLLECTOR.MAX_FLOWS, 150)
 
 
 def flagged_sample(records):

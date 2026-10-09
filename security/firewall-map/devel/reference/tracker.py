@@ -27,7 +27,8 @@
 """Test/development-only state history/ranking oracle."""
 
 import firewallmap_collector as production
-from firewallmap_collector import _Flow, _ranked, FADE_SECONDS, MAX_FLOWS, MAX_INSIDE, MAX_SERVICES
+from firewallmap_collector import _Flow, _ranked, FADE_SECONDS, MAX_INSIDE, MAX_SERVICES
+from lib.collector import RANKED_FLOWS_DEFAULT as MAX_FLOWS  # the retired engine's fixed cap
 from lib.pf import _Record
 from .pf import StateFacts
 
