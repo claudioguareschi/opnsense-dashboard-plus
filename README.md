@@ -94,7 +94,9 @@ icon) holds the widget's display options.*
 ### What you see
 
 - **Live connections**: an arc from the firewall to every remote address, from PF state counters
-  sampled every 2 seconds. **Green** arcs were opened from inside your network, **orange** from
+  sampled every 2 seconds (longer on a busy firewall: the collector asks for it, and the map
+  follows). The map shows the flows the active [ranking profile](#how-flows-are-ranked) ranks
+  highest, up to *Maximum flows on the map* (150 by default). **Green** arcs were opened from inside your network, **orange** from
   outside (port forwards, services on the firewall), gray from both. Pulses travel in the
   direction the data flows. Arcs fade in and out and keep their curve while they live.
 - **Blocked attempts**: connection attempts the firewall dropped (from the filter log) pulse in
@@ -232,14 +234,107 @@ instead.
 
 ### Settings
 
-The plugin settings are in **Reporting ▸ Firewall Map ▸ Settings** (administrators); press
-**Apply** after saving: geolocation service (automatic, MaxMind GeoLite2, MaxMind GeoIP2 City,
-DB-IP Lite), MaxMind license key (taken from a MaxMind GeoIP alias when present), database update
-frequency, threat lists, background recording, AbuseIPDB API key, *Maintain blocklist aliases* and
-the collector's *Memory budget*. The memory budget (empty: 5% of physical memory, at most
-1024 MiB) bounds the state collector and sets the largest PF state table the map processes; above it
-the map says the state table is too large instead of slowing the firewall. Keys are write-only and never displayed or logged: leave a key field empty to keep the stored key,
+The plugin settings are in **Reporting ▸ Firewall Map ▸ Settings** (administrators), in four
+tabs; press **Apply** after saving. When *Maximum flows on the map* or the active profile changes,
+Apply restarts the collector and open maps wait for its first ranked sample.
+
+<img src="docs/screenshots/firewall-map-settings.png" alt="Firewall Map+ settings, General tab with advanced mode on">
+
+*The General tab with OPNsense's advanced mode on; the settings marked with a gear are hidden
+until it is switched on.*
+
+- **General**
+  - *Record in the background* keeps recording threats while no map is open, as long as the
+    widget is on a dashboard.
+  - *Maximum flows on the map* (Collector, 25 to 1000, default 150): how many flows the collector
+    ranks and sends to the map each sample. More flows take more processing time and memory; it
+    never limits firewall states or connections.
+  - *Country blocklists* (OPNsense GeoIP aliases) and *Operational sets* (PF tables with a meaning
+    of your own: partners, cloud providers...) name the sets a remote belongs to on the map.
+    Selecting one blocks nothing and never marks traffic as a threat.
+  - *Log administrator actions* (see Log File below).
+  - With **advanced mode** on: *Firewall map location* (where the firewall sits on the map:
+    normally its public WAN address, geolocated with the configured database; *Use external
+    public IP discovery* for a WAN behind upstream NAT, which finds the public address with
+    api.ipify.org and geolocates it the same way; or manual latitude and longitude, which win),
+    *High availability* (*On a CARP backup*: mirror the master's connections, or show only this
+    firewall's traffic) and the collector's tuning: *Shortest* and *Longest refresh interval*
+    (2 to 300 seconds; on a busy firewall the collector asks for a longer one, within these
+    bounds, and the map follows) and *Memory budget* (empty: 5% of physical memory, at most
+    1024 MiB). The memory budget bounds the state collector and sets the largest PF state table
+    the map processes; above it the map says the state table is too large instead of slowing the
+    firewall.
+- **Geolocation**: the geolocation service (automatic, MaxMind GeoLite2, MaxMind GeoIP2 City,
+  DB-IP Lite), the MaxMind license key (taken from a MaxMind GeoIP alias when present) and how
+  often the database is updated.
+- **Security**: threat lists, the AbuseIPDB API key and *Maintain blocklist aliases*.
+- **Profiles**: the ranking profiles, below.
+
+Keys are write-only and never displayed or logged: leave a key field empty to keep the stored key,
 or tick *Remove the stored key* to delete it.
+
+### How flows are ranked
+
+A busy firewall holds far more connections than a map can show. Each sample, the collector scores
+every flow with the active ranking profile and sends the best ones, up to *Maximum flows on the
+map*:
+
+1. **Score.** The profile's *ranking priorities* weigh eight properties of a flow, each a
+   percentage, together 100:
+
+   | Priority | What it measures |
+   |---|---|
+   | Data rate | Smoothed bytes per second, both directions |
+   | Packet rate | Smoothed packets per second |
+   | Connections | Active PF states |
+   | Connection rate | New PF states per second |
+   | Total data | Bytes moved since the flow's current activity began |
+   | Blocked activity | Blocked attempts from the remote in the firewall log (rules with logging) |
+   | Threat reputation | The remote is in a selected threat list (such as a curated feed or the AbuseIPDB blacklist) |
+   | IDS alerts | Suricata alerts for the remote; high-severity alerts count double |
+
+   *Asset importance* then multiplies the score of flows from chosen local hosts or networks (1
+   to 100; a flow takes its local host's longest matching rule). Flows that never moved data are
+   left out, handshake-only probes count once they reach 10 attempts, and a flow already on the
+   map keeps a slight edge so the map does not flicker.
+2. **Security visibility.** A flow with security evidence belongs to one class: **S3**
+   high-severity Suricata alerts (severity 1 or 2); **S2** other Suricata alerts, or at least 30
+   logged blocked attempts; **S1** any other evidence (a threat list match, an abusive AbuseIPDB
+   lookup, fewer blocked attempts). The profile reserves a minimum share of the map's places for
+   each class, rounded up (30% of 150 is 45 places). S3's best-scoring flows fill its reserved
+   places first, then S2's, then S1's.
+3. **Everything else by score.** The remaining places go to the best-scoring flows overall,
+   security flows included, so a class can take more than its share. Places a class does not use
+   go to general ranking.
+
+The map never shows more than *Maximum flows on the map*, and the browser draws every flow it is
+sent.
+
+### Ranking profiles
+
+Exactly one profile is active, chosen in the **Profiles** tab's *Active* column (it takes effect on
+**Apply**). Four are built in:
+
+- **Balanced** (the default): traffic, connections and flow volume together, with security
+  evidence counted and a few places kept for flows that carry it.
+- **Bandwidth**: the flows moving the most data.
+- **Connections**: the most PF states and the most new connections, whatever their traffic.
+- **Security**: flows with security evidence first, then connection activity.
+
+<img src="docs/screenshots/firewall-map-profiles.png" alt="Firewall Map+ ranking profiles">
+
+*Built-in profiles are shown read only (ⓘ) and cloned to make your own; **+** adds a profile
+starting from Balanced. Your profiles can be edited, cloned and deleted (except the active one).*
+
+<img src="docs/screenshots/firewall-map-profile-editor.png" alt="Firewall Map+ ranking profile editor" width="795">
+
+*The profile editor. **Security visibility** splits the map's places: General ranking and the
+minimum reserved shares of S1, S2 and S3. **Ranking priorities** shows how much each property
+counts. Drag a splitter to move percentage points between its two neighbours only (hovering names
+them; the arrow keys move 1 point, Shift 5), so a bar always totals 100, or type exact values:
+the editor shows what is left or over and keeps Save disabled until the split is valid. Values
+are whole percentages; a 0% property keeps a narrow striped slot. Asset importance takes one rule
+per line (`192.168.1.25 10`, `192.168.10.0/24 3`).*
 
 **Reporting ▸ Firewall Map ▸ Status** shows the installed Firewall Map version, whether the collector
 is running (with the usual start, stop and restart controls), how fresh the geolocation database, the
@@ -263,8 +358,8 @@ administrator actions* on (off by default), it also records who investigated an 
 or deleted threat entries, and saved, annotated or deleted snapshots.
 
 Each widget's display options are in its own settings dialog (gear icon on the widget): busiest-arc
-highlighting, maximum arcs, city labels, blocked traffic and its minimum hits, hostname lookups and
-network (ASN) names.
+highlighting, city labels, blocked traffic and its minimum hits, hostname lookups and network (ASN)
+names. The map draws every flow the collector sends (see *Maximum flows on the map*).
 
 ### What leaves the firewall
 
@@ -275,6 +370,7 @@ network (ASN) names.
 | Threat-list aliases (daily, OPNsense's alias updater) | The list provider | The download request only. |
 | *Investigate* clicked | rdap.org, stat.ripe.net, AbuseIPDB | The one address being investigated. |
 | *Look up hostnames* enabled | Your DNS resolver | Reverse lookups of remote and unnamed inside addresses. |
+| *Use external public IP discovery* on, and the WAN has only a private address (at most every 15 minutes until it answers, then once a day) | api.ipify.org | A plain HTTPS request; the reply is the firewall's public IPv4 address, geolocated locally. |
 
 The collector runs while a map is open, or in the background while the widget is on a dashboard
 and background recording is on. It uses a few percent of one CPU core while a map is open.
@@ -443,6 +539,12 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.60** (in development; Firewall Map+ test builds 0.59.12 to 0.59.20): the collector audit
+  remediation (bounded classification refresh, stricter request parsing, accounted response
+  buffer, fuzzed decoder), adaptive refresh in the map and widget, a tabbed settings page with
+  OPNsense's advanced mode, Country blocklists from GeoIP aliases, *Maximum flows on the map*
+  (the collector's `--flows`, 25 to 1000) and the graphical ranking profile editor (read-only
+  built-ins, new profiles with **+**).
 - **0.59** (all packages): Firewall Map+ keeps complete shared incident snapshots while disclosing
   captured PF connection states only to users with OPNsense's native Diagnostics: Show States privilege.
 - **0.58** (all packages): refines Dashboard Plus QuickAssist+ with a Chart.js activity graph,
