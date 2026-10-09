@@ -213,7 +213,7 @@
         const securityBody = sectionBody('s1_min_percent');
         const classes = [['s1_min_percent', 'progress-bar-success', 'S1'], ['s2_min_percent', 'progress-bar-warning', 'S2'],
             ['s3_min_percent', 'progress-bar-danger', 'S3']].map(([key, css, short]) => fieldCell(key, css, short));
-        const securityCell = $('<td colspan="3"/>').append($('<p class="text-muted"/>').text(PROFILE_TEXT.security_intro));
+        const securityCell = $('<td colspan="3" class="fwmap-allocation-cell"/>').append($('<p class="text-muted"/>').text(PROFILE_TEXT.security_intro));
         securityBody.prepend($('<tr/>').append(securityCell));
         const security = FirewallMapAllocation.create({
             container: securityCell,
@@ -233,7 +233,7 @@
             .map((key, index) => fieldCell(key, `fwmap-weight-${index}`, PROFILE_TEXT.shorts[index]));
         // how to edit, said only where the profile can be edited
         const dragHint = $('<span class="fwmap-allocation-drag-hint"/>').text(` ${PROFILE_TEXT.ranking_drag}`);
-        const rankingCell = $('<td colspan="3"/>').append($('<p class="text-muted"/>').text(PROFILE_TEXT.ranking_intro).append(dragHint));
+        const rankingCell = $('<td colspan="3" class="fwmap-allocation-cell"/>').append($('<p class="text-muted"/>').text(PROFILE_TEXT.ranking_intro).append(dragHint));
         rankingBody.prepend($('<tr/>').append(rankingCell));
         const ranking = FirewallMapAllocation.create({
             container: rankingCell,
@@ -354,6 +354,9 @@
     .fwmap-allocation-handle.disabled { cursor: not-allowed; opacity: 0.4; }
     .fwmap-allocation-readonly .fwmap-allocation-handle { cursor: default; }
     .fwmap-allocation-status { margin: 0 0 8px; }
+    /* Bootstrap rows inside a table cell: no negative margins, or the dialog scrolls sideways */
+    .fwmap-allocation-cell > .row { margin-left: 0; margin-right: 0; }
+    .fwmap-allocation-cell > .row > [class*="col-"] { padding-left: 0; padding-right: 15px; }
     /* one line per field (name, value, what it measures), wrapping in narrow columns */
     .fwmap-allocation-field { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; margin-bottom: 6px; }
     .fwmap-allocation-field label { flex: 0 0 11em; margin: 0; }
