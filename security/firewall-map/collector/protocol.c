@@ -116,7 +116,8 @@ bool protocol_frame(FILE *f, const void *data, size_t len, uint32_t *checksum,
   return true;
 }
 
-/* Sizes of the fixed FMAGG4 records (PROTOCOL.md). */
+/* Sizes of the fixed FMAGG4 records (kind byte included). */
+#define HEADER_RECORD_SIZE 9
 #define FLOW_RECORD_SIZE 183
 #define EVENT_RECORD_SIZE 194
 #define TELEMETRY_RECORD_SIZE 445
@@ -124,6 +125,21 @@ bool protocol_frame(FILE *f, const void *data, size_t len, uint32_t *checksum,
 #define FOOTER_RECORD_SIZE 125
 #define CLASSIFIED_RECORD_SIZE 36
 #define CLASS_SET_RECORD_SIZE 12
+#define THREAT_REMOTE_RECORD_SIZE 58
+/* A candidate record: 32 bytes with its weight, 24 without, plus its value. */
+#define CANDIDATE_RECORD_FIXED(weight) ((weight) ? 32u : 24u)
+
+/* Every fixed record is written into a buffer of its size plus RECORD_SLACK
+ * and framed only when exactly its declared size was written. A field added
+ * or removed without its size fails every sample at once (an internal error,
+ * in every build), and an addition lands in the slack, never past the buffer. */
+#define RECORD_SLACK 64
+static bool record_frame(FILE *f, const unsigned char *b, const unsigned char *p, size_t size,
+                         uint32_t *checksum, struct fm_error *error) {
+  if ((size_t)(p - b) != size)
+    return fm_error_fail(error, FM_FAILURE_INTERNAL, EOVERFLOW, "record size");
+  return protocol_frame(f, b, size, checksum, error);
+}
 
 struct sent {
   uint64_t flows, candidates, matches, remotes, remote_candidates, classified, class_sets,
@@ -134,16 +150,16 @@ static bool write_header(FILE *f, bool threats, uint32_t *checksum,
                          struct fm_error *error) {
   if (fwrite("FMAGG4\0\0", 1, 8, f) != 8)
     return fm_error_set(error, errno ? errno : EIO, "FMAGG4 header");
-  unsigned char b[16], *p = b;
+  unsigned char b[HEADER_RECORD_SIZE + RECORD_SLACK], *p = b;
   *p++ = RECORD_HEADER;
   protocol_put(&p, FM_PROTOCOL_VERSION, 4);
   protocol_put(&p, threats ? 1 : 0, 4);
-  return protocol_frame(f, b, p - b, checksum, error);
+  return record_frame(f, b, p, HEADER_RECORD_SIZE, checksum, error);
 }
 static bool write_flow(FILE *f, size_t rank, const struct flow *flow,
                        const struct ranked_flow *rates, uint32_t *checksum,
                        struct fm_error *error) {
-  unsigned char b[FLOW_RECORD_SIZE], *p = b;
+  unsigned char b[FLOW_RECORD_SIZE + RECORD_SLACK], *p = b;
   *p++ = RECORD_FLOW;
   protocol_put(&p, rank, 4);
   protocol_address_put(&p, flow->local);
@@ -172,12 +188,12 @@ static bool write_flow(FILE *f, size_t rank, const struct flow *flow,
   put_double(&p, rates->score);
   *p++ = rates->presence;
   protocol_put(&p, rates->attempts > UINT32_MAX ? UINT32_MAX : rates->attempts, 4);
-  return protocol_frame(f, b, p - b, checksum, error);
+  return record_frame(f, b, p, FLOW_RECORD_SIZE, checksum, error);
 }
 static bool write_candidate(FILE *f, unsigned char kind, uint32_t owner,
                             const struct candidate_view *value, bool weight,
                             uint32_t *checksum, struct fm_error *error) {
-  unsigned char b[32 + CANDIDATE_VALUE_MAX], *p = b;
+  unsigned char b[32 + CANDIDATE_VALUE_MAX + RECORD_SLACK], *p = b;
   if (value->len > CANDIDATE_VALUE_MAX)
     return fm_error_set(error, EOVERFLOW, "candidate size");
   *p++ = kind;
@@ -190,12 +206,12 @@ static bool write_candidate(FILE *f, unsigned char kind, uint32_t owner,
   protocol_put(&p, value->len, 2);
   memcpy(p, value->data, value->len);
   p += value->len;
-  return protocol_frame(f, b, p - b, checksum, error);
+  return record_frame(f, b, p, CANDIDATE_RECORD_FIXED(weight) + value->len, checksum, error);
 }
 static bool write_match(FILE *f, const struct event_match *match,
                         uint32_t *checksum, struct fm_error *error) {
   const struct correlation_value *v = &match->value;
-  unsigned char b[EVENT_RECORD_SIZE], *p = b;
+  unsigned char b[EVENT_RECORD_SIZE + RECORD_SLACK], *p = b;
   *p++ = RECORD_EVENT_MATCH;
   protocol_put(&p, match->id, 2);
   *p++ = match->kind;
@@ -221,11 +237,11 @@ static bool write_match(FILE *f, const struct event_match *match,
   p += FM_INTERFACE_SIZE;
   memcpy(p, v->rule, FM_LABEL_SIZE);
   p += FM_LABEL_SIZE;
-  return protocol_frame(f, b, p - b, checksum, error);
+  return record_frame(f, b, p, EVENT_RECORD_SIZE, checksum, error);
 }
 static bool write_telemetry(FILE *f, const struct telemetry *t,
                             uint32_t *checksum, struct fm_error *error) {
-  unsigned char b[TELEMETRY_RECORD_SIZE], *p = b;
+  unsigned char b[TELEMETRY_RECORD_SIZE + RECORD_SLACK], *p = b;
   *p++ = RECORD_TELEMETRY;
   protocol_put(&p, t->pid, 4);
   protocol_put(&p, t->sequence, 8);
@@ -285,12 +301,12 @@ static bool write_telemetry(FILE *f, const struct telemetry *t,
                              t->lifetime_refresh_us};
   for (size_t n = 0; n < sizeof(values) / sizeof(*values); n++)
     protocol_put(&p, values[n], 8);
-  return protocol_frame(f, b, p - b, checksum, error);
+  return record_frame(f, b, p, TELEMETRY_RECORD_SIZE, checksum, error);
 }
 static bool write_footer(FILE *f, struct sample_outcome outcome,
                          struct aggregate_counts counts, const struct sent *sent,
                          uint32_t checksum, struct fm_error *error) {
-  unsigned char b[FOOTER_RECORD_SIZE], *p = b;
+  unsigned char b[FOOTER_RECORD_SIZE + RECORD_SLACK], *p = b;
   *p++ = RECORD_FOOTER;
   protocol_put(&p, outcome.code, 4);
   protocol_put(&p, outcome.context_kind, 4);
@@ -309,7 +325,7 @@ static bool write_footer(FILE *f, struct sample_outcome outcome,
   protocol_put(&p, sent->class_sets, 8);
   protocol_put(&p, sent->snapshot_candidates, 8);
   protocol_put(&p, checksum, 4);
-  return protocol_frame(f, b, p - b, NULL, error) &&
+  return record_frame(f, b, p, FOOTER_RECORD_SIZE, NULL, error) &&
          (fflush(f) == 0 || fm_error_set(error, errno, "FMAGG4 flush"));
 }
 
@@ -405,7 +421,7 @@ static bool write_threats(FILE *f, const struct threat_summary *threats,
     struct threat_remote remote;
     if (!threat_summary_remote_at(threats, n, &remote))
       return fm_error_set(error, EINVAL, "threat summary remote");
-    unsigned char b[64], *p = b;
+    unsigned char b[THREAT_REMOTE_RECORD_SIZE + RECORD_SLACK], *p = b;
     *p++ = RECORD_THREAT_REMOTE;
     protocol_put(&p, n, 4);
     protocol_address_put(&p, remote.address);
@@ -414,7 +430,7 @@ static bool write_threats(FILE *f, const struct threat_summary *threats,
     protocol_put(&p, remote.bytes, 8);
     protocol_put(&p, remote.classes, 8);
     protocol_put(&p, remote.youngest, 4);
-    if (!protocol_frame(f, b, p - b, checksum, error))
+    if (!record_frame(f, b, p, THREAT_REMOTE_RECORD_SIZE, checksum, error))
       return false;
     sent->remotes++;
   }
@@ -482,14 +498,14 @@ static bool write_classification(FILE *f, const struct class_report *report,
     if (mask & report->threat_mask) facts.mask |= EVIDENCE_THREAT_LIST;
     uint64_t count = states ? states[n] : 0;
     if (!mask && !facts.mask && !count) continue;
-    unsigned char b[CLASSIFIED_RECORD_SIZE], *p = b;
+    unsigned char b[CLASSIFIED_RECORD_SIZE + RECORD_SLACK], *p = b;
     *p++ = RECORD_CLASSIFIED;
     protocol_address_put(&p, report->addresses[n]);
     protocol_put(&p, mask, 8);
     *p++ = facts.mask;
     *p++ = (unsigned char)security_class(&facts);
     protocol_put(&p, count, 8);
-    if (!(ok = protocol_frame(f, b, p - b, checksum, error))) break;
+    if (!(ok = record_frame(f, b, p, CLASSIFIED_RECORD_SIZE, checksum, error))) break;
     sent->classified++;
   }
   map_clear(&asked);
@@ -498,13 +514,13 @@ static bool write_classification(FILE *f, const struct class_report *report,
   size_t sets = report->classifier ? classifier_set_count(report->classifier) : 0;
   for (size_t n = 0; n < sets; n++) {
     const struct class_set *set = classifier_set(report->classifier, n);
-    unsigned char b[CLASS_SET_RECORD_SIZE], *p = b;
+    unsigned char b[CLASS_SET_RECORD_SIZE + RECORD_SLACK], *p = b;
     *p++ = RECORD_CLASS_SET;
     *p++ = (unsigned char)set->id;
     *p++ = (unsigned char)set->category;
     *p++ = (unsigned char)set->status;
     protocol_put(&p, set->entries, 8);
-    if (!protocol_frame(f, b, p - b, checksum, error)) return false;
+    if (!record_frame(f, b, p, CLASS_SET_RECORD_SIZE, checksum, error)) return false;
     sent->class_sets++;
   }
   return true;
@@ -541,7 +557,7 @@ bool protocol_write_ranked(FILE *f, const struct aggregate *a,
     struct flow_rates rates;
     if (!flow || !ranking_rates(ranked->ranking, ranked->snapshot[n], &rates))
       return fm_error_fail(error, FM_FAILURE_INTERNAL, EINVAL, "snapshot candidate");
-    unsigned char b[SNAPSHOT_CANDIDATE_RECORD_SIZE], *p = b;
+    unsigned char b[SNAPSHOT_CANDIDATE_RECORD_SIZE + RECORD_SLACK], *p = b;
     *p++ = RECORD_SNAPSHOT_CANDIDATE;
     protocol_address_put(&p, flow->local);
     protocol_address_put(&p, flow->remote);
@@ -550,7 +566,7 @@ bool protocol_write_ranked(FILE *f, const struct aggregate *a,
     put_double(&p, ranker_score(ranked->ranker, ranked->snapshot[n]));
     protocol_put(&p, rates.order, 8);
     protocol_put(&p, flow->states, 8);
-    if (!protocol_frame(f, b, p - b, &checksum, error))
+    if (!record_frame(f, b, p, SNAPSHOT_CANDIDATE_RECORD_SIZE, &checksum, error))
       return false;
     sent.snapshot_candidates++;
   }

@@ -61,8 +61,9 @@
 #define BUILD_FREEBSD_VERSION 0
 #endif
 
-/* Live ranking policy: a flow fades over this many seconds once its counters
- * stop; rates are smoothed with this weight on the newest interval. */
+/* Rate history, not ranking policy (that is the active profile's): a flow's
+ * activity fades over this many seconds once its counters stop; rates are
+ * smoothed with this weight on the newest interval. */
 #define FADE_SECONDS 20.0
 #define RATE_SMOOTHING 0.5
 

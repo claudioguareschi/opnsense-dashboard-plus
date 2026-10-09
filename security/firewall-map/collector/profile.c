@@ -572,7 +572,8 @@ bool ranker_select(struct ranker *p, const struct aggregate *a, const struct ran
     p->scores_capacity = flows;
   }
   p->scores_count = flows;
-  memset(p->scores, 0, flows * sizeof(*p->scores));
+  if (flows) /* no flows: scores may still be NULL */
+    memset(p->scores, 0, flows * sizeof(*p->scores));
   if (!p->active)
     return fm_error_fail(error, FM_FAILURE_INTERNAL, EINVAL, "no active ranking profile");
   return select_scored(p, a, r, interval, limit, error);

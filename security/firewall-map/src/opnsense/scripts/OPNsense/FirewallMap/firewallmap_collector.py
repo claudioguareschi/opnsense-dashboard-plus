@@ -1324,6 +1324,16 @@ class Collector:
                     log_notice("samples are accepted again")
                 if omitted and not current.get("threat_remotes_omitted"):
                     log_warning(f"threat recording incomplete: {omitted} remotes over the summary budget")
+                # PF state lifetime validation (collector/lifetime.h) fails open: say so when it stops
+                # and when it resumes, never per sample; a refused sample carries no verdict
+                validation = telemetry.get("lifetime_validation")
+                if not refused and validation in (0, 1):
+                    if validation == 0 and current.get("lifetime_validation") != 0:
+                        log_warning("PF state lifetime validation inactive (PF timeouts unreadable, error "
+                                    f"{telemetry.get('lifetime_error')}): every PF state is kept")
+                    elif validation == 1 and current.get("lifetime_validation") == 0:
+                        log_notice("PF state lifetime validation active again")
+                    current["lifetime_validation"] = validation
                 current.update(helper=sample.get("helper"), telemetry=telemetry or None,
                                baseline=sample["baseline"], refused=refused, states=sample["counts"]["states"],
                                threat_remotes_omitted=omitted, last_sample_at=time.time(),

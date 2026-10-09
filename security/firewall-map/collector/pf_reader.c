@@ -23,12 +23,14 @@
  */
 
 #include "pf_reader.h"
+#include "alloc.h"
 #include "protocol.h"
 #include <errno.h>
 #ifdef __FreeBSD__
 #include <arpa/inet.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <net/if.h>
 #include <net/pfvar.h>
 #include <netlink/netlink.h>
@@ -413,7 +415,9 @@ static void datagram(struct reader *r, unsigned char *buffer, size_t left,
       int error;
       memcpy(&error, h + 1, sizeof(error));
       if (error) {
-        fm_error_set(r->error, error < 0 ? -error : error,
+        /* the kernel sends -errno; INT_MIN is no errno (and cannot be
+         * negated): a status no errno can be is a protocol error */
+        fm_error_set(r->error, error == INT_MIN ? EPROTO : error < 0 ? -error : error,
                      "kernel netlink error");
         return;
       }
@@ -643,20 +647,38 @@ bool pf_reader_state_count(uint64_t *count) {
  * never sent: counters are not cleared) and GET_RULESETS / GET_RULESET
  * (PF_RS_PATH, PF_RS_NR -> PF_RS_NR, PF_RS_NAME). */
 #if __FreeBSD_version >= 1500000
+/* lifetime.h copies PF's timeout table (its size and which indexes time a
+ * state): a kernel that changes it must not compile, rather than silently
+ * leave the lifetime screen without a bound (it fails open) */
+_Static_assert(LIFETIME_TIMEOUTS == PFTM_MAX, "PF timeout table size (lifetime.h)");
+_Static_assert(PFTM_TCP_FIRST_PACKET == 0 && PFTM_OTHER_MULTIPLE == 13 && PFTM_FRAG == 14 &&
+                   PFTM_TS_DIFF == 19 && PFTM_SCTP_FIRST_PACKET == 20 && PFTM_SCTP_CLOSED == 24,
+               "PF state timeout indexes (lifetime_index_applies)");
+/* At most this many rulesets (main + anchors) are walked; beyond it the bound
+ * is unavailable (E2BIG) and the screen fails open. */
 #define RULESETS_MAX 1024
 struct pf_ruleset_entry {
-  char path[MAXPATHLEN];
+  char *path; /* owned (fm_malloc) */
   uint32_t ticket;
   uint64_t max;
 };
-struct pf_rule_cache {
+struct ruleset_list {
   struct pf_ruleset_entry *sets;
-  size_t count;
-  uint64_t rule_max_ever;
+  size_t count, capacity;
 };
 struct nl_call {
   struct snl_state ss;
   int family;
+};
+/* The collector's rule cache: the rulesets of the last walk (their tickets
+ * and rule maxima), the rule maximum seen in this process, and one netlink
+ * socket kept between samples. The socket is closed after any failed
+ * exchange, so no stale reply or sequence state reaches the next walk. */
+struct pf_rule_cache {
+  struct ruleset_list rulesets;
+  uint64_t rule_max_ever;
+  struct nl_call nl;
+  bool open;
 };
 static bool nl_open(struct nl_call *c) {
   if (!snl_init(&c->ss, NETLINK_GENERIC))
@@ -816,18 +838,53 @@ static int get_child(struct nl_call *c, const char *path, uint32_t nr, char *nam
     memcpy(name, rs.name, sizeof(rs.name));
   return error;
 }
-/* One ruleset's rule maximum, from the cache while its ticket is unchanged. */
-static int ruleset_max(struct nl_call *c, const struct pf_rule_cache *cache,
-                       struct pf_ruleset_entry *fresh, size_t *fresh_count, const char *path,
-                       uint64_t *max) {
+static void list_free(struct ruleset_list *list) {
+  for (size_t k = 0; k < list->count; k++)
+    fm_free(list->sets[k].path);
+  fm_free(list->sets);
+  *list = (struct ruleset_list){0};
+}
+/* Appends an entry (taking ownership of its path); grows by doubling, never
+ * past RULESETS_MAX entries. */
+static int list_add(struct ruleset_list *list, struct pf_ruleset_entry entry) {
+  if (list->count == list->capacity) {
+    size_t capacity = list->capacity ? list->capacity * 2 : 8;
+    if (capacity > RULESETS_MAX)
+      capacity = RULESETS_MAX;
+    if (list->count >= capacity)
+      return E2BIG;
+    void *grown = fm_realloc(list->sets, capacity * sizeof(*list->sets));
+    if (!grown)
+      return ENOMEM;
+    list->sets = grown;
+    list->capacity = capacity;
+  }
+  list->sets[list->count++] = entry;
+  return 0;
+}
+static char *path_copy(const char *path) {
+  size_t length = strnlen(path, MAXPATHLEN);
+  char *copy = length < MAXPATHLEN ? fm_malloc(length + 1) : NULL;
+  if (copy) {
+    memcpy(copy, path, length);
+    copy[length] = '\0';
+  }
+  return copy;
+}
+/* One ruleset's rule maximum: the previous walk's while its ticket is
+ * unchanged (its entry moves to the new list), else every rule read again. */
+static int ruleset_max(struct nl_call *c, struct ruleset_list *previous, struct ruleset_list *fresh,
+                       const char *path, uint64_t *max) {
   uint32_t nr, ticket;
   int error = get_rules(c, path, &nr, &ticket);
   if (error)
     return error;
-  for (size_t k = 0; k < cache->count; k++)
-    if (cache->sets[k].ticket == ticket && !strcmp(cache->sets[k].path, path)) {
-      *max = cache->sets[k].max;
-      fresh[(*fresh_count)++] = cache->sets[k];
+  for (size_t k = 0; k < previous->count; k++)
+    if (previous->sets[k].path && previous->sets[k].ticket == ticket && !strcmp(previous->sets[k].path, path)) {
+      if ((error = list_add(fresh, previous->sets[k])))
+        return error;
+      *max = previous->sets[k].max;
+      previous->sets[k].path = NULL; /* moved */
       return 0;
     }
   uint64_t best = 0;
@@ -839,73 +896,82 @@ static int ruleset_max(struct nl_call *c, const struct pf_rule_cache *cache,
   }
   if (error)
     return error; /* EBUSY: the ruleset changed during the walk */
-  struct pf_ruleset_entry *e = &fresh[(*fresh_count)++];
-  snprintf(e->path, sizeof(e->path), "%s", path);
-  e->ticket = ticket;
-  e->max = best;
+  struct pf_ruleset_entry entry = {path_copy(path), ticket, best};
+  if (!entry.path)
+    return ENOMEM;
+  if ((error = list_add(fresh, entry))) {
+    fm_free(entry.path);
+    return error;
+  }
   *max = best;
   return 0;
 }
-/* Every filter ruleset, the main one and each anchor (depth first). */
+/* Every filter ruleset, the main one and each anchor (depth first), with
+ * owned path strings on a stack that grows only as the configuration needs. */
 static int rules_bound(struct nl_call *c, struct pf_rule_cache *cache, uint64_t *max) {
-  struct pf_ruleset_entry *fresh = calloc(RULESETS_MAX, sizeof(*fresh));
-  char(*pending)[MAXPATHLEN] = calloc(RULESETS_MAX, MAXPATHLEN);
-  size_t fresh_count = 0, pending_count = 1, walked = 0;
-  int error = fresh && pending ? 0 : ENOMEM;
+  struct ruleset_list fresh = {0}, pending = {0};
+  char *main_path = path_copy("");
+  int error = main_path ? list_add(&pending, (struct pf_ruleset_entry){.path = main_path}) : ENOMEM;
+  if (error)
+    fm_free(main_path);
   uint64_t best = 0;
-  while (!error && pending_count) {
-    char path[MAXPATHLEN];
-    memcpy(path, pending[--pending_count], MAXPATHLEN);
-    if (++walked > RULESETS_MAX) {
-      error = E2BIG;
-      break;
-    }
+  size_t walked = 0;
+  while (!error && pending.count) {
+    char *path = pending.sets[--pending.count].path;
     uint64_t set_max = 0;
     uint32_t children = 0;
-    error = ruleset_max(c, cache, fresh, &fresh_count, path, &set_max);
+    if (++walked > RULESETS_MAX)
+      error = E2BIG;
+    if (!error)
+      error = ruleset_max(c, &cache->rulesets, &fresh, path, &set_max);
     if (!error && set_max > best)
       best = set_max;
     if (!error)
       error = get_children(c, path, &children);
     for (uint32_t k = 0; k < children && !error; k++) {
-      char name[MAXPATHLEN];
+      char name[MAXPATHLEN], child[MAXPATHLEN];
       if ((error = get_child(c, path, k, name)))
         break;
-      if (pending_count >= RULESETS_MAX) {
-        error = E2BIG;
-        break;
-      }
-      int length = path[0] ? snprintf(pending[pending_count], MAXPATHLEN, "%s/%s", path, name)
-                           : snprintf(pending[pending_count], MAXPATHLEN, "%s", name);
-      if (length < 0 || length >= MAXPATHLEN) {
+      int length = path[0] ? snprintf(child, sizeof(child), "%s/%s", path, name)
+                           : snprintf(child, sizeof(child), "%s", name);
+      if (length < 0 || length >= (int)sizeof(child)) {
         error = ENAMETOOLONG;
         break;
       }
-      pending_count++;
+      char *copy = path_copy(child);
+      if (!copy || (error = list_add(&pending, (struct pf_ruleset_entry){.path = copy}))) {
+        fm_free(copy);
+        error = error ? error : ENOMEM;
+      }
     }
+    fm_free(path);
   }
-  free(pending);
+  list_free(&pending);
   if (error) {
-    free(fresh);
+    list_free(&fresh);
     return error;
   }
-  free(cache->sets);
-  cache->sets = fresh;
-  cache->count = fresh_count;
+  list_free(&cache->rulesets); /* entries moved to fresh are NULL here */
+  cache->rulesets = fresh;
   if (best > cache->rule_max_ever)
     cache->rule_max_ever = best;
   *max = cache->rule_max_ever;
   return 0;
 }
+static void nl_close(struct pf_rule_cache *cache) {
+  if (cache->open)
+    snl_free(&cache->nl.ss);
+  cache->open = false;
+}
 struct lifetime_bound pf_reader_lifetime_bound(struct pf_rule_cache **cachep) {
   struct lifetime_bound bound = {0};
-  if (!*cachep && !(*cachep = calloc(1, sizeof(**cachep)))) {
+  if (!*cachep && !(*cachep = fm_calloc(1, sizeof(**cachep)))) {
     bound.error = ENOMEM;
     return bound;
   }
-  struct nl_call c;
+  struct pf_rule_cache *cache = *cachep;
   errno = 0;
-  if (!nl_open(&c)) {
+  if (!cache->open && !(cache->open = nl_open(&cache->nl))) {
     bound.error = errno ? errno : ENXIO;
     return bound;
   }
@@ -913,12 +979,12 @@ struct lifetime_bound pf_reader_lifetime_bound(struct pf_rule_cache **cachep) {
   int error = 0;
   for (unsigned i = 0; i < LIFETIME_TIMEOUTS && !error; i++)
     if (lifetime_index_applies(i))
-      error = get_timeout(&c, i, &table[i]);
+      error = get_timeout(&cache->nl, i, &table[i]);
   uint64_t rules = 0;
   if (!error)
-    error = rules_bound(&c, *cachep, &rules);
-  snl_free(&c.ss);
+    error = rules_bound(&cache->nl, cache, &rules);
   if (error) {
+    nl_close(cache); /* reopened, clean, by the next walk */
     bound.error = error;
     return bound;
   }
@@ -928,9 +994,11 @@ struct lifetime_bound pf_reader_lifetime_bound(struct pf_rule_cache **cachep) {
   return bound;
 }
 void pf_reader_rule_cache_free(struct pf_rule_cache *cache) {
-  if (cache)
-    free(cache->sets);
-  free(cache);
+  if (!cache)
+    return;
+  nl_close(cache);
+  list_free(&cache->rulesets);
+  fm_free(cache);
 }
 #else
 struct pf_rule_cache {

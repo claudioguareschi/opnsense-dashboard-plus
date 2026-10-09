@@ -409,6 +409,23 @@ class CollectorLoopTest(unittest.TestCase):
         # the helper was started with the active profile
         self.assertEqual(self.collector.collector_engine.profile, balanced)
 
+    def test_lifetime_validation_changes_are_logged_once(self):
+        """The collector's lifetime screen fails open: the service says so when validation stops and
+        when it resumes, never every sample, and a refused sample (no dump, no verdict) says nothing."""
+        def sample(validation, error=0, refused=None):
+            return {"telemetry": {"lifetime_validation": validation, "lifetime_error": error}, "refused": refused,
+                    "baseline": False, "counts": {"states": 1}}
+        refusal = {"reason": "states", "kind": "", "actual": 2, "limit": 1}
+        with mock.patch.object(COLLECTOR, "log_warning") as warning, mock.patch.object(COLLECTOR, "log_notice") as notice:
+            for item in (sample(1), sample(1), sample(0, 71), sample(0, 71), sample(0, 0, refusal),
+                         sample(0, 71), sample(1), sample(1)):
+                self.collector._record_collector(sample=item)
+        lifetime = [call for call in warning.call_args_list if "lifetime" in call.args[0]]
+        self.assertEqual(len(lifetime), 1)
+        self.assertIn("error 71", lifetime[0].args[0])
+        self.assertEqual([call.args[0] for call in notice.call_args_list if "lifetime" in call.args[0]],
+                         ["PF state lifetime validation active again"])
+
     def test_the_sampling_interval_follows_the_collector_within_the_bounds(self):
         """Adaptive refresh: the collector's recommendation, or the base interval if longer, within the
         administrator's bounds; the map document and Status show the interval used."""
