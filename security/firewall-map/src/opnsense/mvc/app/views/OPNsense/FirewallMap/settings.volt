@@ -63,7 +63,6 @@
                 showRows();
             });
         };
-        $('#evidence_sources').html({{ lang._('The firewall log, Suricata alerts, the threat lists and AbuseIPDB')|json_encode }});
         provider.change(showRows);
         // one model behind every tab: the tabs' forms (frm_settings-*) load from one request
         mapDataToFormUI({'frm_settings': '/api/firewallmap/settings/get'}).done(function () {

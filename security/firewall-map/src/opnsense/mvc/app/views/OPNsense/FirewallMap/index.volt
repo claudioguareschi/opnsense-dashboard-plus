@@ -195,7 +195,7 @@
         flow_many: {{ lang._('flows')|json_encode }},
         organization: {{ lang._('Organization')|json_encode }},
         pf_sets: {{ lang._('PF sets')|json_encode }},
-        set_country: {{ lang._('country set: membership decided by the firewall, which may differ from the geolocation')|json_encode }},
+        set_country: {{ lang._('country blocklist: membership decided by the firewall, which may differ from the geolocation')|json_encode }},
         set_operational: {{ lang._('operational set')|json_encode }},
         other_ports: {{ lang._('Other ports')|json_encode }},
         other_services: {{ lang._('Other services')|json_encode }},

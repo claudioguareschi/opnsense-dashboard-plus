@@ -36,9 +36,10 @@
             <threat_lists type=".\ThreatListField">
                 <Multiple>Y</Multiple>
             </threat_lists>
-            <!-- pf tables that describe remotes by country or by operational meaning (never threats) -->
+            <!-- pf tables that describe remotes by country (GeoIP aliases) or by operational meaning (never threats) -->
             <country_sets type=".\ClassificationSetField">
                 <Multiple>Y</Multiple>
+                <AliasType>geoip</AliasType>
             </country_sets>
             <operational_sets type=".\ClassificationSetField">
                 <Multiple>Y</Multiple>

@@ -32,28 +32,42 @@ use OPNsense\Core\Backend;
 
 /**
  * The pf tables that can serve as country or operational classification sets: every table loaded
- * now except OPNsense's internal ones, as the collector lists them. Asking for them takes a configd
+ * now except OPNsense's internal ones, as the collector lists them, or only the aliases of one type
+ * (<AliasType> in the model: country sets offer GeoIP aliases). Asking for them takes a configd
  * call, so the list is built only when the settings form or a validation needs it, once per request.
  */
 class ClassificationSetField extends BaseListField
 {
+    private $aliasType = '';
+
+    public function setAliasType($value)
+    {
+        $this->aliasType = (string)$value;
+    }
+
     private function loadOptions()
     {
-        if (!$this->hasStaticOptions()) {
-            $options = [];
+        if (!$this->hasStaticOptions('')) {
+            $offered = ['' => []];
             $report = json_decode((string)(new Backend())->configdRun('firewallmap tables'), true);
             foreach ($report['sets'] ?? [] as $table) {
                 if (!empty($table['name'])) {
-                    $options[$table['name']] = $table['description'] !== '' ? sprintf('%s (%s)', $table['name'], $table['description']) : $table['name'];
+                    $label = $table['description'] !== '' ? sprintf('%s (%s)', $table['name'], $table['description']) : $table['name'];
+                    $offered[''][$table['name']] = $label;
+                    $offered[$table['type'] ?? ''][$table['name']] = $label;
                 }
             }
-            $this->setStaticOptions($options);
+            foreach ($offered as $type => $options) {
+                $this->setStaticOptions($options, $type);
+            }
         }
-        $this->internalOptionList = $this->getStaticOptions();
-        /* a stored table that is gone (alias deleted) stays listed and valid, so saving still works */
+        $this->internalOptionList = $this->getStaticOptions($this->aliasType);
+        /* a stored table stays listed and valid, so saving still works: one of another type keeps
+           its label (it still classifies), one that is gone (alias deleted) is marked */
+        $tables = $this->getStaticOptions('');
         foreach (explode(',', $this->getInitialValue()) as $name) {
             if ($name !== '' && !isset($this->internalOptionList[$name])) {
-                $this->internalOptionList[$name] = sprintf(gettext('%s (not found)'), $name);
+                $this->internalOptionList[$name] = $tables[$name] ?? sprintf(gettext('%s (not found)'), $name);
             }
         }
     }
