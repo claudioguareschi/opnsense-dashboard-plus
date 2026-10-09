@@ -1,148 +1,164 @@
 <form>
-    <field>
-        <type>header</type>
-        <label>Geolocation</label>
-    </field>
-    <field>
-        <id>firewallmap.general.provider</id>
-        <label>Geolocation service</label>
-        <type>dropdown</type>
-        <help>Where the map looks up the location and network of each address. Downloads go only to the chosen provider; addresses are never sent anywhere.</help>
-    </field>
-    <field>
-        <id>firewallmap.general.license_key</id>
-        <label>MaxMind license key</label>
-        <type>password</type>
-        <help>Leave empty to keep the stored key. Without a key here, the key of a MaxMind GeoIP alias is used when one exists.</help>
-    </field>
-    <field>
-        <id>firewallmap.general.remove_license_key</id>
-        <label>Remove the stored key</label>
-        <type>checkbox</type>
-        <help>Deletes the MaxMind key saved here when you save. A key in a MaxMind GeoIP alias is not affected.</help>
-    </field>
-    <field>
-        <id>firewallmap.general.update_days</id>
-        <label>Update every (days)</label>
-        <type>text</type>
-        <help>How old the database may get before a new one is downloaded.</help>
-    </field>
-    <field>
-        <type>header</type>
-        <label>Firewall map location</label>
-    </field>
-    <field>
-        <id>firewallmap.general.discover_external_ip</id>
-        <label>Discover external IPv4 address</label>
-        <type>checkbox</type>
-        <help>When the assigned WAN address is private and no manual location is set, periodically asks a public HTTPS service for the WAN's visible IPv4 address. The address is used only to place the firewall on the map. Discovery is ignored while both manual coordinates are set.</help>
-    </field>
-    <field>
-        <id>firewallmap.general.latitude</id>
-        <label>Latitude</label>
-        <type>text</type>
-        <help>Optional manual firewall location. Enter signed decimal degrees, for example 40.7128 and -74.0060. Enter both latitude and longitude to override GeoIP for every local map endpoint, including public WAN addresses.</help>
-    </field>
-    <field>
-        <id>firewallmap.general.longitude</id>
-        <label>Longitude</label>
-        <type>text</type>
-        <help>Optional manual firewall location. Enter signed decimal degrees, for example 40.7128 and -74.0060. Enter both latitude and longitude to override GeoIP for every local map endpoint, including public WAN addresses.</help>
-    </field>
-    <field>
-        <type>header</type>
-        <label>Threats</label>
-    </field>
-    <field>
-        <id>firewallmap.general.threat_lists</id>
-        <label>Threat lists</label>
-        <type>select_multiple</type>
-        <style>selectpicker</style>
-        <help>PF tables used to flag traffic on the map and in threat history. With none selected: feed tables and the aliases your block rules use. A curated feed counts only through its FWMAP_* alias (Maintain blocklist aliases).</help>
-    </field>
-    <field>
-        <id>firewallmap.general.record_threats</id>
-        <label>Record in the background</label>
-        <type>checkbox</type>
-        <help>Keep recording threats while the map is closed, as long as the widget is on a dashboard.</help>
-    </field>
-    <field>
-        <id>firewallmap.general.abuseipdb_key</id>
-        <label>AbuseIPDB API key</label>
-        <type>password</type>
-        <help>Optional: enables abuse reports when investigating an address, and the AbuseIPDB blacklist. Leave empty to keep the stored key.</help>
-    </field>
-    <field>
-        <id>firewallmap.general.remove_abuseipdb_key</id>
-        <label>Remove the stored key</label>
-        <type>checkbox</type>
-        <help>Deletes the AbuseIPDB key when you save. Abuse reports and the blacklist stop until a new key is entered.</help>
-    </field>
-    <field>
-        <id>firewallmap.general.blocklist_aliases</id>
-        <label>Maintain blocklist aliases</label>
-        <type>checkbox</type>
-        <help>Keeps an FWMAP_* alias for each selected feed and for the AbuseIPDB blacklist. The map flags traffic with these PF tables, so selected feeds and the blacklist need it; you can also use the aliases in your own rules. No rules are added.</help>
-    </field>
-    <field>
-        <type>header</type>
-        <label>Classification sets</label>
-    </field>
-    <field>
-        <id>firewallmap.general.country_sets</id>
-        <label>Country sets</label>
-        <type>select_multiple</type>
-        <style>selectpicker</style>
-        <help>PF tables (for example GeoIP aliases) that describe where a remote is, as the firewall itself decides. The map shows a match beside the geolocation, which may disagree with it; a country set never marks traffic as a threat.</help>
-    </field>
-    <field>
-        <id>firewallmap.general.operational_sets</id>
-        <label>Operational sets</label>
-        <type>select_multiple</type>
-        <style>selectpicker</style>
-        <help>PF tables with a meaning of your own (partners, cloud providers, monitoring...). The map shows which ones contain a remote; they never mark traffic as a threat. Threat lists, country and operational sets together use at most 64 tables.</help>
-    </field>
-    <field>
-        <type>header</type>
-        <label>High availability</label>
-    </field>
-    <field>
-        <id>firewallmap.general.carp_backup_view</id>
-        <label>On a CARP backup</label>
-        <type>dropdown</type>
-        <help>A CARP backup holds copies of the master's connections (pfsync) without their traffic counters. Mirror shows them, marked as mirrored and ranked by connections and security evidence, so the map is ready when this firewall takes over; Show only this firewall's traffic leaves them out. On the master, or without CARP, this changes nothing.</help>
-    </field>
-    <field>
-        <type>header</type>
-        <label>Collector resources</label>
-    </field>
-    <field>
-        <id>firewallmap.general.interval_min</id>
-        <label>Shortest refresh interval (s)</label>
-        <type>text</type>
-        <help>How often an open map is refreshed at most. The collector measures what each sample costs and, on a busy firewall, asks for a longer interval so it stays a small share of the CPU; the interval never goes below this.</help>
-    </field>
-    <field>
-        <id>firewallmap.general.interval_max</id>
-        <label>Longest refresh interval (s)</label>
-        <type>text</type>
-        <help>The longest the collector may stretch the interval to, however costly a sample is.</help>
-    </field>
-    <field>
-        <id>firewallmap.general.helper_memory</id>
-        <label>Memory budget (MiB)</label>
-        <type>text</type>
-        <hint>automatic</hint>
-        <help>The most memory the state collector may use per sample. It also sets the largest PF state table the map will process: above it a sample is refused and the map says so, instead of slowing the firewall. Leave empty for 5% of physical memory, at most 1024 MiB. The Status page shows the resulting state limit.</help>
-    </field>
-    <field>
-        <type>header</type>
-        <label>Logging</label>
-    </field>
-    <field>
-        <id>firewallmap.general.audit_log</id>
-        <label>Log administrator actions</label>
-        <type>checkbox</type>
-        <help>Adds to the Firewall Map log who investigated an address (which sends it to RDAP, RIPEstat and AbuseIPDB), changed or deleted threat entries, and saved, annotated or deleted snapshots. Downloads, errors and the collector are always logged.</help>
-    </field>
+    <tab id="general" description="General">
+        <field>
+            <type>header</type>
+            <label>Firewall map location</label>
+        </field>
+        <field>
+            <id>firewallmap.general.discover_external_ip</id>
+            <label>Discover external IPv4 address</label>
+            <type>checkbox</type>
+            <help>When the assigned WAN address is private and no manual location is set, periodically asks a public HTTPS service for the WAN's visible IPv4 address. The address is used only to place the firewall on the map. Discovery is ignored while both manual coordinates are set.</help>
+        </field>
+        <field>
+            <id>firewallmap.general.latitude</id>
+            <label>Latitude</label>
+            <type>text</type>
+            <help>Optional manual firewall location. Enter signed decimal degrees, for example 40.7128 and -74.0060. Enter both latitude and longitude to override GeoIP for every local map endpoint, including public WAN addresses.</help>
+        </field>
+        <field>
+            <id>firewallmap.general.longitude</id>
+            <label>Longitude</label>
+            <type>text</type>
+            <help>Optional manual firewall location. Enter signed decimal degrees, for example 40.7128 and -74.0060. Enter both latitude and longitude to override GeoIP for every local map endpoint, including public WAN addresses.</help>
+        </field>
+        <field>
+            <type>header</type>
+            <label>High availability</label>
+        </field>
+        <field>
+            <id>firewallmap.general.carp_backup_view</id>
+            <label>On a CARP backup</label>
+            <type>dropdown</type>
+            <help>A CARP backup holds copies of the master's connections (pfsync) without their traffic counters. Mirror shows them, marked as mirrored and ranked by connections and security evidence, so the map is ready when this firewall takes over; Show only this firewall's traffic leaves them out. On the master, or without CARP, this changes nothing.</help>
+        </field>
+        <field>
+            <type>header</type>
+            <label>Collector resources</label>
+        </field>
+        <field>
+            <id>firewallmap.general.interval_min</id>
+            <label>Shortest refresh interval (s)</label>
+            <type>text</type>
+            <help>How often an open map is refreshed at most. The collector measures what each sample costs and, on a busy firewall, asks for a longer interval so it stays a small share of the CPU; the interval never goes below this.</help>
+        </field>
+        <field>
+            <id>firewallmap.general.interval_max</id>
+            <label>Longest refresh interval (s)</label>
+            <type>text</type>
+            <help>The longest the collector may stretch the interval to, however costly a sample is.</help>
+        </field>
+        <field>
+            <id>firewallmap.general.helper_memory</id>
+            <label>Memory budget (MiB)</label>
+            <type>text</type>
+            <hint>automatic</hint>
+            <help>The most memory the state collector may use per sample. It also sets the largest PF state table the map will process: above it a sample is refused and the map says so, instead of slowing the firewall. Leave empty for 5% of physical memory, at most 1024 MiB. The Status page shows the resulting state limit.</help>
+        </field>
+        <field>
+            <type>header</type>
+            <label>Classification sets</label>
+        </field>
+        <field>
+            <id>firewallmap.general.country_sets</id>
+            <label>Country sets</label>
+            <type>select_multiple</type>
+            <style>selectpicker</style>
+            <help>PF tables (for example GeoIP aliases) that describe where a remote is, as the firewall itself decides. The map shows a match beside the geolocation, which may disagree with it; a country set never marks traffic as a threat.</help>
+        </field>
+        <field>
+            <id>firewallmap.general.operational_sets</id>
+            <label>Operational sets</label>
+            <type>select_multiple</type>
+            <style>selectpicker</style>
+            <help>PF tables with a meaning of your own (partners, cloud providers, monitoring...). The map shows which ones contain a remote; they never mark traffic as a threat. Threat lists, country and operational sets together use at most 64 tables.</help>
+        </field>
+        <field>
+            <type>header</type>
+            <label>Logging</label>
+        </field>
+        <field>
+            <id>firewallmap.general.audit_log</id>
+            <label>Log administrator actions</label>
+            <type>checkbox</type>
+            <help>Adds to the Firewall Map log who investigated an address (which sends it to RDAP, RIPEstat and AbuseIPDB), changed or deleted threat entries, and saved, annotated or deleted snapshots. Downloads, errors and the collector are always logged.</help>
+        </field>
+    </tab>
+    <tab id="geolocation" description="Geolocation">
+        <field>
+            <id>firewallmap.general.provider</id>
+            <label>Geolocation service</label>
+            <type>dropdown</type>
+            <help>Where the map looks up the location and network of each address. Downloads go only to the chosen provider; addresses are never sent anywhere.</help>
+        </field>
+        <field>
+            <id>firewallmap.general.license_key</id>
+            <label>MaxMind license key</label>
+            <type>password</type>
+            <help>Leave empty to keep the stored key. Without a key here, the key of a MaxMind GeoIP alias is used when one exists.</help>
+        </field>
+        <field>
+            <id>firewallmap.general.remove_license_key</id>
+            <label>Remove the stored key</label>
+            <type>checkbox</type>
+            <help>Deletes the MaxMind key saved here when you save. A key in a MaxMind GeoIP alias is not affected.</help>
+        </field>
+        <field>
+            <id>firewallmap.general.update_days</id>
+            <label>Update every (days)</label>
+            <type>text</type>
+            <help>How old the database may get before a new one is downloaded.</help>
+        </field>
+    </tab>
+    <tab id="security" description="Security">
+        <field>
+            <type>header</type>
+            <label>Threat intelligence</label>
+        </field>
+        <field>
+            <id>firewallmap.general.threat_lists</id>
+            <label>Threat lists</label>
+            <type>select_multiple</type>
+            <style>selectpicker</style>
+            <help>PF tables used to flag traffic on the map and in threat history. With none selected: feed tables and the aliases your block rules use. A curated feed counts only through its FWMAP_* alias (Maintain blocklist aliases).</help>
+        </field>
+        <field>
+            <id>firewallmap.general.abuseipdb_key</id>
+            <label>AbuseIPDB API key</label>
+            <type>password</type>
+            <help>Optional: enables abuse reports when investigating an address, and the AbuseIPDB blacklist. Leave empty to keep the stored key.</help>
+        </field>
+        <field>
+            <id>firewallmap.general.remove_abuseipdb_key</id>
+            <label>Remove the stored key</label>
+            <type>checkbox</type>
+            <help>Deletes the AbuseIPDB key when you save. Abuse reports and the blacklist stop until a new key is entered.</help>
+        </field>
+        <field>
+            <type>header</type>
+            <label>Blocklist integration</label>
+        </field>
+        <field>
+            <id>firewallmap.general.blocklist_aliases</id>
+            <label>Maintain blocklist aliases</label>
+            <type>checkbox</type>
+            <help>Keeps an FWMAP_* alias for each selected feed and for the AbuseIPDB blacklist. The map flags traffic with these PF tables, so selected feeds and the blacklist need it; you can also use the aliases in your own rules. No rules are added.</help>
+        </field>
+        <field>
+            <type>header</type>
+            <label>Security evidence</label>
+        </field>
+        <field>
+            <id>evidence_sources</id>
+            <label>Evidence sources</label>
+            <type>info</type>
+            <help>Flows with security evidence are flagged, kept tracked and can have places reserved in the ranking (Security visibility in each profile). The evidence comes from blocked attempts in the firewall log (the last 10 minutes), Suricata alerts (the last hour), the threat lists above and AbuseIPDB lookups. Only block rules with logging enabled are seen, and IDS evidence needs Services: Intrusion Detection. The Status page shows each source and its limits.</help>
+        </field>
+        <field>
+            <id>firewallmap.general.record_threats</id>
+            <label>Record in the background</label>
+            <type>checkbox</type>
+            <help>Keep recording threats while the map is closed, as long as the widget is on a dashboard.</help>
+        </field>
+    </tab>
 </form>

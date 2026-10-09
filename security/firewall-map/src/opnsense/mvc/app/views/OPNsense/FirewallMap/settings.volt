@@ -63,7 +63,9 @@
                 showRows();
             });
         };
+        $('#evidence_sources').html({{ lang._('The firewall log, Suricata alerts, the threat lists and AbuseIPDB')|json_encode }});
         provider.change(showRows);
+        // one model behind every tab: the tabs' forms (frm_settings-*) load from one request
         mapDataToFormUI({'frm_settings': '/api/firewallmap/settings/get'}).done(function () {
             $('.selectpicker').selectpicker('refresh');
             // the form is filled without change events: show the provider's rows now
@@ -71,46 +73,85 @@
             describeKeys();
         });
 
-        // ranking profiles: built-ins can be activated and copied; custom profiles also edited and
+        // ranking profiles: built-ins can be activated and cloned; custom profiles also edited and
         // deleted (never the active one). Changes take effect on Apply, like every other setting.
-        const profileGrid = $("#{{ formGridProfile['table_id'] }}");
-        profileGrid.UIBootgrid({
-            search: '/api/firewallmap/profiles/search_item',
-            get: '/api/firewallmap/profiles/get_item/',
-            set: '/api/firewallmap/profiles/set_item/',
-            add: '/api/firewallmap/profiles/add_item/',
-            del: '/api/firewallmap/profiles/del_item/',
-            commands: {
-                activate: {
-                    method: function (event) {
-                        const uuid = $(this).data('row-id');
-                        ajaxCall(`/api/firewallmap/profiles/activate/${uuid}`, {}, function () {
-                            profileGrid.bootgrid('reload');
-                            $(document).trigger('settings-changed');
-                        });
+        // looked up each time: initializing the grid replaces the table element
+        const profileGrid = () => $("#{{ formGridProfile['table_id'] }}");
+        const escape = (text) => $('<div/>').text(text).html();
+        let profilesLoaded = false;
+        const loadProfiles = function () {
+            if (profilesLoaded) {
+                profileGrid().bootgrid('reload');
+                return;
+            }
+            profilesLoaded = true;
+            profileGrid().UIBootgrid({
+                search: '/api/firewallmap/profiles/search_item',
+                get: '/api/firewallmap/profiles/get_item/',
+                set: '/api/firewallmap/profiles/set_item/',
+                add: '/api/firewallmap/profiles/add_item/',
+                del: '/api/firewallmap/profiles/del_item/',
+                commands: {
+                    // the Active column's toggle: exactly one profile ranks, so it only activates
+                    toggle: {
+                        requires: [],
+                        method: function (event, cell) {
+                            if (cell.getData().active === '1') {
+                                return;
+                            }
+                            $(this).removeClass('fa-square-o').addClass('fa-spinner fa-pulse');
+                            ajaxCall(`/api/firewallmap/profiles/activate/${$(this).data('row-id')}`, {}, function () {
+                                profileGrid().bootgrid('reload');
+                                $(document).trigger('settings-changed');
+                            });
+                        },
+                        title: (cell) => cell.getData().active === '1'
+                            ? {{ lang._('Active profile')|json_encode }} : {{ lang._('Activate')|json_encode }}
                     },
-                    classname: 'fa fa-fw fa-check',
-                    title: {{ lang._('Activate')|json_encode }},
-                    sequence: 10,
-                    filter: (cell) => cell.getData().active !== '1'
+                    // a custom profile starts as a clone of another one
+                    add: {filter: () => false},
+                    edit: {filter: (cell) => cell.getData().builtin !== '1'},
+                    delete: {filter: (cell) => cell.getData().builtin !== '1' && cell.getData().active !== '1'}
                 },
-                // a custom profile starts as a copy of another one
-                add: {filter: () => false},
-                edit: {filter: (cell) => cell.getData().builtin !== '1'},
-                delete: {filter: (cell) => cell.getData().builtin !== '1' && cell.getData().active !== '1'}
-            },
-            options: {
-                selection: false,
-                multiSelect: false,
-                rowSelect: false,
-                formatters: {
-                    profile_name: function (column, row) {
-                        const escape = (text) => $('<div/>').text(text).html();
-                        return escape(row.name)
-                            + (row.active === '1' ? ` <span class="label label-success">${escape({{ lang._('Active')|json_encode }})}</span>` : '')
-                            + (row.builtin === '1' ? ` <span class="label label-default">${escape({{ lang._('Built-in')|json_encode }})}</span>` : '');
+                options: {
+                    selection: false,
+                    multiSelect: false,
+                    rowSelect: false,
+                    formatters: {
+                        profile_type: (column, row) => escape(row.builtin === '1'
+                            ? {{ lang._('Built-in')|json_encode }} : {{ lang._('Custom')|json_encode }})
                     }
                 }
+            });
+        };
+
+        // tabs as on OPNsense's own pages: the selected one is kept in the URL
+        $('#maintabs a').on('shown.bs.tab', function (event) {
+            if (event.target.hash === '#tab_profiles') {
+                // a grid initialized in a hidden tab would be laid out without a width
+                loadProfiles();
+            }
+            if (window.location.hash !== event.target.hash) {
+                history.pushState(null, null, event.target.hash);
+            }
+        });
+        const showTab = function () {
+            const tab = $('#maintabs a').filter((index, link) => link.hash === window.location.hash);
+            (tab.length ? tab : $('#maintabs a[href="#tab_general"]')).tab('show');
+        };
+        $(window).on('hashchange', showTab);
+        showTab();
+
+        // a validation error on another tab: show that tab and its field
+        $(document).on('validation-failed', function (event, data) {
+            if (data.formid !== 'settings_tabs') {
+                return;
+            }
+            const field = $('#settings_tabs .has-error').first();
+            const pane = field.closest('.tab-pane');
+            if (pane.length) {
+                $(`#maintabs a[href="#${pane.attr('id')}"]`).one('shown.bs.tab', () => field[0].scrollIntoView())
+                    .tab('show');
             }
         });
 
@@ -119,8 +160,9 @@
         $('#reconfigureAct').SimpleActionButton({
             onPreAction: function () {
                 const done = new $.Deferred();
-                // a validation error rejects, so the button stops spinning (as on OPNsense's own pages)
-                saveFormToEndpoint('/api/firewallmap/settings/set', 'frm_settings',
+                // every tab's fields in one request; a validation error rejects, so the button stops
+                // spinning (as on OPNsense's own pages)
+                saveFormToEndpoint('/api/firewallmap/settings/set', 'settings_tabs',
                     () => done.resolve(), true, () => done.reject());
                 return done;
             },
@@ -143,24 +185,23 @@
 <div class="alert alert-warning hidden" role="alert" id="classificationWarning">
     <i class="fa fa-triangle-exclamation fa-fw"></i>
     {{ lang._('Not used, because they have no PF table:') }} <strong class="names"></strong>.
-    {{ lang._('Enable Maintain blocklist aliases for the curated feeds and the AbuseIPDB blacklist, or create the aliases.') }}
+    {{ lang._('Enable Maintain blocklist aliases (Security tab) for the curated feeds and the AbuseIPDB blacklist, or create the aliases.') }}
 </div>
 
-<div class="content-box __mb">
-    {{ partial("layout_partials/base_form", ['fields': formSettings, 'id': 'frm_settings']) }}
-</div>
+<ul class="nav nav-tabs" role="tablist" id="maintabs">
+    {{ partial('layout_partials/base_tabs_header', ['formData': formSettings]) }}
+    <li><a data-toggle="tab" href="#tab_profiles">{{ lang._('Profiles') }}</a></li>
+</ul>
 
-<div class="content-box __mb">
-    {{ partial('layout_partials/base_bootgrid_table', formGridProfile + {'command_width': '135', 'hide_delete': true}) }}
-</div>
-
-<div class="content-box __mb">
-    <table class="table table-condensed">
-        <thead><tr><th>{{ lang._('Security evidence') }}</th></tr></thead>
-        <tbody><tr><td class="text-muted">
-            {{ lang._('Flows with security evidence are flagged, kept tracked and can have places reserved in the ranking (Security visibility in each profile). The evidence comes from blocked attempts in the firewall log (the last 10 minutes), Suricata alerts (the last hour), the threat lists above and AbuseIPDB lookups. Only block rules with logging enabled are seen, and IDS evidence needs Services: Intrusion Detection. The Status page shows each source and its limits.') }}
-        </td></tr></tbody>
-    </table>
+<div class="tab-content content-box" id="settings_tabs">
+{% for tab in formSettings['tabs'] %}
+    <div id="tab_{{ tab['tab_id'] }}" class="tab-pane fade{% if tab['tab_id'] == formSettings['activetab'] %} in active{% endif %}">
+        {{ partial('layout_partials/base_form', ['fields': tab, 'id': 'frm_settings-' ~ tab['tab_id']]) }}
+    </div>
+{% endfor %}
+    <div id="tab_profiles" class="tab-pane fade">
+        {{ partial('layout_partials/base_bootgrid_table', formGridProfile + {'hide_delete': true}) }}
+    </div>
 </div>
 
 {{ partial('layout_partials/base_apply_button', {'data_endpoint': '/api/firewallmap/service/reconfigure', 'data_service_widget': 'firewallmap'}) }}

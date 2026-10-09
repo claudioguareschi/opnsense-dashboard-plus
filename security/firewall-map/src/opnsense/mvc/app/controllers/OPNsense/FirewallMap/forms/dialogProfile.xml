@@ -1,11 +1,19 @@
 <form>
     <field>
+        <!-- grid only: which profile ranks (the settings' ranking_profile), not a profile field -->
+        <id>profile.active</id>
+        <label>Active</label>
+        <type>ignore</type>
+        <grid_view>
+            <sequence>1</sequence>
+            <width>6em</width>
+            <formatter>rowtoggle</formatter>
+        </grid_view>
+    </field>
+    <field>
         <id>profile.name</id>
         <label>Name</label>
         <type>text</type>
-        <grid_view>
-            <formatter>profile_name</formatter>
-        </grid_view>
         <help>A name for this profile. Profiles are referenced by their identity, so renaming one changes nothing else.</help>
     </field>
     <field>
@@ -13,6 +21,16 @@
         <label>Description</label>
         <type>text</type>
         <help>For your reference.</help>
+    </field>
+    <field>
+        <!-- grid only: built-in profiles ship with the plugin and cannot be edited or deleted -->
+        <id>profile.builtin</id>
+        <label>Type</label>
+        <type>ignore</type>
+        <grid_view>
+            <width>8em</width>
+            <formatter>profile_type</formatter>
+        </grid_view>
     </field>
     <field>
         <type>header</type>
