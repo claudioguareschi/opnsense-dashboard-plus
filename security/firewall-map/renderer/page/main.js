@@ -31,9 +31,10 @@
  */
 import {escapeHtml, fill} from '../src/format.js';
 import {parseSettings, summaryQuery} from '../src/options.js';
+import {createRefreshLoop, REFRESH_APPLIED_KEY} from '../src/refresh.js';
 import {addCountry, addToAlias, killStates, markThreat, showStates} from './actions.js';
 import {getJSON} from './api.js';
-import {POLL_MS, resetFilters, state, T, TEXT} from './context.js';
+import {resetFilters, state, T, TEXT} from './context.js';
 import {renderDetails} from './details.js';
 import {filtered} from './filters.js';
 import {checkAbuse, investigate} from './investigate.js';
@@ -129,65 +130,76 @@ function showGeo(summary) {
   }
 }
 
-/** One request at a time, never stacked on a slow firewall; nothing while the page is hidden. */
+/**
+ * The live map's refresh (src/refresh.js): one request at a time, the next one when the service's
+ * next sample is due (adaptive refresh), nothing while the page is hidden, at once when it is shown
+ * again or when settings were applied in another tab.
+ */
 function poll(query) {
-  let timer = null;
-  // a request is on its way: showing the page again then must not start a second loop
-  let running = false;
-  const tick = async () => {
-    timer = null;
-    if (document.hidden) {
-      return;
-    }
-    running = true;
+  const request = async () => {
     try {
       const summary = await getJSON(`/api/firewallmap/flow/summary${query}`);
-      const problem = host().problemText(summary, T);
-      state.wait = host().waitText(summary, TEXT);
-      applyWait();
-      showGeo(state.mode === 'live' ? summary : null);
-      if (state.wait) {
-        // the last picture stays under the cover until the first ranked sample replaces it
-        if (state.mode === 'live') {
-          $('#fwmap-status').text(state.wait);
-        }
-      } else if (problem && state.mode === 'live') {
-        // no database or no sample: an empty map, not the last picture
-        if (['no_database', 'too_many_states', 'collector_incompatible'].includes(summary.status)) {
-          state.renderer.render({flows: [], locations: []});
-        }
-        // the geolocation card says it on the map itself
-        $('#fwmap-status').text(summary.status === 'no_database' ? '' : problem);
-      } else {
-        state.live = summary;
-        // the sparklines keep their history in snapshot mode too
-        const groups = talkers(summary);
-        if (state.mode === 'live') {
-          state.data = summary;
-          renderTabs(groups);
-          refresh();
-        }
-      }
+      showSummary(summary);
+      return summary;
     } catch (error) {
       console.error('Firewall Map+: flow update failed', error);
       if (state.mode === 'live') {
         $('#fwmap-status').text(T.unavailable);
       }
-    } finally {
-      running = false;
-    }
-    if (!document.hidden) {
-      timer = setTimeout(tick, POLL_MS);
+      throw error;
     }
   };
-  // shown again: poll at once instead of waiting out an interval
+  const loop = createRefreshLoop({
+    request,
+    isHidden: () => document.hidden,
+    onSchedule: (next) => {
+      state.refresh = {...next, at: Date.now()};
+    },
+  });
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && timer === null && !running) {
-      tick();
+    if (!document.hidden) {
+      loop.visible();
       refreshQueueCount();
     }
   });
-  tick();
+  // Apply on the settings page (any tab of this browser): the collector may restart, so the map
+  // asks at once and the timing of a request already under way no longer counts
+  window.addEventListener('storage', (event) => {
+    if (event.key === REFRESH_APPLIED_KEY) {
+      loop.refreshNow();
+    }
+  });
+  loop.start();
+}
+
+/** One map document, as the live map shows it. */
+function showSummary(summary) {
+  const problem = host().problemText(summary, T);
+  state.wait = host().waitText(summary, TEXT);
+  applyWait();
+  showGeo(state.mode === 'live' ? summary : null);
+  if (state.wait) {
+    // the last picture stays under the cover until the first ranked sample replaces it
+    if (state.mode === 'live') {
+      $('#fwmap-status').text(state.wait);
+    }
+  } else if (problem && state.mode === 'live') {
+    // no database or no sample: an empty map, not the last picture
+    if (['no_database', 'too_many_states', 'collector_incompatible'].includes(summary.status)) {
+      state.renderer.render({flows: [], locations: []});
+    }
+    // the geolocation card says it on the map itself
+    $('#fwmap-status').text(summary.status === 'no_database' ? '' : problem);
+  } else {
+    state.live = summary;
+    // the sparklines keep their history in snapshot mode too
+    const groups = talkers(summary);
+    if (state.mode === 'live') {
+      state.data = summary;
+      renderTabs(groups);
+      refresh();
+    }
+  }
 }
 
 /** The side panel's current tab: top talkers from `groups`, or the saved snapshots. */
@@ -463,6 +475,7 @@ $(async () => {
   poll(summaryQuery(state.settings));
   // ?debug=1: the diagnostics panel, a separate script that only development packages install
   if (new URLSearchParams(window.location.search).get('debug') === '1' && window.FirewallMapDiagnostics) {
-    window.FirewallMapDiagnostics.start({renderer: () => state.renderer, mode: () => state.mode, contextLosses: () => state.contextLosses});
+    window.FirewallMapDiagnostics.start({renderer: () => state.renderer, mode: () => state.mode,
+      contextLosses: () => state.contextLosses, refresh: () => state.refresh});
   }
 });

@@ -409,6 +409,31 @@ class CollectorLoopTest(unittest.TestCase):
         # the helper was started with the active profile
         self.assertEqual(self.collector.collector_engine.profile, balanced)
 
+    def document(self):
+        with open(self.output) as handle:
+            return json.load(handle)
+
+    def test_every_document_carries_the_interval_it_is_written_at(self):
+        """Adaptive refresh: the map asks again when the next document is due and the API judges a
+        document's freshness by its interval, so every document the service writes carries it,
+        waits and refusals included; after a collector restart it is the base interval, never the
+        old collector's recommendation."""
+        self.collector.step()  # baseline: the map waits
+        waiting = self.document()
+        self.assertEqual((waiting["status"], waiting["interval"]), ("waiting", 2.0))
+        engine = self.collector.collector_engine
+        engine.process, engine.metadata = object(), {"pid": 4242}
+        engine.telemetry = {"pid": 4242, "recommended_interval_ms": 30000, "cadence_reason": 1}
+        self.bytes = 5000
+        self.collector.step()
+        self.assertEqual(self.document()["interval"], 30.0)
+        # a restarted collector (another pid): its documents use the base interval until it has
+        # measured itself, whatever the previous one recommended
+        engine.metadata = {"pid": 5151}
+        self.bytes = 9000
+        self.collector.step()
+        self.assertEqual(self.document()["interval"], 2.0)
+
     def test_lifetime_validation_changes_are_logged_once(self):
         """The collector's lifetime screen fails open: the service says so when validation stops and
         when it resumes, never every sample, and a refused sample (no dump, no verdict) says nothing."""

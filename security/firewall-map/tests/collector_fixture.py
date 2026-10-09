@@ -118,6 +118,8 @@ class CollectorFixture:
         self.profile, self.restarts, self.starts = None, 0, 0
         # PF tables the fixture classifies with, {table: [network...]}, like the helper's own
         self.tables = {}
+        # more telemetry each sample reports (a pid, a cadence recommendation), like the helper's
+        self.telemetry = {}
 
     def close(self):
         self.process = None
@@ -159,7 +161,8 @@ class CollectorFixture:
         result = aggregate(selected, len(records), threat_entries)
         result["counts"]["flows"] = self.tracker.total_flows
         result["baseline"] = baseline
-        result["telemetry"] = {"interval": -1.0 if baseline else 2.0, "sequence": len(self.baselines)}
+        result["telemetry"] = {"interval": -1.0 if baseline else 2.0, "sequence": len(self.baselines),
+                               **self.telemetry}
         self.snapshot_open = options.get("snapshot", False)
         self.classify(result, options.get("classification"), options.get("classify", ()))
         # a sample opening a snapshot session lists what it may capture (here every flow, by rate)

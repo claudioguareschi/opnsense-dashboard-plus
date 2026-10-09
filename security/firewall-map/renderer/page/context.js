@@ -34,7 +34,6 @@ export const T = window.FirewallMapPageText || {};
 // the renderer's sentences (flow summaries, IDS lines) in the page's language
 export const TEXT = textTable(T);
 
-export const POLL_MS = 2000;
 export const WATCHLIST = 'FWMAP_Watchlist';
 // list names the collector reports (fwmap_blocklists)
 export const ABUSEIPDB_BLACKLIST_LIST = 'AbuseIPDB blacklist';
@@ -70,6 +69,8 @@ export const state = {
   // what this user may do, worked out by the server from the endpoints' own privileges: the
   // plugin's settings (investigations, Threats, snapshot deletion), aliases, and states
   can: {manage: false, aliases: false, states: false, kill: false, ...(window.FirewallMapPermissions || {})},
+  // the live map's last refresh decision (src/refresh.js): {delay, interval, reason, at}
+  refresh: null,
   selection: null,
   detailsAddress: null,
   renderedSelection: null,

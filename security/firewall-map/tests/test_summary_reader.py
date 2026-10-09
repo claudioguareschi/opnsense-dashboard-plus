@@ -59,6 +59,42 @@ class SnapshotReaderTest(unittest.TestCase):
             self.assertIsNone(SUMMARY.read_summary(path, now=time.time() + 11))
 
 
+class AdaptiveFreshnessTest(unittest.TestCase):
+    """The service writes the map document once per sampling interval (adaptive refresh, 2-300 s):
+    it stays current for 2.5 of its own intervals, never less than the 10 s it always had, so a
+    slow cadence never turns into a "starting" map between two samples."""
+
+    def read(self, payload, age):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "flows.json")
+            with open(path, "w") as handle:
+                json.dump(payload, handle)
+            return SUMMARY.read_summary(path, now=os.stat(path).st_mtime + age)
+
+    def test_freshness_follows_the_documents_interval(self):
+        for interval, fresh, stale in ((2, 10, 10.5), (4, 10, 10.5), (6, 15, 15.5), (60, 150, 150.5),
+                                       (300, 750, 750.5)):
+            with self.subTest(interval=interval):
+                document = {"status": "ok", "interval": interval, "flows": []}
+                self.assertEqual(self.read(document, fresh)["age"], fresh)
+                self.assertIsNone(self.read(document, stale))
+        # a wait or a refusal carries the interval too
+        self.assertEqual(self.read({"status": "too_many_states", "interval": 40, "flows": []}, 90)["status"],
+                         "too_many_states")
+
+    def test_an_unusable_interval_keeps_the_ten_seconds(self):
+        for interval in (None, "60", True, float("nan"), float("inf"), -60, 0, 1.5, 301, [60], {"s": 60}):
+            with self.subTest(interval=interval):
+                document = {"status": "ok", "flows": []}
+                if interval is not None:
+                    document["interval"] = interval
+                self.assertIsNotNone(self.read(document, 9))
+                self.assertIsNone(self.read(document, 11))
+
+    def test_a_document_that_is_not_an_object_is_unusable(self):
+        self.assertIsNone(self.read([{"status": "ok"}], 0))
+
+
 class SnapshotMainTest(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()

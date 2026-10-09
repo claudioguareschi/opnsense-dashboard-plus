@@ -36,6 +36,7 @@ download reports errors. The API applies the viewer's block threshold and host n
 """
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -48,6 +49,11 @@ from lib.common import (
 
 GEODB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "firewallmap_geodb.py")
 STALE_SECONDS = 10
+# adaptive refresh: the service writes the document once per sampling interval (2-300 s, the
+# settings' bounds), so it is current for this many of its own intervals, as the map's stale
+# indicator judges it, and never for less than STALE_SECONDS
+STALE_INTERVALS = 2.5
+INTERVAL_BOUNDS = (2, 300)
 
 
 def start_collector():
@@ -55,6 +61,16 @@ def start_collector():
         subprocess.run([RC_SCRIPT, "onestart"], capture_output=True, check=False, timeout=5)
     except (OSError, subprocess.TimeoutExpired):
         pass
+
+
+def stale_after(payload):
+    """Seconds after which the document no longer describes the firewall: STALE_INTERVALS of the
+    interval it was written at (adaptive refresh), STALE_SECONDS without a usable one."""
+    interval = payload.get("interval")
+    if isinstance(interval, bool) or not isinstance(interval, (int, float)) or not math.isfinite(interval) \
+            or not INTERVAL_BOUNDS[0] <= interval <= INTERVAL_BOUNDS[1]:
+        return STALE_SECONDS
+    return max(STALE_SECONDS, STALE_INTERVALS * interval)
 
 
 def read_summary(path=None, now=None):
@@ -65,7 +81,7 @@ def read_summary(path=None, now=None):
             payload = json.load(handle)
     except (OSError, ValueError):
         return None
-    if age > STALE_SECONDS:
+    if not isinstance(payload, dict) or age > stale_after(payload):
         return None
     payload["age"] = round(max(0.0, age), 1)
     return payload

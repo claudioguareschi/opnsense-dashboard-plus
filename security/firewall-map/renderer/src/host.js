@@ -106,6 +106,8 @@ export function toast(frame, html, ms = 6000) {
   return note;
 }
 
+export {REFRESH_APPLIED_KEY, REFRESH_FLOOR_MS, createRefreshGate, createRefreshLoop, refreshDelay} from './refresh.js';
+
 /**
  * The map's one wait state, for any time there is nothing current to show or act on: the first
  * start, a new collector process (after a restart, or for a new active ranking profile), a capture

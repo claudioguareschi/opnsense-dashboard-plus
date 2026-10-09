@@ -84,12 +84,24 @@ function sample() {
     longTasks,
     mode: page.mode(),
     hidden: document.hidden,
+    // adaptive refresh: the last decision of the live map's refresh loop (src/refresh.js)
+    refresh: page.refresh?.() || null,
   };
   samples.push(point);
   if (samples.length > KEEP) {
     samples.shift();
   }
   return point;
+}
+
+/** "4.5 s (interval 5 s, adaptive)" or "2 s (fallback: status)". */
+function refreshText(refresh) {
+  if (!refresh) {
+    return 'n/a';
+  }
+  const delay = `${(refresh.delay / 1000).toFixed(1)} s`;
+  return refresh.reason === 'adaptive' ? `${delay} (interval ${refresh.interval} s, adaptive)`
+    : `${delay} (fallback: ${refresh.reason})`;
 }
 
 function cssColor(name, fallback) {
@@ -174,6 +186,7 @@ function render(panel, point) {
     ['Poll size', format([...samples].reverse().find((entry) => typeof entry.pollKb === 'number')?.pollKb, 'KB')],
     ['Long tasks', point.longTasks ?? 'n/a'],
     ['WebGL resets', point.contextLosses],
+    ['Next poll', refreshText(point.refresh)],
   ];
   panel.querySelector('.fwmap-diag-facts').innerHTML = facts
     .map(([label, value]) => `<span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b>`).join('');

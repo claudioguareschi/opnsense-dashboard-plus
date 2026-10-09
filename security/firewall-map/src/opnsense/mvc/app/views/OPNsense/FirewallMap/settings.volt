@@ -128,6 +128,13 @@
                 keyField('license_key').val('');
                 keyField('abuseipdb_key').val('');
                 describeKeys();
+                // open maps in other tabs refresh at once (the collector may restart) instead of
+                // waiting out their adaptive delay (the renderer's REFRESH_APPLIED_KEY)
+                try {
+                    window.localStorage.setItem('firewall-map.applied', String(Date.now()));
+                } catch (_) {
+                    // storage blocked: open maps notice at their next refresh
+                }
             }
         });
     });

@@ -138,6 +138,115 @@
 		return `?${new URLSearchParams(Object.entries(summaryParams(settings)).map(([key, value]) => [key, String(value)]))}`;
 	}
 	//#endregion
+	//#region src/refresh.js
+	/** The shortest interval: the collector's floor and the settings' minimum (seconds 2). */
+	var REFRESH_FLOOR_MS = 2e3;
+	/** The service stops sampling for the map once nobody has asked for 300 s: ask at least twice in that window. */
+	var REFRESH_KEEPALIVE_MS = 15e4;
+	var finite = (value) => typeof value === "number" && Number.isFinite(value);
+	/**
+	* The delay before the next request after `summary` (the map document, or null when the request
+	* failed): {delay (ms), interval (s or null), reason}. Reasons: 'adaptive' (the document's
+	* interval, timed from its age), 'status' (no ranked sample: a wait, a refusal, no database),
+	* 'invalid' (a missing or impossible interval) and 'failed' (no document) use the floor.
+	*/
+	function refreshDelay(summary) {
+		if (!summary || typeof summary !== "object") return {
+			delay: REFRESH_FLOOR_MS,
+			interval: null,
+			reason: "failed"
+		};
+		if (summary.status !== "ok") return {
+			delay: REFRESH_FLOOR_MS,
+			interval: null,
+			reason: "status"
+		};
+		const interval = summary.interval;
+		if (!finite(interval) || interval * 1e3 < 2e3 || interval * 1e3 > 3e5) return {
+			delay: REFRESH_FLOOR_MS,
+			interval: null,
+			reason: "invalid"
+		};
+		const intervalMs = interval * 1e3;
+		const due = intervalMs - (finite(summary.age) && summary.age >= 0 ? summary.age * 1e3 : 0) + 500;
+		const delay = Math.min(Math.max(due, REFRESH_FLOOR_MS), intervalMs + 500, REFRESH_KEEPALIVE_MS);
+		return {
+			delay: Math.round(delay),
+			interval,
+			reason: "adaptive"
+		};
+	}
+	/**
+	* The page's refresh loop: one request at a time, the next one scheduled only when the last has
+	* finished (a slow firewall never gets requests stacked or overlapping), nothing while the page
+	* is hidden, at once when it is shown again. `request()` resolves with the map document after
+	* the page has used it (or rejects); `refreshNow()` (an Apply elsewhere) asks at once and makes
+	* a request already under way unable to set the cadence: its document predates the change.
+	* `onSchedule(next)` reports each decision (diagnostics). The timers are injectable for tests.
+	*/
+	function createRefreshLoop({ request, isHidden = () => false, onSchedule = () => {}, setTimer = setTimeout, clearTimer = clearTimeout }) {
+		let refreshTimer = null;
+		let refreshInFlight = false;
+		let generation = 0;
+		let stopped = false;
+		const schedule = (next) => {
+			onSchedule(next);
+			if (!stopped && !isHidden()) refreshTimer = setTimer(tick, next.delay);
+		};
+		async function tick() {
+			refreshTimer = null;
+			if (stopped || refreshInFlight || isHidden()) return;
+			refreshInFlight = true;
+			const asked = generation;
+			let summary = null;
+			try {
+				summary = await request();
+			} catch (_) {
+				summary = null;
+			} finally {
+				refreshInFlight = false;
+			}
+			schedule(asked === generation ? refreshDelay(summary) : {
+				delay: REFRESH_FLOOR_MS,
+				interval: null,
+				reason: "superseded"
+			});
+		}
+		const restart = () => {
+			if (refreshTimer !== null) {
+				clearTimer(refreshTimer);
+				refreshTimer = null;
+			}
+			if (!refreshInFlight) tick();
+		};
+		return {
+			/** Starts (or restarts) the loop; calling it again never adds a second one. */
+			start: restart,
+			/** Shown again: ask now instead of waiting out a long timer (a request under way finishes first). */
+			visible() {
+				if (!isHidden()) restart();
+			},
+			refreshNow() {
+				generation += 1;
+				restart();
+			},
+			stop() {
+				stopped = true;
+				if (refreshTimer !== null) {
+					clearTimer(refreshTimer);
+					refreshTimer = null;
+				}
+			},
+			/** For tests and diagnostics. */
+			state: () => ({
+				timer: refreshTimer !== null,
+				inFlight: refreshInFlight,
+				generation,
+				stopped
+			})
+		};
+	}
+	//#endregion
 	//#region src/text.js
 	var DEFAULT_TEXT = {
 		geo_downloading_title: "Downloading the geolocation database",
@@ -258,7 +367,6 @@
 	//#region page/context.js
 	var T = window.FirewallMapPageText || {};
 	var TEXT = textTable(T);
-	var POLL_MS = 2e3;
 	var WATCHLIST = "FWMAP_Watchlist";
 	var ABUSEIPDB_BLACKLIST_LIST = "AbuseIPDB blacklist";
 	var ABUSEIPDB_LOOKUP_LIST = "AbuseIPDB (looked up)";
@@ -297,6 +405,7 @@
 			kill: false,
 			...window.FirewallMapPermissions || {}
 		},
+		refresh: null,
 		selection: null,
 		detailsAddress: null,
 		renderedSelection: null,
@@ -2699,56 +2808,71 @@
 			host().tickCountdowns();
 		}
 	}
-	/** One request at a time, never stacked on a slow firewall; nothing while the page is hidden. */
+	/**
+	* The live map's refresh (src/refresh.js): one request at a time, the next one when the service's
+	* next sample is due (adaptive refresh), nothing while the page is hidden, at once when it is shown
+	* again or when settings were applied in another tab.
+	*/
 	function poll(query) {
-		let timer = null;
-		let running = false;
-		const tick = async () => {
-			timer = null;
-			if (document.hidden) return;
-			running = true;
+		const request = async () => {
 			try {
 				const summary = await getJSON(`/api/firewallmap/flow/summary${query}`);
-				const problem = host().problemText(summary, T);
-				state.wait = host().waitText(summary, TEXT);
-				applyWait();
-				showGeo(state.mode === "live" ? summary : null);
-				if (state.wait) {
-					if (state.mode === "live") $("#fwmap-status").text(state.wait);
-				} else if (problem && state.mode === "live") {
-					if ([
-						"no_database",
-						"too_many_states",
-						"collector_incompatible"
-					].includes(summary.status)) state.renderer.render({
-						flows: [],
-						locations: []
-					});
-					$("#fwmap-status").text(summary.status === "no_database" ? "" : problem);
-				} else {
-					state.live = summary;
-					const groups = talkers(summary);
-					if (state.mode === "live") {
-						state.data = summary;
-						renderTabs(groups);
-						refresh();
-					}
-				}
+				showSummary(summary);
+				return summary;
 			} catch (error) {
 				console.error("Firewall Map+: flow update failed", error);
 				if (state.mode === "live") $("#fwmap-status").text(T.unavailable);
-			} finally {
-				running = false;
+				throw error;
 			}
-			if (!document.hidden) timer = setTimeout(tick, POLL_MS);
 		};
+		const loop = createRefreshLoop({
+			request,
+			isHidden: () => document.hidden,
+			onSchedule: (next) => {
+				state.refresh = {
+					...next,
+					at: Date.now()
+				};
+			}
+		});
 		document.addEventListener("visibilitychange", () => {
-			if (!document.hidden && timer === null && !running) {
-				tick();
+			if (!document.hidden) {
+				loop.visible();
 				refreshQueueCount();
 			}
 		});
-		tick();
+		window.addEventListener("storage", (event) => {
+			if (event.key === "firewall-map.applied") loop.refreshNow();
+		});
+		loop.start();
+	}
+	/** One map document, as the live map shows it. */
+	function showSummary(summary) {
+		const problem = host().problemText(summary, T);
+		state.wait = host().waitText(summary, TEXT);
+		applyWait();
+		showGeo(state.mode === "live" ? summary : null);
+		if (state.wait) {
+			if (state.mode === "live") $("#fwmap-status").text(state.wait);
+		} else if (problem && state.mode === "live") {
+			if ([
+				"no_database",
+				"too_many_states",
+				"collector_incompatible"
+			].includes(summary.status)) state.renderer.render({
+				flows: [],
+				locations: []
+			});
+			$("#fwmap-status").text(summary.status === "no_database" ? "" : problem);
+		} else {
+			state.live = summary;
+			const groups = talkers(summary);
+			if (state.mode === "live") {
+				state.data = summary;
+				renderTabs(groups);
+				refresh();
+			}
+		}
 	}
 	/** The side panel's current tab: top talkers from `groups`, or the saved snapshots. */
 	function renderTabs(groups) {
@@ -2996,7 +3120,8 @@
 		if (new URLSearchParams(window.location.search).get("debug") === "1" && window.FirewallMapDiagnostics) window.FirewallMapDiagnostics.start({
 			renderer: () => state.renderer,
 			mode: () => state.mode,
-			contextLosses: () => state.contextLosses
+			contextLosses: () => state.contextLosses,
+			refresh: () => state.refresh
 		});
 	});
 	//#endregion

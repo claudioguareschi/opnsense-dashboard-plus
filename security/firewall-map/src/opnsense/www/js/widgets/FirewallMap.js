@@ -28,7 +28,7 @@
 const AUTO_HEIGHT = 10000;
 // the renderer's content hash, written by tools/build-renderer.sh: a new renderer has a new
 // address, so a browser never runs an old cached copy with a newer widget
-const RENDERER_VERSION = '4bf55d5630a9';
+const RENDERER_VERSION = '160946f6a86a';
 // follow traffic is the map's own toggle, remembered per browser (as on the full-size map)
 const FOLLOW_KEY = 'firewallmap.widget.follow';
 
@@ -56,7 +56,10 @@ export default class FirewallMap extends BaseWidget {
         // a slow firewall would otherwise get a burst of canceled HTTP/2 streams
         this.timeoutPeriod = 15000;
         this.retryLimit = 0;
-        this.polling = false;
+        // adaptive refresh (the renderer's createRefreshGate): the dashboard ticks every 2 s, the
+        // widget lets a tick through only when the service's next sample is due, one at a time
+        this.refreshGate = null;
+        this.onApplied = null;
         this.renderer = null;
         this.loadingRenderer = null;
         this.configurable = true;
@@ -378,13 +381,28 @@ export default class FirewallMap extends BaseWidget {
     async onWidgetTick() {
         // a dashboard left open in a background tab must not keep the collector sampling forever:
         // without requests it slows down and stops (or keeps only background recording)
-        if (!this.renderer || this.polling || this.closed || document.hidden) {
+        if (!this.renderer || this.closed || document.hidden) {
             return;
         }
-        this.polling = true;
+        const host = window.FirewallMapRenderer.host;
+        if (!this.refreshGate) {
+            this.refreshGate = host.createRefreshGate({tickMs: this.tickTimeout * 1000});
+            // Apply on the settings page (any tab of this browser): the collector may restart,
+            // so ask at the next tick, and the timing of a request under way no longer counts
+            this.onApplied = (event) => {
+                if (event.key === host.REFRESH_APPLIED_KEY) {
+                    this.refreshGate.refreshNow();
+                }
+            };
+            window.addEventListener('storage', this.onApplied);
+        }
+        const token = this.refreshGate.begin(Date.now());
+        if (!token) {
+            return;
+        }
+        let summary = null;
         try {
-            const host = window.FirewallMapRenderer.host;
-            const summary = await this.ajaxCall('/api/firewallmap/flow/summary', window.FirewallMapRenderer.summaryParams(this.settings));
+            summary = await this.ajaxCall('/api/firewallmap/flow/summary', window.FirewallMapRenderer.summaryParams(this.settings));
             // removed while the request was under way
             if (!this.renderer) {
                 return;
@@ -417,8 +435,17 @@ export default class FirewallMap extends BaseWidget {
         } catch (error) {
             console.error('Firewall Map+: flow update failed', error);
             this._status(this.translations.data_unavailable);
+            summary = null;
         } finally {
-            this.polling = false;
+            this.refreshGate.done(token, Date.now(), summary);
+        }
+    }
+
+    onVisibilityChanged(visible) {
+        super.onVisibilityChanged(visible);
+        // shown again: the next tick asks instead of waiting out a long delay
+        if (visible) {
+            this.refreshGate?.visible();
         }
     }
 
@@ -495,6 +522,10 @@ export default class FirewallMap extends BaseWidget {
 
     onWidgetClose() {
         this.closed = true;
+        if (this.onApplied) {
+            window.removeEventListener('storage', this.onApplied);
+            this.onApplied = null;
+        }
         this.renderer?.destroy();
         this.renderer = null;
         super.onWidgetClose();

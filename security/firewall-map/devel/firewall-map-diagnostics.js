@@ -87,11 +87,18 @@ var FirewallMapDiagnostics = (function(exports) {
 			contextLosses: page.contextLosses() || 0,
 			longTasks,
 			mode: page.mode(),
-			hidden: document.hidden
+			hidden: document.hidden,
+			refresh: page.refresh?.() || null
 		};
 		samples.push(point);
 		if (samples.length > KEEP) samples.shift();
 		return point;
+	}
+	/** "4.5 s (interval 5 s, adaptive)" or "2 s (fallback: status)". */
+	function refreshText(refresh) {
+		if (!refresh) return "n/a";
+		const delay = `${(refresh.delay / 1e3).toFixed(1)} s`;
+		return refresh.reason === "adaptive" ? `${delay} (interval ${refresh.interval} s, adaptive)` : `${delay} (fallback: ${refresh.reason})`;
 	}
 	function cssColor(name, fallback) {
 		return getComputedStyle(document.getElementById("fwmap-map")).getPropertyValue(name).trim() || fallback;
@@ -182,7 +189,8 @@ var FirewallMapDiagnostics = (function(exports) {
 			["DOM nodes", point.nodes],
 			["Poll size", format([...samples].reverse().find((entry) => typeof entry.pollKb === "number")?.pollKb, "KB")],
 			["Long tasks", point.longTasks ?? "n/a"],
-			["WebGL resets", point.contextLosses]
+			["WebGL resets", point.contextLosses],
+			["Next poll", refreshText(point.refresh)]
 		];
 		panel.querySelector(".fwmap-diag-facts").innerHTML = facts.map(([label, value]) => `<span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b>`).join("");
 	}

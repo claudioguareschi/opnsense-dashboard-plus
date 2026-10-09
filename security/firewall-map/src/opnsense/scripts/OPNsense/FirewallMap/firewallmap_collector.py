@@ -958,6 +958,12 @@ class Collector:
         samples publish timing/queue progress, not a new live-map file. The two files need not
         match: each carries its own generation/revision and immutable sample fields.
         """
+        if payload is not None:
+            # the interval this document is written at (adaptive refresh): the API judges its
+            # freshness by it and the map asks again when the next one is due, also for a wait
+            # or a refusal; after a restart it is the base interval until the new collector's
+            # own recommendation (sampling_interval)
+            payload.setdefault("interval", self.sampling_interval(INTERVAL))
         with self._status_lock:
             completed = time.time()
             status = {**self.collector_status, "revision": self.collector_status["revision"] + 1,
