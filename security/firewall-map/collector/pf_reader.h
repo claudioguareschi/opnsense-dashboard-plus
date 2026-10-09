@@ -24,6 +24,7 @@
 
 #ifndef FM_PF_READER_H
 #define FM_PF_READER_H
+#include "lifetime.h"
 #include "state.h"
 #include <stdio.h>
 /* Callback state is borrowed and valid only during the call.
@@ -37,6 +38,16 @@ bool pf_reader_live(pf_state_callback, void *, FILE *raw_fixture,
                     double *request_anchor, struct fm_error *);
 /* PF's current state count without traversing (false: unavailable). */
 bool pf_reader_state_count(uint64_t *count);
+/* The lifetime bound (lifetime.h) of the current PF configuration: the
+ * default timeout table (GET_TIMEOUT) and every filter rule's timeouts
+ * (GETRULE PF_RT_TIMEOUT), main ruleset and anchors. A ruleset's rules are
+ * read again only when its ticket changes (GETRULE takes PF's rules write
+ * lock); the rule maximum never decreases within a process, since states
+ * keep the rule they were created by across reloads. Any failure leaves the
+ * bound unavailable. The cache is the caller's, NULL at first. */
+struct pf_rule_cache;
+struct lifetime_bound pf_reader_lifetime_bound(struct pf_rule_cache **);
+void pf_reader_rule_cache_free(struct pf_rule_cache *);
 /* PF_STATE_VERSION the reader was compiled against (0 without PF headers). */
 unsigned pf_reader_state_version(void);
 /* Devel builds only (FM_DEVEL_TOOLS): decode one netlink datagram (fuzzing). */

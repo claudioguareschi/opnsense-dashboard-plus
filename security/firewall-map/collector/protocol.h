@@ -77,6 +77,12 @@ struct telemetry {
       discovery_bytes;
   /* the recommended sampling interval and why (cadence.h) */
   uint64_t recommended_interval_ms, cadence_reason;
+  /* the lifetime screen (lifetime.h): PF records observed, those skipped for
+   * an impossible lifetime, those whose age is unknown; whether validation
+   * was active, its limit (largest applicable timeout, s), the errno that
+   * made it unavailable, and the bound refresh's cost (us) */
+  uint64_t pf_records_observed, invalid_pf_states_skipped, age_unknown_states,
+      lifetime_validation, lifetime_limit, lifetime_error, lifetime_refresh_us;
 };
 /* The sample's classification: set statuses, and the masks of the addresses
  * the request asked about (K rows). */

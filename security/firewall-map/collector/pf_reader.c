@@ -637,6 +637,311 @@ bool pf_reader_state_count(uint64_t *count) {
   return false;
 }
 #endif
+/* The lifetime bound (pf_reader.h). Requests follow libpfctl: GET_TIMEOUT
+ * (PF_TO_TIMEOUT -> PF_TO_SECONDS), GETRULES (PF_GR_ANCHOR, PF_GR_ACTION ->
+ * PF_GR_NR, PF_GR_TICKET), GETRULE (+ PF_GR_NR, PF_GR_TICKET; PF_GR_CLEAR is
+ * never sent: counters are not cleared) and GET_RULESETS / GET_RULESET
+ * (PF_RS_PATH, PF_RS_NR -> PF_RS_NR, PF_RS_NAME). */
+#if __FreeBSD_version >= 1500000
+#define RULESETS_MAX 1024
+struct pf_ruleset_entry {
+  char path[MAXPATHLEN];
+  uint32_t ticket;
+  uint64_t max;
+};
+struct pf_rule_cache {
+  struct pf_ruleset_entry *sets;
+  size_t count;
+  uint64_t rule_max_ever;
+};
+struct nl_call {
+  struct snl_state ss;
+  int family;
+};
+static bool nl_open(struct nl_call *c) {
+  if (!snl_init(&c->ss, NETLINK_GENERIC))
+    return false;
+  struct timeval timeout = {.tv_sec = 2};
+  c->family = setsockopt(c->ss.fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout))
+                  ? 0 : snl_get_genl_family(&c->ss, PFNL_FAMILY_NAME);
+  if (!c->family)
+    snl_free(&c->ss);
+  return c->family != 0;
+}
+static struct nlmsghdr *nl_request(struct nl_call *c, struct snl_writer *nw, uint8_t cmd, bool dump) {
+  snl_init_writer(&c->ss, nw);
+  struct nlmsghdr *hdr = snl_create_genl_msg_request(nw, c->family, cmd);
+  if (hdr && dump)
+    hdr->nlmsg_flags |= NLM_F_DUMP;
+  return hdr;
+}
+/* Sends the request written to nw and parses the attributes of every reply
+ * message with fn: 0, the kernel's error, or EPROTO for a malformed reply. */
+static int nl_exchange(struct nl_call *c, struct snl_writer *nw, attribute_fn fn, void *arg) {
+  struct nlmsghdr *hdr = snl_finalize_msg(nw);
+  int result = hdr ? 0 : ENOMEM;
+  if (!result && !snl_send_message(&c->ss, hdr))
+    result = EIO;
+  if (!result) {
+    uint32_t seq = hdr->nlmsg_seq;
+    struct snl_errmsg_data e = {0};
+    struct fm_error parse = {0};
+    struct reader r = {.error = &parse};
+    while ((hdr = snl_read_reply_multi(&c->ss, seq, &e)) != NULL)
+      if (hdr->nlmsg_len >= sizeof(*hdr) + sizeof(struct genlmsghdr))
+        attributes(&r, (const unsigned char *)(hdr + 1) + sizeof(struct genlmsghdr),
+                   hdr->nlmsg_len - sizeof(*hdr) - sizeof(struct genlmsghdr), fn, arg);
+    result = e.error ? e.error : parse.code ? EPROTO : 0;
+  }
+  snl_clear_lb(&c->ss);
+  return result;
+}
+struct u32_pair {
+  unsigned types[2];
+  uint32_t values[2];
+  unsigned found;
+};
+static void u32_attr(unsigned type, const unsigned char *p, size_t n, void *arg) {
+  struct u32_pair *u = arg;
+  for (unsigned k = 0; k < 2; k++)
+    if (u->types[k] && type == u->types[k] && n == 4) {
+      memcpy(&u->values[k], p, 4);
+      u->found |= 1u << k;
+    }
+}
+static int get_timeout(struct nl_call *c, unsigned index, uint32_t *seconds) {
+  struct snl_writer nw;
+  if (!nl_request(c, &nw, PFNL_CMD_GET_TIMEOUT, false))
+    return ENOMEM;
+  snl_add_msg_attr_u32(&nw, PF_TO_TIMEOUT, index);
+  struct u32_pair u = {.types = {PF_TO_SECONDS}};
+  int error = nl_exchange(c, &nw, u32_attr, &u);
+  *seconds = u.values[0];
+  return error ? error : u.found == 1 ? 0 : EPROTO;
+}
+static int get_rules(struct nl_call *c, const char *path, uint32_t *nr, uint32_t *ticket) {
+  struct snl_writer nw;
+  if (!nl_request(c, &nw, PFNL_CMD_GETRULES, true))
+    return ENOMEM;
+  snl_add_msg_attr_string(&nw, PF_GR_ANCHOR, path);
+  snl_add_msg_attr_u8(&nw, PF_GR_ACTION, PF_PASS);
+  struct u32_pair u = {.types = {PF_GR_NR, PF_GR_TICKET}};
+  int error = nl_exchange(c, &nw, u32_attr, &u);
+  *nr = u.values[0];
+  *ticket = u.values[1];
+  return error ? error : u.found == 3 ? 0 : EPROTO;
+}
+/* PF_RT_TIMEOUT: nested PF_TT_TIMEOUT u32 values in index order. */
+struct rule_timeouts {
+  uint32_t table[LIFETIME_TIMEOUTS];
+  unsigned count;
+  bool found, malformed;
+};
+static void timeout_value(unsigned type, const unsigned char *p, size_t n, void *arg) {
+  struct rule_timeouts *t = arg;
+  if (type != PF_TT_TIMEOUT)
+    return;
+  if (n != 4 || t->count >= LIFETIME_TIMEOUTS) {
+    t->malformed = true;
+    return;
+  }
+  memcpy(&t->table[t->count++], p, 4);
+}
+static void rule_attr(unsigned type, const unsigned char *p, size_t n, void *arg) {
+  struct rule_timeouts *t = arg;
+  if (type != PF_RT_TIMEOUT)
+    return;
+  struct fm_error nested = {0};
+  struct reader r = {.error = &nested};
+  t->found = true;
+  attributes(&r, p, n, timeout_value, t);
+  if (nested.code)
+    t->malformed = true;
+}
+static int get_rule_max(struct nl_call *c, const char *path, uint32_t nr, uint32_t ticket,
+                        uint64_t *max) {
+  struct snl_writer nw;
+  if (!nl_request(c, &nw, PFNL_CMD_GETRULE, true))
+    return ENOMEM;
+  snl_add_msg_attr_string(&nw, PF_GR_ANCHOR, path);
+  snl_add_msg_attr_u8(&nw, PF_GR_ACTION, PF_PASS);
+  snl_add_msg_attr_u32(&nw, PF_GR_NR, nr);
+  snl_add_msg_attr_u32(&nw, PF_GR_TICKET, ticket);
+  struct rule_timeouts t = {0};
+  int error = nl_exchange(c, &nw, rule_attr, &t);
+  if (error)
+    return error;
+  if (!t.found || t.malformed)
+    return EPROTO;
+  *max = lifetime_table_max(t.table); /* a rule's 0 means the default */
+  return 0;
+}
+struct name_parse {
+  char name[MAXPATHLEN];
+  uint32_t nr;
+  unsigned found;
+};
+static void ruleset_attr(unsigned type, const unsigned char *p, size_t n, void *arg) {
+  struct name_parse *rs = arg;
+  if (type == PF_RS_NR && n == 4) {
+    memcpy(&rs->nr, p, 4);
+    rs->found |= 1;
+  } else if (type == PF_RS_NAME && n && n <= sizeof(rs->name) && !p[n - 1] &&
+             !memchr(p, 0, n - 1)) {
+    memcpy(rs->name, p, n);
+    rs->found |= 2;
+  }
+}
+static int get_children(struct nl_call *c, const char *path, uint32_t *count) {
+  struct snl_writer nw;
+  if (!nl_request(c, &nw, PFNL_CMD_GET_RULESETS, false))
+    return ENOMEM;
+  snl_add_msg_attr_string(&nw, PF_RS_PATH, path);
+  struct name_parse rs = {0};
+  int error = nl_exchange(c, &nw, ruleset_attr, &rs);
+  *count = rs.nr;
+  return error ? error : rs.found & 1 ? 0 : EPROTO;
+}
+static int get_child(struct nl_call *c, const char *path, uint32_t nr, char *name) {
+  struct snl_writer nw;
+  if (!nl_request(c, &nw, PFNL_CMD_GET_RULESET, false))
+    return ENOMEM;
+  snl_add_msg_attr_string(&nw, PF_RS_PATH, path);
+  snl_add_msg_attr_u32(&nw, PF_RS_NR, nr);
+  struct name_parse rs = {0};
+  int error = nl_exchange(c, &nw, ruleset_attr, &rs);
+  if (!error && !(rs.found & 2))
+    error = EPROTO;
+  if (!error)
+    memcpy(name, rs.name, sizeof(rs.name));
+  return error;
+}
+/* One ruleset's rule maximum, from the cache while its ticket is unchanged. */
+static int ruleset_max(struct nl_call *c, const struct pf_rule_cache *cache,
+                       struct pf_ruleset_entry *fresh, size_t *fresh_count, const char *path,
+                       uint64_t *max) {
+  uint32_t nr, ticket;
+  int error = get_rules(c, path, &nr, &ticket);
+  if (error)
+    return error;
+  for (size_t k = 0; k < cache->count; k++)
+    if (cache->sets[k].ticket == ticket && !strcmp(cache->sets[k].path, path)) {
+      *max = cache->sets[k].max;
+      fresh[(*fresh_count)++] = cache->sets[k];
+      return 0;
+    }
+  uint64_t best = 0;
+  for (uint32_t i = 0; i < nr && !error; i++) {
+    uint64_t rule;
+    error = get_rule_max(c, path, i, ticket, &rule);
+    if (!error && rule > best)
+      best = rule;
+  }
+  if (error)
+    return error; /* EBUSY: the ruleset changed during the walk */
+  struct pf_ruleset_entry *e = &fresh[(*fresh_count)++];
+  snprintf(e->path, sizeof(e->path), "%s", path);
+  e->ticket = ticket;
+  e->max = best;
+  *max = best;
+  return 0;
+}
+/* Every filter ruleset, the main one and each anchor (depth first). */
+static int rules_bound(struct nl_call *c, struct pf_rule_cache *cache, uint64_t *max) {
+  struct pf_ruleset_entry *fresh = calloc(RULESETS_MAX, sizeof(*fresh));
+  char(*pending)[MAXPATHLEN] = calloc(RULESETS_MAX, MAXPATHLEN);
+  size_t fresh_count = 0, pending_count = 1, walked = 0;
+  int error = fresh && pending ? 0 : ENOMEM;
+  uint64_t best = 0;
+  while (!error && pending_count) {
+    char path[MAXPATHLEN];
+    memcpy(path, pending[--pending_count], MAXPATHLEN);
+    if (++walked > RULESETS_MAX) {
+      error = E2BIG;
+      break;
+    }
+    uint64_t set_max = 0;
+    uint32_t children = 0;
+    error = ruleset_max(c, cache, fresh, &fresh_count, path, &set_max);
+    if (!error && set_max > best)
+      best = set_max;
+    if (!error)
+      error = get_children(c, path, &children);
+    for (uint32_t k = 0; k < children && !error; k++) {
+      char name[MAXPATHLEN];
+      if ((error = get_child(c, path, k, name)))
+        break;
+      if (pending_count >= RULESETS_MAX) {
+        error = E2BIG;
+        break;
+      }
+      int length = path[0] ? snprintf(pending[pending_count], MAXPATHLEN, "%s/%s", path, name)
+                           : snprintf(pending[pending_count], MAXPATHLEN, "%s", name);
+      if (length < 0 || length >= MAXPATHLEN) {
+        error = ENAMETOOLONG;
+        break;
+      }
+      pending_count++;
+    }
+  }
+  free(pending);
+  if (error) {
+    free(fresh);
+    return error;
+  }
+  free(cache->sets);
+  cache->sets = fresh;
+  cache->count = fresh_count;
+  if (best > cache->rule_max_ever)
+    cache->rule_max_ever = best;
+  *max = cache->rule_max_ever;
+  return 0;
+}
+struct lifetime_bound pf_reader_lifetime_bound(struct pf_rule_cache **cachep) {
+  struct lifetime_bound bound = {0};
+  if (!*cachep && !(*cachep = calloc(1, sizeof(**cachep)))) {
+    bound.error = ENOMEM;
+    return bound;
+  }
+  struct nl_call c;
+  errno = 0;
+  if (!nl_open(&c)) {
+    bound.error = errno ? errno : ENXIO;
+    return bound;
+  }
+  uint32_t table[LIFETIME_TIMEOUTS] = {0};
+  int error = 0;
+  for (unsigned i = 0; i < LIFETIME_TIMEOUTS && !error; i++)
+    if (lifetime_index_applies(i))
+      error = get_timeout(&c, i, &table[i]);
+  uint64_t rules = 0;
+  if (!error)
+    error = rules_bound(&c, *cachep, &rules);
+  snl_free(&c.ss);
+  if (error) {
+    bound.error = error;
+    return bound;
+  }
+  uint64_t defaults = lifetime_table_max(table);
+  bound.timeout_max = defaults > rules ? defaults : rules;
+  bound.available = true;
+  return bound;
+}
+void pf_reader_rule_cache_free(struct pf_rule_cache *cache) {
+  if (cache)
+    free(cache->sets);
+  free(cache);
+}
+#else
+struct pf_rule_cache {
+  int unused;
+};
+struct lifetime_bound pf_reader_lifetime_bound(struct pf_rule_cache **cache) {
+  (void)cache;
+  return (struct lifetime_bound){.error = ENOTSUP};
+}
+void pf_reader_rule_cache_free(struct pf_rule_cache *cache) { (void)cache; }
+#endif
 #ifdef FM_DEVEL_TOOLS
 /* Replays a saved FMNLLE1 capture (devel tools only). */
 bool pf_reader_wire(const char *path, pf_state_callback callback, void *arg,
@@ -700,6 +1005,14 @@ out:
 #endif
 
 #else
+struct pf_rule_cache {
+  int unused;
+};
+struct lifetime_bound pf_reader_lifetime_bound(struct pf_rule_cache **cache) {
+  (void)cache;
+  return (struct lifetime_bound){.error = ENOTSUP};
+}
+void pf_reader_rule_cache_free(struct pf_rule_cache *cache) { (void)cache; }
 unsigned pf_reader_state_version(void) { return 0; }
 bool pf_reader_state_count(uint64_t *count) {
   (void)count;

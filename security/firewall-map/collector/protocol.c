@@ -119,7 +119,7 @@ bool protocol_frame(FILE *f, const void *data, size_t len, uint32_t *checksum,
 /* Sizes of the fixed FMAGG4 records (PROTOCOL.md). */
 #define FLOW_RECORD_SIZE 183
 #define EVENT_RECORD_SIZE 194
-#define TELEMETRY_RECORD_SIZE 389
+#define TELEMETRY_RECORD_SIZE 445
 #define SNAPSHOT_CANDIDATE_RECORD_SIZE 61
 #define FOOTER_RECORD_SIZE 125
 #define CLASSIFIED_RECORD_SIZE 36
@@ -275,7 +275,14 @@ static bool write_telemetry(FILE *f, const struct telemetry *t,
                              t->ranking_bytes,
                              t->discovery_bytes,
                              t->recommended_interval_ms,
-                             t->cadence_reason};
+                             t->cadence_reason,
+                             t->pf_records_observed,
+                             t->invalid_pf_states_skipped,
+                             t->age_unknown_states,
+                             t->lifetime_validation,
+                             t->lifetime_limit,
+                             t->lifetime_error,
+                             t->lifetime_refresh_us};
   for (size_t n = 0; n < sizeof(values) / sizeof(*values); n++)
     protocol_put(&p, values[n], 8);
   return protocol_frame(f, b, p - b, checksum, error);

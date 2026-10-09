@@ -25,6 +25,7 @@
  */
 
 #include "history.h"
+#include "lifetime.h"
 #include "alloc.h"
 #include <errno.h>
 #include <math.h>
@@ -198,7 +199,7 @@ bool history_observe(struct history *h, const struct state *s, bool remote,
   } else {
     /* Not in the committed sample: created since (age has whole-second
      * resolution), so all of its traffic is new; otherwise unknown. */
-    if (h->interval >= 0 && s->age <= 2 * h->interval) {
+    if (h->interval >= 0 && s->age != FM_AGE_UNKNOWN && s->age <= 2 * h->interval) {
       delta->bytes_from_remote = from;
       delta->bytes_to_remote = to;
       delta->packets = packets;

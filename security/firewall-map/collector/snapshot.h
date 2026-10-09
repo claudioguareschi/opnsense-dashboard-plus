@@ -61,6 +61,9 @@ struct snapshot *snapshot_create(const struct context *, const struct snapshot_f
                                  struct fm_error *);
 void snapshot_destroy(struct snapshot *);
 bool snapshot_add(const struct state *, void *, struct fm_error *);
+/* The lifetime bound its PF records are screened with (lifetime.h); a new
+ * snapshot screens ages only (no bound: nothing is rejected). */
+void snapshot_screen(struct snapshot *, struct lifetime_bound);
 bool snapshot_write(struct snapshot *, FILE *, struct fm_error *);
 /* Per-flow exemplar quotas for a state budget (exposed for tests). */
 void snapshot_quotas(const struct snapshot_flow *, size_t count, size_t state_limit,
@@ -70,5 +73,5 @@ void snapshot_quotas(const struct snapshot_flow *, size_t count, size_t state_li
  * the telemetry describes the sample the session belongs to. */
 bool snapshot_session(FILE *, FILE *, const struct context *, const struct aggregate *,
                       const struct ranking *, const struct ranker *, uint64_t, double,
-                      const struct telemetry *, struct fm_error *);
+                      struct lifetime_bound, const struct telemetry *, struct fm_error *);
 #endif

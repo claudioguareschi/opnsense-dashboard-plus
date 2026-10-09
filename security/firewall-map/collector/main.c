@@ -33,6 +33,7 @@
 #include "event_correlation.h"
 #include "history.h"
 #include "index.h"
+#include "lifetime.h"
 #include "pf_reader.h"
 #include "profile.h"
 #include "cadence.h"
@@ -87,6 +88,10 @@ struct engine {
   uint64_t sequence;
   /* the recommended sampling interval (cadence.h), across samples */
   struct cadence cadence;
+  /* the PF state lifetime bound (lifetime.h), refreshed before every dump;
+   * its rules are read again only when a ruleset's ticket changes */
+  struct pf_rule_cache *rules;
+  struct lifetime_bound lifetime;
 };
 /* CARP addresses a request may name (CARP rows) */
 #define REQUEST_CARP_MAX 256
@@ -116,6 +121,8 @@ struct sample {
   bool begun;
   uint64_t states, state_limit;
   bool over_limit;
+  /* every PF record passes the lifetime screen before anything else */
+  struct lifetime_screen screen;
 };
 
 static bool request_error(struct fm_error *error, const char *message) {
@@ -334,6 +341,12 @@ static bool begin(struct sample *s, struct fm_error *error) {
 static bool add_state(const struct state *state, void *arg,
                       struct fm_error *error) {
   struct sample *s = arg;
+  /* an impossible lifetime never becomes a Firewall Map state: not counted,
+   * not admitted, never aggregated */
+  struct state scratch;
+  state = lifetime_screen_state(&s->screen, state, &scratch);
+  if (!state)
+    return true;
   if (++s->states > s->state_limit) {
     s->over_limit = true;
     return fm_error_fail(error, FM_FAILURE_RESOURCES, ECANCELED, "PF state admission backstop");
@@ -599,9 +612,19 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
                              error)) &&
             (!r->snapshot || !clock_gettime(CLOCK_REALTIME, &wall) ||
              fm_error_fail(error, FM_FAILURE_INTERNAL, errno, "sample clock"));
+  double bound_started = monotonic_seconds();
+  e->lifetime = pf_reader_lifetime_bound(&e->rules);
+  telemetry.lifetime_refresh_us = (uint64_t)((monotonic_seconds() - bound_started) * 1e6);
+  lifetime_screen_begin(&sample.screen, e->lifetime);
   ok = ok && pf_reader_live(add_state, &sample, NULL, &sample.anchor, error) &&
        begin(&sample, error) && aggregate_finish(sample.aggregate, error);
   double read_done = monotonic_seconds();
+  telemetry.pf_records_observed = sample.screen.observed;
+  telemetry.invalid_pf_states_skipped = sample.screen.invalid;
+  telemetry.age_unknown_states = sample.screen.age_unknown;
+  telemetry.lifetime_validation = e->lifetime.available;
+  telemetry.lifetime_limit = e->lifetime.available ? e->lifetime.timeout_max : 0;
+  telemetry.lifetime_error = e->lifetime.available ? 0 : (uint64_t)e->lifetime.error;
   telemetry.dump_seconds = ok ? read_done - sample.anchor : 0;
   telemetry.interval = ok ? history_interval(e->history) : -1;
   ok = ok && ranking_update(e->ranking, sample.aggregate, sample.anchor,
@@ -696,7 +719,7 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   }
   if (ok && r->snapshot)
     ok = snapshot_session(stdin, stdout, r->ctx, sample.aggregate, e->ranking, e->ranker, e->sequence,
-                          wall.tv_sec + wall.tv_nsec / 1e9, &telemetry, error);
+                          wall.tv_sec + wall.tv_nsec / 1e9, e->lifetime, &telemetry, error);
   aggregate_destroy(sample.aggregate);
   return ok;
 }
@@ -708,6 +731,7 @@ static void close_engine(struct engine *e) {
   event_history_destroy(e->events);
   ranker_destroy(e->ranker);
   classifier_destroy(e->classifier);
+  pf_reader_rule_cache_free(e->rules);
 }
 
 /* A fresh 128-bit hash key per helper process (arc4random_buf cannot fail).
@@ -739,9 +763,9 @@ static int print_version(void) {
   return 0;
 }
 static bool count_state(const struct state *state, void *arg, struct fm_error *error) {
-  (void)state;
   (void)error;
-  (*(uint64_t *)arg)++;
+  struct state scratch;
+  lifetime_screen_state(arg, state, &scratch); /* counts every record and every rejection */
   return true;
 }
 /* --selftest: can this helper read this kernel's PF states? One GETSTATES dump
@@ -751,9 +775,15 @@ static bool count_state(const struct state *state, void *arg, struct fm_error *e
  * the first real sample checks it. */
 static int self_test(void) {
   struct fm_error error = {0};
-  uint64_t preflight = 0, states = 0;
+  uint64_t preflight = 0;
   bool status = pf_reader_state_count(&preflight);
-  bool ok = pf_reader_live(count_state, &states, NULL, NULL, &error);
+  struct pf_rule_cache *rules = NULL;
+  struct lifetime_bound bound = pf_reader_lifetime_bound(&rules);
+  pf_reader_rule_cache_free(rules);
+  struct lifetime_screen screen;
+  lifetime_screen_begin(&screen, bound);
+  bool ok = pf_reader_live(count_state, &screen, NULL, NULL, &error);
+  uint64_t states = screen.observed - screen.invalid;
   const char *classes[] = {"", "structural", "internal", "incompatible", "resources", "request"};
   if (!ok) {
     char message[sizeof(error.message) * 6 + 1], *p = message;
@@ -765,8 +795,13 @@ static int self_test(void) {
            message);
     return error.failure_class == FM_FAILURE_INCOMPATIBLE ? 3 : 1;
   }
-  printf("{\"ok\":true,\"states\":%llu,\"abi_checked\":%s,\"preflight\":%s}\n",
-         (unsigned long long)states, states ? "true" : "false", status ? "true" : "false");
+  printf("{\"ok\":true,\"states\":%llu,\"abi_checked\":%s,\"preflight\":%s,"
+         "\"pf_records\":%llu,\"invalid_lifetimes\":%llu,\"age_unknown\":%llu,"
+         "\"lifetime_validation\":%s,\"lifetime_limit\":%llu,\"lifetime_error\":%d}\n",
+         (unsigned long long)states, screen.observed ? "true" : "false", status ? "true" : "false",
+         (unsigned long long)screen.observed, (unsigned long long)screen.invalid,
+         (unsigned long long)screen.age_unknown, bound.available ? "true" : "false",
+         (unsigned long long)(bound.available ? bound.timeout_max : 0), bound.available ? 0 : bound.error);
   return 0;
 }
 

@@ -53,7 +53,7 @@ struct flow {
       first;
   uint64_t classes; /* classification sets containing the remote */
   uint64_t created; /* states new since the previous sample */
-  uint32_t oldest, youngest;
+  uint32_t oldest, youngest; /* FM_AGE_UNKNOWN when no state's age is known */
   struct state_delta delta;
   struct evidence evidence; /* the remote's evidence (mask != 0: any evidence) */
   /* asset importance: the largest multiplier of its states' local anchors

@@ -23,6 +23,7 @@
  */
 
 #include "aggregate.h"
+#include "lifetime.h"
 #include "alloc.h"
 #include "profile.h"
 #include <errno.h>
@@ -615,10 +616,15 @@ bool aggregate_add(struct aggregate *a, const struct state *s,
                                              : &f->local_initiated_states,
                  1, error))
     return false;
-  if (f->states == 1 || s->age < f->youngest)
-    f->youngest = s->age;
-  if (s->age > f->oldest)
-    f->oldest = s->age;
+  /* ages over the states whose age is known (FM_AGE_UNKNOWN: none yet) */
+  if (f->states == 1)
+    f->youngest = f->oldest = s->age;
+  else if (s->age != FM_AGE_UNKNOWN) {
+    if (f->youngest == FM_AGE_UNKNOWN || s->age < f->youngest)
+      f->youngest = s->age;
+    if (f->oldest == FM_AGE_UNKNOWN || s->age > f->oldest)
+      f->oldest = s->age;
+  }
   return attribution(a, id, s, &v, weight, seq, error);
 }
 bool aggregate_finish(struct aggregate *a, struct fm_error *error) {

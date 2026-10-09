@@ -26,6 +26,7 @@
 #include "alloc.h"
 #include "response.h"
 #include "index.h"
+#include "lifetime.h"
 #include "profile.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -61,6 +62,9 @@ struct snapshot {
   uint64_t observed, traversed, generation, skipped;
   unsigned reasons;
   double sample_time, started;
+  /* PF records pass the lifetime screen first (lifetime.h); an impossible
+   * lifetime counts as skipped */
+  struct lifetime_screen screen;
 };
 
 static double wall_time(void) {
@@ -167,6 +171,7 @@ struct snapshot *snapshot_create(const struct context *ctx,
   s->generation = generation;
   s->sample_time = sample_time;
   s->started = wall_time();
+  lifetime_screen_begin(&s->screen, (struct lifetime_bound){0});
   s->flows = count ? fm_malloc(count * sizeof(*flows)) : NULL;
   s->evidence = count ? fm_calloc(count, sizeof(*s->evidence)) : NULL;
   size_t *quotas = count ? fm_calloc(count, sizeof(*quotas)) : NULL;
@@ -288,6 +293,9 @@ static size_t row_json(const struct state *state, const struct state_view *v,
    * the from_remote/to_remote fields are the same traffic oriented by
    * the PF initiator. "remote_started" keeps its historical meaning (the
    * apparent-initiator heuristic). */
+  char age[16] = "null"; /* unknown (lifetime.h): never an invented age */
+  if (state->age != FM_AGE_UNKNOWN)
+    snprintf(age, sizeof(age), "%u", state->age);
   int length = snprintf(out, FM_FRAME_MAX,
       "{\"flow\":{\"origin\":\"%s\",\"dest\":\"%s\"},"
       "\"id\":\"%016" PRIx64 "\",\"creatorid\":\"%08" PRIx32 "\","
@@ -301,7 +309,7 @@ static size_t row_json(const struct state *state, const struct state_view *v,
       "\"bytes\":%" PRIu64 ",\"bytes_from_remote\":%" PRIu64 ",\"bytes_to_remote\":%" PRIu64 ","
       "\"packets_from_remote\":%" PRIu64 ",\"packets_to_remote\":%" PRIu64 ","
       "\"peer_states\":[%u,%u],"
-      "\"age\":%u,\"expire\":%u,\"rule_number\":%u,\"rule_label\":\"%s\"}",
+      "\"age\":%s,\"expire\":%u,\"rule_number\":%u,\"rule_label\":\"%s\"}",
       local, remote, state->id, state->creator, pf->proto, protocol, state->pf_direction,
       iface, orig, wire[0], wire[1], stack[0], stack[1], src, pf->initiator.port, dst,
       pf->responder.port, translation, v->has_inside ? inside : "null", outside,
@@ -313,7 +321,7 @@ static size_t row_json(const struct state *state, const struct state_view *v,
       state_bytes_to_remote(state, remote_initiated),
       state_packets_from_remote(state, remote_initiated),
       state_packets_to_remote(state, remote_initiated),
-      state->peer[0], state->peer[1], state->age, state->expire, state->rule, label);
+      state->peer[0], state->peer[1], age, state->expire, state->rule, label);
   if (length < 0 || length >= FM_FRAME_MAX - 5) return 0;
   /* Includes conservative states[remote] wrapper/comma overhead. */
   *cost = (size_t)length + strlen(remote) + 8;
@@ -347,9 +355,18 @@ static struct exemplar *exemplar(const struct state *state, const struct state_v
   memcpy(e->json, json, length);
   return e;
 }
+void snapshot_screen(struct snapshot *s, struct lifetime_bound bound) {
+  lifetime_screen_begin(&s->screen, bound);
+}
 bool snapshot_add(const struct state *state, void *arg, struct fm_error *error) {
   struct snapshot *s = arg;
   s->traversed++;
+  struct state scratch;
+  state = lifetime_screen_state(&s->screen, state, &scratch);
+  if (!state) {
+    s->skipped++;
+    return true;
+  }
   struct state_view v;
   if (!state_normalize(state, s->ctx, &v, error)) return false;
   s->skipped += v.pf.skip != SKIP_NONE;
@@ -517,6 +534,7 @@ struct command_args {
   const struct ranker *ranker;
   uint64_t generation;
   double sample_time;
+  struct lifetime_bound lifetime;
   const struct telemetry *telemetry;
   struct snapshot_flow *flows;
   struct ranked_flow *rows;
@@ -531,6 +549,7 @@ static bool render(enum command command, const struct command_args *c, FILE *out
     struct snapshot *s = snapshot_create(c->ctx, c->flows, c->count, c->bytes, c->states,
                                          c->generation, c->sample_time, error);
     if (!s) return false;
+    snapshot_screen(s, c->lifetime);
     bool ok = pf_reader_live(snapshot_add, s, NULL, NULL, error) && snapshot_write(s, out, error);
     snapshot_destroy(s);
     return ok;
@@ -551,13 +570,13 @@ static bool respond(enum command command, const struct command_args *c, FILE *ou
 
 bool snapshot_session(FILE *in, FILE *out, const struct context *ctx,
                       const struct aggregate *a, const struct ranking *r, const struct ranker *ranker,
-                      uint64_t generation, double sample_time,
+                      uint64_t generation, double sample_time, struct lifetime_bound lifetime,
                       const struct telemetry *telemetry, struct fm_error *error) {
   char line[256], extra;
   bool ok = false;
   /* Heap, not stack: two 5000-row arrays. */
   struct command_args c = {.ctx = ctx, .a = a, .r = r, .ranker = ranker, .generation = generation,
-                           .sample_time = sample_time, .telemetry = telemetry,
+                           .sample_time = sample_time, .lifetime = lifetime, .telemetry = telemetry,
                            .flows = fm_calloc(FM_SNAPSHOT_FLOWS, sizeof(*c.flows)),
                            .rows = fm_calloc(FM_SNAPSHOT_FLOWS, sizeof(*c.rows))};
   uint64_t requested;

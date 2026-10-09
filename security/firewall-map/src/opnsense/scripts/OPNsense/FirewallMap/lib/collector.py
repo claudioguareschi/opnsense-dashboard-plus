@@ -111,12 +111,20 @@ SELECTION_POLICIES = {2: "bytes_desc_newest_identity_v1"}
 
 _FLOW = struct.Struct("!I17s17sQQQIIQQQQQQQBBIIBdddddBI")
 SECURITY_CLASSES = ("S0", "S1", "S2", "S3")
+# an age the kernel could not have measured (collector/lifetime.h FM_AGE_UNKNOWN): None, never 0
+AGE_UNKNOWN = 0xFFFFFFFF
+
+
+def _age(value):
+    return None if value == AGE_UNKNOWN else value
+
+
 # why a flow may be on the map (collector/profile.h): "none" only where the collector did not
 # decide (snapshot selections)
 PRESENCES = ("none", "traffic", "probe", "mirror")
 # CARP addresses a request may name (CARP rows)
 CARP_ADDRESSES_MAX = 256
-_TELEMETRY = struct.Struct("!IQddddd" + "Q" * 42)
+_TELEMETRY = struct.Struct("!IQddddd" + "Q" * 49)
 _TELEMETRY_FIELDS = ("pid", "sequence", "interval", "dump_seconds", "processing_seconds", "user_cpu",
                      "system_cpu", "max_rss", "heap_bytes", "heap_peak", "heap_blocks", "heap_budget",
                      "state_limit", "preflight_states", "skipped_af_translation", "candidates_omitted",
@@ -126,7 +134,12 @@ _TELEMETRY_FIELDS = ("pid", "sequence", "interval", "dump_seconds", "processing_
                      "tracked_flows", "tracked_limit", "exit_threshold", "forced_limit", "forced_flows",
                      "forced_refused", "candidate_limit", "candidate_evictions", "join_limit", "join_refused",
                      "untracked_states", "promoted", "baseline_bytes", "tracked_bytes", "candidate_bytes",
-                     "join_bytes", "ranking_bytes", "discovery_bytes", "recommended_interval_ms", "cadence_reason")
+                     "join_bytes", "ranking_bytes", "discovery_bytes", "recommended_interval_ms", "cadence_reason",
+                     # the lifetime screen (collector/lifetime.h): PF records observed, those skipped
+                     # for an impossible lifetime, those of unknown age; whether validation was active,
+                     # its limit (s), why it was unavailable (errno) and the bound refresh cost (us)
+                     "pf_records_observed", "invalid_pf_states_skipped", "age_unknown_states",
+                     "lifetime_validation", "lifetime_limit", "lifetime_error", "lifetime_refresh_us")
 # why the collector recommends its sampling interval (collector/cadence.h)
 CADENCE_REASONS = ("floor", "duty", "memory", "refused")
 # the quality axes (collector/CONTRACTS.md), as the telemetry numbers them
@@ -474,7 +487,7 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
                 raise CollectorError("invalid FMAGG4 flow rank or rate")
             flows.append({"key": (_address(local), _address(remote)), "states": states,
                           "bytes_from_remote": from_remote, "bytes_to_remote": to_remote,
-                          "oldest": oldest, "youngest": youngest,
+                          "oldest": _age(oldest), "youngest": _age(youngest),
                           "remote_initiated_weight": remote_weight, "local_initiated_weight": local_weight,
                           "first": first, "delta_bytes_from_remote": delta_from,
                           "delta_bytes_to_remote": delta_to, "delta_packets": delta_packets,
@@ -503,7 +516,7 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
                 raise CollectorError("FMAGG4 threat remote order")
             threat_remotes.append({"address": _address(data[5:22]), "remote_initiated_states": remote_states,
                                    "local_initiated_states": local_states, "bytes": transferred,
-                                   "classes": _class_mask(classes, categories), "youngest": youngest})
+                                   "classes": _class_mask(classes, categories), "youngest": _age(youngest)})
         elif kind == THREAT_CANDIDATE:
             if not threats_present or len(data) < 24:
                 raise CollectorError("invalid FMAGG4 threat candidate")
@@ -634,7 +647,7 @@ def _event_match(data, query_keys):
         raise CollectorError("FMAGG4 event tuple mismatch")
     return key, {"kind": match_kind, "inside": _address(data[44:61]) if has_inside else None,
                  "inside_port": inside_port if has_inside else None,
-                 "id": state_id, "creator": creator, "ambiguous": bool(ambiguous), "age": age,
+                 "id": state_id, "creator": creator, "ambiguous": bool(ambiguous), "age": _age(age),
                  # compatibility names: bytes_in is from the remote, bytes_out to the remote
                  "bytes_in": from_remote, "bytes_out": to_remote,
                  "packets_from_remote": packets_from, "packets_to_remote": packets_to,

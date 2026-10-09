@@ -109,6 +109,9 @@
             engine_baseline: {{ lang._('first sample of this process: no rates yet')|json_encode }},
             engine_omitted: {{ lang._('%s states skipped (unsupported address-family translation), %s candidates and %s threat remotes over their budgets, %s recent tuples evicted')|json_encode }},
             engine_rejected: {{ lang._('%s filter log and %s IDS lines rejected')|json_encode }},
+            lifetimes: {{ lang._('Invalid PF state lifetimes skipped: %s of %s PF records (no state can last longer than %s s)')|json_encode }},
+            lifetimes_unavailable: {{ lang._('Not validated: the PF timeouts could not be read (error %s), so every PF state is kept')|json_encode }},
+            ages_unknown: {{ lang._('%s states with an age PF cannot have measured: shown without an age')|json_encode }},
             engine_refused: {{ lang._('Last sample refused: %s')|json_encode }},
             engine_incompatible: {{ lang._('Incompatible with this firewall: %s')|json_encode }},
             engine_protocol_mismatch: {{ lang._('Firewall Map collector incompatible — The Firewall Map application and its state collector use incompatible protocols. Reinstall or upgrade the Firewall Map package so both components come from the same version.')|json_encode }},
@@ -202,6 +205,14 @@
             $('#engine-omitted').text(telemetry.sequence ? fill(T.engine_omitted, count(telemetry.skipped_af_translation),
                 count(telemetry.candidates_omitted), count(telemetry.threat_remotes_omitted),
                 count(telemetry.event_history_evicted)) : '—');
+            // PF states with an impossible lifetime never become map states; ages PF cannot have
+            // measured are shown as unknown
+            $('#engine-lifetimes').html(!telemetry.sequence ? '—' : (telemetry.lifetime_validation
+                ? escape(fill(T.lifetimes, count(telemetry.invalid_pf_states_skipped), count(telemetry.pf_records_observed),
+                    count(telemetry.lifetime_limit)))
+                : state(fill(T.lifetimes_unavailable, telemetry.lifetime_error || '—')))
+                + (telemetry.age_unknown_states ? `<br><small class="text-muted">${escape(fill(T.ages_unknown,
+                    count(telemetry.age_unknown_states)))}</small>` : ''));
             const rejected = engine.ingest_rejected || {};
             $('#engine-rejected').text(fill(T.engine_rejected, count(rejected.filterlog), count(rejected.eve)));
             const problem = incompatible ? (incompatible.reason === 'protocol' ? T.engine_protocol_mismatch
@@ -358,6 +369,7 @@
             <tr><td>{{ lang._('Last collector sample') }}</td><td id="engine-sample"></td></tr>
             <tr><td>{{ lang._('Flows') }}</td><td id="engine-tracking"></td></tr>
             <tr><td>{{ lang._('Left out') }}</td><td id="engine-omitted"></td></tr>
+            <tr><td>{{ lang._('PF state lifetimes') }}</td><td id="engine-lifetimes"></td></tr>
             <tr><td>{{ lang._('Rejected log lines') }}</td><td id="engine-rejected"></td></tr>
             <tr><td>{{ lang._('Ranking profile') }}</td><td id="engine-profile"></td></tr>
             <tr><td>{{ lang._('Generations') }}</td><td id="engine-generations"></td></tr>

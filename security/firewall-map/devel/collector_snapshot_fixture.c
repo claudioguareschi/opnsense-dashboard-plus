@@ -120,7 +120,10 @@ static struct state make_state(size_t n, unsigned sample, const char *mode) {
     snprintf(text, sizeof(text), "10.0.%u.%u", (unsigned)(n >> 8) & 255, (unsigned)n & 255);
     inside.a = address(text);
   }
-  if (!strcmp(mode, "unique") || late || assets) {
+  /* invalid: unique, with every odd state's EXPIRE the observed pfsync-import
+   * wrap (about 2^64/1000 mod 2^32 s): rejected when a lifetime bound is known */
+  bool invalid = !strcmp(mode, "invalid");
+  if (!strcmp(mode, "unique") || invalid || late || assets) {
     /* worst case: every state its own remote, flow, tuple, target and label */
     char text[64];
     snprintf(text, sizeof(text), "9.%u.%u.%u", (unsigned)(n >> 16) & 255, (unsigned)(n >> 8) & 255,
@@ -150,10 +153,28 @@ static struct state make_state(size_t n, unsigned sample, const char *mode) {
   s.key[0].proto = s.key[1].proto = proto;
   if (!strcmp(mode, "cross") && sample >= 3)
     s.key[1].e[1].a = address("fd00::2");
+  if (invalid && n % 2)
+    s.expire = 1270699076u;
   return s;
 }
 
 unsigned pf_reader_state_version(void) { return 0; }
+/* The lifetime bound: FM_TEST_TIMEOUT_MAX=<seconds> makes it available,
+ * FM_TEST_TIMEOUT_ERROR=<errno> unavailable for that reason; neither leaves it
+ * unavailable (ENOTSUP), so nothing is rejected. */
+struct pf_rule_cache {
+  int unused;
+};
+struct lifetime_bound pf_reader_lifetime_bound(struct pf_rule_cache **cache) {
+  (void)cache;
+  const char *max = getenv("FM_TEST_TIMEOUT_MAX"), *failure = getenv("FM_TEST_TIMEOUT_ERROR");
+  if (failure)
+    return (struct lifetime_bound){.error = atoi(failure)};
+  if (max)
+    return (struct lifetime_bound){.available = true, .timeout_max = strtoull(max, NULL, 10)};
+  return (struct lifetime_bound){.error = ENOTSUP};
+}
+void pf_reader_rule_cache_free(struct pf_rule_cache *cache) { (void)cache; }
 
 /* FM_TEST_PREFLIGHT=<count> simulates PF's GET_STATUS state count. */
 bool pf_reader_state_count(uint64_t *count) {
@@ -213,6 +234,13 @@ static bool scenario(const char *path, unsigned sample, pf_state_callback callba
       break;
     }
     s.id = id; s.creator = creator; s.age = age; s.expire = 60; s.rule = 1;
+    /* an optional trailing "@expire=<seconds>" sets the reported EXPIRE */
+    char *expire = strstr(label, "@expire=");
+    if (expire) {
+      s.expire = (uint32_t)strtoul(expire + 8, NULL, 10);
+      while (expire > label && expire[-1] == ' ') expire--;
+      *expire = 0;
+    }
     s.pf_direction = !strcmp(direction, "in") ? FM_IN : FM_OUT;
     s.key[0].proto = (unsigned char)wire_proto; s.key[1].proto = (unsigned char)stack_proto;
     s.pf_bytes[0] = forward; s.pf_bytes[1] = reverse;
