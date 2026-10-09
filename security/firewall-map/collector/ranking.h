@@ -29,11 +29,14 @@ struct ranking;
 struct ranked_flow {
   size_t flow;
   double rate_from_remote, rate_to_remote, packet_rate, activity, score;
-  unsigned char presence; /* enum flow_presence (profile.h); 0 where not decided */
+  unsigned char presence; /* enum flow_presence (profile.h); 0 where not decided (snapshot selections) */
   uint64_t attempts;
 };
-struct ranking *ranking_create(size_t limit, double fade, double smoothing,
-                               struct fm_error *);
+/* Per-flow rate history of the tracked set: EMA-smoothed byte and packet
+ * rates, the linear activity fade, first-seen order, the current activity
+ * episode's volume and connection attempts. The active profile ranks from
+ * these (profile.h); there is no other ranking. */
+struct ranking *ranking_create(double fade, double smoothing, struct fm_error *);
 void ranking_destroy(struct ranking *);
 void ranking_reset(struct ranking *);
 /* `now` is the sample's anchor on the same monotonic clock as history; an
@@ -41,19 +44,12 @@ void ranking_reset(struct ranking *);
  * previous generation is untouched. */
 bool ranking_update(struct ranking *, const struct aggregate *, double now,
                     double interval, struct fm_error *);
-size_t ranking_count(const struct ranking *);
-size_t ranking_total(const struct ranking *);
-bool ranking_at(const struct ranking *, size_t, struct ranked_flow *);
 /* The flow keys with rate history (the tracked set carried to the next
  * sample), keyed as state_flow_key. */
 const struct map *ranking_keys(const struct ranking *);
 /* Keeps the history of the `retained` keys only (the tracked set's choice),
  * forgetting the rest. */
 bool ranking_retain(struct ranking *, const struct map *retained, struct fm_error *);
-/* Snapshot-only rate/order view, including quiet flows for Python's IDS policy.
- * Uses existing history, without updating rates or re-ranking. */
-bool ranking_snapshot_at(const struct ranking *, const struct aggregate *, size_t,
-                         struct ranked_flow *, uint64_t *order);
 size_t ranking_bytes(const struct ranking *);
 /* The last update's rates of aggregate flow n, idle flows included, with its
  * first-seen order (the profile scores every tracked flow, not only active ones). */

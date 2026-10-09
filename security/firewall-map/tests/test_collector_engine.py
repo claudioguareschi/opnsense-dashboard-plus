@@ -43,8 +43,10 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src/opnsense/scripts/OPNsense/FirewallMap"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import collector  # noqa: E402
+from lib import collector, profiles  # noqa: E402
 from collector_build import compile_worker, state_limit  # noqa: E402
+
+BALANCED = profiles.validate(profiles.BY_UUID[profiles.BALANCED])
 
 LOCAL = {"8.8.8.1", "2001:4860::1"}
 CONTEXT = (LOCAL, [], {}, None)
@@ -64,7 +66,7 @@ class CollectorEngineSpecificationTest(unittest.TestCase):
         cls.directory.cleanup()
 
     def setUp(self):
-        self.engine = collector.CollectorEngine(self.worker, profile=None)
+        self.engine = collector.CollectorEngine(self.worker, profile=BALANCED)
         self.addCleanup(self.engine.close)
 
     def samples(self, count, mode="one", states=12, **options):
@@ -75,7 +77,9 @@ class CollectorEngineSpecificationTest(unittest.TestCase):
         first, second, third = self.samples(3)
         self.assertTrue(first["baseline"])
         self.assertEqual(first["telemetry"]["interval"], -1)
-        self.assertEqual(first["flows"], [])  # no rates without a committed predecessor
+        # no rates without a committed predecessor (the profile may still rank the flow by its states)
+        self.assertTrue(all((flow["rate_from_remote"], flow["rate_to_remote"], flow["packet_rate"]) == (0, 0, 0)
+                            for flow in first["flows"]))
         self.assertEqual(first["counts"]["flows"], 1)
         self.assertFalse(second["baseline"])
         self.assertEqual((second["telemetry"]["interval"], third["telemetry"]["interval"]), (2.0, 2.0))
@@ -269,7 +273,7 @@ for line in sys.stdin.buffer:
         return len(self.runs.read_text()) if self.runs.exists() else 0
 
     def engine(self):
-        engine = collector.CollectorEngine(str(self.path), profile=None)
+        engine = collector.CollectorEngine(str(self.path), profile=BALANCED)
         self.addCleanup(engine.close)
         return engine
 
@@ -370,7 +374,7 @@ class CollectorMemoryTest(unittest.TestCase):
         cls.directory.cleanup()
 
     def run_samples(self, count, states=2000, mode="many"):
-        engine = collector.CollectorEngine(self.worker, profile=None)
+        engine = collector.CollectorEngine(self.worker, profile=BALANCED)
         self.addCleanup(engine.close)
         with patch.dict(os.environ, FM_TEST_MODE=mode, FM_TEST_COUNT=str(states), FM_TEST_INTERVAL="2"):
             telemetry = [engine.sample(*CONTEXT, threat_summary=True,

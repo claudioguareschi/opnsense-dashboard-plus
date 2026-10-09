@@ -112,7 +112,7 @@ SELECTION_POLICIES = {2: "bytes_desc_newest_identity_v1"}
 _FLOW = struct.Struct("!I17s17sQQQIIQQQQQQQBBIIBdddddBI")
 SECURITY_CLASSES = ("S0", "S1", "S2", "S3")
 # why a flow may be on the map (collector/profile.h): "none" only where the collector did not
-# decide (the base ranking, snapshot selections)
+# decide (snapshot selections)
 PRESENCES = ("none", "traffic", "probe", "mirror")
 # CARP addresses a request may name (CARP rows)
 CARP_ADDRESSES_MAX = 256
@@ -655,9 +655,10 @@ class CollectorEngine:
     def __init__(self, path=HELPER, *, profile, profile_dir=None):
         self.path = path
         # the active ranking profile (a validated lib/profiles.py profile): startup configuration,
-        # written as the schema-v1 document the helper compiles once. Required, never defaulted:
-        # the service always passes the resolved active profile; only tests and devel tools pass
-        # None, explicitly, for the base ranking (Classic, the regression oracle)
+        # written as the schema-v1 document the helper compiles once. Required: the collector has
+        # no ranking of its own
+        if profile is None:
+            raise ValueError("a ranking profile is required")
         self.profile = profile
         self.profile_dir = profile_dir
         self.process = None
@@ -694,7 +695,7 @@ class CollectorEngine:
         try:
             startup = self._startup_file()
             try:
-                arguments = [self.path] + (["--profile", startup] if startup else [])
+                arguments = [self.path, "--profile", startup]
                 self.process = subprocess.Popen(arguments, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                                 bufsize=0)
                 self.starts += 1
@@ -704,8 +705,7 @@ class CollectorEngine:
                     banner += _read_exact(self.process.stdout, 1, self.process, deadline)
             finally:
                 # the helper compiles the profile before its banner: the file is not needed after
-                if startup:
-                    os.unlink(startup)
+                os.unlink(startup)
             match = BANNER.match(bytes(banner))
             if not match:
                 announced = BANNER_PROTOCOL.match(bytes(banner))
@@ -817,9 +817,7 @@ class CollectorEngine:
         return result
 
     def _startup_file(self):
-        """The active profile's startup document in a private file (0600), or None."""
-        if self.profile is None:
-            return None
+        """The active profile's startup document in a private file (0600)."""
         directory = self.profile_dir or (common.RUN_DIR if os.path.isdir(common.RUN_DIR) else None)
         descriptor, path = tempfile.mkstemp(prefix="collector-profile-", suffix=".json", dir=directory)
         with os.fdopen(descriptor, "w") as handle:
@@ -828,13 +826,15 @@ class CollectorEngine:
 
     @staticmethod
     def _profile_key(profile):
-        return None if profile is None else (profile["uuid"], profiles.fingerprint(profile))
+        return profile["uuid"], profiles.fingerprint(profile)
 
     def set_profile(self, profile):
         """The active ranking profile (validated). Another UUID or another definition of the active
         one (its fingerprint) closes the helper, which compiled the old one at startup: the next
         sample starts one with the new profile (a baseline). The same UUID and definition again
         (a rename, or an edit of another profile) changes nothing."""
+        if profile is None:
+            raise ValueError("a ranking profile is required")
         changed = self._profile_key(profile) != self._profile_key(self.profile)
         self.profile = profile
         if changed:

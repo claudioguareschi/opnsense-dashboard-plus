@@ -33,14 +33,13 @@
 /* The tracked set T and its two regimes (CONTRACTS.md, "Tracked set").
  *
  * Ranking-exact: every flow is tracked, admitted during the pass, while T
- * stays under its limit; ranking and history are then exact (the base
- * ranking, the Classic oracle, is reproduced exactly). If the
+ * stays under its limit; ranking and history are then exact. If the
  * limit is reached during a pass, that whole sample is bounded and the next
  * one starts in the bounded regime.
  *
  * Bounded: T keeps the selected flows, flagged flows (pinned) and the best
  * others by effective score (the active profile's, asset importance
- * included; the base score without a profile), and the discovery tier's
+ * included), and the discovery tier's
  * best untracked flows, promoted at the end of a sample for the next one: a
  * promotion displaces an incumbent only when its estimated effective score
  * beats the incumbent's by the incumbency margin. Discovery counts are

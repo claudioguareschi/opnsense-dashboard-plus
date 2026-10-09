@@ -35,11 +35,6 @@ struct rate_state {
   uint64_t attempts;      /* states created in the current activity episode */
   bool active;
 };
-struct rank_row {
-  size_t flow;
-  uint64_t order;
-  double from_remote, to_remote, packets, activity, score;
-};
 /* Two generations of per-flow rate state. `previous` is the committed one
  * (keyed by flow pair, value index = map item id); `current` is built by
  * ranking_update and then becomes `previous`. The value arrays are swapped,
@@ -51,9 +46,8 @@ struct generation {
 };
 struct ranking {
   struct generation previous, current;
-  struct rank_row *rows, *scratch;
   struct flow_rates *rates;
-  size_t rows_capacity, scratch_capacity, rates_capacity, count, active, total, limit;
+  size_t rates_capacity, total;
   uint64_t next_order;
   double fade, smoothing, sampled_at;
 };
@@ -80,9 +74,8 @@ static bool reserve(void **data, size_t *capacity, size_t needed, size_t size,
   return true;
 }
 
-struct ranking *ranking_create(size_t limit, double fade, double smoothing,
-                               struct fm_error *error) {
-  if (!limit || fade <= 0 || smoothing < 0 || smoothing > 1) {
+struct ranking *ranking_create(double fade, double smoothing, struct fm_error *error) {
+  if (fade <= 0 || smoothing < 0 || smoothing > 1) {
     fm_error_set(error, EINVAL, "ranking options");
     return NULL;
   }
@@ -90,7 +83,6 @@ struct ranking *ranking_create(size_t limit, double fade, double smoothing,
   if (!r)
     fm_error_set(error, errno, "ranking allocation");
   else {
-    r->limit = limit;
     r->fade = fade;
     r->smoothing = smoothing;
   }
@@ -104,8 +96,6 @@ void ranking_destroy(struct ranking *r) {
   map_clear(&r->current.keys);
   fm_free(r->previous.values);
   fm_free(r->current.values);
-  fm_free(r->rows);
-  fm_free(r->scratch);
   fm_free(r->rates);
   fm_free(r);
 }
@@ -115,40 +105,8 @@ void ranking_reset(struct ranking *r) {
     return;
   /* Forget rate state but keep buffers for reuse. */
   map_clear(&r->previous.keys);
-  r->count = r->active = r->total = 0;
+  r->total = 0;
   r->next_order = 0;
-}
-
-static bool before(const struct rank_row *a, const struct rank_row *b) {
-  return a->score > b->score || (a->score == b->score && a->order < b->order);
-}
-
-/* Stable bottom-up merge sort using the ranking's persistent scratch buffer. */
-static bool sort_rows(struct ranking *r, size_t count, struct fm_error *error) {
-  if (count < 2)
-    return true;
-  if (!reserve((void **)&r->scratch, &r->scratch_capacity, count,
-               sizeof(*r->scratch), error))
-    return false;
-  struct rank_row *rows = r->rows, *scratch = r->scratch;
-  for (size_t width = 1; width < count; width *= 2) {
-    for (size_t start = 0; start < count; start += width * 2) {
-      size_t middle = start + width < count ? start + width : count;
-      size_t end = middle + width < count ? middle + width : count;
-      size_t left = start, right = middle, out = start;
-      while (left < middle && right < end)
-        scratch[out++] =
-            before(&rows[left], &rows[right]) ? rows[left++] : rows[right++];
-      while (left < middle)
-        scratch[out++] = rows[left++];
-      while (right < end)
-        scratch[out++] = rows[right++];
-    }
-    memcpy(rows, scratch, count * sizeof(*rows));
-    if (width > SIZE_MAX / 2)
-      break;
-  }
-  return true;
 }
 
 static double activity_at(const struct ranking *r, const struct rate_state *v,
@@ -164,12 +122,9 @@ bool ranking_update(struct ranking *r, const struct aggregate *aggregate,
   size_t total = aggregate_counts(aggregate).flows;
   if (!reserve((void **)&current->values, &current->capacity, total,
                sizeof(*current->values), error) ||
-      !reserve((void **)&r->rows, &r->rows_capacity, total, sizeof(*r->rows),
-               error) ||
       !reserve((void **)&r->rates, &r->rates_capacity, total, sizeof(*r->rates), error))
     return false;
   uint64_t next_order = r->next_order;
-  size_t count = 0;
   for (size_t n = 0; n < total; n++) {
     const struct flow *flow = aggregate_flow(aggregate, n);
     unsigned char key[FM_FLOW_KEY_SIZE];
@@ -211,16 +166,7 @@ bool ranking_update(struct ranking *r, const struct aggregate *aggregate,
     double activity = activity_at(r, &next, now);
     r->rates[n] = (struct flow_rates){next.from_remote, next.to_remote, next.packets, activity,
                                       next.order, next.volume, next.attempts};
-    double rate = next.from_remote + next.to_remote;
-    double score = (rate > 1.0 ? rate : 1.0) * activity;
-    if (activity > 0)
-      r->rows[count++] = (struct rank_row){n, next.order, next.from_remote,
-                                           next.to_remote, next.packets,
-                                           activity, score};
   }
-  /* Stable descending score order: persistent flow insertion order breaks ties. */
-  if (!sort_rows(r, count, error))
-    return false;
   /* Commit: the new generation becomes previous; the old previous buffers are
    * kept as next sample's scratch generation. */
   struct generation retired = r->previous;
@@ -229,13 +175,10 @@ bool ranking_update(struct ranking *r, const struct aggregate *aggregate,
   map_clear(&r->current.keys);
   r->next_order = next_order;
   r->total = total;
-  r->active = count;
-  r->count = count < r->limit ? count : r->limit;
   r->sampled_at = now;
   return true;
 }
 
-size_t ranking_count(const struct ranking *r) { return r->count; }
 bool ranking_rates(const struct ranking *r, size_t flow, struct flow_rates *out) {
   if (flow >= r->total)
     return false;
@@ -270,38 +213,8 @@ bool ranking_retain(struct ranking *r, const struct map *retained, struct fm_err
   map_clear(&r->current.keys);
   return true;
 }
-size_t ranking_total(const struct ranking *r) { return r->total; }
-bool ranking_at(const struct ranking *r, size_t n, struct ranked_flow *out) {
-  if (n >= r->count)
-    return false;
-  const struct rank_row *row = &r->rows[n];
-  *out = (struct ranked_flow){row->flow,    row->from_remote, row->to_remote,
-                              row->packets, row->activity,    row->score, 0, 0};
-  return true;
-}
-
-bool ranking_snapshot_at(const struct ranking *r, const struct aggregate *a,
-                         size_t n, struct ranked_flow *out, uint64_t *order) {
-  const struct flow *flow = aggregate_flow(a, n);
-  if (!flow)
-    return false;
-  unsigned char key[FM_FLOW_KEY_SIZE];
-  state_flow_key(key, flow->local, flow->remote);
-  const struct item *i = map_find(&r->previous.keys, key, sizeof(key));
-  if (!i)
-    return false;
-  const struct rate_state *v = &r->previous.values[i->id];
-  double activity = activity_at(r, v, r->sampled_at);
-  double rate = v->from_remote + v->to_remote;
-  *out = (struct ranked_flow){n,          v->from_remote, v->to_remote,
-                              v->packets, activity, (rate > 1 ? rate : 1) * activity, 0, v->attempts};
-  *order = v->order;
-  return true;
-}
-
 size_t ranking_bytes(const struct ranking *r) {
   return sizeof(*r) + map_bytes(&r->previous.keys) + map_bytes(&r->current.keys) +
          (r->previous.capacity + r->current.capacity) * sizeof(struct rate_state) +
-         (r->rows_capacity + r->scratch_capacity) * sizeof(struct rank_row) +
          r->rates_capacity * sizeof(*r->rates);
 }

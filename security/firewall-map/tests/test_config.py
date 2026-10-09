@@ -127,7 +127,7 @@ class SettingsFileTest(unittest.TestCase):
 
 
 class RankingProfileSettingTest(unittest.TestCase):
-    def test_the_setting_names_a_builtin_by_uuid_and_classic_is_not_offered(self):
+    def test_the_setting_names_a_builtin_by_uuid(self):
         model = (Path(__file__).resolve().parents[1]
                  / "src/opnsense/mvc/app/models/OPNsense/FirewallMap/FirewallMap.xml").read_text()
         default = re.search(r"<ranking_profile[^>]*>.*?<Default>([^<]+)</Default>", model, re.S).group(1)
@@ -141,18 +141,19 @@ class RankingProfileSettingTest(unittest.TestCase):
         self.assertEqual([item["name"] for item in catalog["profiles"]],
                          ["Balanced", "Bandwidth", "Connections", "Security"])
         self.assertEqual(catalog["default"], profiles.DEFAULT)
-        self.assertNotIn("classic", output.getvalue().lower())
         # an unknown or empty setting is the default, never another ranking
         self.assertEqual(profiles.resolve({"ranking_profile": ""}), (profiles.validate(profiles.BY_UUID[profiles.DEFAULT]), None))
         resolved, problem = profiles.resolve({"ranking_profile": "not-a-profile"})
         self.assertEqual((resolved["uuid"], bool(problem)), (profiles.DEFAULT, True))
 
     def test_the_service_never_starts_the_collector_without_a_profile(self):
-        """Classic is a test oracle only: the engine has no default profile, so production code cannot
-        reach the base ranking by omission, and resolution always yields a validated profile (the
-        configured one, or Balanced with the reason) for the service to pass."""
+        """Ranking is the active profile's alone: the engine refuses to exist without one, and
+        resolution always yields a validated profile (the configured one, or Balanced with the
+        reason) for the service to pass."""
         with self.assertRaises(TypeError):
             COLLECTOR.state_collector.CollectorEngine("/nonexistent/firewallmap-collector")
+        with self.assertRaises(ValueError):
+            COLLECTOR.state_collector.CollectorEngine("/nonexistent/firewallmap-collector", profile=None)
         profiles = COLLECTOR.ranking_profiles
         for values, rows in (({}, []), ({"ranking_profile": profiles.SECURITY}, []),
                              ({"ranking_profile": "missing"}, []), ({"ranking_profile": "x"}, [{"uuid": "x"}])):

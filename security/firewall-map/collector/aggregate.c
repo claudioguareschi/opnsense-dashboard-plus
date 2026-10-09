@@ -528,7 +528,7 @@ static void discover(struct aggregate *a, const unsigned char *key, uint64_t has
   d->untracked_states++;
   /* weighted by asset importance, so an important flow keeps its place in
    * the summaries against heavier unimportant ones */
-  uint64_t unit = profile_unit(a->admission.profile, asset);
+  uint64_t unit = a->admission.profile ? profile_unit(a->admission.profile, asset) : 1;
   uint64_t bytes = delta->bytes_from_remote;
   bytes = UINT64_MAX - bytes < delta->bytes_to_remote ? UINT64_MAX : bytes + delta->bytes_to_remote;
   summary_add(d->bytes, key, hash, bytes, unit);
@@ -572,7 +572,8 @@ bool aggregate_add(struct aggregate *a, const struct state *s,
   state_flow_key(key, v.local, v.remote);
   uint64_t hash = index_hash(key, sizeof(key));
   const struct item *known = map_find_hashed(&a->flows, key, sizeof(key), hash);
-  /* the state's local anchor: the inside host when known */
+  /* the state's local anchor: the inside host when known (an aggregate
+   * outside the engine, with no admission, is never ranked: no weighting) */
   double asset = a->admission.profile
                      ? profile_asset(a->admission.profile, v.has_inside ? v.inside.a : v.local)
                      : 1.0;

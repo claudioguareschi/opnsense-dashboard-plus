@@ -68,8 +68,9 @@ class CollectorScaleTest(unittest.TestCase):
         cls.directory.cleanup()
 
     def engine(self, profile=None):
-        """A helper started with `profile` (a validated profile), or with the base ranking (the oracle)."""
-        engine = collector.CollectorEngine(self.worker, profile=profile)
+        """A helper started with `profile` (a validated profile); Balanced, the shipped default,
+        where the test is not about ranking."""
+        engine = collector.CollectorEngine(self.worker, profile=profile or self.profile(profiles.BALANCED))
         self.addCleanup(engine.close)
         return engine
 
@@ -219,13 +220,14 @@ class CollectorScaleTest(unittest.TestCase):
         (_, unique), _ = self.run_mode("unique", 1000, profile=security, threat_summary=True,
                                        classification=("some", [("T", "threats_some")]))
         self.assertEqual(set(self.remotes(unique)[:128]), {f"9.0.0.{n}" for n in range(128)})
-        # light flagged flows against 1,000 heavy ones (late: index 3000 on carries 100x): the base
-        # ranking shows none of them, Security reserves its places for them
+        # light flagged flows against 1,000 heavy ones (late: index 3000 on carries 100x): Bandwidth
+        # shows none of them, Security reserves its places for them
         flagged = {f"9.0.0.{n}" for n in range(128)}
         lists = ("some", [("T", "threats_some")])
-        (*_, base), _ = self.run_mode("late", 4000, samples=3, classification=lists)
+        (*_, bandwidth), _ = self.run_mode("late", 4000, samples=3, profile=self.profile(profiles.BANDWIDTH),
+                                           classification=lists)
         (*_, late), _ = self.run_mode("late", 4000, samples=3, profile=security, classification=lists)
-        self.assertFalse(set(self.remotes(base)) & flagged)
+        self.assertFalse(set(self.remotes(bandwidth)) & flagged)
         self.assertTrue(flagged <= set(self.remotes(late)))
 
     def test_profile_selections_do_not_depend_on_the_hash_key(self):
@@ -313,12 +315,14 @@ class CollectorScaleTest(unittest.TestCase):
             owners = {row[0] for row in result["threat_candidates"] if row[1] == collector.INSIDE_HOST}
             self.assertEqual(owners, set(range(256)))
 
-    def test_the_base_ranking_oracle_ignores_evidence(self):
-        """The base ranking (Classic, the regression oracle) is the same with or without evidence and
-        threat lists: the security machinery never leaks into it."""
+    def test_evidence_reaches_the_ranking_only_through_the_profile(self):
+        """A profile with no security weights and no floors (Bandwidth) ranks the same with or
+        without evidence and threat lists: the security machinery never leaks into it."""
         facts = {f"9.1.{n >> 8}.{n & 255}": evidence.facts(40, 3, 1, True) for n in range(0, 3000, 7)}
-        (_, alone), _ = self.run_mode("mixed", 3000)
-        (_, with_evidence), _ = self.run_mode("mixed", 3000, evidence=facts, classification=THREATS_ALL)
+        bandwidth = self.profile(profiles.BANDWIDTH)
+        (_, alone), _ = self.run_mode("mixed", 3000, profile=bandwidth)
+        (_, with_evidence), _ = self.run_mode("mixed", 3000, profile=bandwidth, evidence=facts,
+                                              classification=THREATS_ALL)
         self.assertEqual([(row["key"], row["score"]) for row in with_evidence["flows"]],
                          [(row["key"], row["score"]) for row in alone["flows"]])
 
@@ -367,6 +371,11 @@ class CollectorScaleTest(unittest.TestCase):
         result = subprocess.run([self.worker, "--profile", "a", "--profile", "b"], capture_output=True, text=True,
                                 timeout=10, input="")
         self.assertEqual(result.returncode, 2)
+        # no profile at all: the collector has no ranking of its own, so it does not start
+        result = subprocess.run([self.worker], capture_output=True, text=True, timeout=10, input="")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("usage", result.stderr)
+        self.assertEqual(result.stdout, "")
 
     def test_a_new_profile_restarts_the_helper(self):
         engine = self.engine(self.profile(profiles.BALANCED))
@@ -451,10 +460,6 @@ class CollectorScaleTest(unittest.TestCase):
         # the probe needs its attempts: after two samples (one baseline) it has only 6
         early = self.presence_run(balanced, True, samples=2)
         self.assertNotIn("9.2.0.1", early)
-        # the base ranking (the regression oracle) is unchanged: it ranks by traffic alone
-        base = self.presence_run(None, True)
-        self.assertNotIn("9.2.0.3", base)
-        self.assertIn("9.2.0.4", base)
 
     def test_heavy_untracked_flows_are_promoted(self):
         engine = self.engine()

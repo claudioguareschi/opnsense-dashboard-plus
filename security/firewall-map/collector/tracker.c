@@ -129,9 +129,9 @@ static double raw_count(const struct summary *s, const unsigned char *key, uint6
   if (e->unit > *unit) *unit = e->unit;
   return (double)e->count / (double)(e->unit ? e->unit : 1);
 }
-/* Promotion candidates of the active profile: the tops of the three
- * summaries (asset-weighted), each estimated by the effective score it would
- * have after one tracked sample. Returns how many, best first. */
+/* Promotion candidates: the tops of the three summaries (asset-weighted),
+ * each estimated by the effective score the active profile would give it
+ * after one tracked sample. Returns how many, best first. */
 static size_t profile_candidates(struct tracker *t, const struct profile *def, double interval) {
   const struct discovery *d = &t->discovery;
   struct {
@@ -162,17 +162,6 @@ static size_t profile_candidates(struct tracker *t, const struct profile *def, d
     }
   }
   qsort(t->candidates, count, sizeof(*t->candidates), better_candidate);
-  return count;
-}
-/* Base ranking candidates: the byte summary's top by the byte rate it would
- * have after one tracked sample. */
-static size_t base_candidates(struct tracker *t, double interval) {
-  size_t count = summary_top(t->discovery.bytes, t->top, TRACK_PROMOTE_MAX);
-  double per_second = interval > 0 ? 1.0 / interval : 0.0;
-  for (size_t n = 0; n < count; n++) {
-    memcpy(t->candidates[n].key, t->top[n].key, FM_FLOW_KEY_SIZE);
-    t->candidates[n].estimate = t->smoothing * (double)t->top[n].count * per_second;
-  }
   return count;
 }
 static bool pin(struct tracker *t, const struct flow *f, struct fm_error *error) {
@@ -220,7 +209,7 @@ bool tracker_finish(struct tracker *t, const struct aggregate *a, const struct r
   if (next == TRACK_BOUNDED) {
     /* the selected flows stay tracked, and flagged flows (up to the forced
      * cap) */
-    for (size_t n = 0; hints && n < hints->selected_count; n++)
+    for (size_t n = 0; n < hints->selected_count; n++)
       if (!pin(t, aggregate_flow(a, hints->selected[n].flow), error)) return false;
     size_t flagged = 0;
     for (size_t n = 0; n < counts.flows && flagged < t->forced_limit; n++) {
@@ -239,14 +228,12 @@ bool tracker_finish(struct tracker *t, const struct aggregate *a, const struct r
     for (size_t n = 0; n < counts.flows; n++) {
       struct flow_rates rates = {0};
       ranking_rates(ranking, n, &rates);
-      t->scored[n] = (struct scored){(uint32_t)n, hints && hints->ranker ? ranker_score(hints->ranker, n) : 0,
-                                     rates.order};
+      t->scored[n] = (struct scored){(uint32_t)n, ranker_score(hints->ranker, n), rates.order};
     }
     qsort(t->scored, counts.flows, sizeof(*t->scored), better_scored);
     /* promotions: the best untracked candidates, each displacing the
      * incumbent at T's edge only by the incumbency margin */
-    const struct profile *def = hints && hints->ranker ? ranker_profile(hints->ranker) : NULL;
-    size_t candidates = def ? profile_candidates(t, def, interval) : base_candidates(t, interval);
+    size_t candidates = profile_candidates(t, ranker_profile(hints->ranker), interval);
     size_t seats = t->limit;
     for (size_t n = 0; n < candidates && t->promoted.used < TRACK_PROMOTE_MAX; n++) {
       if (t->promoted.used >= seats) break;

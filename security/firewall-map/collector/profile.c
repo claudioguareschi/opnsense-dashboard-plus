@@ -318,7 +318,6 @@ void profile_release(struct profile *p) {
   p->spans4_count = p->spans6_count = 0;
 }
 double profile_asset(const struct profile *p, struct addr a) {
-  if (!p) return 1.0;
   const struct asset_span *spans = a.af == 4 ? p->spans4 : p->spans6;
   size_t lo = 0, hi = a.af == 4 ? p->spans4_count : p->spans6_count;
   u128 key = key_of(a);
@@ -331,23 +330,19 @@ double profile_asset(const struct profile *p, struct addr a) {
   return lo < count && spans[lo].lo <= key ? spans[lo].multiplier : p->default_multiplier;
 }
 uint64_t profile_unit(const struct profile *p, double multiplier) {
-  if (!p || !p->asset_rules) return 1;
+  if (!p->asset_rules) return 1;
   double unit = round(PROFILE_DISCOVERY_UNIT * multiplier / p->min_multiplier);
   return unit < 1 ? 1 : unit >= 1.8e19 ? UINT64_MAX : (uint64_t)unit;
 }
 double profile_unit_multiplier(const struct profile *p, uint64_t unit) {
-  if (!p) return 1.0;
   if (!p->asset_rules) return p->default_multiplier;
   return (double)unit * p->min_multiplier / PROFILE_DISCOVERY_UNIT;
-}
-uint64_t profile_unit_floor(const struct profile *p) {
-  return p && p->asset_rules ? PROFILE_DISCOVERY_UNIT : 1;
 }
 
 /* -------- ranking -------- */
 
 struct ranker {
-  const struct profile *active; /* NULL: the base ranking */
+  const struct profile *active;
   /* this sample's selection and the flow keys of the previous one
    * (incumbency), at most `limit` each */
   struct selected *selection;
@@ -493,26 +488,6 @@ size_t profile_floor_places(const struct profile *def, enum security_class class
   return places < 0 ? 0 : places > (double)limit ? limit : (size_t)places;
 }
 
-static bool select_base(struct ranker *p, const struct ranking *r, size_t limit,
-                        struct fm_error *error) {
-  size_t count = ranking_count(r) < limit ? ranking_count(r) : limit;
-  if (!reserve_rows(&p->selection, &p->capacity, count, error)) return false;
-  for (size_t k = 0; k < count; k++) {
-    struct ranked_flow row;
-    ranking_at(r, k, &row);
-    p->selection[k] = (struct selected){(uint32_t)row.flow, row.score};
-  }
-  p->selected = count;
-  /* every flow's base score (retention and promotion) */
-  for (size_t f = 0; f < p->scores_count; f++) {
-    struct flow_rates rates;
-    if (!ranking_rates(r, f, &rates)) continue;
-    double rate = rates.rate_from_remote + rates.rate_to_remote;
-    p->scores[f] = (rate > 1 ? rate : 1) * rates.activity;
-  }
-  return true;
-}
-
 static bool select_scored(struct ranker *p, const struct aggregate *a, const struct ranking *r,
                           double interval, size_t limit, struct fm_error *error) {
   const struct profile *def = p->active;
@@ -598,7 +573,9 @@ bool ranker_select(struct ranker *p, const struct aggregate *a, const struct ran
   }
   p->scores_count = flows;
   memset(p->scores, 0, flows * sizeof(*p->scores));
-  return p->active ? select_scored(p, a, r, interval, limit, error) : select_base(p, r, limit, error);
+  if (!p->active)
+    return fm_error_fail(error, FM_FAILURE_INTERNAL, EINVAL, "no active ranking profile");
+  return select_scored(p, a, r, interval, limit, error);
 }
 
 size_t ranker_bytes(const struct ranker *p) {

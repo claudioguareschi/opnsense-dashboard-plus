@@ -2,10 +2,10 @@
 """Usage: collector_profile_live.py <collector> [scripts_dir] [samples]
 
 Devel check of the ranking profiles on a real firewall (read-only: PF states are only read). The
-collector runs with the base ranking (Classic), each built-in profile, and a worst-case custom
-profile (4,096 asset rules over the firewall's own networks and random prefixes); each run takes
-`samples` samples (default 5) and prints the per-state processing cost, the heap peak, the
-regime and the selection, so the cost of profile scoring and asset lookups can be compared."""
+collector runs with each built-in profile and a worst-case custom profile (4,096 asset rules
+over the firewall's own networks and random prefixes); each run takes `samples` samples (default
+5) and prints the per-state processing cost, the heap peak, the regime and the selection, so the
+cost of profile scoring and asset lookups can be compared."""
 import ipaddress
 import random
 import sys
@@ -47,7 +47,7 @@ def main():
     samples = int(sys.argv[3]) if len(sys.argv) > 3 else 5
     local, _role, networks, interfaces = pf.host_info()
     wan = config.topology().get("primary_wan_device")
-    runs = [("Classic (base)", None)] + [(p["name"], profiles.validate(p)) for p in profiles.BUILTINS]
+    runs = [(p["name"], profiles.validate(p)) for p in profiles.BUILTINS]
     runs.append(("4,096 asset rules", asset_profile([str(network) for network, _device in networks])))
     for name, profile in runs:
         engine = collector.CollectorEngine(sys.argv[1], profile=profile, profile_dir=tempfile.gettempdir())

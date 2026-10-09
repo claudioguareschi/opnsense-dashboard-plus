@@ -26,6 +26,7 @@
 #include "alloc.h"
 #include "response.h"
 #include "index.h"
+#include "profile.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -472,7 +473,7 @@ static bool identities(FILE *in, struct snapshot_flow *flows, size_t count,
   return line_read(in, line, error) && (!strcmp(line, "RUN\n") ||
          fm_error_fail(error, FM_FAILURE_REQUEST, EPROTO, "snapshot request terminator"));
 }
-static bool select_rows(const struct aggregate *a, const struct ranking *r,
+static bool select_rows(const struct aggregate *a, const struct ranking *r, const struct ranker *ranker,
                         const struct snapshot_flow *flows, size_t count,
                         struct ranked_flow *rows, struct fm_error *error) {
   struct map selected = {0}; bool ok = false;
@@ -487,12 +488,14 @@ static bool select_rows(const struct aggregate *a, const struct ranking *r,
   }
   size_t found = 0;
   for (size_t n = 0; n < aggregate_counts(a).flows; n++) {
-    struct ranked_flow row;
-    uint64_t order;
-    if (!ranking_snapshot_at(r, a, n, &row, &order)) {
+    /* the sample's rates, and the active profile's score for the flow */
+    struct flow_rates rates;
+    if (!ranking_rates(r, n, &rates)) {
       fm_error_fail(error, FM_FAILURE_INTERNAL, EINVAL, "snapshot rank lookup");
       goto done;
     }
+    struct ranked_flow row = {n, rates.rate_from_remote, rates.rate_to_remote, rates.packet_rate, rates.activity,
+                              ranker_score(ranker, n), 0, rates.attempts};
     const struct flow *flow = aggregate_flow(a, row.flow);
     unsigned char key[FM_FLOW_KEY_SIZE]; state_flow_key(key, flow->local, flow->remote);
     const struct item *i = map_find(&selected, key, sizeof(key));
@@ -511,6 +514,7 @@ struct command_args {
   const struct context *ctx;
   const struct aggregate *a;
   const struct ranking *r;
+  const struct ranker *ranker;
   uint64_t generation;
   double sample_time;
   const struct telemetry *telemetry;
@@ -546,13 +550,13 @@ static bool respond(enum command command, const struct command_args *c, FILE *ou
 }
 
 bool snapshot_session(FILE *in, FILE *out, const struct context *ctx,
-                      const struct aggregate *a, const struct ranking *r,
+                      const struct aggregate *a, const struct ranking *r, const struct ranker *ranker,
                       uint64_t generation, double sample_time,
                       const struct telemetry *telemetry, struct fm_error *error) {
   char line[256], extra;
   bool ok = false;
   /* Heap, not stack: two 5000-row arrays. */
-  struct command_args c = {.ctx = ctx, .a = a, .r = r, .generation = generation,
+  struct command_args c = {.ctx = ctx, .a = a, .r = r, .ranker = ranker, .generation = generation,
                            .sample_time = sample_time, .telemetry = telemetry,
                            .flows = fm_calloc(FM_SNAPSHOT_FLOWS, sizeof(*c.flows)),
                            .rows = fm_calloc(FM_SNAPSHOT_FLOWS, sizeof(*c.rows))};
@@ -570,7 +574,7 @@ bool snapshot_session(FILE *in, FILE *out, const struct context *ctx,
         goto done;
       }
       if (!identities(in, c.flows, c.count, error) ||
-          !select_rows(a, r, c.flows, c.count, c.rows, error) ||
+          !select_rows(a, r, ranker, c.flows, c.count, c.rows, error) ||
           !respond(COMMAND_SELECT, &c, out, error)) goto done;
     } else if (sscanf(line, "FMSNAP1 DETAIL %" SCNu64 " %zu %zu %zu %c",
                       &requested, &c.bytes, &c.states, &c.count, &extra) == 4) {
@@ -579,7 +583,7 @@ bool snapshot_session(FILE *in, FILE *out, const struct context *ctx,
         goto done;
       }
       ok = identities(in, c.flows, c.count, error) &&
-           select_rows(a, r, c.flows, c.count, c.rows, error);
+           select_rows(a, r, ranker, c.flows, c.count, c.rows, error);
       for (size_t n = 0; ok && n < c.count; n++)
         c.flows[n].sample_states = aggregate_flow(a, c.rows[n].flow)->states;
       ok = ok && respond(COMMAND_DETAIL, &c, out, error);

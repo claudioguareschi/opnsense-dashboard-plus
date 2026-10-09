@@ -46,10 +46,7 @@
  * only for its own class, unused places return to the general pool, a floor
  * is never a cap, and asset importance never changes a class.
  *
- * Without a profile the selection is the base ranking itself, Classic:
- * max(byte rate, 1) x activity with EMA rates, linear fade and first-seen
- * ties. It is not a product profile: only a collector started without
- * --profile uses it (the regression oracle and its tests). */
+ * A profile is required: the collector does not start without one. */
 #define PROFILE_INCUMBENCY 1.1
 #define PROFILE_SCHEMA_VERSION 1
 #define PROFILE_FILE_MAX (1u << 20)
@@ -84,7 +81,7 @@ enum profile_feature {
  *   none     never shown or scored: 0 bytes ever (a real PF state counts the
  *            packet that created it), a probe below the threshold, or a
  *            synchronized flow the administrator chose to leave out.
- * The base ranking (Classic, the regression oracle) does not use presence. */
+ */
 enum flow_presence { PRESENCE_NONE = 0, PRESENCE_TRAFFIC = 1, PRESENCE_PROBE = 2, PRESENCE_MIRROR = 3 };
 #define PROBE_BYTES_PER_STATE 120
 #define PROBE_ATTEMPTS_MIN 10
@@ -109,8 +106,7 @@ bool profile_load(const char *path, struct profile *, char *why, size_t why_size
 /* The same from text (tests and the loader). */
 bool profile_compile(const char *text, size_t length, struct profile *, char *why, size_t why_size);
 void profile_release(struct profile *);
-/* The asset multiplier of an address (the default when no rule matches;
- * 1 without a profile). */
+/* The asset multiplier of an address (the default when no rule matches). */
 double profile_asset(const struct profile *, struct addr);
 /* Discovery weight units of a multiplier: 1 without asset rules (discovery
  * counts raw values), else PROFILE_DISCOVERY_UNIT x multiplier / the
@@ -118,8 +114,6 @@ double profile_asset(const struct profile *, struct addr);
 uint64_t profile_unit(const struct profile *, double multiplier);
 /* The multiplier a discovery unit stands for (inverse of profile_unit). */
 double profile_unit_multiplier(const struct profile *, uint64_t unit);
-/* The raw-value divisor of discovery counts in the least important units. */
-uint64_t profile_unit_floor(const struct profile *);
 /* A security class's reserved places in a selection of `limit`: its floor
  * percentage, rounded up (S3 10% of 150 = 15, S2 5% = 8, S1 2% = 3). */
 size_t profile_floor_places(const struct profile *, enum security_class, size_t limit);
@@ -131,10 +125,10 @@ struct selected {
 struct ranker;
 struct ranker *ranker_create(struct fm_error *);
 void ranker_destroy(struct ranker *);
-/* Sets the active profile once, at startup (NULL: the base ranking). The
- * profile is borrowed for the ranker's lifetime. */
+/* Sets the active profile once, at startup. The profile is borrowed for the
+ * ranker's lifetime. */
 void ranker_configure(struct ranker *, const struct profile *);
-/* The active profile, or NULL for the base ranking. */
+/* The active profile. */
 const struct profile *ranker_profile(const struct ranker *);
 /* Selects up to `limit` flows, in rank order; every tracked flow's effective
  * score is available afterwards (retention and promotion use it). */

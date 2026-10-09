@@ -109,7 +109,6 @@ int main(int argc, char **argv) {
   expect("unit 10x", profile_unit(&p, 10.0) == 10 * PROFILE_DISCOVERY_UNIT);
   expect("unit inverse", profile_unit_multiplier(&p, profile_unit(&p, 2.0)) == 2.0);
   profile_release(&p);
-  expect("no profile", profile_asset(NULL, address("10.0.0.1")) == 1.0 && profile_unit(NULL, 5) == 1);
 
   /* IPv6 and nested rules */
   if (accepts(DOC(WEIGHTS,

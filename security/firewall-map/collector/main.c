@@ -441,7 +441,8 @@ static void telemetry_track(struct telemetry *t, const struct tracker_report *re
 }
 
 /* The flows a snapshot of this sample may capture: tracked flows with
- * evidence (strongest class first, then base score, then first seen), then
+ * evidence (strongest class first, then the active profile's effective
+ * score, then first seen), then
  * the ranked flows in their order; at most FM_SNAPSHOT_FLOWS. */
 struct snapshot_rank {
   uint32_t flow;
@@ -475,9 +476,8 @@ static bool snapshot_candidates(struct engine *e, const struct aggregate *a,
     if (!flow->evidence.mask || !ranking_rates(e->ranking, n, &rates) ||
         profile_presence(flow, &rates) == PRESENCE_NONE)
       continue;
-    double rate = rates.rate_from_remote + rates.rate_to_remote;
     ranks[evidence++] = (struct snapshot_rank){(uint32_t)n, security_class(&flow->evidence),
-                                               (rate > 1 ? rate : 1) * rates.activity, rates.order};
+                                               ranker_score(e->ranker, n), rates.order};
   }
   qsort(ranks, evidence, sizeof(*ranks), snapshot_first);
   size_t kept = 0, wanted = 0;
@@ -661,7 +661,7 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
                              &snapshot_count, &telemetry.snapshot_candidates_omitted, error);
     ok = ok && response_begin(&response, error);
     struct ranked_output ranked = {selected, hints.selected_count, snapshot, snapshot_count,
-                                   e->ranking};
+                                   e->ranking, e->ranker};
     if (ok && !protocol_write_ranked(response.stream, sample.aggregate, &ranked, threats,
                                      matches, match_count, &classes, r->candidates_per_kind,
                                      &telemetry, error)) {
@@ -695,7 +695,7 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
     return refuse(e, refusal, sample.states, &telemetry, error);
   }
   if (ok && r->snapshot)
-    ok = snapshot_session(stdin, stdout, r->ctx, sample.aggregate, e->ranking, e->sequence,
+    ok = snapshot_session(stdin, stdout, r->ctx, sample.aggregate, e->ranking, e->ranker, e->sequence,
                           wall.tv_sec + wall.tv_nsec / 1e9, &telemetry, error);
   aggregate_destroy(sample.aggregate);
   return ok;
@@ -776,23 +776,22 @@ int main(int argc, char **argv) {
     return print_version();
   if (argc == 2 && !strcmp(argv[1], "--selftest"))
     return self_test();
-  /* --profile <file>: the active ranking profile (schema-v1 JSON), startup
-   * configuration compiled once and immutable for this process (profile.h); a
-   * changed profile is a new process. Without it, the base ranking (the
-   * regression oracle). */
+  /* --profile <file>: the active ranking profile (schema-v1 JSON), required:
+   * startup configuration compiled once and immutable for this process
+   * (profile.h); a changed profile is a new process. Every ranking comes from
+   * the profile: there is no other. */
   struct profile profile = {0};
   char why[256] = "";
-  bool scored = argc == 3 && !strcmp(argv[1], "--profile");
-  if ((argc != 1 && !scored) || (scored && !profile_load(argv[2], &profile, why, sizeof(why)))) {
-    if (scored) fprintf(stderr, "firewallmap-collector: %s\n", why);
-    fprintf(stderr, "usage: firewallmap-collector [--version | --selftest | --profile <file>]\n");
+  if (argc != 3 || strcmp(argv[1], "--profile") || !profile_load(argv[2], &profile, why, sizeof(why))) {
+    if (why[0]) fprintf(stderr, "firewallmap-collector: %s\n", why);
+    fprintf(stderr, "usage: firewallmap-collector --profile <file> | --version | --selftest\n");
     return 2;
   }
   seed_hash();
   struct fm_error error = {0};
   struct engine engine = {
       .history = history_create(&error),
-      .ranking = ranking_create(BUDGET_RANKED_FLOWS, FADE_SECONDS, RATE_SMOOTHING, &error),
+      .ranking = ranking_create(FADE_SECONDS, RATE_SMOOTHING, &error),
       .tracker = tracker_create(FADE_SECONDS, RATE_SMOOTHING, &error),
       .ranker = ranker_create(&error),
       .events = event_history_create(&error)};
@@ -801,7 +800,7 @@ int main(int argc, char **argv) {
     close_engine(&engine);
     return 1;
   }
-  ranker_configure(engine.ranker, scored ? &profile : NULL);
+  ranker_configure(engine.ranker, &profile);
   if (printf("FMCOLLECTOR protocol=%u pf_state_version=%u freebsd_version=%u\n",
              (unsigned)FM_PROTOCOL_VERSION, pf_reader_state_version(),
              (unsigned)BUILD_FREEBSD_VERSION) < 0 ||

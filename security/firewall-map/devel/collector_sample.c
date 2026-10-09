@@ -27,6 +27,7 @@
 #include "../collector/pf_reader.h"
 #include "../collector/budget.h"
 #include "../collector/protocol.h"
+#include "balanced_profile.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <math.h>
@@ -295,9 +296,12 @@ static int correlate_fixture(const char *context_path, const char *input_path,
                              struct fm_error *error) {
   struct context *context = context_create(error);
   struct history *history = history_create(error);
-  struct ranking *ranking = ranking_create(150, 20.0, 0.5, error);
+  struct ranking *ranking = ranking_create(20.0, 0.5, error);
+  struct ranker *ranker = ranker_create(error);
+  struct profile profile = {0};
   struct event_history *events = event_history_create(error);
-  if (!context || !history || !ranking || !events ||
+  if (!context || !history || !ranking || !ranker || !events ||
+      !(fm_balanced_profile(&profile) || fm_error_set(error, EINVAL, "balanced profile")) ||
       !read_context(context_path, context, error) ||
       !begin_with_elapsed(history, -1, error))
     goto fail;
@@ -319,18 +323,19 @@ static int correlate_fixture(const char *context_path, const char *input_path,
   if (read_fixture(input_path, &sample, error) && aggregate_finish(aggregate, error))
     match_count = event_sample_finish(events, stream, 100.0, matches, FM_MAX_EVENT_QUERIES, error);
   event_sample_destroy(stream);
-  if (error->code || !ranking_update(ranking, aggregate, 100.0, -1.0, error)) {
+  if (!error->code)
+    ranker_configure(ranker, &profile);
+  if (error->code || !ranking_update(ranking, aggregate, 100.0, -1.0, error) ||
+      !ranker_select(ranker, aggregate, ranking, -1.0, BUDGET_RANKED_FLOWS, error)) {
     aggregate_destroy(aggregate);
     goto fail_history;
   }
   FILE *output = fopen(output_path, "wb");
   struct telemetry telemetry = {.interval = -1};
-  /* the base ranking's flows, in rank order */
+  /* the Balanced profile's selection, in rank order */
   struct ranked_flow rows[BUDGET_RANKED_FLOWS];
-  size_t count = ranking_count(ranking);
-  for (size_t n = 0; n < count; n++)
-    ranking_at(ranking, n, &rows[n]);
-  struct ranked_output ranked = {rows, count, NULL, 0, ranking};
+  size_t count = fm_selection_rows(ranker, ranking, aggregate, rows);
+  struct ranked_output ranked = {rows, count, NULL, 0, ranking, ranker};
   bool ok = output && protocol_write_ranked(output, aggregate, &ranked, NULL,
                                              matches, match_count, NULL, BUDGET_CANDIDATES_DEFAULT,
                                              &telemetry, error);
@@ -342,6 +347,8 @@ static int correlate_fixture(const char *context_path, const char *input_path,
   history_commit(history);
   history_destroy(history);
   ranking_destroy(ranking);
+  ranker_destroy(ranker);
+  profile_release(&profile);
   event_history_destroy(events);
   context_destroy(context);
   return 0;
@@ -351,6 +358,8 @@ fail_history:
 fail:
   history_destroy(history);
   ranking_destroy(ranking);
+  ranker_destroy(ranker);
+  profile_release(&profile);
   event_history_destroy(events);
   context_destroy(context);
   return report_error(error);

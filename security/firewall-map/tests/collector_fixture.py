@@ -113,7 +113,8 @@ class CollectorFixture:
         self.current_records = []
         # one entry per request: True when it was the helper's baseline (first) sample
         self.baselines = []
-        # the ranking profile it was started with, and how often a new one restarted it
+        # the ranking profile it was started with (None until the service configures it), and how
+        # often a new one restarted it
         self.profile, self.restarts, self.starts = None, 0, 0
         # PF tables the fixture classifies with, {table: [network...]}, like the helper's own
         self.tables = {}
@@ -126,7 +127,7 @@ class CollectorFixture:
         """Like the engine: another UUID or definition (fingerprint) restarts it (counted), the same
         one changes nothing."""
         key = COLLECTOR.state_collector.CollectorEngine._profile_key
-        if key(profile) == key(self.profile):
+        if self.profile is not None and key(profile) == key(self.profile):
             self.profile = profile
             return False
         if self.profile is not None:

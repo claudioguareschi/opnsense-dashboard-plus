@@ -37,8 +37,10 @@ from unittest.mock import Mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src/opnsense/scripts/OPNsense/FirewallMap"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import collector, evidence as EVIDENCE  # noqa: E402
+from lib import collector, evidence as EVIDENCE, profiles  # noqa: E402
 from collector_build import compile_worker  # noqa: E402
+
+BALANCED = profiles.validate(profiles.BY_UUID[profiles.BALANCED])
 
 
 class CollectorSnapshotTest(unittest.TestCase):
@@ -52,7 +54,7 @@ class CollectorSnapshotTest(unittest.TestCase):
         cls.directory.cleanup()
 
     def setUp(self):
-        self.engine = collector.CollectorEngine(self.worker, profile=None)
+        self.engine = collector.CollectorEngine(self.worker, profile=BALANCED)
         self.addCleanup(self.engine.close)
 
     def capture(self, mode="one", count=12, byte_limit=collector.SNAPSHOT_BYTES, state_limit=5000,

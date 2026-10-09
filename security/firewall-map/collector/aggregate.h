@@ -101,8 +101,7 @@ struct admission {
   const struct map *evidence;
   const struct evidence *evidence_facts;
   struct discovery *discovery;        /* reset by the caller */
-  /* the active profile (asset importance of flows and discovery weights);
-   * NULL: multiplier 1, raw discovery */
+  /* the active profile (asset importance of flows and discovery weights) */
   const struct profile *profile;
   /* 17-byte address keys of the CARP addresses held as BACKUP (NULL: none),
    * and whether their flows mirror the master or are left out */

@@ -10,10 +10,11 @@ import ipaddress
 import random
 import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, sys.argv[2] if len(sys.argv) > 2 else "/usr/local/opnsense/scripts/OPNsense/FirewallMap")
-from lib import blocklists, collector, config, pf  # noqa: E402
+from lib import blocklists, collector, config, pf, profiles  # noqa: E402
 
 PFCTL = "/sbin/pfctl"
 
@@ -81,8 +82,9 @@ def main():
 
     local, _role, networks, interfaces = pf.host_info()
     wan = config.topology().get("primary_wan_device")
-    # the base ranking (no profile): this check is about classification, not ranking
-    engine = collector.CollectorEngine(sys.argv[1], profile=None)
+    # the shipped default profile: this check is about classification, not ranking
+    engine = collector.CollectorEngine(sys.argv[1], profile=profiles.validate(profiles.BY_UUID[profiles.BALANCED]),
+                                       profile_dir=tempfile.gettempdir())
     failures = 0
     try:
         engine._start()

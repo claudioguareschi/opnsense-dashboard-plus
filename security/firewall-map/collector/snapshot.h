@@ -27,6 +27,7 @@
 #include "pf_reader.h"
 #include "protocol.h"
 #include "ranking.h"
+struct ranker;
 #define FM_SNAPSHOT_FLOWS 5000
 #define FM_SNAPSHOT_BYTES (10u * 1024u * 1024u)
 #define FM_SNAPSHOT_STATES 5000
@@ -68,6 +69,6 @@ void snapshot_quotas(const struct snapshot_flow *, size_t count, size_t state_li
  * aggregate/ranking are borrowed until DETAIL or CANCEL closes the session;
  * the telemetry describes the sample the session belongs to. */
 bool snapshot_session(FILE *, FILE *, const struct context *, const struct aggregate *,
-                      const struct ranking *, uint64_t, double,
+                      const struct ranking *, const struct ranker *, uint64_t, double,
                       const struct telemetry *, struct fm_error *);
 #endif

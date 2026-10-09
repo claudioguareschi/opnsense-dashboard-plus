@@ -324,7 +324,6 @@ static int compare_chosen(const void *left, const void *right) {
 /* Ranked (or explicitly selected) flows with, per (flow, kind), the
  * `candidates_per_kind` heaviest candidates (earliest first on ties). */
 static bool write_flows(FILE *f, const struct aggregate *a,
-                        const struct ranking *ranking,
                         const struct ranked_flow *selection, size_t selected,
                         size_t candidates_per_kind, uint32_t *checksum,
                         struct sent *sent, uint64_t *omitted,
@@ -340,11 +339,8 @@ static bool write_flows(FILE *f, const struct aggregate *a,
   size_t chosen_count = 0, chosen_capacity = 0;
   bool ok = true;
   for (size_t n = 0; ok && n < selected; n++) {
-    struct ranked_flow rank;
-    bool valid = ranking ? ranking_at(ranking, n, &rank) : true;
-    if (!ranking)
-      rank = selection[n];
-    if (!valid || rank.flow >= total || n >= UINT32_MAX || rank_of[rank.flow]) {
+    struct ranked_flow rank = selection[n];
+    if (rank.flow >= total || n >= UINT32_MAX || rank_of[rank.flow]) {
       ok = fm_error_fail(error, FM_FAILURE_INTERNAL, EINVAL, "ranked flow identity");
       break;
     }
@@ -517,7 +513,7 @@ bool protocol_write_ranked(FILE *f, const struct aggregate *a,
   uint32_t checksum = 0;
   struct sent sent = {0};
   if (!write_header(f, threats != NULL, &checksum, error) ||
-      !write_flows(f, a, NULL, ranked->flows, ranked->count, candidates_per_kind,
+      !write_flows(f, a, ranked->flows, ranked->count, candidates_per_kind,
                    &checksum, &sent, &telemetry->candidates_omitted, error) ||
       (threats && !write_threats(f, threats, &checksum, &sent, error)))
     return false;
@@ -538,14 +534,13 @@ bool protocol_write_ranked(FILE *f, const struct aggregate *a,
     struct flow_rates rates;
     if (!flow || !ranking_rates(ranked->ranking, ranked->snapshot[n], &rates))
       return fm_error_fail(error, FM_FAILURE_INTERNAL, EINVAL, "snapshot candidate");
-    double rate = rates.rate_from_remote + rates.rate_to_remote;
     unsigned char b[SNAPSHOT_CANDIDATE_RECORD_SIZE], *p = b;
     *p++ = RECORD_SNAPSHOT_CANDIDATE;
     protocol_address_put(&p, flow->local);
     protocol_address_put(&p, flow->remote);
     *p++ = flow->evidence.mask;
     *p++ = (unsigned char)security_class(&flow->evidence);
-    put_double(&p, (rate > 1 ? rate : 1) * rates.activity);
+    put_double(&p, ranker_score(ranked->ranker, ranked->snapshot[n]));
     protocol_put(&p, rates.order, 8);
     protocol_put(&p, flow->states, 8);
     if (!protocol_frame(f, b, p - b, &checksum, error))
@@ -566,7 +561,7 @@ bool protocol_write_selected(FILE *f, const struct aggregate *a,
   struct telemetry telemetry = *sample_telemetry;
   telemetry.candidates_omitted = 0;
   return write_header(f, false, &checksum, error) &&
-         write_flows(f, a, NULL, rows, count, BUDGET_CANDIDATES_DEFAULT, &checksum, &sent,
+         write_flows(f, a, rows, count, BUDGET_CANDIDATES_DEFAULT, &checksum, &sent,
                      &telemetry.candidates_omitted, error) &&
          write_telemetry(f, &telemetry, &checksum, error) &&
          write_footer(f, (struct sample_outcome){OUTCOME_SAMPLE, 0, 0, 0},

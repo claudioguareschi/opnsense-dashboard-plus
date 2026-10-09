@@ -37,6 +37,7 @@
 #include "../../collector/protocol.h"
 #include "../../collector/ranking.h"
 #include "../../collector/threat_summary.h"
+#include "../balanced_profile.h"
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -78,6 +79,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   static struct context *ctx;
   static struct classifier *classes;
   static uint64_t context_blocks;
+  static struct profile profile; /* kept, like the context */
   if (!ctx) {
     struct fm_error error = {0};
     ctx = context();
@@ -89,11 +91,14 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     const struct class_entry *entries[2] = {threat, country};
     size_t counts[2] = {2, 2};
     classes = classifier_build(sets, 2, entries, counts, &error);
+    if (!fm_balanced_profile(&profile)) abort();
     context_blocks = fm_heap_usage().blocks;
   }
   struct fm_error error = {0};
   struct history *history = history_create(&error);
-  struct ranking *ranking = ranking_create(BUDGET_RANKED_FLOWS, 20.0, 0.5, &error);
+  struct ranking *ranking = ranking_create(20.0, 0.5, &error);
+  struct ranker *ranker = ranker_create(&error);
+  if (ranker) ranker_configure(ranker, &profile);
   struct event_history *events = event_history_create(&error);
   double anchor = 1;
   for (size_t offset = 0; offset < size && !error.code;) {
@@ -116,7 +121,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     }
     if (offset + RECORD > size) offset = size;
     ok = ok && aggregate_finish(aggregate, &error) &&
-         ranking_update(ranking, aggregate, anchor, history_interval(history), &error);
+         ranking_update(ranking, aggregate, anchor, history_interval(history), &error) &&
+         ranker_select(ranker, aggregate, ranking, history_interval(history), BUDGET_RANKED_FLOWS, &error);
     struct threat_limits limits = {NULL, 0, 100, 4, classifier_category(classes, 'T')};
     struct threat_summary *threats = ok ? threat_summary_create(aggregate, limits, &error) : NULL;
     ok = ok && threats;
@@ -133,10 +139,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       if (out) {
         struct class_report report = {classes, NULL, 0, aggregate, NULL, NULL, classifier_category(classes, 'T')};
         struct ranked_flow rows[BUDGET_RANKED_FLOWS];
-        size_t count = ranking_count(ranking);
-        for (size_t n = 0; n < count; n++)
-          ranking_at(ranking, n, &rows[n]);
-        struct ranked_output ranked = {rows, count, NULL, 0, ranking};
+        size_t count = fm_selection_rows(ranker, ranking, aggregate, rows);
+        struct ranked_output ranked = {rows, count, NULL, 0, ranking, ranker};
         protocol_write_ranked(out, aggregate, &ranked, threats, NULL, 0, &report, 4, &telemetry, &error);
         fclose(out);
       }
@@ -150,6 +154,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   }
   history_destroy(history);
   ranking_destroy(ranking);
+  ranker_destroy(ranker);
   event_history_destroy(events);
   if (fm_heap_usage().blocks != context_blocks) abort(); /* every engine allocation was released */
   return 0;

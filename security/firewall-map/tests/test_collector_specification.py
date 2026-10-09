@@ -40,8 +40,10 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src/opnsense/scripts/OPNsense/FirewallMap"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import collector  # noqa: E402
+from lib import collector, profiles  # noqa: E402
 from collector_build import compile_worker  # noqa: E402
+
+BALANCED = profiles.validate(profiles.BY_UUID[profiles.BALANCED])
 
 WAN = "45.33.32.10"
 LAN_NET = (ipaddress.ip_network("10.0.0.0/24"), "lan0")
@@ -74,7 +76,7 @@ class SpecificationTest(unittest.TestCase):
         path = Path(self.directory.name) / f"{self._testMethodName}.txt"
         path.write_text("".join(f"sample {number}\n" + "".join(line + "\n" for line in lines)
                                 for number, lines in samples.items()))
-        engine = collector.CollectorEngine(self.worker, profile=None)
+        engine = collector.CollectorEngine(self.worker, profile=BALANCED)
         self.addCleanup(engine.close)
         with patch.dict(os.environ, FM_TEST_STATES=str(path), FM_TEST_INTERVAL="2"):
             return [engine.sample(context["local"], context["networks"], context["assigned"], context["wan"],
@@ -166,7 +168,8 @@ class SpecificationTest(unittest.TestCase):
         self.assertEqual(results[2]["flows"][0]["rate_from_remote"], 500.0)
         self.assertEqual(results[3]["flows"], [])
         # a reappearing old state is a new baseline for its counters, not a burst
-        self.assertEqual(results[4]["flows"], [])
+        self.assertEqual([(flow["rate_from_remote"], flow["rate_to_remote"]) for flow in results[4]["flows"]],
+                         [(0.0, 0.0)] * len(results[4]["flows"]))
         self.assertEqual(results[5]["flows"][0]["rate_from_remote"], 1000.0)
 
     def test_two_inside_hosts_behind_one_outside_tuple_are_ambiguous(self):
@@ -201,8 +204,8 @@ class SpecificationTest(unittest.TestCase):
     def test_carp_vip_is_the_local_anchor(self):
         context = dict(CONTEXT, local={WAN, "45.33.32.100"})
         keys = ("8.8.4.4:55000", "45.33.32.100:443", "8.8.4.4:55000", "10.0.0.5:8443")
-        _, second = self.run_scenario({1: [state(1, "in", keys, (10, 10, 1, 1))],
-                                       2: [state(1, "in", keys, (50, 10, 1, 1))]}, context)
+        _, second = self.run_scenario({1: [state(1, "in", keys, (1000, 1000, 4, 4))],
+                                       2: [state(1, "in", keys, (5000, 1000, 8, 4))]}, context)
         self.assertEqual(second["flows"][0]["key"], ("45.33.32.100", "8.8.4.4"))
 
     def test_firewall_local_traffic_is_mapped_and_lan_internal_is_not(self):

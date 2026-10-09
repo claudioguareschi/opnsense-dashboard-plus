@@ -26,6 +26,7 @@
 #define FM_PROTOCOL_H
 #include "aggregate.h"
 #include "event_correlation.h"
+#include "profile.h"
 #include "ranking.h"
 #include "threat_summary.h"
 #include <stdio.h>
@@ -105,6 +106,7 @@ struct ranked_output {
   const uint32_t *snapshot;
   size_t snapshot_count;
   const struct ranking *ranking; /* the candidates' rates */
+  const struct ranker *ranker;   /* the candidates' effective scores */
 };
 /* FMAGG4 sample response. */
 /* Fills the telemetry's omission counters before writing it. */
