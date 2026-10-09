@@ -185,7 +185,8 @@
             traffic: {{ lang._('Traffic behavior')|json_encode }},
             evidence: {{ lang._('Security evidence')|json_encode }},
             security_intro: {{ lang._('S1, S2 and S3 reserve a minimum share of the places on the map for security flows, filled from the most severe class down. Unused reserved places return to general ranking, and security flows can take more than their share when their ranking score is high enough. The shares scale with Maximum flows on the map, rounded up per class.')|json_encode }},
-            ranking_intro: {{ lang._('How flows are scored against one another, security flows included. A higher percentage gives that property more influence on which flows appear on the map. Drag a boundary to move points between its two neighbours; the priorities total exactly 100.')|json_encode }}
+            ranking_intro: {{ lang._('How flows are scored against one another, security flows included. A higher percentage gives that property more influence on which flows appear on the map. The priorities total exactly 100.')|json_encode }},
+            ranking_drag: {{ lang._('Drag a boundary to move points between its two neighbours.')|json_encode }}
         };
         const fill = (template, ...values) => values.reduce((text, value) => text.replace('%s', value), template);
         // the field's row becomes a compact cell: its label, input, help and validation message
@@ -230,7 +231,9 @@
         const rankingBody = sectionBody('byte_rate');
         const weights = ['byte_rate', 'packet_rate', 'active_states', 'new_state_rate', 'flow_volume', 'pf_blocked', 'threat_intelligence', 'ids_evidence']
             .map((key, index) => fieldCell(key, `fwmap-weight-${index}`, PROFILE_TEXT.shorts[index]));
-        const rankingCell = $('<td colspan="3"/>').append($('<p class="text-muted"/>').text(PROFILE_TEXT.ranking_intro));
+        // how to edit, said only where the profile can be edited
+        const dragHint = $('<span class="fwmap-allocation-drag-hint"/>').text(` ${PROFILE_TEXT.ranking_drag}`);
+        const rankingCell = $('<td colspan="3"/>').append($('<p class="text-muted"/>').text(PROFILE_TEXT.ranking_intro).append(dragHint));
         rankingBody.prepend($('<tr/>').append(rankingCell));
         const ranking = FirewallMapAllocation.create({
             container: rankingCell,
@@ -267,6 +270,7 @@
                 profileForm.find('.selectpicker').selectpicker('refresh');
                 security.readOnly(true);
                 ranking.readOnly(true);
+                dragHint.addClass('hidden');
                 security.refresh();
                 ranking.refresh();
                 profileTitle.text(fill({{ lang._('Ranking profile: %s (built-in)')|json_encode }}, data.profile.name));
@@ -290,6 +294,7 @@
             profileForm.find('.selectpicker').selectpicker('refresh');
             security.readOnly(false);
             ranking.readOnly(false);
+            dragHint.removeClass('hidden');
             profileTitle.text(editTitle);
             profileSave.removeClass('hidden');
             cloneButton.addClass('hidden');
