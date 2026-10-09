@@ -414,21 +414,44 @@ class CollectorLoopTest(unittest.TestCase):
         administrator's bounds; the map document and Status show the interval used."""
         self.collector.step()
         self.collector.values.update(interval_min=2, interval_max=60)
+        engine = self.collector.collector_engine
+        engine.metadata = {"pid": 4242}
         status = self.collector.collector_status.setdefault("state_collector", {})
         for recommended, base, expected in ((2000, 2.0, 2.0), (12000, 2.0, 12.0), (500000, 2.0, 60.0),
                                             (2000, 5.0, 5.0)):
-            status["telemetry"] = {"recommended_interval_ms": recommended, "cadence_reason": 1}
+            status["telemetry"] = {"pid": 4242, "recommended_interval_ms": recommended, "cadence_reason": 1}
             self.assertEqual(self.collector.sampling_interval(base), expected, recommended)
         self.collector.values.update(interval_min=10)
-        status["telemetry"] = {"recommended_interval_ms": 2000, "cadence_reason": 0}
+        status["telemetry"] = {"pid": 4242, "recommended_interval_ms": 2000, "cadence_reason": 0}
         self.assertEqual(self.collector.sampling_interval(2.0), 10)
         self.collector.values.update(interval_min=2)
+        # a restarted collector (a new active profile, a failure) does not inherit the old cadence:
+        # another process's recommendation, or a closed engine, counts for nothing
+        status["telemetry"] = {"pid": 9999, "recommended_interval_ms": 30000, "cadence_reason": 1}
+        self.assertEqual(self.collector.sampling_interval(2.0), 2.0)
+        status["telemetry"] = {"pid": 4242, "recommended_interval_ms": 30000, "cadence_reason": 1}
+        self.assertEqual(self.collector.sampling_interval(2.0), 30.0)
+        del engine.metadata
         self.bytes = 5000
         self.collector.step()
         with open(self.output) as handle:
             self.assertEqual(json.load(handle)["interval"], 2.0)
         cadence = self.collector.collector_status["state_collector"]["cadence"]
         self.assertEqual((cadence["interval"], cadence["bounds"]), (2.0, [2, 60]))
+        # a closed engine's last recommendation counts for nothing either
+        engine.metadata = {"pid": 4242}
+        status["telemetry"] = {"pid": 4242, "recommended_interval_ms": 30000, "cadence_reason": 1}
+        engine.close()
+        self.assertEqual(self.collector.sampling_interval(2.0), 2.0)
+
+    def test_rest_wakes_when_the_settings_change(self):
+        """Apply must not wait out the current interval: the rest ends as soon as the reload token
+        changes (the next step then reloads the settings and restarts the collector if needed)."""
+        tokens = iter(["a", "a", "b"])
+        with mock.patch.object(COLLECTOR, "reload_token", lambda: next(tokens, "b")), \
+                mock.patch.object(COLLECTOR.time, "sleep") as sleep:
+            COLLECTOR.rest_until(60.0, "a", False)
+        self.assertEqual(sleep.call_count, 2)
 
     def test_a_carp_backup_sends_its_backup_addresses_and_the_mirror_choice(self):
         engine = self.collector.collector_engine
@@ -582,7 +605,7 @@ class CollectorLoopTest(unittest.TestCase):
         with mock.patch.object(COLLECTOR, "acquire_lock", lambda: object()), \
                 mock.patch.object(COLLECTOR, "CacheStore", lambda: store), \
                 mock.patch.object(COLLECTOR.Collector, "step", step), \
-                mock.patch.object(COLLECTOR.time, "sleep") as sleep, \
+                mock.patch.object(COLLECTOR, "rest_until") as sleep, \
                 mock.patch.object(COLLECTOR.signal, "signal"), \
                 mock.patch.object(COLLECTOR, "log_error") as log_error, \
                 mock.patch.object(COLLECTOR, "log_notice") as log_notice:

@@ -1428,7 +1428,12 @@ class Collector:
         """The interval to sample at (seconds): the collector's recommendation (adaptive refresh,
         collector/cadence.h) or `base`, whichever is longer, within the administrator's bounds."""
         telemetry = (self.collector_status.get("state_collector") or {}).get("telemetry") or {}
-        recommended = (telemetry.get("recommended_interval_ms") or 0) / 1000.0
+        # only the running collector's own recommendation: one that was restarted (a new active
+        # profile, a failure) or closed starts its cadence afresh from its first sample
+        engine = self.collector_engine
+        helper = (getattr(engine, "metadata", None) or {}) if getattr(engine, "process", None) is not None else {}
+        current = helper.get("pid") is not None and telemetry.get("pid") == helper.get("pid")
+        recommended = (telemetry.get("recommended_interval_ms") or 0) / 1000.0 if current else 0.0
         low = self.values.get("interval_min", 2)
         high = self.values.get("interval_max", 60)
         return min(max(base, recommended, low), high)
@@ -1459,11 +1464,13 @@ class Collector:
             self.geo.save(force=True)
 
 
-def sleep_until_viewer(seconds):
-    """Sleep, but wake at once when a viewer opens the map."""
+def rest_until(seconds, reload_seen, background):
+    """Rest between samples, but wake at once when the settings changed (Apply: a new active
+    profile restarts the collector without waiting out the interval) or, in the background, when a
+    viewer opens the map."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        if requested(REQUEST_MARKER, 2):
+        if reload_token() != reload_seen or (background and requested(REQUEST_MARKER, 2)):
             return
         time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
 
@@ -1497,10 +1504,7 @@ def run():
                 collector.rest_status(rest, failed=True)
             if rest is None:
                 return
-            if collector.background:
-                sleep_until_viewer(rest)
-            else:
-                time.sleep(rest)
+            rest_until(rest, collector.reload_seen, collector.background)
     except SystemExit as reason:
         log_notice(f"collector stopped ({reason})")
     finally:
