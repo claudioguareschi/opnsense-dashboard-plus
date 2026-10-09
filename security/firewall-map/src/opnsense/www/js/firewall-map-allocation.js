@@ -150,6 +150,8 @@
             options.changed();
         };
         const place = (percent, px) => `calc(${percent}% + ${px}px)`;
+        // read only (a built-in profile shown, not edited): handles stay visible, take nothing
+        let readOnly = false;
         const render = () => {
             const current = state();
             const plan = layout(current.values.map((value) => value || 0));
@@ -163,9 +165,11 @@
                     .find('.fwmap-allocation-name').text(percent >= 16 ? segments[index].label : percent >= 8 ? segments[index].short : '').end()
                     .find('.fwmap-allocation-value').text(percent >= 5 ? text : '');
             });
+            wrap.toggleClass('fwmap-allocation-readonly', readOnly);
             plan.boundaries.forEach(({percent: position, px}, k) => {
+                const inert = readOnly || !current.valid;
                 handles[k].css({left: place(position, px)})
-                    .toggleClass('disabled', !current.valid).attr('aria-disabled', String(!current.valid))
+                    .toggleClass('disabled', inert).attr('aria-disabled', String(inert)).attr('tabindex', readOnly ? '-1' : '0')
                     .attr('aria-valuenow', String(position))
                     .attr('aria-valuetext', `${segments[k].label} ${current.values[k] ?? '?'}%, `
                         + `${segments[k + 1].label} ${current.values[k + 1] ?? '?'}%`);
@@ -174,7 +178,7 @@
         };
         const shift = (k, delta) => {
             const current = state();
-            if (current.valid && delta) {
+            if (!readOnly && current.valid && delta) {
                 write(move(current.values, k, delta));
                 tips[k].refresh();
             }
@@ -211,7 +215,7 @@
                 }
             });
             handle.on('pointerdown', (event) => {
-                if (!state().valid) {
+                if (readOnly || !state().valid) {
                     return;
                 }
                 event.preventDefault();
@@ -247,6 +251,9 @@
         return {render, state, refresh: () => {
             render();
             options.changed();
+        }, readOnly: (value) => {
+            readOnly = Boolean(value);
+            render();
         }};
     };
 

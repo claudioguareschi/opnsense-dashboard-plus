@@ -109,6 +109,17 @@
                         title: (cell) => cell.getData().active === '1'
                             ? {{ lang._('Active profile')|json_encode }} : {{ lang._('Activate')|json_encode }}
                     },
+                    // a built-in is shown read only (OPNsense's info command), a custom one edited
+                    info: {
+                        requires: [],
+                        classname: 'fa fa-fw fa-info-circle',
+                        title: {{ lang._('View')|json_encode }},
+                        sequence: 90,
+                        filter: (cell) => cell.getData().builtin === '1',
+                        method: function () {
+                            viewProfile($(this).data('row-id'));
+                        }
+                    },
                     edit: {filter: (cell) => cell.getData().builtin !== '1'},
                     delete: {filter: (cell) => cell.getData().builtin !== '1' && cell.getData().active !== '1'}
                 },
@@ -240,6 +251,49 @@
             security.refresh();
             ranking.refresh();
         });
+        // a built-in profile shown read only: the same dialog, its fields and handles disabled, a
+        // clone offered instead of Save (the server refuses changes to a built-in anyway)
+        const profileForm = $(`#frm_${profileDialog.attr('id')}`);
+        const profileTitle = profileDialog.find('.modal-title');
+        const editTitle = profileTitle.text();
+        const cloneButton = $('<button type="button" class="btn btn-primary hidden"/>')
+            .text({{ lang._('Clone to edit')|json_encode }}).insertAfter(profileSave);
+        let viewed = null;
+        const viewProfile = (uuid) => {
+            ajaxGet(`/api/firewallmap/profiles/get_item/${uuid}`, {}, (data) => {
+                viewed = uuid;
+                setFormData(profileForm.attr('id'), data);
+                profileForm.find('input, select, textarea').prop('disabled', true);
+                profileForm.find('.selectpicker').selectpicker('refresh');
+                security.readOnly(true);
+                ranking.readOnly(true);
+                security.refresh();
+                ranking.refresh();
+                profileTitle.text(fill({{ lang._('Ranking profile: %s (built-in)')|json_encode }}, data.profile.name));
+                profileSave.addClass('hidden');
+                cloneButton.removeClass('hidden');
+                profileDialog.modal('show');
+            });
+        };
+        cloneButton.on('click', () => {
+            const uuid = viewed;
+            profileDialog.one('hidden.bs.modal', () => profileGrid().find(`.command-copy[data-row-id="${uuid}"]`).trigger('click'));
+            profileDialog.modal('hide');
+        });
+        // leaving the view: everything editable again for the next edit, clone or add
+        profileDialog.on('hidden.bs.modal', () => {
+            if (viewed === null) {
+                return;
+            }
+            viewed = null;
+            profileForm.find('input, select, textarea').prop('disabled', false);
+            profileForm.find('.selectpicker').selectpicker('refresh');
+            security.readOnly(false);
+            ranking.readOnly(false);
+            profileTitle.text(editTitle);
+            profileSave.removeClass('hidden');
+            cloneButton.addClass('hidden');
+        });
 
         updateServiceControlUI('firewallmap');
 
@@ -293,6 +347,7 @@
     /* focus shows as the darker bar (above), with no outline of its own */
     .fwmap-allocation-handle:focus, .fwmap-allocation-handle:focus-visible { outline: none; }
     .fwmap-allocation-handle.disabled { cursor: not-allowed; opacity: 0.4; }
+    .fwmap-allocation-readonly .fwmap-allocation-handle { cursor: default; }
     .fwmap-allocation-status { margin: 0 0 8px; }
     /* one line per field (name, value, what it measures), wrapping in narrow columns */
     .fwmap-allocation-field { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; margin-bottom: 6px; }
