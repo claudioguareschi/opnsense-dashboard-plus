@@ -27,6 +27,7 @@
 #include "../collector/pf_reader.h"
 #include "../collector/budget.h"
 #include "../collector/protocol.h"
+#include "collector_fmagg2.h"
 #include "balanced_profile.h"
 #include <arpa/inet.h>
 #include <errno.h>

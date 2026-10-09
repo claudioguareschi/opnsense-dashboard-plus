@@ -30,7 +30,9 @@
 #include "ranking.h"
 #include "threat_summary.h"
 #include <stdio.h>
-/* Wire formats are specified in PROTOCOL.md. No C structure is serialized.
+/* Wire formats are the byte layouts protocol.c writes field by field (and
+ * lib/collector.py decodes): length-prefixed frames, fixed-size records. No
+ * C structure is serialized.
  * The collector speaks exactly one protocol: it is announced in the banner and
  * carried by every response header (FMAGG4, FMSTATE2). */
 #define FM_PROTOCOL_VERSION 1
@@ -83,6 +85,11 @@ struct telemetry {
    * made it unavailable, and the bound refresh's cost (us) */
   uint64_t pf_records_observed, invalid_pf_states_skipped, age_unknown_states,
       lifetime_validation, lifetime_limit, lifetime_error, lifetime_refresh_us;
+  /* the classification snapshot: 1 when the last refresh failed and the
+   * previous snapshot is in use, why (errno), what the last build needed
+   * and the limit it ran under (bytes above what was allocated before it:
+   * the build bound at the caps, within the memory budget; 0 before any) */
+  uint64_t classifier_stale, classifier_error, classifier_build_peak, classifier_build_bound;
 };
 /* The sample's classification: set statuses, and the masks of the addresses
  * the request asked about (K rows). */
@@ -129,8 +136,4 @@ bool protocol_write_refusal(FILE *, struct sample_outcome, uint64_t states_seen,
                             const struct telemetry *, struct fm_error *);
 /* FMFAIL1: best effort; the helper exits afterwards. */
 void protocol_write_failure(FILE *, const struct fm_error *);
-/* Devel-only FMAGG2 aggregate dump used by the equivalence tools; defined in
- * devel/collector_fmagg2.c, not in the installed helper. */
-bool protocol_write(FILE *, const struct aggregate *, const struct correlation *, bool with_deltas,
-                    struct fm_error *);
 #endif

@@ -24,7 +24,7 @@
 
 
 
-"""Security evidence for the collector's ranking (collector/evidence.h, CONTRACTS.md "Evidence").
+"""Security evidence for the collector's ranking (collector/evidence.h).
 
 Each source stays its own fact, so a remote can be blocked, IDS-detected and reputation-flagged at
 once; the collector adds the threat-list fact from its PF tables and derives the security class

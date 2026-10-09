@@ -74,7 +74,7 @@ struct candidate_view {
 struct aggregate_counts {
   uint64_t seen, retained, mapped, skipped_af_translation;
   size_t flows, candidates;
-  /* bounded tiers (CONTRACTS.md, boundedness): states of flows outside the
+  /* bounded tiers: states of flows outside the
    * tracked set, whether exact admission ran out during the pass, flows
    * admitted by the forced security cap and those it refused, candidate
    * values evicted or dropped, and LAN-companion join entries refused */

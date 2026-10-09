@@ -98,7 +98,7 @@
         <id>profile.default_multiplier</id>
         <label>Default multiplier</label>
         <type>text</type>
-        <help>The multiplier of local hosts no rule below matches. 1 leaves the quality score as it is.</help>
+        <help>The multiplier of local hosts no rule below matches, from 1 (the quality score as it is) to 100.</help>
         <grid_view>
             <ignore>true</ignore>
         </grid_view>
@@ -107,7 +107,7 @@
         <id>profile.assets</id>
         <label>Rules</label>
         <type>textbox</type>
-        <help>One rule per line: a network or host and its multiplier, for example "192.168.1.25 10" or "192.168.10.0/24 3". A flow takes the multiplier of its local host's longest matching rule; rules never multiply each other. Importance changes ranking only, never the security class of a flow.</help>
+        <help>One rule per line: a network or host and its multiplier, for example "192.168.1.25 10" or "192.168.10.0/24 3"; a multiplier is from 1 (no boost) to 100. A flow takes the multiplier of its local host's longest matching rule; rules never multiply each other. Importance changes ranking only, never the security class of a flow.</help>
         <grid_view>
             <ignore>true</ignore>
         </grid_view>

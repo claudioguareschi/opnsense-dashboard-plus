@@ -28,7 +28,7 @@
 #include "aggregate.h"
 #include "ranking.h"
 
-/* The active Ranking Profile (CONTRACTS.md, "Ranking profile"): the complete
+/* The active Ranking Profile: the complete
  * operational ranking policy the collector runs under, one for every viewer.
  * It is startup configuration: OPNsense resolves and validates it and passes
  * it as schema-v1 JSON (--profile <file>); profile_load compiles it once into
@@ -51,9 +51,12 @@
 #define PROFILE_SCHEMA_VERSION 1
 #define PROFILE_FILE_MAX (1u << 20)
 #define PROFILE_ASSET_RULES_MAX 4096
-/* Asset multipliers: sane numeric limits, rejected outside (never clamped). */
-#define PROFILE_MULTIPLIER_MIN 0.000001
-#define PROFILE_MULTIPLIER_MAX 1000000.0
+/* Asset multipliers boost importance: 1 (none) to 100, rejected outside
+ * (never clamped). Values below 1 would suppress a flow, which asset
+ * importance is not for; the 100:1 range also keeps discovery units far
+ * from saturation (profile_unit: at most 6,400 units per unit of count). */
+#define PROFILE_MULTIPLIER_MIN 1.0
+#define PROFILE_MULTIPLIER_MAX 100.0
 /* Discovery weight units of the least important multiplier when a profile
  * has asset rules (profile_unit). */
 #define PROFILE_DISCOVERY_UNIT 64

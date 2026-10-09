@@ -55,7 +55,7 @@ struct flow_evidence {
 };
 struct snapshot {
   const struct context *ctx;
-  struct map selected;
+  struct map selected; /* flow key -> flows/evidence[item value] */
   struct snapshot_flow *flows;
   struct flow_evidence *evidence;
   size_t count, byte_limit, state_limit, bytes, included;
@@ -187,7 +187,7 @@ struct snapshot *snapshot_create(const struct context *ctx,
     s->evidence[n].quota = quotas[n];
     unsigned char key[FM_FLOW_KEY_SIZE];
     state_flow_key(key, flows[n].local, flows[n].remote);
-    struct item *i = lookup(&s->selected, key, sizeof(key), true, error);
+    struct item *i = map_insert(&s->selected, key, sizeof(key), error);
     if (!i || i->count) {
       if (i) fm_error_fail(error, FM_FAILURE_REQUEST, EINVAL, "duplicate snapshot flow");
       fm_free(quotas);
@@ -496,7 +496,7 @@ static bool select_rows(const struct aggregate *a, const struct ranking *r, cons
   struct map selected = {0}; bool ok = false;
   for (size_t n = 0; n < count; n++) {
     unsigned char key[FM_FLOW_KEY_SIZE]; state_flow_key(key, flows[n].local, flows[n].remote);
-    struct item *i = lookup(&selected, key, sizeof(key), true, error);
+    struct item *i = map_insert(&selected, key, sizeof(key), error);
     if (!i || i->count) {
       if (i) fm_error_fail(error, FM_FAILURE_REQUEST, EINVAL, "duplicate snapshot selection");
       goto done;

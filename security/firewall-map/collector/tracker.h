@@ -30,7 +30,7 @@
 #include "profile.h"
 #include "ranking.h"
 
-/* The tracked set T and its two regimes (CONTRACTS.md, "Tracked set").
+/* The tracked set T and its two regimes.
  *
  * Ranking-exact: every flow is tracked, admitted during the pass, while T
  * stays under its limit; ranking and history are then exact. If the
@@ -55,6 +55,8 @@
  * regimes under its budget, so a newly tracked flow is complete at once. */
 enum quality_discovery { DISCOVERY_EXACT = 0, DISCOVERY_BOUNDED = 1 };
 enum quality_ranking { RANKING_EXACT = 0, RANKING_WARMING = 1, RANKING_BOUNDED = 2 };
+/* ATTRIBUTION_WARMING is reserved wire vocabulary (telemetry quality_attribution
+ * 1): kept so the protocol's numbering stays stable, never emitted today. */
 enum quality_attribution { ATTRIBUTION_EXACT = 0, ATTRIBUTION_WARMING = 1, ATTRIBUTION_PARTIAL = 2 };
 /* A promotion must beat the incumbent it displaces by this factor. */
 #define TRACK_INCUMBENCY_MARGIN 1.25

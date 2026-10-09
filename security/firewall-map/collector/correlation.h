@@ -55,8 +55,10 @@ void correlation_merge(struct correlation_value *current, bool seen,
                        const struct correlation_value *value);
 #define OUTSIDE_KEY_SIZE 39
 size_t outside_key_encode(unsigned char out[OUTSIDE_KEY_SIZE], struct outside_key);
-/* The full per-tuple map: devel tools and tests only (it is O(S)); production
- * streams tuples into the bounded event sample instead (event_correlation.c). */
+#ifdef FM_DEVEL_TOOLS
+/* The full per-tuple map: devel tools only (it is O(S)), never built into the
+ * installed collector; production streams tuples into the bounded event
+ * sample instead (event_correlation.c). */
 bool correlation_observe(void *correlation, const struct outside_key *,
                          const struct correlation_value *, struct fm_error *);
 struct correlation *correlation_create(struct fm_error *);
@@ -69,4 +71,5 @@ size_t correlation_count(const struct correlation *);
 size_t correlation_bytes(const struct correlation *);
 bool correlation_at(const struct correlation *, size_t, struct outside_key *,
                     struct correlation_value *);
+#endif
 #endif

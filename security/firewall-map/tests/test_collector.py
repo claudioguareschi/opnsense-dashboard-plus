@@ -413,6 +413,21 @@ class CollectorLoopTest(unittest.TestCase):
         with open(self.output) as handle:
             return json.load(handle)
 
+    def test_a_stale_classification_is_logged_once(self):
+        def sample(stale, error=0, refused=None):
+            return {"telemetry": {"classifier_stale": stale, "classifier_error": error}, "refused": refused,
+                    "baseline": False, "counts": {"states": 1}}
+        with mock.patch.object(COLLECTOR, "log_warning") as warning, mock.patch.object(COLLECTOR, "log_notice") as notice:
+            for item in (sample(0), sample(1, 12), sample(1, 12), sample(0, 0, {"reason": "states", "kind": "",
+                                                                                "actual": 2, "limit": 1}),
+                         sample(1, 12), sample(0), sample(0)):
+                self.collector._record_collector(sample=item)
+        stale = [call.args[0] for call in warning.call_args_list if "classification" in call.args[0]]
+        self.assertEqual(len(stale), 1)
+        self.assertIn("error 12", stale[0])
+        self.assertEqual([call.args[0] for call in notice.call_args_list if "classification" in call.args[0]],
+                         ["classification refreshed again"])
+
     def test_every_document_carries_the_interval_it_is_written_at(self):
         """Adaptive refresh: the map asks again when the next document is due and the API judges a
         document's freshness by its interval, so every document the service writes carries it,
@@ -446,6 +461,7 @@ class CollectorLoopTest(unittest.TestCase):
                          sample(0, 71), sample(1), sample(1)):
                 self.collector._record_collector(sample=item)
         lifetime = [call for call in warning.call_args_list if "lifetime" in call.args[0]]
+        self.assertFalse([call for call in warning.call_args_list if "classification" in call.args[0]])
         self.assertEqual(len(lifetime), 1)
         self.assertIn("error 71", lifetime[0].args[0])
         self.assertEqual([call.args[0] for call in notice.call_args_list if "lifetime" in call.args[0]],

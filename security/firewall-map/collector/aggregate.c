@@ -289,7 +289,7 @@ static struct item *join_entry(struct aggregate *a, struct map *m, const void *k
     }
     return found;
   }
-  return lookup(m, key, len, true, error);
+  return map_insert(m, key, len, error);
 }
 static bool lan_label_slot(struct aggregate *a, struct item *i,
                            struct fm_error *error) {
@@ -369,7 +369,7 @@ static int admit(struct aggregate *a, const unsigned char *key, uint64_t hash,
 static struct flow *flow_add(struct aggregate *a, const struct state_view *v,
                              const unsigned char *key, uint64_t seq, uint32_t *id,
                              struct fm_error *error) {
-  struct item *i = lookup(&a->flows, key, FM_FLOW_KEY_SIZE, true, error);
+  struct item *i = map_insert(&a->flows, key, FM_FLOW_KEY_SIZE, error);
   if (!i)
     return NULL;
   if (i->id > UINT32_MAX) {

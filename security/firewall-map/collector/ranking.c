@@ -40,7 +40,7 @@ struct rate_state {
  * ranking_update and then becomes `previous`. The value arrays are swapped,
  * not reallocated, so their capacity is reused from sample to sample. */
 struct generation {
-  struct map keys;
+  struct map keys; /* flow key -> values[item id] */
   struct rate_state *values;
   size_t capacity;
 };
@@ -129,7 +129,7 @@ bool ranking_update(struct ranking *r, const struct aggregate *aggregate,
     const struct flow *flow = aggregate_flow(aggregate, n);
     unsigned char key[FM_FLOW_KEY_SIZE];
     state_flow_key(key, flow->local, flow->remote);
-    struct item *item = lookup(&current->keys, key, sizeof(key), true, error);
+    struct item *item = map_insert(&current->keys, key, sizeof(key), error);
     if (!item)
       return false;
     const struct item *previous = map_find(&r->previous.keys, key, sizeof(key));
@@ -196,7 +196,7 @@ bool ranking_retain(struct ranking *r, const struct map *retained, struct fm_err
   for (size_t n = 0; ok && n < used; n++) {
     const struct item *i = r->previous.keys.order[n];
     if (!map_find(retained, i->key, i->len)) continue;
-    struct item *copy = lookup(&next->keys, i->key, i->len, true, error);
+    struct item *copy = map_insert(&next->keys, i->key, i->len, error);
     if (!copy) {
       ok = false;
       break;

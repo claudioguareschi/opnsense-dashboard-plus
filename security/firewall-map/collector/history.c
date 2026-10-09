@@ -32,7 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The compact state baseline (CONTRACTS.md): one open-addressed table of
+/* The compact state baseline: one open-addressed table of
  * 40-byte entries keyed by (creator, id), updated in place. An entry's epoch
  * says which sample last saw the state: the committed epoch (previous sample)
  * or the staged one (this sample). After a committed sample every entry the
@@ -261,7 +261,7 @@ void history_commit(struct history *h) {
 
 void history_abort(struct history *h) {
   /* Counters were updated in place, so this sample cannot be undone: the
-   * next sample is a baseline (CONTRACTS.md). Callers stop or refuse after
+   * next sample is a baseline. Callers stop or refuse after
    * an aborted sample anyway. */
   h->staging = false;
   history_reset(h);

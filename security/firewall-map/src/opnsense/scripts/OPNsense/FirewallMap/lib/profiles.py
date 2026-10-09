@@ -24,7 +24,7 @@
 
 
 
-"""Ranking profiles: the collector's operational ranking policy (collector/CONTRACTS.md, "Ranking profile").
+"""Ranking profiles: the collector's operational ranking policy (collector/profile.h).
 
 Exactly one profile is active for the firewall, and every viewer sees the flows it ranks. It is an
 administrative setting (general.ranking_profile, a profile UUID), never a viewer's choice, and it
@@ -68,8 +68,8 @@ FLOORS = ("s3_min_percent", "s2_min_percent", "s1_min_percent")
 DIRECTIONS = ("equal",)
 # the collector's limits (collector/profile.h)
 ASSET_RULES_MAX = 4096
-MULTIPLIER_MIN = 0.000001
-MULTIPLIER_MAX = 1000000.0
+MULTIPLIER_MIN = 1.0
+MULTIPLIER_MAX = 100.0
 
 BALANCED = "9bded7b2-a028-44ca-b7ab-4e3357694174"
 BANDWIDTH = "a5df6449-a682-4029-82c9-ae51b25a87db"
@@ -206,7 +206,7 @@ def _definition(profile):
 
 
 def document(profile):
-    """The collector's startup document (collector/PROTOCOL.md, "Startup"; schema v1) of a
+    """The collector's startup document (schema v1, which collector/profile.c compiles) of a
     validated profile."""
     # the name is informational to the collector, whose reader takes printable ASCII only
     name = "".join(c if " " <= c <= "~" else "?" for c in profile["name"])[:128] or "?"

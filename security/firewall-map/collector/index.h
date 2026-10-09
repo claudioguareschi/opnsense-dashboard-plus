@@ -50,8 +50,10 @@ struct map {
 void index_set_hash_key(const uint8_t key[16]);
 /* The same keyed hash, for fixed-capacity tables built on it. */
 uint64_t index_hash(const void *, size_t);
-struct item *lookup(struct map *, const void *, size_t, bool add,
-                    struct fm_error *);
+/* The item for a key: the existing one, or a new one inserted (its id the
+ * next insertion index, value/count/seq at 0, 0, UINT64_MAX); NULL only
+ * when the insertion fails (error set). */
+struct item *map_insert(struct map *, const void *, size_t, struct fm_error *);
 /* Lookup without insertion; never fails, never modifies the map. */
 const struct item *map_find(const struct map *, const void *, size_t);
 /* The same, with the key's index_hash already computed. */

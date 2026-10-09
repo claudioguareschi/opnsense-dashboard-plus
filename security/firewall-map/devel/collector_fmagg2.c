@@ -25,7 +25,7 @@
 /* Devel-only FMAGG2 aggregate dump (every flow, candidate and correlation) used
  * by devel/collector_sample.c and the equivalence tools. Never linked into the
  * installed helper. */
-#include "../collector/protocol.h"
+#include "collector_fmagg2.h"
 #include <errno.h>
 #include <string.h>
 

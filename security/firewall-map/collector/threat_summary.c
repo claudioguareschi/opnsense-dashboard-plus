@@ -85,6 +85,8 @@ struct threat_summary *threat_summary_create(const struct aggregate *aggregate,
                                              struct fm_error *error) {
   struct threat_summary *summary = fm_calloc(1, sizeof(*summary));
   struct aggregate_counts counts = aggregate_counts(aggregate);
+  /* ids: remote -> rows[item value] (count: seen); evidence: EVIDENCE
+   * remotes; candidates: per remote and kind, the values already kept */
   struct map ids = {0}, evidence = {0}, candidates = {0};
   struct remote_row *rows = NULL, **order = NULL;
   size_t row_count = 0;
@@ -99,14 +101,14 @@ struct threat_summary *threat_summary_create(const struct aggregate *aggregate,
   }
   for (size_t n = 0; n < limits.evidence_count; n++) {
     unsigned char key[17];
-    struct item *item = lookup(&evidence, key, address_key(key, limits.evidence[n]), true, error);
+    struct item *item = map_insert(&evidence, key, address_key(key, limits.evidence[n]), error);
     if (!item) goto fail;
   }
   /* every distinct remote of the sample, totals summed over its flows */
   for (size_t n = 0; n < counts.flows; n++) {
     const struct flow *flow = aggregate_flow(aggregate, n);
     unsigned char key[17];
-    struct item *item = lookup(&ids, key, address_key(key, flow->remote), true, error);
+    struct item *item = map_insert(&ids, key, address_key(key, flow->remote), error);
     if (!item) goto fail;
     if (!item->count) {
       item->count = 1;
@@ -184,7 +186,7 @@ struct threat_summary *threat_summary_create(const struct aggregate *aggregate,
     *key_end++ = candidate.len;
     memcpy(key_end, candidate.data, candidate.len);
     key_end += candidate.len;
-    struct item *seen = lookup(&candidates, candidate_key, (size_t)(key_end - candidate_key), true, error);
+    struct item *seen = map_insert(&candidates, candidate_key, (size_t)(key_end - candidate_key), error);
     if (!seen) goto fail;
     if (seen->count) continue;
     seen->count = 1;
@@ -192,7 +194,7 @@ struct threat_summary *threat_summary_create(const struct aggregate *aggregate,
     unsigned char kind_key[5];
     memcpy(kind_key, &remote_id, 4);
     kind_key[4] = candidate.kind;
-    struct item *per_kind = lookup(&candidates, kind_key, sizeof(kind_key), true, error);
+    struct item *per_kind = map_insert(&candidates, kind_key, sizeof(kind_key), error);
     if (!per_kind) goto fail;
     if (per_kind->value >= limits.candidates_per_kind) {
       summary->candidates_omitted++;

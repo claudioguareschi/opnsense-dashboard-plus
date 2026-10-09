@@ -28,7 +28,7 @@
 #include "state.h"
 #include <stdint.h>
 
-/* Bounded flow discovery (CONTRACTS.md, "Discovery"): what the collector
+/* Bounded flow discovery: what the collector
  * knows about flows it does not track richly.
  *
  * A summary is a weighted Space-Saving counter set over flow keys for one

@@ -26,7 +26,7 @@
 """Client of the package-owned PF state collector (firewallmap-collector).
 
 The collector speaks exactly one protocol, PROTOCOL_VERSION; the wire formats
-are specified in collector/PROTOCOL.md. A collector announcing any other
+are the layouts collector/protocol.c writes. A collector announcing any other
 protocol comes from a different package version: that is an installation
 problem (CollectorIncompatible), not a transient failure, and the same binary
 is never started again. A collector built for another PF state ABI than the
@@ -73,7 +73,7 @@ SNAPSHOT_BYTES = 10 * 1024 * 1024
 SNAPSHOT_STATES = 5000
 MAX_EVENT_QUERIES = 2500
 
-# Resource budgets (collector/budget.h, PROTOCOL.md): the helper enforces the same maxima.
+# Resource budgets (collector/budget.h): the helper enforces the same maxima.
 RANKED_FLOWS = 150
 CANDIDATES_PER_KIND = 16
 THREAT_REMOTES = 20000
@@ -124,7 +124,7 @@ def _age(value):
 PRESENCES = ("none", "traffic", "probe", "mirror")
 # CARP addresses a request may name (CARP rows)
 CARP_ADDRESSES_MAX = 256
-_TELEMETRY = struct.Struct("!IQddddd" + "Q" * 49)
+_TELEMETRY = struct.Struct("!IQddddd" + "Q" * 53)
 _TELEMETRY_FIELDS = ("pid", "sequence", "interval", "dump_seconds", "processing_seconds", "user_cpu",
                      "system_cpu", "max_rss", "heap_bytes", "heap_peak", "heap_blocks", "heap_budget",
                      "state_limit", "preflight_states", "skipped_af_translation", "candidates_omitted",
@@ -139,10 +139,13 @@ _TELEMETRY_FIELDS = ("pid", "sequence", "interval", "dump_seconds", "processing_
                      # for an impossible lifetime, those of unknown age; whether validation was active,
                      # its limit (s), why it was unavailable (errno) and the bound refresh cost (us)
                      "pf_records_observed", "invalid_pf_states_skipped", "age_unknown_states",
-                     "lifetime_validation", "lifetime_limit", "lifetime_error", "lifetime_refresh_us")
+                     "lifetime_validation", "lifetime_limit", "lifetime_error", "lifetime_refresh_us",
+                     # the classification snapshot: stale (the last refresh failed, the previous one
+                     # is in use), why (errno), the last build's need and the build bound (bytes)
+                     "classifier_stale", "classifier_error", "classifier_build_peak", "classifier_build_bound")
 # why the collector recommends its sampling interval (collector/cadence.h)
 CADENCE_REASONS = ("floor", "duty", "memory", "refused")
-# the quality axes (collector/CONTRACTS.md), as the telemetry numbers them
+# the quality axes (collector/tracker.h), as the telemetry numbers them
 REGIMES = ("exact", "bounded")
 QUALITY = {"discovery": ("exact", "bounded"), "ranking": ("exact", "warming", "bounded"),
            "attribution": ("exact", "warming", "partial")}

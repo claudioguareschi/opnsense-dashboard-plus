@@ -160,7 +160,7 @@ struct event_sample *event_sample_begin(struct event_history *history,
   for (size_t n = 0; n < query_count; n++) {
     unsigned char encoded[OUTSIDE_KEY_SIZE];
     size_t length = outside_key_encode(encoded, queries[n].key);
-    struct item *item = lookup(&s->query_index, encoded, length, true, error);
+    struct item *item = map_insert(&s->query_index, encoded, length, error);
     if (!item) {
       event_sample_destroy(s);
       return NULL;
@@ -247,8 +247,7 @@ size_t event_sample_finish(struct event_history *history, struct event_sample *s
   map_clear(&history->index);
   for (size_t n = 0; n < count; n++) {
     unsigned char key[OUTSIDE_KEY_SIZE];
-    struct item *item = lookup(&history->index, key, outside_key_encode(key, history->rows[n].key),
-                               true, error);
+    struct item *item = map_insert(&history->index, key, outside_key_encode(key, history->rows[n].key), error);
     if (!item) return 0;
     item->value = n;
   }

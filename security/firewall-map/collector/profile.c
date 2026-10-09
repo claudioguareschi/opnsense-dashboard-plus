@@ -347,7 +347,7 @@ struct ranker {
    * (incumbency), at most `limit` each */
   struct selected *selection;
   size_t selected, capacity;
-  struct map previous;
+  struct map previous; /* last selection's flow keys (presence only) */
   /* every tracked flow's effective score this sample */
   double *scores;
   size_t scores_capacity, scores_count;
@@ -545,7 +545,7 @@ static bool select_scored(struct ranker *p, const struct aggregate *a, const str
     const struct flow *flow = aggregate_flow(a, p->selection[k].flow);
     unsigned char key[FM_FLOW_KEY_SIZE];
     state_flow_key(key, flow->local, flow->remote);
-    if (!lookup(&p->previous, key, sizeof(key), true, error)) return false;
+    if (!map_insert(&p->previous, key, sizeof(key), error)) return false;
   }
   return true;
 }

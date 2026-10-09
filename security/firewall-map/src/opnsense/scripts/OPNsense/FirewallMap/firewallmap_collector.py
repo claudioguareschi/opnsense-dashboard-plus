@@ -208,7 +208,7 @@ class FlowTracker:
         self.fade_seconds = fade_seconds
         self.flows = {}
         self.total_flows = 0
-        # the collector's quality axes for the last sample (CONTRACTS.md) and whether the flow
+        # the collector's quality axes for the last sample and whether the flow
         # total is an estimate (bounded discovery)
         self.total_estimated = False
         self.quality = None
@@ -1340,6 +1340,16 @@ class Collector:
                     elif validation == 1 and current.get("lifetime_validation") == 0:
                         log_notice("PF state lifetime validation active again")
                     current["lifetime_validation"] = validation
+                # the classification snapshot keeps the previous tables when a refresh of the same
+                # sets fails (collector main.c): say so when it happens and when it is current again
+                stale = telemetry.get("classifier_stale")
+                if not refused and stale in (0, 1):
+                    if stale == 1 and current.get("classifier_stale") != 1:
+                        log_warning("classification refresh failed (error "
+                                    f"{telemetry.get('classifier_error')}): the previous PF table snapshot stays in use")
+                    elif stale == 0 and current.get("classifier_stale") == 1:
+                        log_notice("classification refreshed again")
+                    current["classifier_stale"] = stale
                 current.update(helper=sample.get("helper"), telemetry=telemetry or None,
                                baseline=sample["baseline"], refused=refused, states=sample["counts"]["states"],
                                threat_remotes_omitted=omitted, last_sample_at=time.time(),
@@ -1374,7 +1384,7 @@ class Collector:
                 "remotes": {"sent": len(self.sent_evidence), "omitted": self.evidence_omitted,
                             "cap": state_collector.THREAT_REMOTES}}
             current["ingest_rejected"] = dict(self.ingest_rejected)
-            # what the bounded evidence trackers left out (Phase F boundedness)
+            # what the bounded evidence trackers left out
             current["evidence_omitted"] = {
                 "filterlog_skipped_bytes": self.log.skipped_bytes, "eve_skipped_bytes": self.eve.skipped_bytes,
                 "blocked_sources_evicted": self.blocks.evicted_sources,

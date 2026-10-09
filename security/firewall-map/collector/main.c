@@ -22,7 +22,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* Persistent sample worker (see PROTOCOL.md). Each request is an FMCONF2
+/* Persistent sample worker. Each request is an FMCONF2
  * context followed by RUN; each answer is one complete FMAGG4 response, or
  * FMFAIL1 followed by exit. History, ranking and event correlation persist
  * across requests; the sample interval is measured here, never supplied. */
@@ -86,6 +86,12 @@ struct engine {
   struct classifier *classifier;
   struct class_config classes;
   bool classes_loaded;
+  /* the last refresh failed (classification stale): its configuration, not
+   * tried again until the request's changes, why, and what the last build
+   * needed (bytes) */
+  struct class_config failed_classes;
+  bool classes_failed;
+  uint64_t classifier_error, classifier_build_peak, classifier_build_limit;
   uint64_t sequence;
   /* the recommended sampling interval (cadence.h), across samples */
   struct cadence cadence;
@@ -186,14 +192,45 @@ static void class_row(struct request *r, const char *line, struct fm_error *erro
   set->category = category;
   strcpy(set->name, name);
 }
+/* Request rows are at most REQUEST_LINE_MAX bytes, newline included (the
+ * longest row Python sends, a Q or EVIDENCE row with IPv6 addresses, is
+ * about 120). A longer row, a NUL byte or a last row without its newline is
+ * a request error, never parsed as a shorter row: the collector answers
+ * FMFAIL1 and exits, so nothing after it is read. */
+#define REQUEST_LINE_MAX 512
+enum request_line { LINE_OK, LINE_EOF, LINE_BAD };
+static enum request_line read_line(FILE *f, char line[REQUEST_LINE_MAX + 1], const char **why) {
+  size_t n = 0;
+  int c;
+  while ((c = getc(f)) != EOF) {
+    if (c == '\0') {
+      *why = "NUL byte in a request row";
+      return LINE_BAD;
+    }
+    if (n == REQUEST_LINE_MAX) {
+      *why = "request row too long";
+      return LINE_BAD;
+    }
+    line[n++] = (char)c;
+    if (c == '\n') {
+      line[n] = '\0';
+      return LINE_OK;
+    }
+  }
+  if (!n)
+    return LINE_EOF;
+  *why = "request row without a newline";
+  return LINE_BAD;
+}
 static bool read_request(struct request *r, bool *clean_eof, struct fm_error *error) {
-  char *line = NULL;
-  size_t capacity = 0;
+  char line[REQUEST_LINE_MAX + 1] = {0};
+  const char *why = NULL;
+  enum request_line got = LINE_EOF;
   bool header = false, run = false, got_line = false;
   bool seen_threats = false, seen_snapshot = false, seen_budget = false,
-       seen_correlation = false, seen_generation = false, seen_mirror = false;
+       seen_correlation = false, seen_generation = false, seen_mirror = false, seen_wan = false;
   struct context *ctx = r->ctx;
-  while (!error->code && getline(&line, &capacity, stdin) >= 0) {
+  while (!error->code && (got = read_line(stdin, line, &why)) == LINE_OK) {
     got_line = true;
     char a[64], b[64], device[FM_INTERFACE_SIZE], extra;
     unsigned x, y, z, id, proto, public_port, remote_port;
@@ -250,7 +287,9 @@ static bool read_request(struct request *r, bool *clean_eof, struct fm_error *er
       }
       parse_address(a, &r->classify[r->classify_count++], error);
     } else if (!strncmp(line, "EVIDENCE ", 9)) {
-      /* EVIDENCE <address> <mask> <blocked hits> <IDS alerts> <IDS worst severity> */
+      /* EVIDENCE <address> <mask> <blocked hits> <IDS alerts> <IDS worst severity>;
+       * at most BUDGET_THREAT_REMOTES_MAX rows, whatever the BUDGET row's
+       * threat_remotes (rows may come in any order) */
       unsigned mask, blocked, alerts, severity;
       if (sscanf(line, "EVIDENCE %63s %u %u %u %u %c", a, &mask, &blocked, &alerts, &severity,
                  &extra) != 5 ||
@@ -310,6 +349,9 @@ static bool read_request(struct request *r, bool *clean_eof, struct fm_error *er
           !error->code)
         context_overflow(r, 'A', CONTEXT_MAX_ASSIGNED);
     } else if (line[0] == 'W' && sscanf(line, "W %15s %c", device, &extra) == 1) {
+      if (seen_wan)
+        request_error(error, "duplicate request keyword");
+      seen_wan = true;
       strcpy(ctx->wan, device);
     } else if (line[0] == 'S' && sscanf(line, "S %u %u %u %c", &x, &y, &z, &extra) == 3) {
       if (x > 255 || y > 65535)
@@ -319,8 +361,9 @@ static bool read_request(struct request *r, bool *clean_eof, struct fm_error *er
     } else
       request_error(error, "configuration row");
   }
-  free(line);
-  if (!got_line && feof(stdin)) {
+  if (got == LINE_BAD && !error->code)
+    request_error(error, why);
+  if (!got_line && got == LINE_EOF) {
     *clean_eof = true;
     return false;
   }
@@ -390,6 +433,9 @@ static bool refuse(struct engine *e, struct sample_outcome refusal, uint64_t see
       cadence_update(&e->cadence, telemetry->dump_seconds + telemetry->processing_seconds, telemetry->heap_peak,
                      telemetry->heap_budget, true);
   telemetry->cadence_reason = e->cadence.reason;
+  /* the refusal is small and fixed (header, telemetry, footer): rendered
+   * past the budget a memory refusal has just exhausted */
+  fm_heap_set_budget(0);
   struct response response;
   if (!response_begin(&response, error))
     return false;
@@ -400,36 +446,77 @@ static bool refuse(struct engine *e, struct sample_outcome refusal, uint64_t see
   return response_commit(&response, stdout, error);
 }
 
-static bool same_classes(const struct class_config *a, const struct class_config *b) {
-  if (a->count != b->count || strcmp(a->generation, b->generation)) return false;
+/* The same sets (ids, categories and tables), whatever the generation. */
+static bool same_sets(const struct class_config *a, const struct class_config *b) {
+  if (a->count != b->count) return false;
   for (size_t n = 0; n < a->count; n++)
     if (a->sets[n].category != b->sets[n].category || strcmp(a->sets[n].name, b->sets[n].name))
       return false;
   return true;
 }
+static bool same_classes(const struct class_config *a, const struct class_config *b) {
+  return same_sets(a, b) && !strcmp(a->generation, b->generation);
+}
 /* Reads the PF tables again only when the configuration or its generation
- * changed: never per sample. A failed load leaves no snapshot (and is
- * retried by the next request). */
+ * changed: never per sample. The build runs under an explicit bound: the
+ * build bound at the entry caps (classifier_build_bound) above what is
+ * allocated now, never past the collector's memory budget. The snapshot in
+ * use is replaced only by a complete new one. When a refresh of the same
+ * sets (a new generation of their tables) fails, samples go on classifying
+ * with the previous snapshot, reported stale, and the refresh is not tried
+ * again until the configuration changes again: its set ids are the
+ * request's, so every requested set is still reported. Other sets, or no
+ * snapshot yet, cannot be answered that way: the failure is the request's,
+ * as always (retried by the next one). */
 static bool refresh_classifier(struct engine *e, const struct class_config *wanted,
-                               struct fm_error *error) {
+                               uint64_t memory_budget, struct fm_error *error) {
   if (e->classes_loaded && same_classes(&e->classes, wanted)) return true;
-  classifier_destroy(e->classifier);
-  e->classifier = NULL;
-  e->classes_loaded = false;
+  if (e->classes_failed && same_classes(&e->failed_classes, wanted)) return true;
   if (!wanted->count) {
+    classifier_destroy(e->classifier);
+    e->classifier = NULL;
     e->classes = *wanted;
     e->classes_loaded = true;
+    e->classes_failed = false;
+    e->classifier_error = 0;
     return true;
   }
   struct class_config loaded = *wanted;
-  e->classifier = classifier_load(loaded.sets, loaded.count, error);
-  if (!e->classifier) return false;
+  uint64_t before = fm_heap_usage().bytes, bound = before + classifier_build_bound();
+  if (memory_budget && memory_budget < bound) bound = memory_budget;
+#ifdef FM_TEST_HOOKS
+  /* FM_TEST_CLASSIFIER_BUDGET=<bytes>: the build's bound above what is allocated */
+  const char *hook = getenv("FM_TEST_CLASSIFIER_BUDGET");
+  if (hook) bound = before + strtoull(hook, NULL, 10);
+#endif
+  fm_heap_set_budget(bound);
+  fm_heap_reset_peak();
+  e->classifier_build_limit = bound > before ? bound - before : 0;
+  struct fm_error build_error = {0};
+  struct classifier *next = classifier_load(loaded.sets, loaded.count, &build_error);
+  uint64_t peak = fm_heap_usage().peak_bytes;
+  e->classifier_build_peak = peak > before ? peak - before : 0;
+  fm_heap_set_budget(0);
+  if (!next) {
+    if (!e->classes_loaded || !same_sets(&e->classes, wanted)) {
+      *error = build_error;
+      return false;
+    }
+    e->failed_classes = *wanted;
+    e->classes_failed = true;
+    e->classifier_error = build_error.code ? (uint64_t)build_error.code : ENOMEM;
+    return true;
+  }
+  classifier_destroy(e->classifier);
+  e->classifier = next;
   e->classes = loaded;
   e->classes_loaded = true;
+  e->classes_failed = false;
+  e->classifier_error = 0;
   return true;
 }
 
-/* The sample's tracked-set report in the telemetry (PROTOCOL.md). */
+/* The sample's tracked-set report in the telemetry. */
 static void telemetry_track(struct telemetry *t, const struct tracker_report *report,
                             struct aggregate_counts counts) {
   t->regime = report->regime;
@@ -536,14 +623,18 @@ static bool selection_rows(struct engine *e, const struct aggregate *a, struct r
 static bool run_sample(struct engine *e, struct request *r, struct fm_error *error) {
   /* the snapshot persists across samples: it is loaded outside the sample
    * budget and its size comes off the state admission */
-  if (!refresh_classifier(e, &r->classes, error))
+  if (!refresh_classifier(e, &r->classes, r->memory_budget, error))
     return false;
   uint64_t class_bytes = classifier_bytes(e->classifier);
   struct budget_limits shares = budget_limits(r->memory_budget, class_bytes);
   uint64_t state_limit = shares.states;
   struct telemetry telemetry = {.pid = (uint32_t)getpid(), .sequence = ++e->sequence,
                                 .interval = -1, .state_limit = state_limit,
-                                .classifier_bytes = class_bytes};
+                                .classifier_bytes = class_bytes,
+                                .classifier_stale = e->classes_failed,
+                                .classifier_error = e->classes_failed ? e->classifier_error : 0,
+                                .classifier_build_peak = e->classifier_build_peak,
+                                .classifier_build_bound = e->classifier_build_limit};
   fm_heap_set_budget(r->memory_budget);
 #ifdef FM_TEST_HOOKS
   /* FM_TEST_HEAP_BUDGET=<bytes>:<sequence> exhausts the heap below the
@@ -574,12 +665,14 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
                          : NULL;
   /* the tracked set: who is tracked richly, who only reaches discovery */
   struct admission admission;
+  /* evidence: EVIDENCE address -> evidence_facts[item value] (count: seen);
+   * carp: BACKUP CARP addresses (presence only) */
   struct map evidence = {0}, carp = {0};
   bool tracked = sample.aggregate && tracker_begin(e->tracker, e->ranking, shares, &admission, error);
   for (size_t n = 0; tracked && n < r->evidence_count; n++) {
     unsigned char key[17] = {r->evidence[n].af};
     memcpy(key + 1, r->evidence[n].b, 16);
-    struct item *item = lookup(&evidence, key, sizeof(key), true, error);
+    struct item *item = map_insert(&evidence, key, sizeof(key), error);
     if (!(tracked = item != NULL)) break;
     if (item->count) {
       request_error(error, "duplicate EVIDENCE address");
@@ -592,7 +685,7 @@ static bool run_sample(struct engine *e, struct request *r, struct fm_error *err
   for (size_t n = 0; tracked && n < r->carp_count; n++) {
     unsigned char key[17] = {r->carp[n].af};
     memcpy(key + 1, r->carp[n].b, 16);
-    tracked = lookup(&carp, key, sizeof(key), true, error) != NULL;
+    tracked = map_insert(&carp, key, sizeof(key), error) != NULL;
   }
   if (tracked) {
     admission.carp_backup = &carp;

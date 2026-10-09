@@ -91,6 +91,17 @@ class ValidationTest(unittest.TestCase):
         self.rejects(assets=[{"cidr": "10.0.0.0/8", "multiplier": 2}, {"cidr": "10.0.0.0/8", "multiplier": 3}])
         self.rejects(assets=[{"cidr": "10.0.0.0/8", "multiplier": 0}])
         self.rejects(assets=[{"cidr": "10.0.0.0/8", "multiplier": 2e6}])
+        # asset multipliers boost only: 1 to 100 inclusive (the collector's range)
+        for value in (0.999, 0.9999999999, 0, -1, -0.0, 100.000001, 101, float("nan"), float("inf"),
+                      float("-inf"), "0.5", "NaN", "Infinity", "x", True, None):
+            with self.subTest(multiplier=value):
+                self.rejects(assets=[{"cidr": "10.0.0.0/8", "multiplier": value}])
+                self.rejects(default_multiplier=value)
+        for value in (1, 1.0, 2, 5, 10, 100, "100", "1e2"):
+            with self.subTest(multiplier=value):
+                accepted = PROFILES.validate(dict(example(), default_multiplier=value,
+                                                  assets=[{"cidr": "10.0.0.0/8", "multiplier": value}]))
+                self.assertEqual(accepted["default_multiplier"], float(value))
         self.rejects(assets=[{"cidr": "mail.example", "multiplier": 2}])
         self.rejects(default_multiplier=0)
         self.rejects(direction="inbound")
@@ -166,6 +177,8 @@ class ModelParityTest(unittest.TestCase):
     """The settings model refuses exactly the asset rules the scripts (and the collector) refuse."""
 
     CASES = ["192.168.1.25 10", "192.168.1.0/24 2\n192.168.1.25 10", "2001:db8::/32 3", "10.0.0.0/8 0.5",
+             "10.0.0.0/8 1", "10.0.0.0/8 100", "10.0.0.0/8 5", "10.0.0.0/8 0.999999", "10.0.0.0/8 100.000001",
+             "10.0.0.0/8 101", "10.0.0.0/8 -1", "10.0.0.0/8 NaN", "10.0.0.0/8 INF", "10.0.0.0/8 1e2",
              "192.168.1.5/24 2", "192.168.1.0/33 2", "192.168.1.0/024 2", "mail.example 2", "10.0.0.0/8",
              "10.0.0.0/8 0", "10.0.0.0/8 2000000", "10.0.0.0/8 x", "10.0.0.0/8 2\n10.0.0.0/8 3",
              "10.0.0.0/8 2\n10.0.0.0/8 2", "2001:db8::1/64 2", "0.0.0.0/0 2", "\n\n"]

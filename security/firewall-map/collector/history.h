@@ -25,7 +25,7 @@
 #ifndef FM_HISTORY_H
 #define FM_HISTORY_H
 #include "state.h"
-/* The compact state baseline (CONTRACTS.md): per-state counters from the
+/* The compact state baseline: per-state counters from the
  * previous sample, keyed by (creator, id), and the sample interval.
  *
  * Timing: each sample is anchored at the CLOCK_MONOTONIC time its PF dump

@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
 
   /* IPv6 and nested rules */
   if (accepts(DOC(WEIGHTS,
-                  "\"asset_importance\":{\"default_multiplier\":0.5,\"rules\":["
+                  "\"asset_importance\":{\"default_multiplier\":1.5,\"rules\":["
                   "{\"cidr\":\"2001:db8::/32\",\"multiplier\":3},{\"cidr\":\"2001:db8:1::/48\",\"multiplier\":7},"
                   "{\"cidr\":\"2001:db8:1::1/128\",\"multiplier\":9},{\"cidr\":\"0.0.0.0/0\",\"multiplier\":2},"
                   "{\"cidr\":\"10.0.0.0/8\",\"multiplier\":4},{\"cidr\":\"10.0.0.0/8\",\"multiplier\":4}]}",
@@ -121,11 +121,11 @@ int main(int argc, char **argv) {
     expect("v6 /128", profile_asset(&p, address("2001:db8:1::1")) == 9);
     expect("v6 /48", profile_asset(&p, address("2001:db8:1::2")) == 7);
     expect("v6 /32", profile_asset(&p, address("2001:db8:2::")) == 3);
-    expect("v6 none", profile_asset(&p, address("2001:db9::")) == 0.5);
+    expect("v6 none", profile_asset(&p, address("2001:db9::")) == 1.5);
     expect("v4 /0", profile_asset(&p, address("11.0.0.0")) == 2);
     expect("v4 /8", profile_asset(&p, address("10.255.255.255")) == 4);
     expect("duplicate kept once", p.asset_rules == 5);
-    expect("min multiplier", p.min_multiplier == 0.5);
+    expect("min multiplier", p.min_multiplier == 1.5);
     profile_release(&p);
   } else failed = 1;
   /* precise floors and fractional weights */
@@ -200,6 +200,10 @@ int main(int argc, char **argv) {
       "{\"cidr\":\"10.0.0.0/8\",\"multiplier\":0}",        /* zero */
       "{\"cidr\":\"10.0.0.0/8\",\"multiplier\":-2}",       /* negative */
       "{\"cidr\":\"10.0.0.0/8\",\"multiplier\":1e7}",      /* over the limit */
+      "{\"cidr\":\"10.0.0.0/8\",\"multiplier\":0.999999}", /* below 1: boost only */
+      "{\"cidr\":\"10.0.0.0/8\",\"multiplier\":0.5}",      /* a suppression */
+      "{\"cidr\":\"10.0.0.0/8\",\"multiplier\":100.000001}", /* over 100 */
+      "{\"cidr\":\"10.0.0.0/8\",\"multiplier\":101}",
       "{\"cidr\":\"10.0.0.0/8\"}",                         /* missing */
       "{\"cidr\":\"10.0.0.0/8\",\"multiplier\":2,\"x\":1}", /* unknown key */
       "{\"cidr\":\"10.0.0.0/8\",\"multiplier\":2},{\"cidr\":\"10.0.0.0/8\",\"multiplier\":3}", /* conflict */
@@ -214,6 +218,27 @@ int main(int argc, char **argv) {
   }
   rejects("default multiplier 0", DOC(WEIGHTS, "\"asset_importance\":{\"default_multiplier\":0,\"rules\":[]}", FLOORS,
                                       "\"equal\""));
+  /* asset multipliers boost only: 1 to 100 inclusive, default and rules alike */
+  static const char *const multipliers[] = {"1", "2", "5", "10", "100", "1.0", "1e2", "0.999999", "0", "-1",
+                                            "100.000001", "101", "1e3"};
+  for (size_t n = 0; n < sizeof(multipliers) / sizeof(*multipliers); n++) {
+    bool valid = n < 7;
+    char text[2048];
+    snprintf(text, sizeof(text),
+             "{\"schema_version\":1,\"profile\":{" UUID "," WEIGHTS
+             ",\"asset_importance\":{\"default_multiplier\":%s,\"rules\":[{\"cidr\":\"10.0.0.0/8\",\"multiplier\":%s}]},"
+             FLOORS ",\"direction\":\"equal\"}}", multipliers[n], multipliers[n]);
+    struct profile q;
+    char reason[256];
+    bool ok = profile_compile(text, strlen(text), &q, reason, sizeof(reason));
+    if (ok) profile_release(&q);
+    if (ok != valid) {
+      printf("multiplier %s: %s\n", multipliers[n], ok ? "accepted" : reason);
+      failed = 1;
+    }
+    /* the discovery units of every valid multiplier stay far from saturation */
+    if (ok) expect("units", profile_unit(&q, 100.0) <= 100 * PROFILE_DISCOVERY_UNIT);
+  }
   /* the rule cap */
   {
     size_t size = 64 + (PROFILE_ASSET_RULES_MAX + 1) * 48 + 1024;

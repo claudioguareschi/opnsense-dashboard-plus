@@ -25,8 +25,8 @@
 #ifndef FM_BUDGET_H
 #define FM_BUDGET_H
 #include <stdint.h>
-/* The helper's resource model (PROTOCOL.md, "Resource budgets";
- * CONTRACTS.md, "Boundedness").
+/* The helper's resource model: every structure is fixed in size or derived
+ * from the memory budget, so a sample stays bounded whatever PF holds.
  *
  * 1. The memory budget (BUDGET row; accounted heap, alloc.c). After the
  *    fixed structures and the classification snapshot, the rest is shared

@@ -120,7 +120,7 @@ bool protocol_frame(FILE *f, const void *data, size_t len, uint32_t *checksum,
 #define HEADER_RECORD_SIZE 9
 #define FLOW_RECORD_SIZE 183
 #define EVENT_RECORD_SIZE 194
-#define TELEMETRY_RECORD_SIZE 445
+#define TELEMETRY_RECORD_SIZE 477
 #define SNAPSHOT_CANDIDATE_RECORD_SIZE 61
 #define FOOTER_RECORD_SIZE 125
 #define CLASSIFIED_RECORD_SIZE 36
@@ -298,7 +298,11 @@ static bool write_telemetry(FILE *f, const struct telemetry *t,
                              t->lifetime_validation,
                              t->lifetime_limit,
                              t->lifetime_error,
-                             t->lifetime_refresh_us};
+                             t->lifetime_refresh_us,
+                             t->classifier_stale,
+                             t->classifier_error,
+                             t->classifier_build_peak,
+                             t->classifier_build_bound};
   for (size_t n = 0; n < sizeof(values) / sizeof(*values); n++)
     protocol_put(&p, values[n], 8);
   return record_frame(f, b, p, TELEMETRY_RECORD_SIZE, checksum, error);
@@ -468,7 +472,7 @@ static size_t address_key(unsigned char key[17], struct addr a) {
 static bool write_classification(FILE *f, const struct class_report *report,
                                  uint32_t *checksum, struct sent *sent,
                                  struct fm_error *error) {
-  struct map asked = {0};
+  struct map asked = {0}; /* K address -> its index (item value) */
   uint64_t *states = report->address_count && report->aggregate
                          ? fm_calloc(report->address_count, sizeof(*states)) : NULL;
   bool ok = !(report->address_count && report->aggregate && !states) ||
@@ -476,7 +480,7 @@ static bool write_classification(FILE *f, const struct class_report *report,
   /* states per asked address: one pass over the tracked flows */
   for (size_t n = 0; ok && states && n < report->address_count; n++) {
     unsigned char key[17];
-    struct item *item = lookup(&asked, key, address_key(key, report->addresses[n]), true, error);
+    struct item *item = map_insert(&asked, key, address_key(key, report->addresses[n]), error);
     if (!(ok = item != NULL)) break;
     item->value = n;
   }

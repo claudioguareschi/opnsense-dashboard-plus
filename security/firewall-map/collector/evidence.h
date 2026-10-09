@@ -28,7 +28,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Security evidence of a flow's remote (CONTRACTS.md, "Evidence"). Each
+/* Security evidence of a flow's remote. Each
  * source is its own fact; a flow may have several, and none is ever folded
  * into another. Python collects the bounded evidence (filterlog, Suricata,
  * AbuseIPDB verdicts) and sends it with EVIDENCE rows; THREAT_LIST is
@@ -73,7 +73,7 @@ static inline bool evidence_valid(const struct evidence *e) {
  *   S1  any other evidence: threat list, reputation, weaker blocked activity
  *   S0  no evidence
  * so a flow has a class above S0 exactly when it has any evidence. The one
- * place this policy lives (tests/collector_evidence: Phase G may tune it). */
+ * place this policy lives (tests/collector_evidence_check.c pins it). */
 #define SECURITY_BLOCKED_STRONG_HITS 30u
 enum security_class { SECURITY_S0 = 0, SECURITY_S1 = 1, SECURITY_S2 = 2, SECURITY_S3 = 3 };
 static inline enum security_class security_class(const struct evidence *e) {

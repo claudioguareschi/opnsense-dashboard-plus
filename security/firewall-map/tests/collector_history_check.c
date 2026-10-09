@@ -27,7 +27,7 @@
 /* Property check of collector/history.c, the compact baseline: over many
  * samples with heavy churn, duplicates, counter resets, presizing and growth,
  * every delta and every statistic must equal a naive reference that applies
- * CONTRACTS.md literally. Built and run by tests/test_collector_history.py;
+ * the baseline rules literally (collector/history.h). Built and run by tests/test_collector_history.py;
  * prints "ok" or the first mismatch. */
 #include "../collector/history.h"
 #include <stdio.h>

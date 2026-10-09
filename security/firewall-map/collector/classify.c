@@ -37,6 +37,12 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #endif
+/* A PF table entry as DIOCRGETADDRS copies it (the build bound's read phase). */
+#ifdef __FreeBSD__
+#define CLASSIFY_PF_ADDR_SIZE sizeof(struct pfr_addr)
+#else
+#define CLASSIFY_PF_ADDR_SIZE 64 /* larger than FreeBSD's struct pfr_addr */
+#endif
 #ifdef FM_TEST_HOOKS
 #include <arpa/inet.h>
 #include <sys/socket.h>
@@ -175,14 +181,58 @@ static int compare_event(const void *left, const void *right) {
   return a->at < b->at ? -1 : a->at > b->at;
 }
 
-/* Merges every set's member intervals into disjoint spans with set masks. */
+/* Disjoint spans with set masks from sorted events, adjacent spans of the
+ * same mask merged: counted when spans is NULL (so they can be allocated at
+ * their exact size), else written. */
+static size_t sweep(const struct event *events, size_t n, u128 max, bool v4, void *spans) {
+  size_t count = 0;
+  uint64_t mask = 0, last_mask = 0;
+  u128 from = 0, last_hi = 0;
+  for (size_t i = 0;;) {
+    bool end = i == n;
+    u128 at = end ? 0 : events[i].at;
+    if (mask && (end || at > from)) {
+      u128 hi = end ? max : at - 1;
+      if (count && last_mask == mask && last_hi + 1 == from) {
+        last_hi = hi;
+        if (spans && v4)
+          ((struct span4 *)spans)[count - 1].hi = (uint32_t)hi;
+        else if (spans)
+          ((struct span6 *)spans)[count - 1].hi = hi;
+      } else {
+        if (spans && v4)
+          ((struct span4 *)spans)[count] = (struct span4){(uint32_t)from, (uint32_t)hi, mask};
+        else if (spans)
+          ((struct span6 *)spans)[count] = (struct span6){from, hi, mask};
+        count++;
+        last_mask = mask;
+        last_hi = hi;
+      }
+    }
+    if (end)
+      break;
+    for (; i < n && events[i].at == at; i++) {
+      if (events[i].start)
+        mask |= UINT64_C(1) << events[i].bit;
+      else
+        mask &= ~(UINT64_C(1) << events[i].bit);
+    }
+    from = at;
+  }
+  return count;
+}
+
+/* Merges every set's member intervals of one family into disjoint spans with
+ * set masks; the spans are allocated at their exact size. */
 static bool merge(struct intervals *per_set, const unsigned *bits, size_t sets, u128 max, bool v4,
                   struct classifier *c, struct fm_error *error) {
   size_t total = 0;
   for (size_t s = 0; s < sets; s++)
     total += per_set[s].count * 2;
-  struct event *events = total ? fm_calloc(total, sizeof(*events)) : NULL;
-  if (total && !events)
+  if (!total) /* no member interval in this family: no spans */
+    return true;
+  struct event *events = fm_calloc(total, sizeof(*events));
+  if (!events)
     return fm_error_set(error, ENOMEM, "classification events");
   size_t n = 0;
   for (size_t s = 0; s < sets; s++)
@@ -192,56 +242,14 @@ static bool merge(struct intervals *per_set, const unsigned *bits, size_t sets, 
         events[n++] = (struct event){per_set[s].items[r].hi + 1, bits[s], false};
     }
   qsort(events, n, sizeof(*events), compare_event);
-  size_t capacity = 0, count = 0;
-  void *spans = NULL;
-  uint64_t mask = 0;
-  u128 from = 0;
-  bool ok = true;
-  for (size_t i = 0; i < n && ok;) {
-    u128 at = events[i].at;
-    if (mask && at > from) {
-      if (v4) {
-        struct span4 *s = spans;
-        if (count && s[count - 1].mask == mask && (u128)s[count - 1].hi + 1 == from)
-          s[count - 1].hi = (uint32_t)(at - 1);
-        else if ((ok = grow(&spans, &capacity, sizeof(*s), count + 1, error)))
-          ((struct span4 *)spans)[count++] = (struct span4){(uint32_t)from, (uint32_t)(at - 1), mask};
-      } else {
-        struct span6 *s = spans;
-        if (count && s[count - 1].mask == mask && s[count - 1].hi + 1 == from)
-          s[count - 1].hi = at - 1;
-        else if ((ok = grow(&spans, &capacity, sizeof(*s), count + 1, error)))
-          ((struct span6 *)spans)[count++] = (struct span6){from, at - 1, mask};
-      }
-    }
-    for (; i < n && events[i].at == at; i++) {
-      if (events[i].start)
-        mask |= UINT64_C(1) << events[i].bit;
-      else
-        mask &= ~(UINT64_C(1) << events[i].bit);
-    }
-    from = at;
+  size_t count = sweep(events, n, max, v4, NULL);
+  void *spans = count ? fm_calloc(count, v4 ? sizeof(struct span4) : sizeof(struct span6)) : NULL;
+  if (count && !spans) {
+    fm_free(events);
+    return fm_error_set(error, ENOMEM, "classification spans");
   }
-  if (ok && mask) {
-    if (v4) {
-      struct span4 *s = spans;
-      if (count && s[count - 1].mask == mask && (u128)s[count - 1].hi + 1 == from)
-        s[count - 1].hi = (uint32_t)max;
-      else if ((ok = grow(&spans, &capacity, sizeof(*s), count + 1, error)))
-        ((struct span4 *)spans)[count++] = (struct span4){(uint32_t)from, (uint32_t)max, mask};
-    } else {
-      struct span6 *s = spans;
-      if (count && s[count - 1].mask == mask && s[count - 1].hi + 1 == from)
-        s[count - 1].hi = max;
-      else if ((ok = grow(&spans, &capacity, sizeof(*s), count + 1, error)))
-        ((struct span6 *)spans)[count++] = (struct span6){from, max, mask};
-    }
-  }
+  sweep(events, n, max, v4, spans);
   fm_free(events);
-  if (!ok) {
-    fm_free(spans);
-    return false;
-  }
   if (v4) {
     c->v4 = spans;
     c->n4 = count;
@@ -260,60 +268,134 @@ void classifier_destroy(struct classifier *c) {
   fm_free(c);
 }
 
-struct classifier *classifier_build(const struct class_set *sets, size_t set_count,
-                                    const struct class_entry *const *entries,
-                                    const size_t *entry_counts, struct fm_error *error) {
+/* An incremental build: each set's prefixes are compiled into its member
+ * intervals as soon as its entries are known (the caller may then free
+ * them), and the intervals are merged at the end. Only one set's entries and
+ * prefixes exist at a time. */
+struct builder {
+  struct classifier *c;
+  struct intervals per_set[2][CLASSIFY_MAX_SETS];
+  unsigned bits[CLASSIFY_MAX_SETS];
+  struct prefix *prefixes;
+  size_t prefix_capacity;
+};
+static void builder_free(struct builder *b) {
+  for (size_t s = 0; s < CLASSIFY_MAX_SETS; s++) {
+    fm_free(b->per_set[0][s].items);
+    fm_free(b->per_set[1][s].items);
+  }
+  fm_free(b->prefixes);
+  classifier_destroy(b->c);
+  fm_free(b);
+}
+static struct builder *builder_begin(const struct class_set *sets, size_t set_count,
+                                     struct fm_error *error) {
   if (set_count > CLASSIFY_MAX_SETS) {
     fm_error_fail(error, FM_FAILURE_REQUEST, EINVAL, "classification set count");
     return NULL;
   }
-  struct classifier *c = fm_calloc(1, sizeof(*c));
-  if (!c) {
+  struct builder *b = fm_calloc(1, sizeof(*b));
+  if (b && !(b->c = fm_calloc(1, sizeof(*b->c)))) {
+    fm_free(b);
+    b = NULL;
+  }
+  if (!b) {
     fm_error_set(error, ENOMEM, "classifier allocation");
     return NULL;
   }
-  c->set_count = set_count;
-  memcpy(c->sets, sets, set_count * sizeof(*sets));
-  struct intervals per_set[2][CLASSIFY_MAX_SETS];
-  unsigned bits[CLASSIFY_MAX_SETS];
-  memset(per_set, 0, sizeof(per_set));
-  struct prefix *prefixes = NULL;
-  size_t prefix_capacity = 0;
-  bool ok = true;
-  for (size_t s = 0; s < set_count && ok; s++) {
-    bits[s] = sets[s].id;
-    if (sets[s].status != CLASS_OK)
-      continue;
-    for (unsigned family = 0; family < 2 && ok; family++) {
-      unsigned af = family ? 6 : 4, width = family ? 128 : 32;
-      u128 max = family ? ~(u128)0 : (u128)UINT32_MAX;
-      size_t n = 0;
-      for (size_t e = 0; e < entry_counts[s] && ok; e++) {
-        const struct class_entry *entry = &entries[s][e];
-        if (entry->a.af != af || entry->prefix > width)
-          continue;
-        if (!(ok = grow((void **)&prefixes, &prefix_capacity, sizeof(*prefixes), n + 1, error)))
-          break;
-        u128 host = entry->prefix == width ? 0 : (max >> entry->prefix);
-        u128 lo = key_of(entry->a) & ~host & max;
-        prefixes[n] = (struct prefix){lo, lo | host, entry->prefix, !entry->negated, n};
-        n++;
-      }
-      ok = ok && compile_set(prefixes, n, max, &per_set[family][s], error);
+  b->c->set_count = set_count;
+  memcpy(b->c->sets, sets, set_count * sizeof(*sets));
+  for (size_t s = 0; s < set_count; s++)
+    b->bits[s] = sets[s].id;
+  return b;
+}
+/* Set s's entries (its status and count as loaded); intervals kept at their
+ * exact size. */
+static bool builder_add(struct builder *b, size_t s, const struct class_entry *entries, size_t count,
+                        struct fm_error *error) {
+  if (b->c->sets[s].status != CLASS_OK)
+    return true;
+  for (unsigned family = 0; family < 2; family++) {
+    unsigned af = family ? 6 : 4, width = family ? 128 : 32;
+    u128 max = family ? ~(u128)0 : (u128)UINT32_MAX;
+    size_t n = 0;
+    for (size_t e = 0; e < count; e++) {
+      const struct class_entry *entry = &entries[e];
+      if (entry->a.af != af || entry->prefix > width)
+        continue;
+      if (!grow((void **)&b->prefixes, &b->prefix_capacity, sizeof(*b->prefixes), n + 1, error))
+        return false;
+      u128 host = entry->prefix == width ? 0 : (max >> entry->prefix);
+      u128 lo = key_of(entry->a) & ~host & max;
+      b->prefixes[n] = (struct prefix){lo, lo | host, entry->prefix, !entry->negated, n};
+      n++;
+    }
+    struct intervals *out = &b->per_set[family][s];
+    if (!compile_set(b->prefixes, n, max, out, error))
+      return false;
+    if (out->count < out->capacity) { /* exact size: kept until the merge */
+      void *exact = out->count ? fm_realloc(out->items, out->count * sizeof(*out->items)) : NULL;
+      if (out->count && !exact)
+        return fm_error_set(error, ENOMEM, "classification intervals");
+      if (!out->count)
+        fm_free(out->items);
+      out->items = exact;
+      out->capacity = out->count;
     }
   }
-  ok = ok && merge(per_set[0], bits, set_count, (u128)UINT32_MAX, true, c, error) &&
-       merge(per_set[1], bits, set_count, ~(u128)0, false, c, error);
-  for (size_t s = 0; s < set_count; s++) {
-    fm_free(per_set[0][s].items);
-    fm_free(per_set[1][s].items);
+  return true;
+}
+/* The merge, after the last set: the prefixes go first, then each family's
+ * intervals as soon as that family is merged. */
+static struct classifier *builder_finish(struct builder *b, struct fm_error *error) {
+  fm_free(b->prefixes);
+  b->prefixes = NULL;
+  b->prefix_capacity = 0;
+  size_t sets = b->c->set_count;
+  bool ok = merge(b->per_set[0], b->bits, sets, (u128)UINT32_MAX, true, b->c, error);
+  for (size_t s = 0; s < sets; s++) {
+    fm_free(b->per_set[0][s].items);
+    b->per_set[0][s] = (struct intervals){0};
   }
-  fm_free(prefixes);
+  ok = ok && merge(b->per_set[1], b->bits, sets, ~(u128)0, false, b->c, error);
   if (!ok) {
-    classifier_destroy(c);
+    builder_free(b);
     return NULL;
   }
+  struct classifier *c = b->c;
+  b->c = NULL;
+  builder_free(b);
   return c;
+}
+
+struct classifier *classifier_build(const struct class_set *sets, size_t set_count,
+                                    const struct class_entry *const *entries,
+                                    const size_t *entry_counts, struct fm_error *error) {
+  struct builder *b = builder_begin(sets, set_count, error);
+  if (!b)
+    return NULL;
+  for (size_t s = 0; s < set_count; s++)
+    if (!builder_add(b, s, entries[s], entry_counts[s], error)) {
+      builder_free(b);
+      return NULL;
+    }
+  return builder_finish(b, error);
+}
+
+size_t classifier_build_bound(void) {
+  /* At the entry caps: every prefix can split its set's intervals once (2n+1
+   * per set and family), each interval gives two events, the events give at
+   * most one span each; while one table is read: its PF copy (1/16 slack),
+   * its entries and its prefixes (doubling); the classifier being replaced
+   * stays until the new one is complete. */
+  size_t intervals = 2 * (size_t)CLASSIFY_MAX_TOTAL_ENTRIES + 2 * CLASSIFY_MAX_SETS;
+  size_t merge_phase = intervals * sizeof(struct interval) + 2 * intervals * sizeof(struct event) +
+                       2 * intervals * sizeof(struct span6);
+  size_t table = (size_t)CLASSIFY_MAX_TABLE_ENTRIES;
+  size_t read_phase = (table + table / 16 + 16) * CLASSIFY_PF_ADDR_SIZE + table * sizeof(struct class_entry) +
+                      2 * table * sizeof(struct prefix) + intervals * sizeof(struct interval);
+  return (merge_phase > read_phase ? merge_phase : read_phase) + sizeof(struct builder) +
+         sizeof(struct classifier);
 }
 
 #ifdef __FreeBSD__
@@ -432,12 +514,10 @@ static enum class_status read_table_file(const char *name, struct class_entry **
 #endif
 
 struct classifier *classifier_load(struct class_set *sets, size_t set_count, struct fm_error *error) {
-  if (set_count > CLASSIFY_MAX_SETS) {
-    fm_error_fail(error, FM_FAILURE_REQUEST, EINVAL, "classification set count");
+  struct builder *b = builder_begin(sets, set_count, error);
+  if (!b)
     return NULL;
-  }
-  struct class_entry *entries[CLASSIFY_MAX_SETS] = {0};
-  size_t counts[CLASSIFY_MAX_SETS] = {0}, total = 0;
+  size_t total = 0;
 #ifdef FM_TEST_HOOKS
   bool test_tables = getenv("FM_TEST_CLASS_DIR") != NULL;
 #endif
@@ -448,36 +528,39 @@ struct classifier *classifier_load(struct class_set *sets, size_t set_count, str
 #endif
     fd = open("/dev/pf", O_RDONLY);
 #endif
-  for (size_t s = 0; s < set_count; s++) {
-    size_t budget = CLASSIFY_MAX_TOTAL_ENTRIES - total;
+  /* one table at a time: read, compiled into its intervals, freed */
+  for (size_t s = 0; s < set_count && !error->code; s++) {
+    size_t budget = CLASSIFY_MAX_TOTAL_ENTRIES - total, count = 0;
+    struct class_entry *entries = NULL;
 #ifdef FM_TEST_HOOKS
     if (test_tables)
-      sets[s].status = read_table_file(sets[s].name, &entries[s], &counts[s], budget, error);
+      sets[s].status = read_table_file(sets[s].name, &entries, &count, budget, error);
     else
 #endif
 #ifdef __FreeBSD__
       sets[s].status = fd < 0 ? CLASS_UNREADABLE
-                              : read_table(fd, sets[s].name, &entries[s], &counts[s], budget, error);
+                              : read_table(fd, sets[s].name, &entries, &count, budget, error);
 #else
       sets[s].status = CLASS_MISSING;
     (void)budget;
 #endif
-    if (error->code)
-      break;
-    sets[s].entries = sets[s].status == CLASS_OK ? counts[s] : 0;
-    total += counts[s];
+    if (!error->code) {
+      sets[s].entries = sets[s].status == CLASS_OK ? count : 0;
+      b->c->sets[s] = sets[s];
+      builder_add(b, s, entries, count, error);
+      total += count;
+    }
+    fm_free(entries);
   }
 #ifdef __FreeBSD__
   if (fd >= 0)
     close(fd);
 #endif
-  struct classifier *c = error->code ? NULL
-                                     : classifier_build(sets, set_count,
-                                                        (const struct class_entry *const *)entries,
-                                                        counts, error);
-  for (size_t s = 0; s < set_count; s++)
-    fm_free(entries[s]);
-  return c;
+  if (error->code) {
+    builder_free(b);
+    return NULL;
+  }
+  return builder_finish(b, error);
 }
 
 uint64_t classifier_lookup(const struct classifier *c, struct addr a) {

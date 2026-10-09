@@ -51,7 +51,7 @@ struct event_match {
  * a 20,000-tuple window of its newest distinct tuples. Memory never depends
  * on the number of PF states.
  *
- * Semantics (CONTRACTS.md): a query matches the last state of this sample
+ * Semantics: a query matches the last state of this sample
  * with its outside tuple (ambiguous when those states disagreed about the
  * inside endpoint), else a ring entry from an earlier sample. After the
  * sample the ring holds the earlier entries this sample did not see and that

@@ -114,7 +114,7 @@ def threat_list_candidates(tables=None, aliases=None):
     return sorted(candidates.values(), key=lambda item: (not item.get("curated"), item["name"].lower()))
 
 
-# classification categories as the collector names them (collector/PROTOCOL.md, CLASS rows)
+# classification categories as the collector names them (the request's CLASS rows)
 CATEGORIES = {"T": "threat", "C": "country", "O": "operational"}
 # a set matching at least this share of at least BROAD_MIN_FLOWS ranked flows dominates the map
 BROAD_SHARE = 0.5

@@ -112,6 +112,8 @@
             lifetimes: {{ lang._('Invalid PF state lifetimes skipped: %s of %s PF records (no state can last longer than %s s)')|json_encode }},
             lifetimes_unavailable: {{ lang._('Not validated: the PF timeouts could not be read (error %s), so every PF state is kept')|json_encode }},
             ages_unknown: {{ lang._('%s states with an age PF cannot have measured: shown without an age')|json_encode }},
+            classifier_current: {{ lang._('Current: the last build needed %s of its %s bound; the snapshot takes %s')|json_encode }},
+            classifier_stale: {{ lang._('Refresh failed (error %s): the previous PF table snapshot stays in use until a refresh succeeds')|json_encode }},
             engine_refused: {{ lang._('Last sample refused: %s')|json_encode }},
             engine_incompatible: {{ lang._('Incompatible with this firewall: %s')|json_encode }},
             engine_protocol_mismatch: {{ lang._('Firewall Map collector incompatible — The Firewall Map application and its state collector use incompatible protocols. Reinstall or upgrade the Firewall Map package so both components come from the same version.')|json_encode }},
@@ -213,6 +215,11 @@
                 : state(fill(T.lifetimes_unavailable, telemetry.lifetime_error || '—')))
                 + (telemetry.age_unknown_states ? `<br><small class="text-muted">${escape(fill(T.ages_unknown,
                     count(telemetry.age_unknown_states)))}</small>` : ''));
+            // the classification snapshot: a failed refresh of the same tables keeps the previous one
+            $('#engine-classifier').html(!telemetry.sequence ? '—' : telemetry.classifier_stale
+                ? state(fill(T.classifier_stale, telemetry.classifier_error || '—'))
+                : escape(fill(T.classifier_current, megabytes(telemetry.classifier_build_peak || 0),
+                    megabytes(telemetry.classifier_build_bound || 0), megabytes(telemetry.classifier_bytes || 0))));
             const rejected = engine.ingest_rejected || {};
             $('#engine-rejected').text(fill(T.engine_rejected, count(rejected.filterlog), count(rejected.eve)));
             const problem = incompatible ? (incompatible.reason === 'protocol' ? T.engine_protocol_mismatch
@@ -370,6 +377,7 @@
             <tr><td>{{ lang._('Flows') }}</td><td id="engine-tracking"></td></tr>
             <tr><td>{{ lang._('Left out') }}</td><td id="engine-omitted"></td></tr>
             <tr><td>{{ lang._('PF state lifetimes') }}</td><td id="engine-lifetimes"></td></tr>
+            <tr><td>{{ lang._('Classification snapshot') }}</td><td id="engine-classifier"></td></tr>
             <tr><td>{{ lang._('Rejected log lines') }}</td><td id="engine-rejected"></td></tr>
             <tr><td>{{ lang._('Ranking profile') }}</td><td id="engine-profile"></td></tr>
             <tr><td>{{ lang._('Generations') }}</td><td id="engine-generations"></td></tr>

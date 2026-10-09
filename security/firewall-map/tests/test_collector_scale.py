@@ -21,7 +21,7 @@
 
 """Adversarial and scale tests of the state collector's resource model (synthetic PF reader).
 
-These run the shipped engine code at high cardinality and check the bounds of PROTOCOL.md:
+These run the shipped engine code at high cardinality and check the protocol's bounds:
 response size, candidate and threat caps, hash-key independence, correlation skipping. Timings
 are printed for the record; the assertions use only generous bounds, since they run on any
 development machine. Target (FreeBSD/netlink) costs are measured separately on the firewall.
@@ -426,7 +426,7 @@ class CollectorScaleTest(unittest.TestCase):
                        "FM_TEST_CLASS_DIR": self.tables}
         light = {f"9.0.{n >> 8}.{n & 255}" for n in range(2600, 2700)}
         tops = []
-        for rules in ((), [(cidr, 1000) for cidr in ("10.0.10.40/29", "10.0.10.48/28", "10.0.10.64/26",
+        for rules in ((), [(cidr, 100) for cidr in ("10.0.10.40/29", "10.0.10.48/28", "10.0.10.64/26",
                                                              "10.0.10.128/29", "10.0.10.136/30")]):
             engine = self.engine(self.custom(assets=rules, byte_rate=100))
             with patch.dict(os.environ, environment):
@@ -470,6 +470,11 @@ class CollectorScaleTest(unittest.TestCase):
         promoting = results[1]
         self.assertEqual(promoting["regime"], "bounded")
         self.assertGreater(promoting["telemetry"]["promoted"], 0)
+        # tracked_limit is the ordinary set's limit: the selection and the promotions take its
+        # seats (flagged flows alone may come on top, up to the hard limit)
+        for result in results:
+            telemetry = result["telemetry"]
+            self.assertLessEqual(telemetry["tracked_flows"] - telemetry["forced_flows"], telemetry["tracked_limit"])
         # the next sample tracks them: the heavy flows (index 3000 on: 9.0.11.184 and up) lead the map
         top = [row["key"][1] for row in results[3]["flows"][:20]]
         self.assertTrue(all(tuple(map(int, remote.split(".")))[1:] >= (0, 11, 184) for remote in top), top)

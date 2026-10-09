@@ -38,8 +38,8 @@ class FirewallMap extends BaseModel
                              'pf_blocked', 'threat_intelligence', 'ids_evidence'];
     public const FLOORS = ['s3_min_percent', 's2_min_percent', 's1_min_percent'];
     private const ASSET_RULES_MAX = 4096;
-    private const MULTIPLIER_MIN = 0.000001;
-    private const MULTIPLIER_MAX = 1000000;
+    private const MULTIPLIER_MIN = 1;
+    private const MULTIPLIER_MAX = 100;
 
     /**
      * Asset rules from their text, one "CIDR multiplier" per line (an address alone is a host):
@@ -77,7 +77,7 @@ class FirewallMap extends BaseModel
             }
             if (!is_numeric($multiplier) || (float)$multiplier < self::MULTIPLIER_MIN ||
                 (float)$multiplier > self::MULTIPLIER_MAX) {
-                return sprintf(gettext('Asset rule %d: the multiplier is from 0.000001 to 1000000.'), $number + 1);
+                return sprintf(gettext('Asset rule %d: the multiplier is from 1 to 100.'), $number + 1);
             }
             $key = inet_ntop($bytes) . '/' . (int)$prefix;
             if (isset($seen[$key]) && $seen[$key] !== (float)$multiplier) {

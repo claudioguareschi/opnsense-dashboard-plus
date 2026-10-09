@@ -31,7 +31,7 @@ struct ranker;
 #define FM_SNAPSHOT_FLOWS 5000
 #define FM_SNAPSHOT_BYTES (10u * 1024u * 1024u)
 #define FM_SNAPSHOT_STATES 5000
-/* FMSTATE2 omission reason bits (PROTOCOL.md). */
+/* FMSTATE2 omission reason bits. */
 #define SNAPSHOT_OMITTED_BYTES 1      /* the encoded-size budget ran out */
 #define SNAPSHOT_OMITTED_STATES 2     /* the state budget left this flow no quota */
 #define SNAPSHOT_OMITTED_FLOW_QUOTA 4 /* more matching states than the flow's quota */

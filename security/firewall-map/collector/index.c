@@ -66,11 +66,10 @@ const struct item *map_find_hashed(const struct map *m, const void *key, size_t 
                                    uint64_t h) {
   return find(m, key, len, h);
 }
-struct item *lookup(struct map *m, const void *key, size_t len, bool add,
-                    struct fm_error *error) {
+struct item *map_insert(struct map *m, const void *key, size_t len, struct fm_error *error) {
   uint64_t h = hash(key, len);
   struct item *found = find(m, key, len, h);
-  if (found || !add)
+  if (found)
     return found;
   if ((!m->capacity || m->used >= m->capacity * 3 / 4) && !resize(m, error))
     return NULL;

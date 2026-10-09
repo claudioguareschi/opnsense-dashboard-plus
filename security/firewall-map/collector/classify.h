@@ -30,7 +30,7 @@
 #include "error.h"
 #include <stdint.h>
 
-/* Classification sets (CONTRACTS.md): PF tables given Firewall Map meaning,
+/* Classification sets: PF tables given Firewall Map meaning,
  * compiled into an immutable snapshot that answers, for an address, which
  * sets contain it (one bit per set ID). Membership is PF's own: the longest
  * matching prefix of a table decides, and a negated entry ("!net") excludes.
@@ -71,6 +71,10 @@ struct classifier *classifier_build(const struct class_set *sets, size_t set_cou
  * set is reported missing). Statuses are written into sets[]. */
 struct classifier *classifier_load(struct class_set *sets, size_t set_count, struct fm_error *);
 void classifier_destroy(struct classifier *);
+/* The most accounted memory a build can need at the entry caps (bytes),
+ * besides the classifier it replaces: the explicit bound a refresh runs
+ * under (main.c), with the collector's memory budget. */
+size_t classifier_build_bound(void);
 /* Set mask for address; 0 for a NULL snapshot. */
 uint64_t classifier_lookup(const struct classifier *, struct addr);
 /* Mask of the sets in a category. */

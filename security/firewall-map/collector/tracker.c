@@ -35,16 +35,18 @@ struct tracker {
   struct budget_limits limits;
   size_t limit, hard_limit, forced_limit, exit_threshold;
   /* flow keys for this sample (promoted, pinned) and their successors being
-   * built for the next one */
+   * built for the next one; presence only (item fields unused) */
   struct map promoted, pinned;
   struct discovery discovery;
   struct summary_entry *top;
-  /* scratch: promotion candidates, and the tracked flows by effective score */
-  struct candidate *candidates;
+  /* scratch: promotion candidates (untracked flows from the discovery
+   * summaries; not aggregate.c's attribution candidates), and the tracked
+   * flows by effective score */
+  struct promotion *promotions;
   struct scored *scored;
   size_t scored_capacity;
 };
-struct candidate {
+struct promotion {
   unsigned char key[FM_FLOW_KEY_SIZE];
   double estimate;
 };
@@ -64,9 +66,9 @@ struct tracker *tracker_create(double fade, double smoothing, struct fm_error *e
   t->fade = fade;
   t->smoothing = smoothing;
   t->top = fm_calloc(TRACK_PROMOTE_MAX, sizeof(*t->top));
-  t->candidates = t->top ? fm_calloc(TRACK_CANDIDATES, sizeof(*t->candidates)) : NULL;
-  if (!t->candidates || !discovery_init(&t->discovery, error)) {
-    if (!t->candidates) fm_error_set(error, ENOMEM, "tracker allocation");
+  t->promotions = t->top ? fm_calloc(TRACK_CANDIDATES, sizeof(*t->promotions)) : NULL;
+  if (!t->promotions || !discovery_init(&t->discovery, error)) {
+    if (!t->promotions) fm_error_set(error, ENOMEM, "tracker allocation");
     tracker_destroy(t);
     return NULL;
   }
@@ -78,7 +80,7 @@ void tracker_destroy(struct tracker *t) {
   map_clear(&t->pinned);
   discovery_destroy(&t->discovery);
   fm_free(t->top);
-  fm_free(t->candidates);
+  fm_free(t->promotions);
   fm_free(t->scored);
   fm_free(t);
 }
@@ -110,15 +112,15 @@ bool tracker_begin(struct tracker *t, struct ranking *ranking, struct budget_lim
 }
 
 static bool promote(struct tracker *t, const unsigned char *key, struct fm_error *error) {
-  return lookup(&t->promoted, key, FM_FLOW_KEY_SIZE, true, error) != NULL;
+  return map_insert(&t->promoted, key, FM_FLOW_KEY_SIZE, error) != NULL;
 }
 static int better_scored(const void *left, const void *right) {
   const struct scored *a = left, *b = right;
   if (a->score != b->score) return a->score > b->score ? -1 : 1;
   return a->order < b->order ? -1 : a->order > b->order;
 }
-static int better_candidate(const void *left, const void *right) {
-  const struct candidate *a = left, *b = right;
+static int better_promotion(const void *left, const void *right) {
+  const struct promotion *a = left, *b = right;
   if (a->estimate != b->estimate) return a->estimate > b->estimate ? -1 : 1;
   return memcmp(a->key, b->key, FM_FLOW_KEY_SIZE);
 }
@@ -132,7 +134,7 @@ static double raw_count(const struct summary *s, const unsigned char *key, uint6
 /* Promotion candidates: the tops of the three summaries (asset-weighted),
  * each estimated by the effective score the active profile would give it
  * after one tracked sample. Returns how many, best first. */
-static size_t profile_candidates(struct tracker *t, const struct profile *def, double interval) {
+static size_t promotion_candidates(struct tracker *t, const struct profile *def, double interval) {
   const struct discovery *d = &t->discovery;
   struct {
     const struct summary *summary;
@@ -147,7 +149,7 @@ static size_t profile_candidates(struct tracker *t, const struct profile *def, d
     for (size_t n = 0; n < top; n++) {
       const unsigned char *key = t->top[n].key;
       bool seen = false;
-      for (size_t k = 0; k < count && !seen; k++) seen = !memcmp(t->candidates[k].key, key, FM_FLOW_KEY_SIZE);
+      for (size_t k = 0; k < count && !seen; k++) seen = !memcmp(t->promotions[k].key, key, FM_FLOW_KEY_SIZE);
       if (seen) continue;
       uint64_t hash = index_hash(key, FM_FLOW_KEY_SIZE), unit = 0;
       double bytes = raw_count(d->bytes, key, hash, &unit), states = raw_count(d->states, key, hash, &unit),
@@ -157,17 +159,17 @@ static size_t profile_candidates(struct tracker *t, const struct profile *def, d
       values[FEATURE_ACTIVE_STATES] = states;
       values[FEATURE_NEW_STATE_RATE] = created * per_second;
       values[FEATURE_FLOW_VOLUME] = bytes;
-      memcpy(t->candidates[count].key, key, FM_FLOW_KEY_SIZE);
-      t->candidates[count++].estimate = profile_estimate(def, values, profile_unit_multiplier(def, unit));
+      memcpy(t->promotions[count].key, key, FM_FLOW_KEY_SIZE);
+      t->promotions[count++].estimate = profile_estimate(def, values, profile_unit_multiplier(def, unit));
     }
   }
-  qsort(t->candidates, count, sizeof(*t->candidates), better_candidate);
+  qsort(t->promotions, count, sizeof(*t->promotions), better_promotion);
   return count;
 }
 static bool pin(struct tracker *t, const struct flow *f, struct fm_error *error) {
   unsigned char key[FM_FLOW_KEY_SIZE];
   state_flow_key(key, f->local, f->remote);
-  return lookup(&t->pinned, key, sizeof(key), true, error) != NULL;
+  return map_insert(&t->pinned, key, sizeof(key), error) != NULL;
 }
 
 bool tracker_finish(struct tracker *t, const struct aggregate *a, const struct ranking *ranking,
@@ -207,10 +209,11 @@ bool tracker_finish(struct tracker *t, const struct aggregate *a, const struct r
   map_clear(&t->pinned);
   map_clear(&t->promoted);
   if (next == TRACK_BOUNDED) {
-    /* the selected flows stay tracked, and flagged flows (up to the forced
-     * cap) */
+    /* the selected flows stay tracked (seats of the ordinary limit), and
+     * flagged flows (up to the forced cap: their own reservation) */
     for (size_t n = 0; n < hints->selected_count; n++)
       if (!pin(t, aggregate_flow(a, hints->selected[n].flow), error)) return false;
+    size_t selected_seats = t->pinned.used;
     size_t flagged = 0;
     for (size_t n = 0; n < counts.flows && flagged < t->forced_limit; n++) {
       const struct flow *f = aggregate_flow(a, n);
@@ -233,24 +236,27 @@ bool tracker_finish(struct tracker *t, const struct aggregate *a, const struct r
     qsort(t->scored, counts.flows, sizeof(*t->scored), better_scored);
     /* promotions: the best untracked candidates, each displacing the
      * incumbent at T's edge only by the incumbency margin */
-    size_t candidates = profile_candidates(t, ranker_profile(hints->ranker), interval);
+    size_t offered = promotion_candidates(t, ranker_profile(hints->ranker), interval);
     size_t seats = t->limit;
-    for (size_t n = 0; n < candidates && t->promoted.used < TRACK_PROMOTE_MAX; n++) {
+    for (size_t n = 0; n < offered && t->promoted.used < TRACK_PROMOTE_MAX; n++) {
       if (t->promoted.used >= seats) break;
       size_t edge = seats - t->promoted.used - 1; /* the incumbent this would push out */
       double incumbent = edge < counts.flows ? t->scored[edge].score : 0;
-      if (incumbent > 0 && !(t->candidates[n].estimate > incumbent * TRACK_INCUMBENCY_MARGIN)) break;
-      if (!(t->candidates[n].estimate > 0)) break;
-      if (!promote(t, t->candidates[n].key, error)) return false;
+      if (incumbent > 0 && !(t->promotions[n].estimate > incumbent * TRACK_INCUMBENCY_MARGIN)) break;
+      if (!(t->promotions[n].estimate > 0)) break;
+      if (!promote(t, t->promotions[n].key, error)) return false;
     }
-    /* retention: the best others, leaving room for the promotions */
-    size_t room = t->limit > t->promoted.used ? t->limit - t->promoted.used : 0, kept = 0;
+    /* retention: the best others, in the seats the selection and the
+     * promotions leave (tracked_limit is the ordinary set's limit; flagged
+     * flows come on top of it, up to the hard limit) */
+    size_t taken = selected_seats + t->promoted.used;
+    size_t room = t->limit > taken ? t->limit - taken : 0, kept = 0;
     for (size_t n = 0; n < counts.flows && kept < room; n++) {
       const struct flow *f = aggregate_flow(a, t->scored[n].flow);
       unsigned char key[FM_FLOW_KEY_SIZE];
       state_flow_key(key, f->local, f->remote);
       if (map_find(&t->pinned, key, sizeof(key))) continue;
-      if (!lookup(&t->pinned, key, sizeof(key), true, error)) return false;
+      if (!map_insert(&t->pinned, key, sizeof(key), error)) return false;
       kept++;
     }
   }
@@ -262,5 +268,5 @@ bool tracker_finish(struct tracker *t, const struct aggregate *a, const struct r
 size_t tracker_bytes(const struct tracker *t) {
   return sizeof(*t) + map_bytes(&t->promoted) + map_bytes(&t->pinned) +
          discovery_bytes(&t->discovery) + TRACK_PROMOTE_MAX * sizeof(*t->top) +
-         TRACK_CANDIDATES * sizeof(*t->candidates) + t->scored_capacity * sizeof(*t->scored);
+         TRACK_CANDIDATES * sizeof(*t->promotions) + t->scored_capacity * sizeof(*t->scored);
 }

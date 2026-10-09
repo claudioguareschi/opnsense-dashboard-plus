@@ -23,17 +23,12 @@
  */
 
 #include "correlation.h"
-#include "index.h"
 #include "alloc.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-struct correlation {
-  struct map keys;
-  struct correlation_value *values;
-  size_t allocated;
-};
+
 static size_t encode(unsigned char *out, struct outside_key key) {
   unsigned char *p = out;
   *p++ = key.protocol;
@@ -46,6 +41,28 @@ static size_t encode(unsigned char *out, struct outside_key key) {
   }
   return (size_t)(p - out);
 }
+size_t outside_key_encode(unsigned char out[OUTSIDE_KEY_SIZE], struct outside_key key) {
+  return encode(out, key);
+}
+
+void correlation_merge(struct correlation_value *current, bool seen,
+                       const struct correlation_value *value) {
+  bool ambiguous = seen && (current->ambiguous ||
+                            current->has_inside != value->has_inside ||
+                            (current->has_inside &&
+                             !endpoint_equal(current->inside, value->inside)));
+  *current = *value;
+  current->ambiguous = ambiguous;
+}
+
+#ifdef FM_DEVEL_TOOLS
+/* The full per-tuple map (devel tools only: it is O(S)). */
+#include "index.h"
+struct correlation {
+  struct map keys;
+  struct correlation_value *values;
+  size_t allocated;
+};
 struct correlation *correlation_create(struct fm_error *error) {
   struct correlation *c = fm_calloc(1, sizeof(*c));
   if (!c) fm_error_set(error, errno, "correlation allocation");
@@ -65,7 +82,7 @@ bool correlation_add(struct correlation *c, struct outside_key key,
     return fm_error_set(error, EINVAL, "correlation address family");
   unsigned char encoded[39];
   size_t length = encode(encoded, key);
-  struct item *item = lookup(&c->keys, encoded, length, true, error);
+  struct item *item = map_insert(&c->keys, encoded, length, error);
   if (!item) return false;
   size_t index = item->id;
   if (c->keys.used > c->allocated) {
@@ -82,25 +99,12 @@ bool correlation_add(struct correlation *c, struct outside_key key,
   return true;
 }
 
-void correlation_merge(struct correlation_value *current, bool seen,
-                       const struct correlation_value *value) {
-  bool ambiguous = seen && (current->ambiguous ||
-                            current->has_inside != value->has_inside ||
-                            (current->has_inside &&
-                             !endpoint_equal(current->inside, value->inside)));
-  *current = *value;
-  current->ambiguous = ambiguous;
-}
-
 bool correlation_observe(void *c, const struct outside_key *key,
                          const struct correlation_value *value,
                          struct fm_error *error) {
   return correlation_add(c, *key, value, error);
 }
 
-size_t outside_key_encode(unsigned char out[OUTSIDE_KEY_SIZE], struct outside_key key) {
-  return encode(out, key);
-}
 bool correlation_lookup(const struct correlation *c, struct outside_key key,
                         struct correlation_value *value) {
   if ((key.public.a.af != 4 && key.public.a.af != 6) ||
@@ -135,3 +139,4 @@ bool correlation_at(const struct correlation *c, size_t n,
   *value = c->values[item->id];
   return true;
 }
+#endif

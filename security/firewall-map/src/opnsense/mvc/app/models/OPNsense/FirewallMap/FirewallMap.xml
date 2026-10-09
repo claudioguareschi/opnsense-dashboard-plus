@@ -195,9 +195,9 @@
                 <default_multiplier type="NumericField">
                     <Required>Y</Required>
                     <Default>1</Default>
-                    <MinimumValue>0.000001</MinimumValue>
-                    <MaximumValue>1000000</MaximumValue>
-                    <ValidationMessage>A multiplier is from 0.000001 to 1000000.</ValidationMessage>
+                    <MinimumValue>1</MinimumValue>
+                    <MaximumValue>100</MaximumValue>
+                    <ValidationMessage>A multiplier is from 1 to 100.</ValidationMessage>
                 </default_multiplier>
                 <!-- asset importance rules: one "CIDR multiplier" per line (an address alone is a host) -->
                 <assets type="TextField"/>
