@@ -34,13 +34,44 @@
     </field>
     <field>
         <type>header</type>
-        <label>Quality: weights totaling exactly 100</label>
+        <label>Security visibility</label>
+    </field>
+    <field>
+        <id>profile.s1_min_percent</id>
+        <label>Security interest (S1)</label>
+        <type>text</type>
+        <help>Flows with any other security evidence: a threat list match, an abusive AbuseIPDB lookup, or blocked attempts below the strong level.</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <id>profile.s2_min_percent</id>
+        <label>Elevated security (S2)</label>
+        <type>text</type>
+        <help>Flows with Suricata alerts below high severity, or at least 30 logged blocked attempts.</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <id>profile.s3_min_percent</id>
+        <label>High-priority security (S3)</label>
+        <type>text</type>
+        <help>Flows with high-severity Suricata alerts (severity 1 or 2).</help>
+        <grid_view>
+            <ignore>true</ignore>
+        </grid_view>
+    </field>
+    <field>
+        <type>header</type>
+        <label>Ranking priorities</label>
     </field>
     <field>
         <id>profile.byte_rate</id>
-        <label>Byte rate</label>
+        <label>Data rate</label>
         <type>text</type>
-        <help>How fast the flow moves data (smoothed bytes per second, both directions).</help>
+        <help>Smoothed bytes per second, both directions.</help>
         <grid_view>
             <ignore>true</ignore>
         </grid_view>
@@ -49,59 +80,59 @@
         <id>profile.packet_rate</id>
         <label>Packet rate</label>
         <type>text</type>
-        <help>How many packets per second the flow moves (smoothed).</help>
+        <help>Smoothed packets per second.</help>
         <grid_view>
             <ignore>true</ignore>
         </grid_view>
     </field>
     <field>
         <id>profile.active_states</id>
-        <label>Active states</label>
+        <label>Connections</label>
         <type>text</type>
-        <help>How many PF states the flow has now.</help>
+        <help>Active PF states.</help>
         <grid_view>
             <ignore>true</ignore>
         </grid_view>
     </field>
     <field>
         <id>profile.new_state_rate</id>
-        <label>New-state rate</label>
+        <label>Connection rate</label>
         <type>text</type>
-        <help>How many new states the flow opens per second.</help>
+        <help>New PF states per second.</help>
         <grid_view>
             <ignore>true</ignore>
         </grid_view>
     </field>
     <field>
         <id>profile.flow_volume</id>
-        <label>Flow volume</label>
+        <label>Total data</label>
         <type>text</type>
-        <help>How many bytes the flow moved since it became active.</help>
+        <help>Bytes moved since the flow's current activity began.</help>
         <grid_view>
             <ignore>true</ignore>
         </grid_view>
     </field>
     <field>
         <id>profile.pf_blocked</id>
-        <label>PF blocked activity</label>
+        <label>Blocked activity</label>
         <type>text</type>
-        <help>Blocked attempts by the remote in the firewall log (only rules with logging enabled).</help>
+        <help>Blocked attempts from the remote in the firewall log (rules with logging enabled).</help>
         <grid_view>
             <ignore>true</ignore>
         </grid_view>
     </field>
     <field>
         <id>profile.threat_intelligence</id>
-        <label>Threat intelligence</label>
+        <label>Threat reputation</label>
         <type>text</type>
-        <help>The remote is on a threat list.</help>
+        <help>The remote is in a selected threat list (a PF table, such as a curated feed or the AbuseIPDB blacklist).</help>
         <grid_view>
             <ignore>true</ignore>
         </grid_view>
     </field>
     <field>
         <id>profile.ids_evidence</id>
-        <label>IDS evidence</label>
+        <label>IDS alerts</label>
         <type>text</type>
         <help>Suricata alerts for the remote; high-severity alerts count double.</help>
         <grid_view>
@@ -110,7 +141,7 @@
     </field>
     <field>
         <type>header</type>
-        <label>Asset importance: multipliers, not part of the 100</label>
+        <label>Asset importance</label>
     </field>
     <field>
         <id>profile.default_multiplier</id>
@@ -132,38 +163,8 @@
     </field>
     <field>
         <type>header</type>
-        <label>Security visibility: minimum share of the ranked flows, not part of the 100</label>
-    </field>
-    <field>
-        <id>profile.s3_min_percent</id>
-        <label>S3 minimum (%)</label>
-        <type>text</type>
-        <help>Places kept for flows with high-severity IDS alerts, as a percentage of the ranked flows (rounded up). A minimum, never a cap: unused places go to other flows.</help>
-        <grid_view>
-            <ignore>true</ignore>
-        </grid_view>
-    </field>
-    <field>
-        <id>profile.s2_min_percent</id>
-        <label>S2 minimum (%)</label>
-        <type>text</type>
-        <help>Places kept for flows with other IDS alerts or heavy blocking, as a percentage of the ranked flows (rounded up). A minimum, never a cap: unused places go to other flows.</help>
-        <grid_view>
-            <ignore>true</ignore>
-        </grid_view>
-    </field>
-    <field>
-        <id>profile.s1_min_percent</id>
-        <label>S1 minimum (%)</label>
-        <type>text</type>
-        <help>Places kept for flows with any other security evidence, as a percentage of the ranked flows (rounded up). A minimum, never a cap: unused places go to other flows.</help>
-        <grid_view>
-            <ignore>true</ignore>
-        </grid_view>
-    </field>
-    <field>
-        <type>header</type>
         <label>Modifiers</label>
+        <collapse>true</collapse>
     </field>
     <field>
         <id>profile.direction</id>

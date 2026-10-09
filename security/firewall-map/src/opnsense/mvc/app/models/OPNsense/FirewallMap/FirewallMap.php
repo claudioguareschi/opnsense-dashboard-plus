@@ -104,7 +104,7 @@ class FirewallMap extends BaseModel
         }
         if (abs($total - 100) > 1e-9) {
             $messages->appendMessage(new Message(
-                sprintf(gettext('The quality weights total %s; they must total exactly 100.'), round($total, 6)),
+                sprintf(gettext('The ranking priorities total %s; they must total exactly 100.'), round($total, 6)),
                 $field . 'byte_rate'
             ));
         }
@@ -114,7 +114,7 @@ class FirewallMap extends BaseModel
         }
         if ($floors > 100) {
             $messages->appendMessage(new Message(
-                gettext('The security visibility floors total more than 100%.'),
+                gettext('The security visibility shares total more than 100%.'),
                 $field . 's3_min_percent'
             ));
         }

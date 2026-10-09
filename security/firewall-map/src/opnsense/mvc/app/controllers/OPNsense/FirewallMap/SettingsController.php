@@ -37,6 +37,9 @@ class SettingsController extends \OPNsense\Base\IndexController
         $this->view->formSettings = $this->getForm('settings') + ['activetab' => 'general'];
         $this->view->formDialogProfile = $this->getForm('dialogProfile');
         $this->view->formGridProfile = $this->getFormGrid('dialogProfile');
+        /* the editor's script, keyed on its own change (the plugin updates apart from the firmware) */
+        $allocation = '/usr/local/opnsense/www/js/firewall-map-allocation.js';
+        $this->view->allocationVersion = is_file($allocation) ? filemtime($allocation) : 0;
         $this->view->pick('OPNsense/FirewallMap/settings');
     }
 }

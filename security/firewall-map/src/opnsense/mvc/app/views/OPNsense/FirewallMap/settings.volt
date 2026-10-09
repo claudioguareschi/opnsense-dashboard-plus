@@ -24,6 +24,7 @@
  # POSSIBILITY OF SUCH DAMAGE.
  #}
 
+<script src="/ui/js/firewall-map-allocation.js?v={{ allocationVersion }}"></script>
 <script>
     $(document).ready(function () {
         const keyField = (name) => $(`#firewallmap\\.general\\.${name}`);
@@ -154,6 +155,93 @@
             }
         });
 
+        // the ranking profile editor: two allocation bars over the dialog's own fields (the fields
+        // stay the state, are loaded and saved as before, and show the server's validation)
+        const profileDialog = $("#{{ formGridProfile['edit_dialog_id'] }}");
+        const profileSave = $("#btn_{{ formGridProfile['edit_dialog_id'] }}_save");
+        const profileField = (key) => $(`#profile\\.${key}`);
+        const PROFILE_TEXT = {
+            general: {{ lang._('General ranking')|json_encode }},
+            general_short: {{ lang._('General')|json_encode }},
+            shorts: [{{ lang._('Data')|json_encode }}, {{ lang._('Packets')|json_encode }}, {{ lang._('Conns')|json_encode }},
+                {{ lang._('Conn/s')|json_encode }}, {{ lang._('Total')|json_encode }}, {{ lang._('Blocked')|json_encode }},
+                {{ lang._('Threat')|json_encode }}, {{ lang._('IDS')|json_encode }}],
+            unreserved: {{ lang._('General ranking (unreserved): %s%')|json_encode }},
+            over: {{ lang._('Over-allocated by %s%')|json_encode }},
+            bad: {{ lang._('Enter whole percentages from 0 to 100.')|json_encode }},
+            total: {{ lang._('Total: %s%')|json_encode }},
+            remaining: {{ lang._('Total: %s% (%s% remaining)')|json_encode }},
+            exceeded: {{ lang._('Total: %s% (%s% over)')|json_encode }},
+            traffic: {{ lang._('Traffic behavior')|json_encode }},
+            evidence: {{ lang._('Security evidence')|json_encode }},
+            security_intro: {{ lang._('S1, S2 and S3 reserve a minimum share of the places on the map for security flows, filled from the most severe class down. Unused reserved places return to general ranking, and security flows can take more than their share when their ranking score is high enough. The shares scale with Maximum flows on the map, rounded up per class.')|json_encode }},
+            ranking_intro: {{ lang._('How flows are scored against one another, security flows included. A higher percentage gives that property more influence on which flows appear on the map. Drag a boundary to move points between its two neighbours; the priorities total exactly 100.')|json_encode }}
+        };
+        const fill = (template, ...values) => values.reduce((text, value) => text.replace('%s', value), template);
+        // the field's row becomes a compact cell: its label, input, help and validation message
+        const fieldCell = (key, css, short) => {
+            const field = profileField(key);
+            const row = $(`#row_profile\\.${key}`);
+            const label = row.find('.control-label b').text();
+            const help = row.find(`[data-for="help_for_profile.${key}"] small`).text();
+            field.attr({type: 'number', min: 0, max: 100, step: 1, inputmode: 'numeric', 'aria-label': label});
+            const cell = $('<div class="fwmap-allocation-field"/>').append(
+                $('<label/>').attr('for', field.attr('id')).append($('<span class="fwmap-allocation-swatch"/>').addClass(css), ' ', $('<span/>').text(label)),
+                $('<div class="input-group input-group-sm"/>').append(field, '<span class="input-group-addon">%</span>'),
+                $('<small class="text-muted"/>').text(help),
+                $(`#help_block_profile\\.${key}`));
+            // nothing of the row is left for core's validation to show again
+            row.remove();
+            return {cell, segment: {label, short, css, field}};
+        };
+        const sectionBody = (key) => profileField(key).closest('tbody');
+        const securityStatus = $('<p class="fwmap-allocation-status"/>');
+        const rankingTotal = $('<p class="fwmap-allocation-status"/>');
+        const refreshSave = () => profileSave.prop('disabled', !(security.state().valid && ranking.state().valid));
+        // Security visibility: General (what the shares leave) | S1 | S2 | S3
+        const securityBody = sectionBody('s1_min_percent');
+        const classes = [['s1_min_percent', 'progress-bar-success', 'S1'], ['s2_min_percent', 'progress-bar-warning', 'S2'],
+            ['s3_min_percent', 'progress-bar-danger', 'S3']].map(([key, css, short]) => fieldCell(key, css, short));
+        const securityCell = $('<td colspan="3"/>').append($('<p class="text-muted"/>').text(PROFILE_TEXT.security_intro));
+        securityBody.prepend($('<tr/>').append(securityCell));
+        const security = FirewallMapAllocation.create({
+            container: securityCell,
+            segments: [{label: PROFILE_TEXT.general, short: PROFILE_TEXT.general_short, css: 'progress-bar-info', derived: true},
+                ...classes.map((entry) => entry.segment)],
+            changed: () => {
+                const current = security.state();
+                securityStatus.toggleClass('text-danger', !current.valid).text(current.bad ? PROFILE_TEXT.bad
+                    : current.over > 0 ? fill(PROFILE_TEXT.over, current.over) : fill(PROFILE_TEXT.unreserved, current.values[0]));
+                refreshSave();
+            }
+        });
+        securityCell.append(securityStatus, $('<div class="row"/>').append(classes.map((entry) => $('<div class="col-sm-4"/>').append(entry.cell))));
+        // Ranking priorities: the eight weights, traffic behaviour then security evidence
+        const rankingBody = sectionBody('byte_rate');
+        const weights = ['byte_rate', 'packet_rate', 'active_states', 'new_state_rate', 'flow_volume', 'pf_blocked', 'threat_intelligence', 'ids_evidence']
+            .map((key, index) => fieldCell(key, `fwmap-weight-${index}`, PROFILE_TEXT.shorts[index]));
+        const rankingCell = $('<td colspan="3"/>').append($('<p class="text-muted"/>').text(PROFILE_TEXT.ranking_intro));
+        rankingBody.prepend($('<tr/>').append(rankingCell));
+        const ranking = FirewallMapAllocation.create({
+            container: rankingCell,
+            segments: weights.map((entry) => entry.segment),
+            changed: () => {
+                const current = ranking.state();
+                rankingTotal.toggleClass('text-danger', !current.valid).text(current.bad ? PROFILE_TEXT.bad
+                    : current.over < 0 ? fill(PROFILE_TEXT.remaining, current.total, -current.over)
+                    : current.over > 0 ? fill(PROFILE_TEXT.exceeded, current.total, current.over) : fill(PROFILE_TEXT.total, 100));
+                refreshSave();
+            }
+        });
+        const group = (title, entries) => $('<div class="col-md-6"/>').append($('<h5/>').text(title), entries.map((entry) => entry.cell));
+        rankingCell.append(rankingTotal, $('<div class="row"/>').append(group(PROFILE_TEXT.traffic, weights.slice(0, 5)),
+            group(PROFILE_TEXT.evidence, weights.slice(5))));
+        // a profile was loaded into the dialog
+        profileDialog.on('opnsense_bootgrid_mapped', () => {
+            security.refresh();
+            ranking.refresh();
+        });
+
         updateServiceControlUI('firewallmap');
 
         $('#reconfigureAct').SimpleActionButton({
@@ -180,6 +268,56 @@
         });
     });
 </script>
+
+<style>
+    /* the ranking profile's allocation bars: Bootstrap's stacked progress bar, taller so a segment
+       can carry its name and share, with a handle on each boundary */
+    .fwmap-allocation { position: relative; margin: 12px 0 10px; }
+    /* one row that never wraps, redrawn at once (Bootstrap animates progress widths: mid-way the
+       segments would briefly overflow and the last one drop out of sight) */
+    .fwmap-allocation-bar { display: flex; flex-wrap: nowrap; height: 40px; margin: 0; }
+    .fwmap-allocation-bar .progress-bar { float: none; flex: 0 1 auto; transition: none; }
+    .fwmap-allocation-bar .progress-bar { display: flex; flex-direction: column; justify-content: center;
+        padding: 0 2px; min-width: 0; overflow: hidden; white-space: nowrap; line-height: 1.2; color: #1f2328; font-size: 12px; }
+    .fwmap-allocation-value { font-weight: bold; font-size: 14px; }
+    /* a zero share takes no room at all: the two handles beside each other mark it */
+    .fwmap-allocation-bar .fwmap-allocation-zero { padding: 0; }
+    /* a handle: the map's panel splitter (firewall-map.css .fwmap-splitter-v), a thin bar inside
+       the colour bar on the boundary; the whole bar height takes the pointer */
+    .fwmap-allocation-handle { position: absolute; top: 0; height: 40px; width: 12px; transform: translateX(-50%);
+        cursor: col-resize; touch-action: none; user-select: none; z-index: 2; }
+    .fwmap-allocation-handle::after { content: ""; position: absolute; left: 4.5px; top: 10px; height: 20px; width: 3px;
+        border-radius: 2px; background: rgba(0, 0, 0, .35); box-shadow: 0 0 0 1px rgba(255, 255, 255, .45);
+        transition: background .15s; }
+    .fwmap-allocation-handle:hover::after, .fwmap-allocation-handle:focus-visible::after,
+    .fwmap-allocation-handle.fwmap-dragging::after { background: rgba(0, 0, 0, .7); }
+    /* focus shows as the darker bar (above), with no outline of its own */
+    .fwmap-allocation-handle:focus, .fwmap-allocation-handle:focus-visible { outline: none; }
+    .fwmap-allocation-handle.disabled { cursor: not-allowed; opacity: 0.4; }
+    .fwmap-allocation-status { margin: 0 0 8px; }
+    /* one line per field (name, value, what it measures), wrapping in narrow columns */
+    .fwmap-allocation-field { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; margin-bottom: 6px; }
+    .fwmap-allocation-field label { flex: 0 0 11em; margin: 0; }
+    .fwmap-allocation-field .input-group { flex: 0 0 7em; width: 7em; }
+    .fwmap-allocation-field .input-group .form-control { width: 100%; }
+    .fwmap-allocation-field small { flex: 1 1 14em; }
+    .fwmap-allocation-field .help-block { flex: 0 0 100%; margin: 0; }
+    .fwmap-allocation-swatch { display: inline-block; float: none; width: 12px; height: 12px; vertical-align: -1px; }
+    /* a handle's tooltip: the two neighbours it moves points between, one line */
+    .fwmap-allocation-tooltip .tooltip-inner { max-width: none; white-space: nowrap; padding: 5px 10px; }
+    .fwmap-allocation-tip .fa { margin: 0 8px; opacity: .8; }
+    .fwmap-allocation-tip .fwmap-allocation-swatch { box-shadow: 0 0 0 1px rgba(255, 255, 255, .6); }
+    /* the eight ranking priorities: the theme's contextual colours are only five, so a fixed
+       colour-blind-safe set (Okabe-Ito), each neighbour clearly apart, with readable text on each */
+    .fwmap-weight-0 { background-color: #0072B2; color: #fff !important; }
+    .fwmap-weight-1 { background-color: #56B4E9; }
+    .fwmap-weight-2 { background-color: #009E73; color: #fff !important; }
+    .fwmap-weight-3 { background-color: #F0E442; }
+    .fwmap-weight-4 { background-color: #999999; }
+    .fwmap-weight-5 { background-color: #E69F00; }
+    .fwmap-weight-6 { background-color: #CC79A7; }
+    .fwmap-weight-7 { background-color: #D55E00; color: #fff !important; }
+</style>
 
 <div class="alert alert-warning hidden" role="alert" id="classificationWarning">
     <i class="fa fa-triangle-exclamation fa-fw"></i>
