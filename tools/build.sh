@@ -26,7 +26,7 @@
 
 # Build the plugin packages on an OPNsense machine.
 #
-#   tools/build.sh                          both plugins, release package names
+#   tools/build.sh                          every plugin, release package names
 #   tools/build.sh security/firewall-map    one plugin
 #   DEVEL=1 tools/build.sh                  development packages (os-<name>-devel)
 #
@@ -40,7 +40,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERIES="${SERIES:-$(opnsense-version -a 2>/dev/null || echo master)}"
 WORK="${WORK:-/tmp/opnsense-plugins-framework}"
 UPSTREAM="${UPSTREAM:-https://github.com/opnsense/plugins.git}"
-PLUGINS="${*:-misc/dashboard-plus security/firewall-map}"
+PLUGINS="${*:-misc/dashboard-plus misc/vnstat-plus security/firewall-map}"
 
 if [ ! -d "${WORK}/.git" ]; then
     BRANCH="stable/${SERIES}"
