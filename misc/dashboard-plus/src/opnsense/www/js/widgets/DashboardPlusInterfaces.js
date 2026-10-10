@@ -95,15 +95,15 @@ export default class DashboardPlusInterfaces extends DashboardPlusWidget(BaseWid
         const line = (value, muted) => (value
             ? `<div${muted ? ' class="dashboard-plus-muted"' : ''}>${escapeHtml(value)}</div>`
             : '<div class="dashboard-plus-muted">—</div>');
-        // an IPv6 address may wrap only after one of its colons
-        const v6 = intf.addr6
-            ? `<div class="dashboard-plus-muted dashboard-plus-interface-v6">${escapeHtml(intf.addr6).replace(/:/g, ':<wbr>')}</div>`
-            : line('');
+        // the addresses an interface has, none shown for one it lacks; an IPv6 address may wrap only
+        // after one of its colons
+        const addresses = (intf.addr4 ? `<div>${escapeHtml(intf.addr4)}</div>` : '')
+            + (intf.addr6 ? `<div class="dashboard-plus-muted dashboard-plus-interface-v6">${escapeHtml(intf.addr6).replace(/:/g, ':<wbr>')}</div>` : '');
         return `<div class="flextable-row dashboard-plus-row dashboard-plus-grab" role="row" data-sort-id="${escapeHtml(intf.identifier)}" draggable="true" title="${escapeHtml(t.drag_to_reorder)}">
             <div role="cell" class="dashboard-plus-interface-icon"><i class="fa fa-fw fa-plug ${link.color}" aria-hidden="true"></i></div>
             <div role="cell">
                 <a class="dashboard-plus-interface-name" href="/interfaces.php?if=${encodeURIComponent(intf.identifier)}" title="${escapeHtml(intf.identifier)}">${escapeHtml(intf.description)}</a>
-                <div class="dashboard-plus-interface-addresses">${line(intf.addr4)}${v6}</div>
+                ${addresses ? `<div class="dashboard-plus-interface-addresses">${addresses}</div>` : ''}
             </div>
             <div role="cell" class="dashboard-plus-interface-link">
                 ${line([media.type, media.duplex].filter(Boolean).join('\u2002'))}${line(intf.macaddr, true)}

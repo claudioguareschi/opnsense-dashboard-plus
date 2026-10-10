@@ -73,7 +73,10 @@ test('Interfaces+ rows: name and addresses, then link, MAC address and a state p
     // a tunnel: its type, no MAC address, no IPv6
     const vti = widget._row({identifier: 'opt3', description: 'GreenwoodVTI', device: 'ipsec1', status: 'up',
         media: '', macaddr: '', addr4: '10.255.255.2/30', addr6: ''});
-    assert.match(vti, /<div>10.255.255.2\/30<\/div><div class="dashboard-plus-muted">—<\/div>/);
+    // no dash for an address it lacks
+    assert.match(vti, /<div class="dashboard-plus-interface-addresses"><div>10.255.255.2\/30<\/div><\/div>/);
+    const bare = widget._row({identifier: 'z', description: 'Z', status: 'up'});
+    assert.doesNotMatch(bare, /dashboard-plus-interface-addresses/);
     assert.match(vti, /<div>IPsec VTI<\/div><div class="dashboard-plus-muted">—<\/div>/);
     // down and no carrier in the danger color, anything else in ifconfig's own word, muted
     assert.match(widget._row({identifier: 'a', description: 'A', status: 'no carrier'}), /text-danger"><span class="dashboard-plus-state-dot"[^>]*><\/span> No carrier/);

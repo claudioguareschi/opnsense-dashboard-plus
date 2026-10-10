@@ -226,7 +226,8 @@ const STYLE = `
 
     /* Interfaces+: the icon, name and addresses; after a divider the link, MAC address and state */
     .dashboard-plus-interfaces { --dashboard-plus-columns: auto minmax(0, 1fr) auto; row-gap: 0; }
-    .dashboard-plus-interfaces > .dashboard-plus-row.dashboard-plus-row { align-items: center; padding: 0.65em 0; }
+    /* top-aligned: the name stays beside the icon however many address lines follow */
+    .dashboard-plus-interfaces > .dashboard-plus-row.dashboard-plus-row { align-items: start; padding: 0.65em 0; }
     .dashboard-plus-interfaces .dashboard-plus-interface-icon { align-self: start; font-size: 1.45em; padding: 0.05em 0.1em 0 0.15em; }
     .dashboard-plus-interfaces .dashboard-plus-interface-name { font-weight: 600; font-size: 1.05em; color: inherit; }
     .dashboard-plus-interfaces .dashboard-plus-interface-addresses,
