@@ -237,6 +237,7 @@
             <endpoint>/api/unbound/settings/get</endpoint>
             <endpoint>/api/unbound/settings/searchForward</endpoint>
             <endpoint>/api/dashboardplus/dns/recent</endpoint>
+            <endpoint>/api/dashboardplus/dns/queries</endpoint>
         </endpoints>
         <translations>
             <title>DNS Health+</title>

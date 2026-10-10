@@ -478,7 +478,9 @@ be selected in the widget settings, and start, stop and restart actions require 
 
 *A compact resolver health view showing Unbound status, recursive or forwarding mode, query rate,
 cache hit rate and DNSBL totals. When Unbound has forwarding entries, the configured AdGuard
-upstreams are listed by name and address. Settings: refresh interval.*
+upstreams are listed by name and address. Settings: refresh interval. The live query rate reads
+only Unbound's query counter every two seconds (`unbound-control stats_noreset`, which never resets
+the counters OPNsense reads), not the full statistics.*
 
 ### QuickAssist+
 
@@ -487,7 +489,9 @@ firmware requests, request/response pipeline lag and outstanding work, plus a De
 Capabilities panel with device and acceleration-engine counts, configured services, OpenCrypto
 Framework state and supported kernel cryptographic algorithms. Clock information is shown only
 when the running QAT driver exposes it. It discovers the loaded QAT driver dynamically and shows
-unavailable or degraded states without changing driver, OCF or firewall configuration.*
+unavailable or degraded states without changing driver, OCF or firewall configuration. Each
+two-second sample is one read of the QAT sysctl tree, parsed by the web server, with no script
+started.*
 
 ## VNStat Plus
 

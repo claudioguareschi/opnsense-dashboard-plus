@@ -30,6 +30,7 @@ namespace OPNsense\DashboardPlus\Api;
 
 use OPNsense\Base\ApiControllerBase;
 use OPNsense\Core\Backend;
+use OPNsense\DashboardPlus\QuickAssist;
 
 class SystemController extends ApiControllerBase
 {
@@ -88,16 +89,15 @@ class SystemController extends ApiControllerBase
         return $result;
     }
 
-    /** Read-only QuickAssist topology, health and firmware-counter sample. */
+    /**
+     * Read-only QuickAssist topology, health and firmware-counter sample: the QAT sysctl tree,
+     * read by configd and parsed here (QuickAssist.php), so a sample every two seconds starts no
+     * interpreter.
+     */
     public function qatAction()
     {
-        $backend = new Backend();
-        $result = json_decode($backend->configdRun('dashboardplus system qat'), true);
-
-        if (!is_array($result)) {
-            return ['status' => 'failed'];
-        }
-
+        $output = (new Backend())->configdRun('dashboardplus system qat');
+        $result = QuickAssist::sample($output, microtime(true));
         $result['status'] = 'ok';
         return $result;
     }

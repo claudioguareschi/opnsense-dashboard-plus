@@ -95,3 +95,28 @@ test('DNS Health+ keeps useful data when one of its read-only API calls fails', 
     assert.deepEqual(widget.data.upstreams, []);
     assert.deepEqual(widget.data.recent.queries, [{name: 'example.test'}]);
 });
+
+test('DNS Health+ polls only the query counter for the live rate, and keeps the full statistics', async () => {
+    const widget = new DnsHealth({translations});
+    const stats = {data: {total: {num: {queries: 10, cachehits: 7}}}};
+    widget.data = {stats};
+    widget.loading = false;  // after the first full refresh
+    const calls = [];
+    let total = 100;
+    widget.ajaxCall = async url => {
+        calls.push(url);
+        total += 20;
+        return {status: 'ok', queries: total};
+    };
+    widget._renderMetrics = () => {};
+    widget._renderQueryRate = () => {};
+    await widget._pollQueryRate();
+    await widget._pollQueryRate();
+    assert.deepEqual(calls, ['/api/dashboardplus/dns/queries', '/api/dashboardplus/dns/queries']);
+    assert.equal(widget.data.stats, stats);
+    assert.equal(widget.previousSample.queries, 140);
+    // a failed read records nothing
+    widget.ajaxCall = async () => ({status: 'failed'});
+    await widget._pollQueryRate();
+    assert.equal(widget.previousSample.queries, 140);
+});

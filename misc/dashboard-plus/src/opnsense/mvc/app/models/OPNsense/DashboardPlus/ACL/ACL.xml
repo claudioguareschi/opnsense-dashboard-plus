@@ -55,6 +55,7 @@
             <pattern>api/unbound/settings/get</pattern>
             <pattern>api/unbound/settings/searchForward</pattern>
             <pattern>api/dashboardplus/dns/recent</pattern>
+            <pattern>api/dashboardplus/dns/queries</pattern>
         </patterns>
     </page-dashboard-widget-dashboard-plus-dns-health>
 </acl>

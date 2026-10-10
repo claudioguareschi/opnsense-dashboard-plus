@@ -40,6 +40,20 @@ class DnsController extends ApiControllerBase
      * Health+ only needs query type distribution and recent externally resolved domains, so do
      * not expose the raw records under the Dashboard privilege.
      */
+    /**
+     * Unbound's running query total, for the live query rate of DNS Health+: one counter read
+     * with `unbound-control stats_noreset` (never `stats`, which resets the counters OPNsense's
+     * own reporting reads), instead of the full statistics every poll.
+     */
+    public function queriesAction()
+    {
+        $output = (string)(new Backend())->configdRun('dashboardplus dns queries');
+        if (!preg_match('/^total\.num\.queries=(\d+)\s*$/m', $output, $match)) {
+            return ['status' => 'failed'];
+        }
+        return ['status' => 'ok', 'queries' => (int)$match[1]];
+    }
+
     public function recentAction()
     {
         $records = json_decode((new Backend())->configdpRun('unbound qstats details', [100]), true);
