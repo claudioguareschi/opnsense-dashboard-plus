@@ -572,7 +572,8 @@ def zfs_scan(stats):
     """The last scrub or resilver: what, how it ended, when, and what it found."""
     if not isinstance(stats, dict) or stats.get("function") in (None, "NONE"):
         return None
-    to_examine = int_value(stats.get("to_examine")) or 0
+    # as zpool status computes it: a block counts once its I/O is issued; skipped blocks never are
+    total = (int_value(stats.get("to_examine")) or 0) - (int_value(stats.get("skipped")) or 0)
     issued = int_value(stats.get("issued")) or 0
     return {
         "function": str(stats.get("function", "")).lower(),
@@ -581,7 +582,7 @@ def zfs_scan(stats):
         "end": int_value(stats.get("end_time")),
         "errors": int_value(stats.get("errors")) or 0,
         "repaired": int_value(stats.get("processed")) or 0,
-        "progress": int(issued * 100 / to_examine) if to_examine else None,
+        "progress": min(100, int(issued * 100 / total)) if total > 0 else None,
     }
 
 

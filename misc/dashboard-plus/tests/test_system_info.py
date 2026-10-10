@@ -405,6 +405,17 @@ class ZfsTest(unittest.TestCase):
                          ("resilver", "scanning", 42))
         self.assertIsNone(parsed["b"])
 
+    def test_the_real_scrub_on_firewall2(self):
+        # zpool status -j --json-int after the first scrub of FW2's pool (OpenZFS 2.4.2)
+        scan = {"function": "SCRUB", "state": "FINISHED", "start_time": 1791664047, "end_time": 1791664053,
+                "to_examine": 1961193472, "examined": 1952534528, "skipped": 3022848, "processed": 0, "errors": 0,
+                "bytes_per_scan": 0, "pass_start": 1791664047, "scrub_pause": 0, "scrub_spent_paused": 0,
+                "issued_bytes_per_scan": 1950924800, "issued": 1950924800}
+        parsed = SYSTEM_INFO.parse_zpool_status(zpool({"zroot": pool("zroot", [disk("ada0p4")], scan=scan)}))[0]
+        # zpool status itself reports 99.63% done: issued over what was to examine less what was skipped
+        self.assertEqual(parsed["scan"], {"function": "scrub", "state": "finished", "start": 1791664047,
+                                          "end": 1791664053, "errors": 0, "repaired": 0, "progress": 99})
+
     def test_no_pools_or_no_json(self):
         self.assertEqual(SYSTEM_INFO.parse_zpool_status(zpool({})), [])
         for output in ("", "no pools available", "[]", "null", '{"pools": []}'):
