@@ -163,14 +163,23 @@ const STYLE = `
     /* a state (Healthy, Online...) in the theme's success, warning or danger color, with a light fill
        and border made from that same color, so it follows the light and dark themes */
     .dashboard-plus-state-pill { display: inline-flex; align-items: center; gap: 0.35em; padding: 0.15em 0.65em;
-        border-radius: 0.35em; font-weight: 600; white-space: nowrap;
-        background: color-mix(in srgb, currentColor 14%, transparent);
-        box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 40%, transparent); }
+        border-radius: 0.35em; font-weight: 600; white-space: nowrap; }
+    /* the theme's state color (read once by ensureStyle) for the dot, fill and border; the label mixes it
+       with the theme's text color, darker on a light theme and lighter on a dark one, for contrast */
+    .dashboard-plus-state-pill.text-success { --dashboard-plus-state: var(--dashboard-plus-success); }
+    .dashboard-plus-state-pill.text-warning { --dashboard-plus-state: var(--dashboard-plus-warning); }
+    .dashboard-plus-state-pill.text-danger { --dashboard-plus-state: var(--dashboard-plus-danger); }
+    .dashboard-plus-state-pill.text-muted { --dashboard-plus-state: var(--dashboard-plus-muted); }
+    .dashboard-plus-state-pill.dashboard-plus-state-pill[class*="text-"] {
+        color: color-mix(in srgb, var(--dashboard-plus-state) 60%, var(--dashboard-plus-ink));
+        background: color-mix(in srgb, var(--dashboard-plus-state) 15%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dashboard-plus-state) 45%, transparent); }
     .dashboard-plus-state-pill > .fa { line-height: 1; }
     /* in a table column beside numbers, the size the Bootstrap labels had there */
     .dashboard-plus-state-pill.dashboard-plus-compact { font-size: 85%; padding: 0.1em 0.55em; }
     /* a dot in the pill's color, centered by the flex box rather than by a font's glyph metrics */
-    .dashboard-plus-state-dot { width: 0.6em; height: 0.6em; border-radius: 50%; background: currentColor; flex: none; }
+    .dashboard-plus-state-dot { width: 0.6em; height: 0.6em; border-radius: 50%; flex: none;
+        background: var(--dashboard-plus-state, currentColor); }
     .dashboard-plus-bar.progress { height: 0.75em; margin: 0.2em 0 0; }
     .dashboard-plus-gateway-name { line-height: 1.35; }
 
@@ -255,9 +264,24 @@ export function usageColor(percent) {
     return percent >= 80 ? 'danger' : percent >= 50 ? 'warning' : 'success';
 }
 
+/*
+ * The theme's state colors (text-success, -warning, -danger, -muted) and its text color, as CSS
+ * variables for the state pill: CSS cannot mix an element's own color into that same color.
+ */
+function themeColors() {
+    const root = document.documentElement.style;
+    const probe = $('<span style="position: absolute; visibility: hidden;"></span>').appendTo('body');
+    for (const state of ['success', 'warning', 'danger', 'muted']) {
+        root.setProperty(`--dashboard-plus-${state}`, getComputedStyle(probe.attr('class', `text-${state}`)[0]).color);
+    }
+    probe.remove();
+    root.setProperty('--dashboard-plus-ink', getComputedStyle(document.body).color);
+}
+
 export function ensureStyle() {
     if (!document.getElementById('dashboard-plus-style')) {
         $('<style id="dashboard-plus-style"></style>').text(STYLE).appendTo('head');
+        themeColors();
     }
 }
 

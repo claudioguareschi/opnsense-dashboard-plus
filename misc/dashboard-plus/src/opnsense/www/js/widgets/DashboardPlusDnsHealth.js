@@ -142,18 +142,22 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 gap: 0.6em;
                 padding: 0.55em 0 0.35em;
             }
+            /* one column grid for every row: the names beside the icons, the addresses lined up after them */
             .dashboard-plus-dns-health-upstreams {
                 display: grid;
-                gap: 0.25em;
+                grid-template-columns: auto minmax(0, 1fr) auto;
+                column-gap: 0.65em;
+                row-gap: 0.25em;
+                text-align: left;
                 padding: 0 0.65em 0.65em;
                 max-height: 10em;
                 overflow-y: auto;
             }
             .dashboard-plus-dns-health-upstream {
+                grid-column: 1 / -1;
                 display: grid;
-                grid-template-columns: auto minmax(0, 1fr) auto;
+                grid-template-columns: subgrid;
                 align-items: center;
-                column-gap: 0.65em;
                 min-width: 0;
                 padding: 0.32em 0;
             }
@@ -170,12 +174,13 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 font-size: 0.88em;
             }
             .dashboard-plus-dns-health-upstream-server {
-                text-align: right;
+                text-align: left;
                 opacity: 0.62;
                 font-size: 0.76em;
                 font-variant-numeric: tabular-nums;
             }
             .dashboard-plus-dns-health-empty {
+                grid-column: 1 / -1;
                 padding: 0.35em 0 0.6em;
                 opacity: 0.65;
                 font-size: 0.82em;
