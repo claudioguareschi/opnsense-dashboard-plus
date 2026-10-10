@@ -71,6 +71,23 @@ class SystemController extends ApiControllerBase
         return $result;
     }
 
+    /**
+     * The assigned interfaces for Interfaces+: link status, media and primary addresses, as the
+     * interfaces overview shows them, without its SFP module reads (interfaces.php).
+     */
+    public function interfacesAction()
+    {
+        $backend = new Backend();
+        $result = json_decode($backend->configdRun('dashboardplus system interfaces'), true);
+
+        if (!is_array($result) || !is_array($result['rows'] ?? null)) {
+            return ['status' => 'failed'];
+        }
+
+        $result['status'] = 'ok';
+        return $result;
+    }
+
     /** Read-only QuickAssist topology, health and firmware-counter sample. */
     public function qatAction()
     {

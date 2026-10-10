@@ -19,8 +19,9 @@ export default class DashboardPlusInterfaces extends DashboardPlusWidget(BaseWid
     constructor(config) {
         super(config);
         this.configurable = true;
-        // the shortest refresh interval; every refresh runs two pluginctl processes on the firewall
-        // (0.8 s of CPU), so slower choices are offered and onWidgetTick skips the ticks before them
+        // the shortest refresh interval; slower choices are offered and onWidgetTick skips the ticks
+        // before them. A refresh reads `ifconfig -L` once on the firewall (system/interfaces, about
+        // 80 ms of CPU) rather than the interfaces overview, which reads every SFP module twice.
         this.tickTimeout = 10;
         this.cachedInterfaces = [];
         this.currentConfig = null;
@@ -47,10 +48,8 @@ export default class DashboardPlusInterfaces extends DashboardPlusWidget(BaseWid
     }
 
     _availableInterfaces(data) {
-        return (data.rows || []).filter(intf =>
-            intf.config && intf.enabled !== false &&
-            !(intf.config.virtual && intf.config.virtual === '1')
-        );
+        // assigned interfaces only (system/interfaces lists no others), not disabled or virtual
+        return (data?.rows || []).filter(intf => intf.identifier && intf.enabled !== false && !intf.virtual);
     }
 
     _orderedInterfaces() {
@@ -132,14 +131,14 @@ export default class DashboardPlusInterfaces extends DashboardPlusWidget(BaseWid
             return;
         }
         this.lastRefresh = Date.now();
-        const data = await this.ajaxCall('/api/interfaces/overview/interfaces_info');
+        const data = await this.ajaxCall('/api/dashboardplus/system/interfaces');
         this.cachedInterfaces = this._availableInterfaces(data);
         this._render();
     }
 
     async getWidgetOptions() {
         const interfaces = this.cachedInterfaces.length ? this.cachedInterfaces :
-            this._availableInterfaces(await this.ajaxCall('/api/interfaces/overview/interfaces_info'));
+            this._availableInterfaces(await this.ajaxCall('/api/dashboardplus/system/interfaces'));
         return {
             interfaces: {
                 title: this.translations.interfaces,

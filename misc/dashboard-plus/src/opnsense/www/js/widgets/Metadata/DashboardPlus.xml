@@ -180,7 +180,7 @@
         <filename>DashboardPlusInterfaces.js</filename>
         <link>/interfaces.php</link>
         <endpoints>
-            <endpoint>/api/interfaces/overview/interfaces_info</endpoint>
+            <endpoint>/api/dashboardplus/system/interfaces</endpoint>
         </endpoints>
         <translations>
             <title>Interfaces+</title>
