@@ -126,14 +126,16 @@ export function waitText(summary, text) {
 }
 
 /**
- * Covers a map frame while it waits: the last picture (if any) dimmed and blurred under a spinner
- * and `message`, and no interaction with it (the cover takes every pointer event). A null
- * `message` removes the cover.
+ * Marks a map frame as waiting: a spinner and a short caption over it, the last picture (if any)
+ * faded so it is not taken for current data, and no interaction with it (the cover takes every
+ * pointer event). A null `message` removes the cover.
  */
 export function wait(frame, message) {
   let cover = frame.querySelector('.fwmap-wait');
+  const canvases = [...frame.querySelectorAll('canvas')];
   if (message === null || message === undefined) {
     cover?.remove();
+    canvases.forEach((canvas) => { canvas.style.opacity = ''; });
     frame.removeAttribute('aria-busy');
     return;
   }
@@ -142,19 +144,17 @@ export function wait(frame, message) {
     cover.className = 'fwmap-wait';
     Object.assign(cover.style, {
       position: 'absolute', inset: '0', zIndex: '20', display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center', gap: '12px', cursor: 'progress',
-      background: 'rgba(128, 128, 128, .25)', backdropFilter: 'blur(3px) grayscale(.6)',
-      webkitBackdropFilter: 'blur(3px) grayscale(.6)',
+      alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'progress',
+      color: 'var(--fwmap-text, inherit)',
     });
     cover.innerHTML = '<i class="fa fa-spinner fa-pulse fa-2x" aria-hidden="true"></i>'
       + '<span class="fwmap-wait-text" role="status"></span>';
     Object.assign(cover.querySelector('.fwmap-wait-text').style, {
-      padding: '6px 12px', borderRadius: '10px', fontSize: '.92em', maxWidth: 'calc(100% - 24px)',
-      textAlign: 'center', background: 'var(--fwmap-panel, #fff)', color: 'var(--fwmap-text, #333)',
-      boxShadow: '0 6px 20px rgba(0, 0, 0, .25)',
+      fontSize: '.9em', opacity: '.8', maxWidth: 'calc(100% - 32px)', textAlign: 'center',
     });
     frame.appendChild(cover);
   }
+  canvases.forEach((canvas) => { canvas.style.opacity = '.3'; });
   cover.querySelector('.fwmap-wait-text').textContent = message;
   frame.setAttribute('aria-busy', 'true');
 }

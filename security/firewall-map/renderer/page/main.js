@@ -470,7 +470,7 @@ $(async () => {
     }
   });
   // nothing to show before the first answer: the map waits
-  state.wait = T.starting;
+  state.wait = T.reading;
   applyWait();
   poll(summaryQuery(state.settings));
   // ?debug=1: the diagnostics panel, a separate script that only development packages install

@@ -28,7 +28,7 @@
 const AUTO_HEIGHT = 10000;
 // the renderer's content hash, written by tools/build-renderer.sh: a new renderer has a new
 // address, so a browser never runs an old cached copy with a newer widget
-const RENDERER_VERSION = 'fb02cabccce1';
+const RENDERER_VERSION = '7f49e1ecf3e3';
 // follow traffic is the map's own toggle, remembered per browser (as on the full-size map)
 const FOLLOW_KEY = 'firewallmap.widget.follow';
 
@@ -285,7 +285,8 @@ export default class FirewallMap extends BaseWidget {
     /** The status line's words, in this widget's translations. */
     _text() {
         const t = this.translations;
-        return {...t, starting: t.collector_starting, unavailable: t.data_unavailable, downloading: t.database_downloading};
+        return {...t, starting: t.collector_starting, reading: t.reading_data, unavailable: t.data_unavailable,
+                downloading: t.database_downloading};
     }
 
     _gridItem() {
@@ -362,13 +363,16 @@ export default class FirewallMap extends BaseWidget {
             // rather than relying on the static position (the dashboard centers widget text).
             $(container).children('canvas').css({left: 0, top: 0});
             // nothing to show before the first answer: the map waits
-            this._wait(this._text().starting);
+            this._wait(this._text().reading);
         } catch (error) {
             console.error('Firewall Map+: renderer initialization failed', error);
             this._status(`${this.translations.renderer_failed}: ${error?.message || error}`);
             return;
         }
-        await this.onWidgetTick();
+        // The dashboard shows its own spinner until this returns: return once the map is set up and
+        // let the first answer arrive under the map's own caption, so only one spinner shows. The
+        // refresh gate keeps the dashboard's own tick from starting a second request meanwhile.
+        this.onWidgetTick().catch((error) => console.error('Firewall Map+: first refresh failed', error));
     }
 
     async onWidgetTick() {

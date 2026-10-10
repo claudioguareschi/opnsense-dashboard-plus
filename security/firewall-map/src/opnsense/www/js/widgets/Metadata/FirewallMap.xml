@@ -13,7 +13,8 @@
             <active_flows_one>{count} active flow</active_flows_one>
             <active_flows_many>{count} active flows</active_flows_many>
             <no_flows>No active public flows</no_flows>
-            <collector_starting>Starting flow collector…</collector_starting>
+            <collector_starting>Warming up…</collector_starting>
+            <reading_data>Reading data…</reading_data>
             <heavy_top>Highlight the busiest links</heavy_top>
             <heavy_rate>Also highlight any link faster than</heavy_rate>
             <labels>City labels</labels>

@@ -3112,7 +3112,7 @@
 		$(document).on("keydown", (event) => {
 			if (event.key === "Escape" && state.mode === "snapshot" && !$(".modal.in").length) backToLive();
 		});
-		state.wait = T.starting;
+		state.wait = T.reading;
 		applyWait();
 		poll(summaryQuery(state.settings));
 		if (new URLSearchParams(window.location.search).get("debug") === "1" && window.FirewallMapDiagnostics) window.FirewallMapDiagnostics.start({

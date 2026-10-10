@@ -44,7 +44,8 @@
     window.FirewallMapPermissions = {{ permissions }};
     window.FirewallMapPageText = Object.assign({{ sharedText }}, firewallMapPlain({
         firewall_map: {{ lang._('Firewall Map')|json_encode }},
-        starting: {{ lang._('Starting flow collector…')|json_encode }},
+        starting: {{ lang._('Warming up…')|json_encode }},
+        reading: {{ lang._('Reading data…')|json_encode }},
         unavailable: {{ lang._('Live flow data is unavailable')|json_encode }},
         webgl: {{ lang._('WebGL is required for Firewall Map+')|json_encode }},
         downloading: {{ lang._('Downloading the geolocation database…')|json_encode }},
