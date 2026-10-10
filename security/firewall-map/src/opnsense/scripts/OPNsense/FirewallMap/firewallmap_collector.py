@@ -70,6 +70,7 @@ from lib.blocklists import (
     threat_lists_for,
 )
 from lib import evidence as evidence_facts
+from lib import home as firewall_home
 from lib import profiles as ranking_profiles
 from lib.blocks import BlockTracker, FilterLogTail, block_event_time, block_summary, parse_block
 from lib.cache import GEO_LOOKUPS_PER_SAMPLE, CacheStore, GeoCache
@@ -371,7 +372,12 @@ def summarize_flows(tracker, geo, local_addresses, role, now, wall_time, hostnam
             continue
         locations[remote] = _location_entry(remote, remote_location, local_addresses)
         local_location = geo.get(local)
-        if anchor is not None:
+        # anchor: one place for every address of the firewall, or (a home plan's location) the home
+        # each address starts from
+        placed = anchor(local) if callable(anchor) else None
+        if placed is not None:
+            locations[local] = placed
+        elif anchor is not None and not callable(anchor):
             locations[local] = {"id": local, "name": anchor.get("name") or "Firewall",
                                 "lat": anchor["lat"], "lon": anchor["lon"], "local": True}
         elif local_location is not None:
@@ -691,6 +697,7 @@ class Collector:
         self.primary_wan_device = None
         self.location_settings = {"discover_external_ip": False, "latitude": None, "longitude": None}
         self.external_ip, self.external_ip_key, self.external_ip_checked = None, None, None
+        self.homes, self.homes_key = None, None
         self.values = {}
         self.recording = False
         self.provider = "maxmind"
@@ -756,6 +763,10 @@ class Collector:
                 self.geo = GeoCache(store=self.store, database=city, asn_database=asn)
                 self.geo.forget_old_databases()
             self.checked["settings"] = now
+        if self.geo is not None:
+            # the firewall's own addresses, for its place on the map (home_plan)
+            self.geo.resolve(sorted({address for items in self.interface_addresses.values() for address in items
+                                     if public_ip(address)} | self.local_addresses))
 
     def refresh_metadata(self, now):
         """Rule descriptions, interface and DHCP names and port forwards, in both modes: a collector
@@ -849,6 +860,31 @@ class Collector:
         location = self.geo.get(self.external_ip)
         return {"lat": location["lat"], "lon": location["lon"], "name": "Firewall"} if location else None
 
+    def home_plan(self, now):
+        """Where the firewall's addresses start on the map (lib/home.py), kept until its addresses,
+        their locations or the location settings change, so the house does not move between samples."""
+        latitude, longitude = self.location_settings["latitude"], self.location_settings["longitude"]
+        coordinates = (latitude, longitude) if latitude is not None and longitude is not None else None
+        external = None
+        if coordinates is None and self.map_anchor(now) is not None and self.external_ip:
+            external = (self.external_ip, self.geo.get(self.external_ip))
+        addresses = {device: set(items) for device, items in self.interface_addresses.items()}
+        known = set().union(*addresses.values()) if addresses else set()
+        if self.local_addresses - known:
+            addresses[""] = self.local_addresses - known
+        # looked up by refresh_settings, never here: a lookup between a snapshot's coverage count and
+        # its serialization could evict the locations it counted
+        public = sorted({address for items in addresses.values() for address in items if public_ip(address)})
+        ipv6_home = self.location_settings.get("ipv6_home", "auto")
+        located = tuple((address, json.dumps(self.geo.get(address), sort_keys=True)) for address in public)
+        key = (coordinates, external and json.dumps(external, sort_keys=True), ipv6_home, self.primary_wan_device,
+               tuple(sorted((device, tuple(sorted(items))) for device, items in addresses.items())), located)
+        if key != self.homes_key:
+            self.homes = firewall_home.plan(addresses, self.geo.get, self.primary_wan_device, coordinates, external,
+                                            ipv6_home)
+            self.homes_key = key
+        return self.homes
+
     def host_names(self):
         """Configured DHCP names override the short-lived PTR fallback."""
         return host_names(self.leases, self.store)
@@ -866,8 +902,9 @@ class Collector:
             "blocklists": self.blocklists, "reputation": self.reputation, "alerts": self.alerts,
             "descriptions": self.descriptions,
         }
+        homes = self.home_plan(now)
         payload = summarize_flows(self.tracker, geo, self.local_addresses, self.role, now, time.time(), resolver, context,
-                                  self.map_anchor(now), visible)
+                                  homes.location, visible)
         origin = next((location["id"] for location in payload["locations"] if location["local"]), None)
         if origin is None and self.local_addresses:
             origin = sorted(self.local_addresses)[0]
@@ -891,11 +928,13 @@ class Collector:
         payload["interfaces"] = sorted({name for device, name in self.interfaces.items()
                                         if not re.match(r"^(lo|enc)\d+$", device)}, key=str.lower)
         payload["threat_lists"] = list(self.blocklists.names) + ([REPUTATION_LIST] if self.reputation.scores else [])
-        if origin and geo.get(origin) and not any(location["id"] == origin for location in payload["locations"]):
-            location = geo.get(origin)
-            payload["locations"].append({
-                "id": origin, "name": origin, "lat": location["lat"], "lon": location["lon"], "local": True,
-            })
+        if origin and not any(location["id"] == origin for location in payload["locations"]):
+            location = homes.location(origin)
+            if location is None and geo.get(origin):
+                location = {"id": origin, "name": origin, "lat": geo.get(origin)["lat"],
+                            "lon": geo.get(origin)["lon"], "local": True}
+            if location is not None:
+                payload["locations"].append(location)
         payload["ranking_profile"] = ranking_profiles.descriptor(self.profile)
         # how often the map is refreshed while it is watched (adaptive refresh)
         payload["interval"] = self.sampling_interval(INTERVAL)
@@ -1366,6 +1405,8 @@ class Collector:
             current["incompatible"] = self.collector_incompatible
             # the flows on the map: the last sample's ranked flows of the collector's --flows
             current["ranked_flows_limit"] = self.collector_engine.flows
+            # where the firewall stands on the map, and why (lib/home.py)
+            current["home"] = self.homes.describe() if self.homes is not None else None
             # adaptive refresh: the collector's recommendation, why, and the interval used
             telemetry = current.get("telemetry") or {}
             reason = telemetry.get("cadence_reason")

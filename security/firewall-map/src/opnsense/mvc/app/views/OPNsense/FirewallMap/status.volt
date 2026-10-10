@@ -99,6 +99,14 @@
             engine_limit: {{ lang._('Up to %s states (memory budget %s)')|json_encode }},
             engine_tracking: {{ lang._('%s: %s of up to %s flows tracked, %s flows in all')|json_encode }},
             engine_ranked: {{ lang._('%s of up to %s ranked flows sent each sample')|json_encode }},
+            home_accuracy: {{ lang._('within %s km')|json_encode }},
+            home_coordinates: {{ lang._('from the coordinates in the settings')|json_encode }},
+            home_ipv4_wan: {{ lang._('from the WAN address %s')|json_encode }},
+            home_external_ip: {{ lang._('from the discovered public address %s')|json_encode }},
+            home_ipv4: {{ lang._('from the address %s')|json_encode }},
+            home_ipv6_inside: {{ lang._('from the inside IPv6 address %s')|json_encode }},
+            home_ipv6_wan: {{ lang._('from the WAN IPv6 address %s')|json_encode }},
+            home_approximate: {{ lang._('approximate, from %s (no precise location)')|json_encode }},
             engine_quality: {{ lang._('discovery %s, ranking %s, attribution %s')|json_encode }},
             regime_exact: {{ lang._('Every flow tracked')|json_encode }},
             regime_bounded: {{ lang._('Bounded')|json_encode }},
@@ -205,6 +213,12 @@
                     axis(telemetry.quality_discovery, ['exact', 'bounded']),
                     axis(telemetry.quality_ranking, ['exact', 'warming', 'bounded']),
                     axis(telemetry.quality_attribution, ['exact', 'warming', 'partial'])))}</small>` : '—');
+            // where the firewall stands on the map: each house, the address families it serves, and why
+            $('#geo-home').html(Array.isArray(engine.home) && engine.home.length ? engine.home.map((home) => [
+                `<strong>${escape(home.name)}</strong>`, escape((home.families || []).join(' + ')),
+                escape(fill(T[`home_${home.source}`] || '%s', home.evidence || '')),
+                Number.isInteger(home.accuracy_km) ? escape(fill(T.home_accuracy, home.accuracy_km)) : '',
+            ].filter(Boolean).join(' · ')).join('<br>') : '—');
             $('#engine-ranked').text(Number.isInteger(engine.ranked_flows) && engine.ranked_flows_limit
                 ? fill(T.engine_ranked, count(engine.ranked_flows), count(engine.ranked_flows_limit)) : '—');
             $('#engine-omitted').text(telemetry.sequence ? fill(T.engine_omitted, count(telemetry.skipped_af_translation),
@@ -398,6 +412,7 @@
         <tbody>
             <tr><td style="width: 25%;">{{ lang._('Service') }}</td><td id="geo-provider"></td></tr>
             <tr><td>{{ lang._('License key') }}</td><td id="geo-key"></td></tr>
+            <tr><td>{{ lang._('Firewall location') }}</td><td id="geo-home"></td></tr>
             <tr><td>{{ lang._('Locations') }}</td><td id="geo-city"></td></tr>
             <tr><td>{{ lang._('Networks') }}</td><td id="geo-asn"></td></tr>
             <tr><td>{{ lang._('Next update') }}</td><td id="geo-next"></td></tr>

@@ -159,6 +159,8 @@ def topology(path=SETTINGS_FILE):
         "primary_wan_device": str(values.get("primary_wan_device") or "") or None,
         "discover_external_ip": str(values.get("discover_external_ip") or "0") == "1",
         "latitude": coordinates[0], "longitude": coordinates[1],
+        # IPv6 joins the IPv4 home when it agrees ("auto"), or always ("ipv4"); lib/home.py
+        "ipv6_home": "ipv4" if values.get("ipv6_home") == "ipv4" else "auto",
     }
 
 

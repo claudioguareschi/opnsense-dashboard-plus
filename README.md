@@ -257,7 +257,12 @@ until it is switched on.*
   - With **advanced mode** on: *Firewall map location* (where the firewall sits on the map:
     normally its public WAN address, geolocated with the configured database; *Use external
     public IP discovery* for a WAN behind upstream NAT, which finds the public address with
-    api.ipify.org and geolocates it the same way; or manual latitude and longitude, which win),
+    api.ipify.org and geolocates it the same way; or manual latitude and longitude, which win;
+    and *IPv6 location*: IPv6 joins the IPv4 location when any precise IPv6 location of the
+    firewall, its inside prefixes first, is within 50 km of it or within the two locations'
+    accuracy. A location known only by country never counts, and tunnel and VPN interfaces are
+    never used. *Automatic* shows a second house only for IPv6 precisely located elsewhere;
+    *Same as IPv4* always shows one. The Status page names the address each house comes from),
     *High availability* (*On a CARP backup*: mirror the master's connections, or show only this
     firewall's traffic) and the collector's tuning: *Shortest* and *Longest refresh interval*
     (2 to 300 seconds; on a busy firewall the collector asks for a longer one, within these
@@ -560,7 +565,10 @@ versions and signs the whole catalog.
   graphical ranking profile editor (read-only built-ins, new profiles with **+**).
   VNStat Traffic+ takes its select and table colors from the theme and its chart spans the full
   width; QuickAssist+'s live chart scrolls like Traffic's.
-  Investigating an IPv6 address on the Firewall Map page works again.
+  Investigating an IPv6 address on the Firewall Map page works again. A dual-stack firewall is
+  shown at one place: IPv6 follows the IPv4 location unless it is precisely located elsewhere
+  (*IPv6 location* setting), so a WAN IPv6 address that the database knows only by country no
+  longer adds a second house.
 - **0.59** (all packages): Firewall Map+ keeps complete shared incident snapshots while disclosing
   captured PF connection states only to users with OPNsense's native Diagnostics: Show States privilege.
 - **0.58** (all packages): refines Dashboard Plus QuickAssist+ with a Chart.js activity graph,

@@ -66,7 +66,10 @@ class SettingsFileTest(unittest.TestCase):
             self.assertEqual([alias["name"] for alias in CONFIG.aliases(path)], ["Drop"])
             self.assertEqual(CONFIG.interface_names(path), {"igb1": "WAN", "vlan01": "LAN"})
             self.assertEqual(CONFIG.topology(path), {"primary_wan_device": "igb1", "discover_external_ip": False,
-                                                      "latitude": None, "longitude": None})
+                                                      "latitude": None, "longitude": None, "ipv6_home": "auto"})
+            for value, expected in (("ipv4", "ipv4"), ("auto", "auto"), ("other", "auto"), (None, "auto")):
+                self.write(path, {"topology": {"primary_wan_device": "igb1", "ipv6_home": value}})
+                self.assertEqual(CONFIG.topology(path)["ipv6_home"], expected)
             # sampling interval bounds: valid ones kept, inverted or out of range ones back to the defaults
             for low, high, expected in (("5", "30", (5, 30)), ("30", "5", (2, 60)), ("1", "30", (2, 60)),
                                         ("2", "301", (2, 60)), ("x", "30", (2, 60))):

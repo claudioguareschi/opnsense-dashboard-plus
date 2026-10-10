@@ -65,6 +65,7 @@
         "primary_wan_device": {{ interfaces.get('wan', {}).get('if', '') | tojson }},
         "discover_external_ip": {{ general.discover_external_ip | default('0', true) | tojson }},
         "latitude": {{ general.latitude | default('', true) | tojson }},
-        "longitude": {{ general.longitude | default('', true) | tojson }}
+        "longitude": {{ general.longitude | default('', true) | tojson }},
+        "ipv6_home": {{ general.ipv6_home | default('auto', true) | tojson }}
     }
 }

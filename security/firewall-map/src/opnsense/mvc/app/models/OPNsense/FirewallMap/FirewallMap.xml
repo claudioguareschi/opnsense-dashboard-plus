@@ -19,6 +19,15 @@
             </discover_external_ip>
             <latitude type="TextField"/>
             <longitude type="TextField"/>
+            <!-- IPv6 joins the IPv4 home when a precise IPv6 location agrees with it (auto), or always -->
+            <ipv6_home type="OptionField">
+                <Required>Y</Required>
+                <Default>auto</Default>
+                <OptionValues>
+                    <auto>Automatic (separate only when IPv6 is located elsewhere)</auto>
+                    <ipv4>Same as IPv4</ipv4>
+                </OptionValues>
+            </ipv6_home>
             <!-- write-only; empty: reuse the key of a MaxMind GeoIP alias URL, when one is configured -->
             <license_key type="UpdateOnlyTextField">
                 <Mask>/^[A-Za-z0-9_]{0,64}$/</Mask>

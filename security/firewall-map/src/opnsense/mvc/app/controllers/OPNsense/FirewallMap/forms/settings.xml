@@ -33,6 +33,13 @@
             <advanced>true</advanced>
         </field>
         <field>
+            <id>firewallmap.general.ipv6_home</id>
+            <label>IPv6 location</label>
+            <type>dropdown</type>
+            <help>The map places the firewall from its public IPv4 address. IPv6 joins that location when any precise IPv6 location of the firewall (its inside prefixes first, then its WAN address) is within 50 km of it, or within the two locations' accuracy; a location known only by country never counts. Automatic shows a second house only for IPv6 that is precisely located elsewhere; Same as IPv4 always uses one. Tunnel and VPN interfaces are never used. Not used while both coordinates are set.</help>
+            <advanced>true</advanced>
+        </field>
+        <field>
             <type>header</type>
             <label>High availability</label>
             <advanced>true</advanced>
