@@ -71,32 +71,44 @@ export default class DashboardPlusInterfaces extends DashboardPlusWidget(BaseWid
         return {type, duplex: duplex || ''};
     }
 
+    /* The link state as a pill and icon color: online, offline or no carrier, else ifconfig's own word. */
     _linkState(intf) {
+        const t = this.translations;
         const status = String(intf.status || '').toLowerCase();
         if (status === 'up') {
-            return {icon: 'arrow-up', color: 'text-success', title: this.translations.up};
+            return {text: t.online, color: 'text-success'};
         }
-        if (status === 'down') {
-            return {icon: 'arrow-down', color: 'text-danger', title: this.translations.down};
+        if (status === 'down' || status === 'no carrier') {
+            return {text: status === 'down' ? t.offline : t.no_carrier, color: 'text-danger'};
         }
-        return {icon: 'minus', color: 'text-muted', title: this.translations.unavailable};
+        return {text: status ? status.charAt(0).toUpperCase() + status.slice(1) : t.unavailable, color: 'text-muted'};
     }
 
+    /*
+     * One interface: the icon, the name and its IPv4 and IPv6 addresses; then, after a divider, the
+     * link (media and duplex, or the tunnel type), the MAC address and the state.
+     */
     _row(intf) {
+        const t = this.translations;
         const link = this._linkState(intf);
         const media = this._media(intf);
-        const addresses = [intf.addr4, intf.addr6].filter(Boolean);
-        const icon = this._tunnelType(intf) !== null ? 'right-left' : 'sitemap';
-        return `<div class="flextable-row dashboard-plus-row dashboard-plus-grab" role="row" data-sort-id="${escapeHtml(intf.identifier)}" draggable="true" title="${escapeHtml(this.translations.drag_to_reorder)}">
-            <div role="cell" class="dashboard-plus-interface-icon"><i class="fa fa-fw fa-${icon}" aria-hidden="true"></i></div>
-            <div role="cell" class="dashboard-plus-ellipsis dashboard-plus-interface-name">
-                <a href="/interfaces.php?if=${encodeURIComponent(intf.identifier)}" title="${escapeHtml(intf.identifier)}">${escapeHtml(intf.description)}</a>
+        const line = (value, muted) => (value
+            ? `<div${muted ? ' class="dashboard-plus-muted"' : ''}>${escapeHtml(value)}</div>`
+            : '<div class="dashboard-plus-muted">—</div>');
+        // an IPv6 address may wrap only after one of its colons
+        const v6 = intf.addr6
+            ? `<div class="dashboard-plus-muted dashboard-plus-interface-v6">${escapeHtml(intf.addr6).replace(/:/g, ':<wbr>')}</div>`
+            : line('');
+        return `<div class="flextable-row dashboard-plus-row dashboard-plus-grab" role="row" data-sort-id="${escapeHtml(intf.identifier)}" draggable="true" title="${escapeHtml(t.drag_to_reorder)}">
+            <div role="cell" class="dashboard-plus-interface-icon"><i class="fa fa-fw fa-plug ${link.color}" aria-hidden="true"></i></div>
+            <div role="cell">
+                <a class="dashboard-plus-interface-name" href="/interfaces.php?if=${encodeURIComponent(intf.identifier)}" title="${escapeHtml(intf.identifier)}">${escapeHtml(intf.description)}</a>
+                <div class="dashboard-plus-interface-addresses">${line(intf.addr4)}${v6}</div>
             </div>
-            <div role="cell" class="dashboard-plus-nowrap dashboard-plus-number">
-                <i class="fa fa-fw fa-${link.icon} ${link.color}" title="${escapeHtml(link.title)}"></i> ${escapeHtml(media.type)}
+            <div role="cell" class="dashboard-plus-interface-link">
+                ${line([media.type, media.duplex].filter(Boolean).join('\u2002'))}${line(intf.macaddr, true)}
+                <span class="dashboard-plus-state-pill ${link.color}"><span class="dashboard-plus-state-dot" aria-hidden="true"></span> ${escapeHtml(link.text)}</span>
             </div>
-            <div role="cell" class="dashboard-plus-muted dashboard-plus-small">${addresses.map(escapeHtml).join('<br>') || '—'}</div>
-            <div role="cell" class="dashboard-plus-muted dashboard-plus-small dashboard-plus-number">${escapeHtml(media.duplex)}</div>
         </div>`;
     }
 

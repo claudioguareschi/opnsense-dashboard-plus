@@ -50,7 +50,7 @@ test('ZFS: name and layout, a usage bar in the usage colors, then health, errors
     assert.match(html, /class="progress-bar progress-bar-success" style="width: 1%;"/);
     assert.match(html, /<strong>1%<\/strong>/);
     assert.match(html, /<div class="dashboard-plus-zfs-detail text-muted">0.9 GiB \/ 103 GiB<\/div>/);
-    assert.match(html, /<span class="dashboard-plus-zfs-health text-success"><i class="fa fa-fw fa-circle-check"[^>]*><\/i> Healthy<\/span>/);
+    assert.match(html, /<span class="dashboard-plus-state-pill text-success"><i class="fa fa-fw fa-circle-check"[^>]*><\/i> Healthy<\/span>/);
     assert.match(html, /<span>No errors<\/span><span title="\d{4}-\d\d-\d\d \d\d:\d\d, repaired 0 B">Scrubbed 5 days ago<\/span>/);
 });
 
@@ -64,7 +64,7 @@ test('ZFS: a nearly full pool, never or long ago scrubbed, and problems stand ou
     const bad = widget._zfs([pool({state: 'DEGRADED', layout: 'raidz2', device_errors: 3, data_errors: 2,
         scan: {function: 'resilver', state: 'scanning', progress: 42}})], NOW);
     assert.match(bad, /· RAID-Z2/);
-    assert.match(bad, /dashboard-plus-zfs-health text-warning"><i class="fa fa-fw fa-triangle-exclamation"[^>]*><\/i> Degraded/);
+    assert.match(bad, /dashboard-plus-state-pill text-warning"><i class="fa fa-fw fa-triangle-exclamation"[^>]*><\/i> Degraded/);
     assert.match(bad, /<span class="text-danger">Data loss \(2\)<\/span><span class="text-warning">Resilvering 42%<\/span>/);
     const faulted = widget._zfs([pool({state: 'FAULTED', device_errors: 5})], NOW);
     assert.match(faulted, /text-danger"><i class="fa fa-fw fa-circle-xmark"[^>]*><\/i> Faulted<\/span><span class="text-warning">Device errors \(5\)<\/span>/);

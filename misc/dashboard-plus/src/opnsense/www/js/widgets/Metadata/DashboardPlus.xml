@@ -220,6 +220,9 @@
             <up>Up</up>
             <down>Down</down>
             <unavailable>Unavailable</unavailable>
+            <online>Online</online>
+            <offline>Offline</offline>
+            <no_carrier>No carrier</no_carrier>
             <drag_to_reorder>Drag to reorder</drag_to_reorder>
             <no_interfaces>No interfaces selected</no_interfaces>
             <ipsec_vti>IPsec VTI</ipsec_vti>

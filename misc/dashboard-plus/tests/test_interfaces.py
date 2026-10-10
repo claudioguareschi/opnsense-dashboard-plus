@@ -124,13 +124,14 @@ class InterfacesTest(unittest.TestCase):
         self.assertEqual(list(rows), ["lan", "opt1", "opt9", "lo0", "opt3"])
         self.assertEqual(rows["lan"], {
             "identifier": "lan", "description": "LAN", "device": "ix0", "enabled": True, "virtual": False,
-            "status": "up", "media": "10Gbase-SR <full-duplex,rxpause,txpause>",
+            "status": "up", "media": "10Gbase-SR <full-duplex,rxpause,txpause>", "macaddr": "90:e2:ba:00:00:01",
             "addr4": "192.168.1.248/24", "addr6": "2601:740:8500:5e78::1/64"})
         # down, the current ifconfig status, the identifier when there is no description
         self.assertEqual((rows["opt1"]["status"], rows["opt1"]["description"], rows["opt1"]["enabled"]),
                          ("no carrier", "OPT1", False))
-        self.assertEqual((rows["opt9"]["media"], rows["opt9"]["addr4"], rows["opt9"]["addr6"]),
-                         ("", "10.74.109.115/32", ""))
+        self.assertEqual((rows["opt9"]["media"], rows["opt9"]["macaddr"], rows["opt9"]["addr4"], rows["opt9"]["addr6"]),
+                         ("", "", "10.74.109.115/32", ""))
+        self.assertEqual(rows["opt1"]["macaddr"], "00:1b:21:00:00:02")
         self.assertTrue(rows["lo0"]["virtual"])
         self.assertEqual(rows["opt3"]["addr6"], "2001:470:1f06::2/128")
 

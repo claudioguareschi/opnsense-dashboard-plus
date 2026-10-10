@@ -445,8 +445,9 @@ order. Settings: which gateways and which metrics to show.*
 
 <img src="docs/screenshots/interfaces.png" alt="Interfaces+" width="795">
 
-*Link state, IPv4 and IPv6 addresses and media for the interfaces you choose, including IPsec VTI,
-WireGuard and OpenVPN tunnels; rows can be dragged into any order. Settings: which interfaces and the refresh interval (10, 30 or 60 seconds).
+*For the interfaces you choose: the name with its IPv4 and IPv6 addresses, then the media and duplex
+(or the tunnel type for IPsec VTI, WireGuard and OpenVPN), the MAC address and an Online, Offline or
+No carrier pill in the theme's colors; rows can be dragged into any order. Settings: which interfaces and the refresh interval (10, 30 or 60 seconds).
 A refresh reads `ifconfig -L` once (about 80 ms of CPU) instead of OPNsense's interfaces overview,
 which also reads every SFP module and costs about ten times as much; the addresses are still
 chosen by OPNsense's own functions.*

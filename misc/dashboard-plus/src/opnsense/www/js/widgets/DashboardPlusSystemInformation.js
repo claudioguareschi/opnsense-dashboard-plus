@@ -176,7 +176,7 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
             const state = String(pool.state || '').toLowerCase();
             const [color, icon] = state === 'online' ? ['text-success', 'circle-check']
                 : state === 'degraded' ? ['text-warning', 'triangle-exclamation'] : ['text-danger', 'circle-xmark'];
-            const health = `<span class="dashboard-plus-zfs-health ${color}"><i class="fa fa-fw fa-${icon}" aria-hidden="true"></i> `
+            const health = `<span class="dashboard-plus-state-pill ${color}"><i class="fa fa-fw fa-${icon}" aria-hidden="true"></i> `
                 + `${escapeHtml(t[`zfs_${state}`] || pool.state || t.unavailable)}</span>`;
             const errors = pool.data_errors ? span(fill(t.zfs_data_loss, {count: pool.data_errors}), 'text-danger')
                 : pool.device_errors ? span(fill(t.zfs_device_errors, {count: pool.device_errors}), 'text-warning')

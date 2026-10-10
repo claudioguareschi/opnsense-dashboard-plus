@@ -160,6 +160,15 @@ const STYLE = `
     .dashboard-plus-dragging { opacity: 0.4; outline: 2px dashed currentColor; }
     .dashboard-plus-drop { border: 2px dashed currentColor; }
     .dashboard-plus-grab { cursor: grab; }
+    /* a state (Healthy, Online...) in the theme's success, warning or danger color, with a light fill
+       and border made from that same color, so it follows the light and dark themes */
+    .dashboard-plus-state-pill { display: inline-flex; align-items: center; gap: 0.35em; padding: 0.15em 0.65em;
+        border-radius: 0.35em; font-weight: 600; white-space: nowrap;
+        background: color-mix(in srgb, currentColor 14%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 40%, transparent); }
+    .dashboard-plus-state-pill > .fa { line-height: 1; }
+    /* a dot in the pill's color, centered by the flex box rather than by a font's glyph metrics */
+    .dashboard-plus-state-dot { width: 0.6em; height: 0.6em; border-radius: 50%; background: currentColor; flex: none; }
     /* labels rounded into pills: Bootstrap 3 badges come in gray only */
     .label.dashboard-plus-pill { border-radius: 10em; padding: 0.25em 0.75em; font-size: 85%; vertical-align: middle; }
     .dashboard-plus-bar.progress { height: 0.75em; margin: 0.2em 0 0; }
@@ -202,10 +211,7 @@ const STYLE = `
     .dashboard-plus-zfs-status > span { padding: 0 0.9em; border-left: 1px solid rgba(128, 128, 128, 0.35); }
     .dashboard-plus-zfs-status > span:first-child { padding-left: 0; border-left: 0; }
     /* the pill takes the theme's success, warning or danger color, a light fill and border made from it */
-    .dashboard-plus-zfs-status > .dashboard-plus-zfs-health { display: inline-flex; align-items: center; gap: 0.35em;
-        padding: 0.15em 0.65em; margin-right: 0.9em; border-radius: 0.35em; font-weight: 600;
-        background: color-mix(in srgb, currentColor 14%, transparent);
-        box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 40%, transparent); }
+    .dashboard-plus-zfs-status > .dashboard-plus-state-pill { margin-right: 0.9em; }
 
     .dashboard-plus-traffic { padding: 0 0.25em; }
     .dashboard-plus-legend { display: flex; flex-wrap: wrap; gap: 0.2em 1em; white-space: nowrap; }
@@ -218,10 +224,18 @@ const STYLE = `
     .dashboard-plus-sensor { padding: 0.35em 0; }
     .dashboard-plus-sensor-head { display: flex; justify-content: space-between; align-items: baseline; }
 
-    /* Interfaces+: two lines per interface, the icon beside both */
+    /* Interfaces+: the icon, name and addresses; after a divider the link, MAC address and state */
     .dashboard-plus-interfaces { --dashboard-plus-columns: auto minmax(0, 1fr) auto; row-gap: 0; }
-    .dashboard-plus-interfaces > .dashboard-plus-row.dashboard-plus-row { row-gap: 0.15em; align-items: start; }
-    .dashboard-plus-interfaces .dashboard-plus-interface-icon { grid-row: 1 / span 2; }
+    .dashboard-plus-interfaces > .dashboard-plus-row.dashboard-plus-row { align-items: center; padding: 0.65em 0; }
+    .dashboard-plus-interfaces .dashboard-plus-interface-icon { align-self: start; font-size: 1.45em; padding: 0.05em 0.1em 0 0.15em; }
+    .dashboard-plus-interfaces .dashboard-plus-interface-name { font-weight: 600; font-size: 1.05em; color: inherit; }
+    .dashboard-plus-interfaces .dashboard-plus-interface-addresses,
+    .dashboard-plus-interfaces .dashboard-plus-interface-link { margin-top: 0.15em; line-height: 1.5; font-variant-numeric: tabular-nums; }
+    .dashboard-plus-interfaces .dashboard-plus-interface-link { margin-top: 0; padding-left: 1em; white-space: nowrap;
+        border-left: 1px solid rgba(128, 128, 128, 0.35); }
+    .dashboard-plus-interfaces .dashboard-plus-state-pill { margin-top: 0.35em; }
+    /* IPv6 a little smaller, and broken only after a colon when it must wrap (<wbr> marks those) */
+    .dashboard-plus-interfaces .dashboard-plus-interface-v6 { font-size: 0.9em; overflow-wrap: normal; }
 
     /* Firewall Logs+: the interface and rule go on a second line, so the addresses keep room */
     .dashboard-plus-logs { --dashboard-plus-columns: auto auto minmax(0, 1fr) minmax(0, 1fr); }

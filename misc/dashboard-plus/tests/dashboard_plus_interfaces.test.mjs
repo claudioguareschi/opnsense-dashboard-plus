@@ -56,3 +56,29 @@ test('Interfaces+ reads its own endpoint, not the interfaces overview', async ()
     assert.deepEqual(calls, ['/api/dashboardplus/system/interfaces']);
     assert.deepEqual(widget.cachedInterfaces.map(row => row.identifier), ['lan']);
 });
+
+test('Interfaces+ rows: name and addresses, then link, MAC address and a state pill in the theme colors', () => {
+    // _media decodes the HTML-escaped media text with jQuery: a stand-in that returns it as is
+    globalThis.$ = () => ({html(value) { this.value = value; return this; }, text() { return this.value; }});
+    const widget = new Interfaces({translations: {online: 'Online', offline: 'Offline', no_carrier: 'No carrier',
+        unavailable: 'Unavailable', ipsec_vti: 'IPsec VTI', drag_to_reorder: 'Drag to reorder'}});
+    const wan = widget._row({identifier: 'wan', description: 'WAN', device: 'igb0', status: 'up',
+        media: '1000baseT <full-duplex>', macaddr: '00:1c:42:9c:ba:c5', addr4: '73.180.73.118/22',
+        addr6: '2001:558:6041:1:9cba:c5ad:3caa:d05e/128'});
+    assert.match(wan, /<i class="fa fa-fw fa-plug text-success"/);
+    assert.match(wan, /<a class="dashboard-plus-interface-name" href="\/interfaces.php\?if=wan"[^>]*>WAN<\/a>/);
+    assert.match(wan, /<div>73.180.73.118\/22<\/div><div class="dashboard-plus-muted dashboard-plus-interface-v6">2001:<wbr>558:<wbr>6041:<wbr>1:<wbr>9cba:<wbr>c5ad:<wbr>3caa:<wbr>d05e\/128<\/div>/);
+    assert.match(wan, /<div>1000BaseT full duplex<\/div><div class="dashboard-plus-muted">00:1c:42:9c:ba:c5<\/div>/);
+    assert.match(wan, /<span class="dashboard-plus-state-pill text-success"><span class="dashboard-plus-state-dot"[^>]*><\/span> Online<\/span>/);
+    // a tunnel: its type, no MAC address, no IPv6
+    const vti = widget._row({identifier: 'opt3', description: 'GreenwoodVTI', device: 'ipsec1', status: 'up',
+        media: '', macaddr: '', addr4: '10.255.255.2/30', addr6: ''});
+    assert.match(vti, /<div>10.255.255.2\/30<\/div><div class="dashboard-plus-muted">—<\/div>/);
+    assert.match(vti, /<div>IPsec VTI<\/div><div class="dashboard-plus-muted">—<\/div>/);
+    // down and no carrier in the danger color, anything else in ifconfig's own word, muted
+    assert.match(widget._row({identifier: 'a', description: 'A', status: 'no carrier'}), /text-danger"><span class="dashboard-plus-state-dot"[^>]*><\/span> No carrier/);
+    assert.match(widget._row({identifier: 'b', description: 'B', status: 'down'}), /fa-plug text-danger[\s\S]*Offline/);
+    assert.match(widget._row({identifier: 'c', description: 'C', status: 'associated'}), /text-muted"><span class="dashboard-plus-state-dot"[^>]*><\/span> Associated/);
+    // names are escaped
+    assert.match(widget._row({identifier: 'x', description: '<b>', status: 'up'}), />&lt;b&gt;<\/a>/);
+});

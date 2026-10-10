@@ -53,6 +53,8 @@ function dashboardplus_ifconfig_details(array $lines)
             }
         } elseif ($current === null) {
             continue;
+        } elseif (strpos($line, "\tether ") === 0) {
+            $result[$current]['macaddr'] = $parts[1] ?? '';
         } elseif (strpos($line, "\tinet ") !== false) {
             $address = ['ipaddr' => $parts[1], 'tunnel' => false];
             for ($i = 0; $i < count($parts); ++$i) {
@@ -139,6 +141,7 @@ function dashboardplus_interface_rows(array $interfaces, array $details, callabl
             'virtual' => !empty($config['virtual']),
             'status' => $status,
             'media' => $info['media'] ?? '',
+            'macaddr' => $info['macaddr'] ?? '',
         ];
         foreach (['addr4' => $primary4, 'addr6' => $primary6] as $key => $primary) {
             $address = $primary($identifier);
