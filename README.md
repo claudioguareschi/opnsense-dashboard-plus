@@ -535,8 +535,10 @@ FM_COLLECTOR_TEST_CC=clang FM_COLLECTOR_TEST_FLAGS="-g -fsanitize=address,undefi
 
 ### Publishing (maintainer)
 
-All packages share one version (`PLUGIN_VERSION` in each Makefile, no revision) and are released
-together: 0.50, 0.51, ...
+Releases share one version (`PLUGIN_VERSION` in each Makefile, no revision) and are published
+together: 0.50, 0.51, ... Between releases a package under development carries test builds
+numbered after the last release (Firewall Map+ 0.59.12, 0.59.13, ...), which are never tagged or
+published; at the next release every Makefile moves to the new version together (0.60).
 The signed feed lives in the `packages` branch, kept as a single commit. On the machine holding
 the signing key:
 
@@ -551,7 +553,7 @@ versions and signs the whole catalog.
 
 ## Changelog
 
-- **0.60** (in development; Firewall Map+ test builds 0.59.12 to 0.59.20): the collector audit
+- **0.60** (in development; Firewall Map+ test builds 0.59.12 to 0.59.21): the collector audit
   remediation (bounded classification refresh, stricter request parsing, accounted response
   buffer, fuzzed decoder), adaptive refresh in the map and widget, a tabbed settings page with
   OPNsense's advanced mode, Country blocklists from GeoIP aliases, *Maximum flows on the map*
