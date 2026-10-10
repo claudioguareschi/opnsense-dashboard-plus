@@ -404,7 +404,9 @@ Since some of these widgets are meant to extend the information provided by the 
 <img src="docs/screenshots/system-information.png" alt="System Information+" width="795">
 
 *Name and GUI user; hardware (manufacturer, model, serial number); firmware (vendor, version,
-release date, boot method) and the current and next boot environment; OPNsense and FreeBSD
+release date, boot method) and the current and next boot environment; on ZFS, each pool's layout
+(single disk, stripe, mirror, RAID-Z1/2/3, dRAID), health, device errors or data loss, capacity and
+last scrub (orange when it is older than 35 days or never ran); OPNsense and FreeBSD
 versions with update status; CPU model, current and maximum frequency and core/thread layout;
 crypto hardware (AES-NI, QuickAssist) and the algorithms accelerated for IPsec; kernel PTI and MDS
 mitigation state; uptime, date and time; and the DNS resolver the firewall itself uses.

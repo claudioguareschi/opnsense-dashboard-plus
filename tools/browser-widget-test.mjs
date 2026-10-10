@@ -32,13 +32,24 @@ const renderTitle = () => {};
 const ensureStyle = () => {};
 const sharedRequest = (widget, url) => widget.ajaxCall(url);
 const DashboardPlusWidget = Base => Base;
+const fill = (template, values) => String(template).replace(/\\{(\\w+)\\}/g, (match, name) => (name in values ? String(values[name]) : match));
+const mergeOrder = (order, selected) => {
+    const current = [...new Set(Array.isArray(order) ? order : [])];
+    const wanted = [...new Set(Array.isArray(selected) ? selected : [])];
+    return [...current.filter(item => wanted.includes(item)), ...wanted.filter(item => !current.includes(item))];
+};
+const makeSortable = () => {};
+const isDragging = () => false;
+const isEditMode = () => false;
+const watchEditMode = () => () => {};
 `;
 
-const COMMON_IMPORT = /const \{[^}]+\}\s*=\s*\n\s*await import\(`\.\/DashboardPlusCommon\.js\$\{new URL\(import\.meta\.url\)\.search\}`\);/;
+const COMMON_IMPORT = /const \{[^}]+\}\s*=\s*await import\(`\.\/DashboardPlusCommon\.js\$\{new URL\(import\.meta\.url\)\.search\}`\);/;
 
 /** Load a browser widget in Node with only the shared widget primitives it uses in unit tests. */
 export async function loadBrowserWidget(path) {
     const previousBaseWidget = globalThis.BaseWidget;
+    const previousTableWidget = globalThis.BaseTableWidget;
     globalThis.BaseWidget = class {
         constructor(config = {}) {
             this.config = config;
@@ -46,10 +57,12 @@ export async function loadBrowserWidget(path) {
             this.translations = config.translations || {};
         }
     };
+    globalThis.BaseTableWidget = class extends globalThis.BaseWidget {};
     try {
         const source = (await readFile(path, 'utf8')).replace(COMMON_IMPORT, COMMON_STUB);
         return (await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)).default;
     } finally {
         globalThis.BaseWidget = previousBaseWidget;
+        globalThis.BaseTableWidget = previousTableWidget;
     }
 }

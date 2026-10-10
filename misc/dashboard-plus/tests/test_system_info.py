@@ -25,6 +25,7 @@
 """Unit tests for Dashboard Plus hardware parsing."""
 
 import importlib.util
+import json
 from pathlib import Path
 import unittest
 
@@ -330,3 +331,82 @@ forward-zone:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def zpool(pools):
+    return json.dumps({"output_version": {"command": "zpool status", "vers_major": 0, "vers_minor": 1},
+                       "pools": pools})
+
+
+def disk(name, errors=(0, 0, 0), kind="disk", **extra):
+    return {"name": name, "vdev_type": kind, "class": "normal", "state": "ONLINE", "read_errors": errors[0],
+            "write_errors": errors[1], "checksum_errors": errors[2], **extra}
+
+
+def pool(name, children, state="ONLINE", error_count=0, scan=None, size=1000, allocated=487):
+    root = {"name": name, "vdev_type": "root", "state": state, "total_space": size, "alloc_space": allocated,
+            "read_errors": 0, "write_errors": 0, "checksum_errors": 0,
+            "vdevs": {child["name"]: child for child in children}}
+    result = {"name": name, "state": state, "vdevs": {name: root}, "error_count": error_count}
+    if scan is not None:
+        result["scan_stats"] = scan
+    return result
+
+
+class ZfsTest(unittest.TestCase):
+    """zpool status -j --json-int (OpenZFS 2.3 and later) for the ZFS section of System Information+."""
+
+    def test_a_single_disk_pool_never_scrubbed_as_on_firewall2(self):
+        output = ('{"output_version":{"command":"zpool status","vers_major":0,"vers_minor":1},"pools":{"zroot":'
+                  '{"name":"zroot","state":"ONLINE","pool_guid":15055133742887778497,"txg":19784,"spa_version":5000,'
+                  '"zpl_version":5,"vdevs":{"zroot":{"name":"zroot","vdev_type":"root","guid":15055133742887778497,'
+                  '"class":"normal","state":"ONLINE","alloc_space":1960869888,"total_space":229780750336,'
+                  '"def_space":229780750336,"read_errors":0,"write_errors":0,"checksum_errors":0,"vdevs":{"ada0p4":'
+                  '{"name":"ada0p4","vdev_type":"disk","guid":4002880333967051339,"path":"/dev/ada0p4","class":"normal",'
+                  '"state":"ONLINE","alloc_space":1960869888,"total_space":229780750336,"read_errors":0,'
+                  '"write_errors":0,"checksum_errors":0,"slow_ios":0}}}},"error_count":0}}}')
+        self.assertEqual(SYSTEM_INFO.parse_zpool_status(output), [{
+            "name": "zroot", "state": "ONLINE", "layout": "single", "device_errors": 0, "data_errors": 0,
+            "size": 229780750336, "allocated": 1960869888, "capacity": 0, "scan": None,
+        }])
+
+    def test_layouts(self):
+        layouts = {
+            "mirror": [{**disk("mirror-0", kind="mirror"), "vdevs": {"a": disk("a"), "b": disk("b")}}],
+            "raidz2": [{**disk("raidz2-0", kind="raidz"), "vdevs": {"a": disk("a")}},
+                       {**disk("log0"), "class": "log"}, {**disk("special0", kind="mirror"), "class": "special"}],
+            "stripe": [disk("ada0"), disk("ada1")],
+            "mixed": [{**disk("mirror-0", kind="mirror")}, {**disk("raidz1-1", kind="raidz")}],
+            "draid": [{**disk("draid2:4d:1c:0s-0", kind="draid")}],
+        }
+        pools = {name: pool(name, children) for name, children in layouts.items()}
+        parsed = {item["name"]: item["layout"] for item in SYSTEM_INFO.parse_zpool_status(zpool(pools))}
+        self.assertEqual(parsed, {name: name for name in layouts})
+
+    def test_errors_capacity_and_the_last_scrub(self):
+        scan = {"function": "SCRUB", "state": "FINISHED", "start_time": 1759633200, "end_time": 1759633212,
+                "to_examine": 4000, "examined": 4000, "issued": 4000, "processed": 1536, "errors": 0}
+        mirror = {**disk("mirror-0", kind="mirror", errors=(1, 0, 0)),
+                  "vdevs": {"a": disk("a", errors=(0, 0, 3)), "b": disk("b")}}
+        parsed = SYSTEM_INFO.parse_zpool_status(zpool({"tank": pool("tank", [mirror], state="DEGRADED",
+                                                                          error_count=2, scan=scan)}))[0]
+        self.assertEqual((parsed["state"], parsed["device_errors"], parsed["data_errors"], parsed["capacity"]),
+                         ("DEGRADED", 4, 2, 48))
+        self.assertEqual(parsed["scan"], {"function": "scrub", "state": "finished", "start": 1759633200,
+                                          "end": 1759633212, "errors": 0, "repaired": 1536, "progress": 100})
+
+    def test_a_scan_under_way_and_none_at_all(self):
+        running = {"function": "RESILVER", "state": "SCANNING", "start_time": 1759633200, "end_time": 0,
+                   "to_examine": 1000, "issued": 420, "processed": 0, "errors": 0}
+        pools = {"a": pool("a", [disk("ada0")], scan=running),
+                 "b": pool("b", [disk("ada1")], scan={"function": "NONE", "state": "NONE"})}
+        parsed = {item["name"]: item["scan"] for item in SYSTEM_INFO.parse_zpool_status(zpool(pools))}
+        self.assertEqual((parsed["a"]["function"], parsed["a"]["state"], parsed["a"]["progress"]),
+                         ("resilver", "scanning", 42))
+        self.assertIsNone(parsed["b"])
+
+    def test_no_pools_or_no_json(self):
+        self.assertEqual(SYSTEM_INFO.parse_zpool_status(zpool({})), [])
+        for output in ("", "no pools available", "[]", "null", '{"pools": []}'):
+            with self.subTest(output=output):
+                self.assertEqual(SYSTEM_INFO.parse_zpool_status(output), [])

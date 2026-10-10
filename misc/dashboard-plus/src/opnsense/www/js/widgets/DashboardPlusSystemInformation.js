@@ -29,12 +29,17 @@ const {
     isEditMode, watchEditMode, sharedRequest
 } = await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
-// Every section, in the default order. Boot Environment and Crypto Hardware show only where the
-// firewall has them.
+// Every section, in the default order. Boot Environment, ZFS and Crypto Hardware show only where
+// the firewall has them.
 const SECTIONS = [
-    'name', 'user', 'hardware', 'firmware', 'boot_environment', 'version', 'cpu', 'accelerator',
+    'name', 'user', 'hardware', 'firmware', 'boot_environment', 'zfs', 'version', 'cpu', 'accelerator',
     'ipsec', 'accelerated_algorithms', 'pti', 'mds', 'uptime', 'datetime', 'dns_servers'
 ];
+// The sections a layout saved before known_sections was recorded knew about: one added since
+// then (ZFS) appears once in such a layout, after the section it follows by default.
+const FIRST_SECTIONS = SECTIONS.filter(section => section !== 'zfs');
+// A pool not scrubbed for longer than this is worth a look (FreeBSD scrubs only when told to).
+const SCRUB_DAYS = 35;
 
 export default class DashboardPlusSystemInformation extends DashboardPlusWidget(BaseTableWidget) {
     constructor(config) {
@@ -118,6 +123,70 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
             lines.push(...servers.map(server => escapeHtml(server)));
         }
         return lines.length > 0 ? lines.join('<br>') : escapeHtml(t.not_set);
+    }
+
+    _bytes(value) {
+        const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+        let size = Number(value) || 0;
+        let unit = 0;
+        while (size >= 1024 && unit < units.length - 1) {
+            size /= 1024;
+            unit += 1;
+        }
+        return `${size >= 10 || unit === 0 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`;
+    }
+
+    _when(epoch, now = Date.now() / 1000) {
+        const t = this.translations;
+        const date = new Date(epoch * 1000);
+        const pad = number => String(number).padStart(2, '0');
+        const text = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        const days = Math.max(0, Math.floor((now - epoch) / 86400));
+        return {date: text, age: days === 0 ? t.zfs_today : days === 1 ? t.zfs_yesterday : fill(t.zfs_days_ago, {count: days}), days};
+    }
+
+    /* The last scrub or resilver of a pool, in one line, and whether it deserves attention. */
+    _scan(scan, now) {
+        const t = this.translations;
+        if (!scan || !['scrub', 'resilver'].includes(scan.function)) {
+            return {text: t.zfs_never_scrubbed, color: 'text-warning'};
+        }
+        if (scan.state === 'scanning') {
+            return {text: fill(scan.function === 'resilver' ? t.zfs_resilvering : t.zfs_scrubbing, {percent: scan.progress ?? 0}),
+                    color: scan.function === 'resilver' ? 'text-warning' : ''};
+        }
+        const when = this._when(scan.end || scan.start || 0, now);
+        if (scan.state === 'canceled') {
+            return {text: fill(t.zfs_scrub_canceled, when), color: 'text-warning'};
+        }
+        const found = [fill(t.zfs_repaired, {size: this._bytes(scan.repaired)})];
+        if (scan.errors) {
+            found.push(fill(t.zfs_scan_errors, {count: scan.errors}));
+        }
+        const template = scan.function === 'resilver' ? t.zfs_last_resilver : t.zfs_last_scrub;
+        return {text: `${fill(template, when)} · ${found.join(', ')}`,
+                color: scan.errors ? 'text-danger' : when.days > SCRUB_DAYS ? 'text-warning' : ''};
+    }
+
+    /* Each pool: layout, health, errors and capacity, and its last scrub under them. */
+    _zfs(pools, now = Date.now() / 1000) {
+        const t = this.translations;
+        const colored = (text, color) => (color ? `<span class="${color}">${escapeHtml(text)}</span>` : escapeHtml(text));
+        return pools.map(pool => {
+            const state = String(pool.state || '').toLowerCase();
+            const health = colored(t[`zfs_${state}`] || pool.state || t.unavailable,
+                state === 'online' ? 'text-success' : state === 'degraded' ? 'text-warning' : 'text-danger');
+            const errors = pool.data_errors ? colored(fill(t.zfs_data_loss, {count: pool.data_errors}), 'text-danger')
+                : pool.device_errors ? colored(fill(t.zfs_device_errors, {count: pool.device_errors}), 'text-warning')
+                : escapeHtml(t.zfs_no_errors);
+            const layout = t[`zfs_${pool.layout}`] || pool.layout;
+            const capacity = Number.isInteger(pool.capacity)
+                ? fill(t.zfs_capacity, {percent: pool.capacity, size: this._bytes(pool.size)}) : null;
+            const line = [layout && escapeHtml(layout), health, errors, capacity && escapeHtml(capacity)]
+                .filter(Boolean).join(' · ');
+            const scan = this._scan(pool.scan, now);
+            return `<strong>${escapeHtml(pool.name)}:</strong> ${line}<br>${colored(scan.text, scan.color)}`;
+        }).join('<br>');
     }
 
     /* The system script reports states as codes; show them in the UI language. */
@@ -210,6 +279,9 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
         if ((details.crypto_hardware || []).length > 0) {
             sections.accelerator = this._cryptoHardware(details.crypto_hardware);
         }
+        if ((details.zfs_pools || []).length > 0) {
+            sections.zfs = this._zfs(details.zfs_pools);
+        }
         return sections;
     }
 
@@ -242,15 +314,37 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
             .toggleClass('dashboard-plus-grab', editing);
     }
 
+    /*
+     * A layout saved with its own section list keeps it; a section added since it was saved shows
+     * once, after the section it follows by default, and from then on it is chosen like the others.
+     */
+    _withNewSections(config) {
+        if (!Array.isArray(config?.sections)) {
+            return config;
+        }
+        const known = Array.isArray(config.known_sections) ? config.known_sections : FIRST_SECTIONS;
+        const sections = [...config.sections];
+        SECTIONS.filter(section => !known.includes(section) && !sections.includes(section)).forEach(section => {
+            const before = SECTIONS.slice(0, SECTIONS.indexOf(section)).reverse().find(item => sections.includes(item));
+            sections.splice(before === undefined ? 0 : sections.indexOf(before) + 1, 0, section);
+        });
+        const updated = {...config, sections, known_sections: [...SECTIONS]};
+        if (JSON.stringify(updated) !== JSON.stringify(config)) {
+            this.setWidgetConfig(updated);
+        }
+        return updated;
+    }
+
     async onMarkupRendered() {
         renderTitle(this);
-        this.currentConfig = await this.getWidgetConfig();
+        this.currentConfig = this._withNewSections(await this.getWidgetConfig());
         makeSortable($(`#${this._tableId()}`), {
             itemSelector: '.flextable-row[data-sort-id]',
             placeholderClass: 'flextable-row',
             label: this.translations.drag_to_reorder,
             onReorder: order => {
                 this.currentConfig.sections = mergeOrder(order, this.currentConfig.sections || order);
+                this.currentConfig.known_sections = [...SECTIONS];
                 this.setWidgetConfig(this.currentConfig);
             }
         });
@@ -278,6 +372,7 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
         const config = await this.getWidgetConfig();
         // The dialog returns the selection in option order; keep the dragged order.
         config.sections = mergeOrder(previous, config.sections);
+        config.known_sections = [...SECTIONS];
         this.setWidgetConfig(config);
         this.currentConfig = config;
         this._render();

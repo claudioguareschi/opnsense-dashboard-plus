@@ -21,6 +21,37 @@
             <release_date>Release Date</release_date>
             <boot_method>Boot Method</boot_method>
             <boot_environment>Boot Environment</boot_environment>
+            <zfs>ZFS</zfs>
+            <zfs_single>Single disk</zfs_single>
+            <zfs_stripe>Stripe</zfs_stripe>
+            <zfs_mirror>Mirror</zfs_mirror>
+            <zfs_raidz1>RAID-Z1</zfs_raidz1>
+            <zfs_raidz2>RAID-Z2</zfs_raidz2>
+            <zfs_raidz3>RAID-Z3</zfs_raidz3>
+            <zfs_draid>dRAID</zfs_draid>
+            <zfs_mixed>Mixed</zfs_mixed>
+            <zfs_online>Healthy</zfs_online>
+            <zfs_degraded>Degraded</zfs_degraded>
+            <zfs_faulted>Faulted</zfs_faulted>
+            <zfs_offline>Offline</zfs_offline>
+            <zfs_removed>Removed</zfs_removed>
+            <zfs_unavail>Unavailable</zfs_unavail>
+            <zfs_suspended>Suspended</zfs_suspended>
+            <zfs_no_errors>No errors</zfs_no_errors>
+            <zfs_device_errors>Device errors ({count})</zfs_device_errors>
+            <zfs_data_loss>Data loss ({count})</zfs_data_loss>
+            <zfs_capacity>{percent}% of {size}</zfs_capacity>
+            <zfs_last_scrub>Last scrub {date} ({age})</zfs_last_scrub>
+            <zfs_last_resilver>Last resilver {date} ({age})</zfs_last_resilver>
+            <zfs_scrub_canceled>Scrub canceled {date} ({age})</zfs_scrub_canceled>
+            <zfs_repaired>repaired {size}</zfs_repaired>
+            <zfs_scan_errors>{count} errors</zfs_scan_errors>
+            <zfs_never_scrubbed>Never scrubbed</zfs_never_scrubbed>
+            <zfs_scrubbing>Scrub in progress: {percent}%</zfs_scrubbing>
+            <zfs_resilvering>Resilver in progress: {percent}%</zfs_resilvering>
+            <zfs_today>today</zfs_today>
+            <zfs_yesterday>yesterday</zfs_yesterday>
+            <zfs_days_ago>{count} days ago</zfs_days_ago>
             <current>Current</current>
             <cpu_topology>{threads} CPUs: {packages} package(s) × {cores} core(s) × {threads_per_core} hardware threads</cpu_topology>
             <next>Next</next>

@@ -38,6 +38,7 @@ SYSCTL = "/sbin/sysctl"
 DMESG = "/sbin/dmesg"
 MOUNT = "/sbin/mount"
 BECTL = "/sbin/bectl"
+ZPOOL = "/sbin/zpool"
 SOCKSTAT = "/usr/bin/sockstat"
 RESOLV_CONF = "/etc/resolv.conf"
 UNBOUND_CONF = "/var/unbound/unbound.conf"
@@ -526,6 +527,92 @@ def collect_boot_environments(output):
     return environments
 
 
+def _vdevs(vdev):
+    """A vdev's children, in the order zpool status lists them."""
+    children = vdev.get("vdevs") if isinstance(vdev, dict) else None
+    return [child for child in children.values() if isinstance(child, dict)] if isinstance(children, dict) else []
+
+
+def zfs_layout(root):
+    """One word for how a pool stores its data: single, stripe, mirror, raidz1-3, draid or mixed.
+
+    Only the data vdevs count; log, special, dedup and cache devices do not change the layout.
+    """
+    kinds = []
+    for vdev in _vdevs(root):
+        if vdev.get("class", "normal") != "normal":
+            continue
+        kind = vdev.get("vdev_type")
+        if kind in ("disk", "file"):
+            kinds.append("disk")
+        elif kind == "raidz":
+            match = re.match(r"raidz(\d)", str(vdev.get("name", "")))
+            kinds.append(f"raidz{match.group(1) if match else 1}")
+        elif kind in ("mirror", "draid"):
+            kinds.append(kind)
+        else:
+            kinds.append(str(kind or "unknown"))
+    if not kinds:
+        return None
+    if set(kinds) == {"disk"}:
+        return "single" if len(kinds) == 1 else "stripe"
+    return kinds[0] if len(set(kinds)) == 1 else "mixed"
+
+
+def zfs_device_errors(vdev):
+    """Read, write and checksum errors of every device under a vdev."""
+    total = 0
+    for child in _vdevs(vdev):
+        total += sum(int_value(child.get(key)) or 0 for key in ("read_errors", "write_errors", "checksum_errors"))
+        total += zfs_device_errors(child)
+    return total
+
+
+def zfs_scan(stats):
+    """The last scrub or resilver: what, how it ended, when, and what it found."""
+    if not isinstance(stats, dict) or stats.get("function") in (None, "NONE"):
+        return None
+    to_examine = int_value(stats.get("to_examine")) or 0
+    issued = int_value(stats.get("issued")) or 0
+    return {
+        "function": str(stats.get("function", "")).lower(),
+        "state": str(stats.get("state", "")).lower(),
+        "start": int_value(stats.get("start_time")),
+        "end": int_value(stats.get("end_time")),
+        "errors": int_value(stats.get("errors")) or 0,
+        "repaired": int_value(stats.get("processed")) or 0,
+        "progress": int(issued * 100 / to_examine) if to_examine else None,
+    }
+
+
+def parse_zpool_status(output):
+    """The pools of zpool status -j --json-int: layout, health, errors, capacity, last scan."""
+    try:
+        pools = json.loads(output).get("pools")
+    except (ValueError, AttributeError):
+        return []
+    result = []
+    for name, pool in sorted((pools or {}).items()) if isinstance(pools, dict) else []:
+        if not isinstance(pool, dict):
+            continue
+        root = (pool.get("vdevs") or {}).get(name, {})
+        size = int_value(root.get("total_space")) or 0
+        allocated = int_value(root.get("alloc_space")) or 0
+        result.append({
+            "name": name,
+            "state": str(pool.get("state", "")),
+            "layout": zfs_layout(root),
+            "device_errors": zfs_device_errors(root),
+            "data_errors": int_value(pool.get("error_count")) or 0,
+            "size": size,
+            "allocated": allocated,
+            # as zpool list shows it: the whole percent below
+            "capacity": int(allocated * 100 / size) if size else None,
+            "scan": zfs_scan(pool.get("scan_stats")),
+        })
+    return result
+
+
 def cpu_package_count(sysctl_packages, dmesg_output):
     """Use the FreeBSD SMP boot record when the package sysctl is absent."""
     packages = int_value(sysctl_packages)
@@ -574,6 +661,7 @@ def collect():
     mds = sysctl_value("machdep.mitigations.mds.state") or sysctl_value("hw.mds_disable_state")
     kernel_boot_method = sysctl_value("machdep.bootmethod")
     boot_environments = collect_boot_environments(run([BECTL, "list", "-H"]))
+    zfs_pools = parse_zpool_status(run([ZPOOL, "status", "-j", "--json-int"]))
 
     accelerator = collect_qat(
         run([PCICONF, "-lv"]),
@@ -606,6 +694,7 @@ def collect():
             ),
         },
         "boot_environment": boot_environments,
+        "zfs_pools": zfs_pools,
         "cpu": {
             "model": sysctl_value("hw.model"),
             "packages": cpu_package_count(sysctl_value("kern.smp.packages"), dmesg_output),
