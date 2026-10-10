@@ -553,13 +553,13 @@ versions and signs the whole catalog.
 
 ## Changelog
 
-- **0.60** (all packages; Firewall Map+ test builds 0.59.12 to 0.59.21): Firewall Map+ gets the
-  collector audit remediation (bounded classification refresh, stricter request parsing, accounted
-  response buffer, fuzzed decoder), adaptive refresh in the map and widget, a tabbed settings page
-  with OPNsense's advanced mode, Country blocklists from GeoIP aliases, *Maximum flows on the map*
-  (the collector's `--flows`, 25 to 1000) and the graphical ranking profile editor (read-only
-  built-ins, new profiles with **+**). VNStat Traffic+ takes its select and table colors from the
-  theme and its chart spans the full width; QuickAssist+'s live chart scrolls like Traffic's.
+- **0.60** Firewall Map+ gets the collector audit remediation (bounded classification refresh,
+  stricter request parsing, accounted response buffer, fuzzed decoder), adaptive refresh in the
+  map and widget, a tabbed settings page with OPNsense's advanced mode, Country blocklists from
+  GeoIP aliases, *Maximum flows on the map* (the collector's `--flows`, 25 to 1000) and the
+  graphical ranking profile editor (read-only built-ins, new profiles with **+**).
+  VNStat Traffic+ takes its select and table colors from the theme and its chart spans the full
+  width; QuickAssist+'s live chart scrolls like Traffic's.
 - **0.59** (all packages): Firewall Map+ keeps complete shared incident snapshots while disclosing
   captured PF connection states only to users with OPNsense's native Diagnostics: Show States privilege.
 - **0.58** (all packages): refines Dashboard Plus QuickAssist+ with a Chart.js activity graph,
