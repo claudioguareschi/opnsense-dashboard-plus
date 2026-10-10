@@ -560,6 +560,7 @@ versions and signs the whole catalog.
   graphical ranking profile editor (read-only built-ins, new profiles with **+**).
   VNStat Traffic+ takes its select and table colors from the theme and its chart spans the full
   width; QuickAssist+'s live chart scrolls like Traffic's.
+  Investigating an IPv6 address on the Firewall Map page works again.
 - **0.59** (all packages): Firewall Map+ keeps complete shared incident snapshots while disclosing
   captured PF connection states only to users with OPNsense's native Diagnostics: Show States privilege.
 - **0.58** (all packages): refines Dashboard Plus QuickAssist+ with a Chart.js activity graph,

@@ -39,14 +39,17 @@ class InvestigateController extends ApiControllerBase
 {
     /**
      * POST only: a lookup spends third-party quota (the AbuseIPDB key) and stores a verdict, so it
-     * must not be started by a link (OPNsense checks the CSRF token on POST).
+     * must not be started by a link (OPNsense checks the CSRF token on POST). The address is
+     * percent-decoded first: the router passes path segments still encoded, so an IPv6 address
+     * arrives with %3A.
      */
     public function addressAction($address = null)
     {
         if (!$this->request->isPost()) {
             return ['status' => 'failed', 'error' => 'POST required'];
         }
-        if (!is_string($address) || filter_var($address, FILTER_VALIDATE_IP) === false) {
+        $address = rawurldecode((string)$address);
+        if (filter_var($address, FILTER_VALIDATE_IP) === false) {
             return ['status' => 'failed', 'error' => 'not an IP address'];
         }
         // "abuseipdb" for the Reputation card's check; anything else looks up every source
