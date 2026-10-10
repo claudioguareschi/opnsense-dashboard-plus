@@ -92,13 +92,15 @@ test('QuickAssist+ shows a per-device AE figure only when all device counts matc
     assert.equal(widget._mhz(0), '');
 });
 
-test('QuickAssist+ retains only the current minute of Chart.js samples', () => {
+test('QuickAssist+ keeps Chart.js samples for the streaming ttl', () => {
     const widget = new QuickAssist({translations});
     widget._recordRate({completed: 1}, 1000);
     widget._recordRate({completed: 2}, 61000);
     assert.deepEqual(widget.rateSamples, [{x: 1000, y: 1}, {x: 61000, y: 2}]);
-    widget._recordRate({completed: 3}, 61001);
-    assert.deepEqual(widget.rateSamples, [{x: 61000, y: 2}, {x: 61001, y: 3}]);
+    widget._recordRate({completed: 3}, 71000);
+    assert.deepEqual(widget.rateSamples.map(sample => sample.x), [1000, 61000, 71000]);
+    widget._recordRate({completed: 4}, 71001);
+    assert.deepEqual(widget.rateSamples, [{x: 61000, y: 2}, {x: 71000, y: 3}, {x: 71001, y: 4}]);
 });
 
 test('QuickAssist+ requests its live sample through the widget request context', async () => {

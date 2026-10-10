@@ -456,10 +456,12 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
         if (errorElement) errorElement.textContent = error;
     }
 
+    // As in Traffic: plotted on the browser clock the realtime axis scrolls on, and kept as long as
+    // the streaming ttl, so the line runs past the left edge instead of stopping inside it.
     _recordRate(rates, at) {
         const now = at || Date.now();
         this.rateSamples.push({x: now, y: rates.completed});
-        this.rateSamples = this.rateSamples.filter(sample => sample.x >= now - HISTORY_MS);
+        this.rateSamples = this.rateSamples.filter(sample => sample.x >= now - HISTORY_MS - 10000);
     }
 
     _renderChart() {
@@ -482,8 +484,8 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
                     tooltip: {callbacks: {label: context => `${this.translations.requests_per_second}: ${this._compact(context.raw.y)} req/s`}}},
                 scales: {
                     y: {beginAtZero: true, ticks: {maxTicksLimit: 5, callback: value => `${this._compact(value)}/s`}},
-                    x: {type: 'realtime', time: {tooltipFormat: 'HH:mm:ss', unit: 'second', displayFormats: {second: 'HH:mm:ss'}},
-                        realtime: {duration: HISTORY_MS, delay: 2000}, ticks: {maxRotation: 0, autoSkip: true, maxTicksLimit: 5}}
+                    x: {type: 'realtime', time: {tooltipFormat: 'HH:mm:ss', unit: 'minute', displayFormats: {minute: 'HH:mm'}},
+                        realtime: {duration: HISTORY_MS, delay: 2000}}
                 }
             }
         });
@@ -497,7 +499,7 @@ export default class DashboardPlusQuickAssist extends DashboardPlusWidget(BaseWi
         }
         const health = this._health(result);
         const rates = this._rates(result);
-        this._recordRate(rates, sampledAt);
+        this._recordRate(rates);
         this._renderChart();
         this._render(result, rates, health);
     }

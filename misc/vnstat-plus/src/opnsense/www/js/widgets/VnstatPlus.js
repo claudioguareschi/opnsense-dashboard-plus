@@ -112,10 +112,7 @@ export default class VnstatPlus extends BaseWidget {
                     #${rootId} { width: 95%; margin: 0.25em auto; }
                     #${rootId} .vnstat-plus-controls { display: flex; flex-wrap: wrap; gap: 0.4em; align-items: center; margin: 0 0 0.55em; }
                     #${rootId} .vnstat-plus-controls .bootstrap-select { min-width: 7em; flex: 1 1 7em; }
-                    #${rootId} .vnstat-plus-controls .bootstrap-select > .dropdown-toggle { height: 2.55em; padding: 0.45em 0.7em; border-color: rgba(127,127,127,0.3); background: var(--vnstat-plus-select-background); color: inherit; }
-                    #${rootId} .vnstat-plus-controls .bootstrap-select.open > .dropdown-toggle,
-                    #${rootId} .vnstat-plus-controls .bootstrap-select > .dropdown-toggle:focus { border-color: #d94f00; box-shadow: 0 0 0 0.15rem rgba(217,79,0,0.2); }
-                    #${rootId} .vnstat-plus-controls .bootstrap-select .dropdown-menu > li.selected > a { background: #d94f00; color: #fff; }
+                    #${rootId} .vnstat-plus-controls .bootstrap-select > .dropdown-toggle { height: 2.55em; padding: 0.45em 0.7em; }
                     #${rootId} .vnstat-plus-controls button { flex: 0 0 auto; }
                     #${rootId} .vnstat-plus-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.45em; margin-bottom: 0.7em; }
                     #${rootId} .vnstat-plus-card { border: 1px solid rgba(127,127,127,0.24); border-radius: 3px; background: rgba(127,127,127,0.06); padding: 0.6em 0.65em; min-width: 0; }
@@ -141,7 +138,7 @@ export default class VnstatPlus extends BaseWidget {
                     #${rootId} th { color: var(--vnstat-plus-muted); font-weight: 600; }
                     #${rootId} thead th { position: sticky; top: 0; background: var(--vnstat-plus-table-background); z-index: 1; }
                     #${rootId} th:not(:first-child), #${rootId} td:not(:first-child) { text-align: right; }
-                    #${rootId} .vnstat-plus-empty { color: #999; padding: 1em 0; text-align: center; }
+                    #${rootId} .vnstat-plus-empty { color: var(--vnstat-plus-muted); padding: 1em 0; text-align: center; }
                     @media (max-width: 420px) {
                         #${rootId} .vnstat-plus-summary { grid-template-columns: 1fr; }
                         #${rootId} .vnstat-plus-bar-row { grid-template-columns: 5.4em minmax(0, 1fr) 4.5em; }
@@ -292,23 +289,28 @@ export default class VnstatPlus extends BaseWidget {
             $(probe).remove();
             return color;
         };
-        const readUsableColor = (node, property, fallback) => {
-            const color = node ? getComputedStyle(node)[property] : '';
-            return color && color !== 'rgba(0, 0, 0, 0)' ? color : fallback;
+        // the theme paints the card on an ancestor (.grid-stack-item-content): the first opaque one
+        const readBackground = (node, fallback) => {
+            for (; node && node.nodeType === 1; node = node.parentElement) {
+                const color = getComputedStyle(node).backgroundColor;
+                if (color && color !== 'transparent' && !/^rgba\(.*,\s*0\)$/.test(color)) {
+                    return color;
+                }
+            }
+            return fallback;
         };
-        const widget = $root.closest('.widget')[0] || $root[0];
-        const widgetStyle = getComputedStyle(widget);
+        const widgetStyle = getComputedStyle($root[0]);
+        const background = readBackground($root[0], getComputedStyle(document.body).backgroundColor);
         const rootStyle = $root[0].style;
         rootStyle.setProperty('--vnstat-plus-rx', '#2ca02c');
         rootStyle.setProperty('--vnstat-plus-tx', '#ff7f0e');
         rootStyle.setProperty('--vnstat-plus-total', '#a0cbe8');
         rootStyle.setProperty('--vnstat-plus-muted', readSemanticColor('text-muted'));
         rootStyle.setProperty('--vnstat-plus-border', readSemanticColor('text-muted'));
-        rootStyle.setProperty('--vnstat-plus-tooltip-bg', readUsableColor(widget, 'backgroundColor', '#20242b'));
-        rootStyle.setProperty('--vnstat-plus-tooltip-text', readUsableColor(widget, 'color', '#f4f4f4'));
-        rootStyle.setProperty('--vnstat-plus-tooltip-border', widgetStyle.color || '#888');
-        rootStyle.setProperty('--vnstat-plus-select-background', readUsableColor(widget, 'backgroundColor', '#ffffff'));
-        rootStyle.setProperty('--vnstat-plus-table-background', readUsableColor(widget, 'backgroundColor', '#ffffff'));
+        rootStyle.setProperty('--vnstat-plus-tooltip-bg', background);
+        rootStyle.setProperty('--vnstat-plus-tooltip-text', widgetStyle.color);
+        rootStyle.setProperty('--vnstat-plus-tooltip-border', widgetStyle.color);
+        rootStyle.setProperty('--vnstat-plus-table-background', background);
     }
 
     _applyVisibility() {
@@ -508,7 +510,8 @@ export default class VnstatPlus extends BaseWidget {
                 },
                 scales: {
                     y: {beginAtZero: true, ticks: {callback: value => this._formatBytes(value)}},
-                    x: {ticks: {maxRotation: 0, autoSkip: true, maxTicksLimit: 8}}
+                    // the end labels sit inside the axis, so the plot reaches both edges
+                    x: {ticks: {maxRotation: 0, autoSkip: true, maxTicksLimit: 8, align: 'inner'}}
                 }
             }
         });
