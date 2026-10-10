@@ -459,10 +459,14 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         };
     }
 
-    _recordQueryRate(totalQueries) {
+    // serverAt: Unbound's clock at the read (seconds), when known. Samples are placed by this
+    // browser's clock; the time between two reads is Unbound's when both have it, so one read
+    // handed to several viewers (or twice) adds nothing, and the clocks are never mixed.
+    _recordQueryRate(totalQueries, serverAt = null) {
         const now = Date.now();
         if (totalQueries !== null && this.previousSample) {
-            const elapsed = (now - this.previousSample.at) / 1000;
+            const elapsed = serverAt !== null && this.previousSample.serverAt !== null
+                ? serverAt - this.previousSample.serverAt : (now - this.previousSample.at) / 1000;
             const delta = totalQueries - this.previousSample.queries;
             if (elapsed > 0 && delta >= 0) {
                 this.queryRateSamples.push({at: now, ratePerSecond: delta / elapsed});
@@ -470,7 +474,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         }
         this.queryRateSamples = this.queryRateSamples.filter(sample => sample.at >= now - 60 * 1000);
         if (totalQueries !== null) {
-            this.previousSample = {queries: totalQueries, at: now};
+            this.previousSample = {queries: totalQueries, at: now, serverAt};
         }
     }
 
@@ -671,7 +675,9 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             // only the query total: the full statistics come with the regular refresh
             const result = await this.ajaxCall('/api/dashboardplus/dns/queries');
             if (result?.status === 'ok') {
-                this._recordQueryRate(this._asNumber(result.queries));
+                // timed by Unbound's own clock at the read: a read shared by several viewers
+                // (configd caches it for a second) then counts once and at its real time
+                this._recordQueryRate(this._asNumber(result.queries), this._asNumber(result.at));
             }
             this._renderMetrics();
             this._renderQueryRate();

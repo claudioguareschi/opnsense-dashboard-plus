@@ -418,7 +418,9 @@ into any order.
 *CPU usage and temperature as live charts, with the load averages; gauges for memory, firewall
 states (**Show** opens the state table), mbufs and swap, with the exact figures under each gauge;
 and filesystem usage. Settings: which components to show, and the chart window (20 seconds,
-1 minute or 5 minutes).*
+1 minute or 5 minutes). Its readings, shared with Thermal Sensors+ and System Information+, come
+from a small shell script (one `sysctl` call and `pfctl` twice; mbufs, swap and filesystems once
+a minute) that configd hands to every open dashboard for five seconds.*
 
 ### Traffic Graph+
 

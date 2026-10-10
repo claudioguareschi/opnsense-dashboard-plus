@@ -120,3 +120,15 @@ test('DNS Health+ polls only the query counter for the live rate, and keeps the 
     await widget._pollQueryRate();
     assert.equal(widget.previousSample.queries, 140);
 });
+
+test('DNS Health+ times its rate by Unbound\'s clock, so one read shared by viewers counts once', () => {
+    const widget = new DnsHealth({translations});
+    widget._recordQueryRate(1000, 100.0);
+    widget._recordQueryRate(1000, 100.0);   // the same cached read again: nothing to add
+    assert.equal(widget.queryRateSamples.length, 0);
+    widget._recordQueryRate(1040, 102.0);   // 40 queries in Unbound's 2 seconds
+    assert.equal(widget.queryRateSamples.at(-1).ratePerSecond, 20);
+    // the full refresh carries no Unbound clock: browser time, never a mix of the two clocks
+    widget._recordQueryRate(1100, null);
+    assert.equal(widget.previousSample.serverAt, null);
+});

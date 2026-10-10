@@ -30,6 +30,7 @@ namespace OPNsense\DashboardPlus\Api;
 
 use OPNsense\Base\ApiControllerBase;
 use OPNsense\Core\Backend;
+use OPNsense\DashboardPlus\Metrics;
 use OPNsense\DashboardPlus\QuickAssist;
 
 class SystemController extends ApiControllerBase
@@ -55,8 +56,8 @@ class SystemController extends ApiControllerBase
      */
     public function metricsAction()
     {
-        $backend = new Backend();
-        $result = json_decode($backend->configdRun('dashboardplus system metrics'), true);
+        // read by metrics.sh through configd (shared by every viewer for five seconds), parsed here
+        $result = Metrics::parse((new Backend())->configdRun('dashboardplus system metrics'));
 
         if (!is_array($result)) {
             return ['status' => 'failed'];

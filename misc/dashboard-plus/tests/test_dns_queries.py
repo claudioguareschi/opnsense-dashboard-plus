@@ -57,6 +57,7 @@ thread0.num.queries_ip_ratelimited=0
 total.num.queries=7153
 total.num.queries_ip_ratelimited=0
 total.num.cachehits=6000
+time.now=1791660520.699783
 """
 
 
@@ -70,7 +71,9 @@ def queries(output):
 class QueriesTest(unittest.TestCase):
     def test_the_total_query_counter(self):
         answer = queries(STATS)
-        self.assertEqual(answer["result"], {"status": "ok", "queries": 7153})
+        self.assertEqual(answer["result"], {"status": "ok", "queries": 7153, "at": 1791660520.699783})
+        # without Unbound's clock the counter alone
+        self.assertEqual(queries("total.num.queries=5\n")["result"], {"status": "ok", "queries": 5})
         self.assertEqual(answer["actions"], ["dashboardplus dns queries"])
 
     def test_unbound_not_answering(self):
@@ -85,6 +88,9 @@ class ActionTest(unittest.TestCase):
         actions = (ROOT / "service/conf/actions.d/actions_dashboardplus.conf").read_text()
         self.assertIn("[dns.queries]\ncommand:/usr/local/sbin/unbound-control -c /var/unbound/unbound.conf "
                       "stats_noreset\nparameters:\n", actions)
+        # configd hands one read to every viewer for a second; "at" keeps the rate exact
+        block = actions[actions.index("[dns.queries]"):].split("\n\n")[0]
+        self.assertIn("\ncache_ttl:1", block)
         acl = (ROOT / "mvc/app/models/OPNsense/DashboardPlus/ACL/ACL.xml").read_text()
         dns = acl[acl.index("<page-dashboard-widget-dashboard-plus-dns-health>"):]
         self.assertIn("<pattern>api/dashboardplus/dns/queries</pattern>", dns[:dns.index("</patterns>")])

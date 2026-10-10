@@ -43,7 +43,8 @@ class DnsController extends ApiControllerBase
     /**
      * Unbound's running query total, for the live query rate of DNS Health+: one counter read
      * with `unbound-control stats_noreset` (never `stats`, which resets the counters OPNsense's
-     * own reporting reads), instead of the full statistics every poll.
+     * own reporting reads), instead of the full statistics every poll. "at" is Unbound's own
+     * clock at the read, so a rate stays exact when configd hands several viewers one read.
      */
     public function queriesAction()
     {
@@ -51,7 +52,11 @@ class DnsController extends ApiControllerBase
         if (!preg_match('/^total\.num\.queries=(\d+)\s*$/m', $output, $match)) {
             return ['status' => 'failed'];
         }
-        return ['status' => 'ok', 'queries' => (int)$match[1]];
+        $result = ['status' => 'ok', 'queries' => (int)$match[1]];
+        if (preg_match('/^time\.now=(\d+(?:\.\d+)?)\s*$/m', $output, $time)) {
+            $result['at'] = (float)$time[1];
+        }
+        return $result;
     }
 
     public function recentAction()
