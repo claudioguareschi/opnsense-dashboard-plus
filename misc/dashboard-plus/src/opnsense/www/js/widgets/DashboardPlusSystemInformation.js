@@ -25,7 +25,7 @@
  */
 
 const {
-    escapeHtml, renderTitle, fill, ensureStyle, DashboardPlusWidget, mergeOrder, makeSortable, isDragging,
+    escapeHtml, renderTitle, fill, ensureStyle, DashboardPlusWidget, mergeOrder, usageColor, makeSortable, isDragging,
     isEditMode, watchEditMode, sharedRequest
 } = await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
@@ -125,14 +125,11 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
         return lines.length > 0 ? lines.join('<br>') : escapeHtml(t.not_set);
     }
 
-    _bytes(value) {
+    /* A size in binary units; `scale` (a size) picks the unit, so a pair of sizes reads in one unit. */
+    _bytes(value, scale = value) {
         const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
-        let size = Number(value) || 0;
-        let unit = 0;
-        while (size >= 1024 && unit < units.length - 1) {
-            size /= 1024;
-            unit += 1;
-        }
+        const unit = Math.min(units.length - 1, Math.max(0, Math.floor(Math.log2(Number(scale) || 1) / 10)));
+        const size = (Number(value) || 0) / 1024 ** unit;
         return `${size >= 10 || unit === 0 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`;
     }
 
@@ -145,48 +142,63 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
         return {date: text, age: days === 0 ? t.zfs_today : days === 1 ? t.zfs_yesterday : fill(t.zfs_days_ago, {count: days}), days};
     }
 
-    /* The last scrub or resilver of a pool, in one line, and whether it deserves attention. */
+    /* The last scrub or resilver in a few words, its date and repairs for the tooltip, and its color. */
     _scan(scan, now) {
         const t = this.translations;
         if (!scan || !['scrub', 'resilver'].includes(scan.function)) {
             return {text: t.zfs_never_scrubbed, color: 'text-warning'};
         }
+        const resilver = scan.function === 'resilver';
         if (scan.state === 'scanning') {
-            return {text: fill(scan.function === 'resilver' ? t.zfs_resilvering : t.zfs_scrubbing, {percent: scan.progress ?? 0}),
-                    color: scan.function === 'resilver' ? 'text-warning' : ''};
+            return {text: fill(resilver ? t.zfs_resilvering : t.zfs_scrubbing, {percent: scan.progress ?? 0}),
+                    color: resilver ? 'text-warning' : ''};
         }
         const when = this._when(scan.end || scan.start || 0, now);
+        const title = fill(t.zfs_scan_detail, {date: when.date, size: this._bytes(scan.repaired)});
         if (scan.state === 'canceled') {
-            return {text: fill(t.zfs_scrub_canceled, when), color: 'text-warning'};
+            return {text: t.zfs_scrub_canceled, color: 'text-warning', title};
         }
-        const found = [fill(t.zfs_repaired, {size: this._bytes(scan.repaired)})];
         if (scan.errors) {
-            found.push(fill(t.zfs_scan_errors, {count: scan.errors}));
+            return {text: fill(t.zfs_scrub_found, {count: scan.errors}), color: 'text-danger', title};
         }
-        const template = scan.function === 'resilver' ? t.zfs_last_resilver : t.zfs_last_scrub;
-        return {text: `${fill(template, when)} · ${found.join(', ')}`,
-                color: scan.errors ? 'text-danger' : when.days > SCRUB_DAYS ? 'text-warning' : ''};
+        return {text: fill(resilver ? t.zfs_resilvered : t.zfs_scrubbed, when), title,
+                color: when.days > SCRUB_DAYS ? 'text-warning' : ''};
     }
 
-    /* Each pool: layout, health, errors and capacity, and its last scrub under them. */
+    /*
+     * Each pool: its name and layout; a usage bar in the theme's usage colors with the share beside it
+     * and the sizes under it; then health (a pill in the theme's state color), errors and last scrub.
+     */
     _zfs(pools, now = Date.now() / 1000) {
         const t = this.translations;
-        const colored = (text, color) => (color ? `<span class="${color}">${escapeHtml(text)}</span>` : escapeHtml(text));
+        const span = (text, color, title) => `<span${color ? ` class="${color}"` : ''}${title ? ` title="${escapeHtml(title)}"` : ''}>${escapeHtml(text)}</span>`;
         return pools.map(pool => {
             const state = String(pool.state || '').toLowerCase();
-            const health = colored(t[`zfs_${state}`] || pool.state || t.unavailable,
-                state === 'online' ? 'text-success' : state === 'degraded' ? 'text-warning' : 'text-danger');
-            const errors = pool.data_errors ? colored(fill(t.zfs_data_loss, {count: pool.data_errors}), 'text-danger')
-                : pool.device_errors ? colored(fill(t.zfs_device_errors, {count: pool.device_errors}), 'text-warning')
-                : escapeHtml(t.zfs_no_errors);
-            const layout = t[`zfs_${pool.layout}`] || pool.layout;
-            const capacity = Number.isInteger(pool.capacity)
-                ? fill(t.zfs_capacity, {percent: pool.capacity, size: this._bytes(pool.size)}) : null;
-            const line = [layout && escapeHtml(layout), health, errors, capacity && escapeHtml(capacity)]
-                .filter(Boolean).join(' · ');
+            const [color, icon] = state === 'online' ? ['text-success', 'circle-check']
+                : state === 'degraded' ? ['text-warning', 'triangle-exclamation'] : ['text-danger', 'circle-xmark'];
+            const health = `<span class="dashboard-plus-zfs-health ${color}"><i class="fa fa-fw fa-${icon}" aria-hidden="true"></i> `
+                + `${escapeHtml(t[`zfs_${state}`] || pool.state || t.unavailable)}</span>`;
+            const errors = pool.data_errors ? span(fill(t.zfs_data_loss, {count: pool.data_errors}), 'text-danger')
+                : pool.device_errors ? span(fill(t.zfs_device_errors, {count: pool.device_errors}), 'text-warning')
+                : span(t.zfs_no_errors);
             const scan = this._scan(pool.scan, now);
-            return `<strong>${escapeHtml(pool.name)}:</strong> ${line}<br>${colored(scan.text, scan.color)}`;
-        }).join('<br>');
+            const layout = t[`zfs_${pool.layout}`] || pool.layout;
+            const percent = Number.isInteger(pool.capacity) ? pool.capacity : null;
+            const usage = percent === null ? '' : `
+                <div class="dashboard-plus-zfs-usage">
+                    <div class="progress dashboard-plus-bar" role="progressbar" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100">
+                        <div class="progress-bar progress-bar-${usageColor(percent)}" style="width: ${Math.max(percent, 1)}%;"></div>
+                    </div>
+                    <strong>${percent}%</strong>
+                </div>
+                <div class="dashboard-plus-zfs-detail text-muted">${escapeHtml(fill(t.zfs_used,
+                    {used: this._bytes(pool.allocated, pool.size), size: this._bytes(pool.size)}))}</div>`;
+            return `<div class="dashboard-plus-zfs">
+                <div><strong>${escapeHtml(pool.name)}</strong>${layout ? ` <span class="text-muted">· ${escapeHtml(layout)}</span>` : ''}</div>
+                ${usage}
+                <div class="dashboard-plus-zfs-status">${health}${errors}${span(scan.text, scan.color, scan.title)}</div>
+            </div>`;
+        }).join('');
     }
 
     /* The system script reports states as codes; show them in the UI language. */

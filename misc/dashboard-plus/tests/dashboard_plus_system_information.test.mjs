@@ -41,27 +41,38 @@ const pool = (extra = {}) => ({name: 'zroot', state: 'ONLINE', layout: 'mirror',
     size: 229780750336, allocated: 1960869888, capacity: 0, scan: null, ...extra});
 const text = html => html.replace(/<[^>]+>/g, '|').replace(/\|+/g, '|');
 
-test('ZFS: layout, health, errors and capacity on one line, the last scrub under it', () => {
+test('ZFS: name and layout, a usage bar in the usage colors, then health, errors and last scrub', () => {
     const widget = new SystemInformation({translations});
-    const html = widget._zfs([pool({scan: {function: 'scrub', state: 'finished', start: NOW - 5 * 86400 - 60,
-        end: NOW - 5 * 86400, errors: 0, repaired: 0, progress: 100}})], NOW);
-    assert.match(text(html), /zroot:\| Mirror · \|Healthy\| · No errors · 0% of 214 GiB\|Last scrub \d{4}-\d\d-\d\d \d\d:\d\d \(5 days ago\) · repaired 0 B/);
-    assert.match(html, /<span class="text-success">Healthy<\/span>/);
+    const html = widget._zfs([pool({layout: 'single', size: 110595407872, allocated: 966367641, capacity: 1,
+        scan: {function: 'scrub', state: 'finished', start: NOW - 5 * 86400 - 6, end: NOW - 5 * 86400, errors: 0,
+               repaired: 0, progress: 99}})], NOW);
+    assert.match(html, /<strong>zroot<\/strong> <span class="text-muted">· Single disk<\/span>/);
+    assert.match(html, /class="progress-bar progress-bar-success" style="width: 1%;"/);
+    assert.match(html, /<strong>1%<\/strong>/);
+    assert.match(html, /<div class="dashboard-plus-zfs-detail text-muted">0.9 GiB \/ 103 GiB<\/div>/);
+    assert.match(html, /<span class="dashboard-plus-zfs-health text-success"><i class="fa fa-fw fa-circle-check"[^>]*><\/i> Healthy<\/span>/);
+    assert.match(html, /<span>No errors<\/span><span title="\d{4}-\d\d-\d\d \d\d:\d\d, repaired 0 B">Scrubbed 5 days ago<\/span>/);
 });
 
-test('ZFS: never scrubbed, a stale scrub and problems stand out', () => {
+test('ZFS: a nearly full pool, never or long ago scrubbed, and problems stand out in the theme colors', () => {
     const widget = new SystemInformation({translations});
-    assert.match(widget._zfs([pool({layout: 'single'})], NOW), /Single disk.*<span class="text-warning">Never scrubbed<\/span>/);
+    assert.match(widget._zfs([pool({capacity: 85})], NOW), /progress-bar-danger" style="width: 85%;"/);
+    assert.match(widget._zfs([pool({capacity: 60})], NOW), /progress-bar-warning/);
+    assert.match(widget._zfs([pool()], NOW), /<span class="text-warning">Never scrubbed<\/span>/);
     const stale = widget._zfs([pool({scan: {function: 'scrub', state: 'finished', end: NOW - 40 * 86400, errors: 0, repaired: 0}})], NOW);
-    assert.match(stale, /<span class="text-warning">Last scrub [^<]*\(40 days ago\)/);
+    assert.match(stale, /<span class="text-warning" title="[^"]+">Scrubbed 40 days ago<\/span>/);
     const bad = widget._zfs([pool({state: 'DEGRADED', layout: 'raidz2', device_errors: 3, data_errors: 2,
         scan: {function: 'resilver', state: 'scanning', progress: 42}})], NOW);
-    assert.match(bad, /RAID-Z2 · <span class="text-warning">Degraded<\/span> · <span class="text-danger">Data loss \(2\)<\/span>/);
-    assert.match(bad, /<span class="text-warning">Resilver in progress: 42%<\/span>/);
-    const devices = widget._zfs([pool({state: 'FAULTED', device_errors: 5})], NOW);
-    assert.match(devices, /<span class="text-danger">Faulted<\/span> · <span class="text-warning">Device errors \(5\)<\/span>/);
-    const repaired = widget._zfs([pool({scan: {function: 'scrub', state: 'finished', end: NOW - 3600, errors: 4, repaired: 1536}})], NOW);
-    assert.match(repaired, /<span class="text-danger">Last scrub [^<]*\(today\) · repaired 1.5 KiB, 4 errors<\/span>/);
+    assert.match(bad, /· RAID-Z2/);
+    assert.match(bad, /dashboard-plus-zfs-health text-warning"><i class="fa fa-fw fa-triangle-exclamation"[^>]*><\/i> Degraded/);
+    assert.match(bad, /<span class="text-danger">Data loss \(2\)<\/span><span class="text-warning">Resilvering 42%<\/span>/);
+    const faulted = widget._zfs([pool({state: 'FAULTED', device_errors: 5})], NOW);
+    assert.match(faulted, /text-danger"><i class="fa fa-fw fa-circle-xmark"[^>]*><\/i> Faulted<\/span><span class="text-warning">Device errors \(5\)<\/span>/);
+    const found = widget._zfs([pool({scan: {function: 'scrub', state: 'finished', end: NOW - 3600, errors: 4, repaired: 1536}})], NOW);
+    assert.match(found, /<span class="text-danger" title="[^"]+, repaired 1.5 KiB">Scrub found 4 errors<\/span>/);
+    assert.match(widget._zfs([pool({scan: {function: 'scrub', state: 'scanning', progress: 7}})], NOW), /<span>Scrubbing 7%<\/span>/);
+    // no capacity: no bar
+    assert.doesNotMatch(widget._zfs([pool({capacity: null})], NOW), /progress/);
 });
 
 test('ZFS shows only where there are pools', () => {

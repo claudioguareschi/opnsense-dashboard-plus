@@ -192,6 +192,21 @@ const STYLE = `
     .dashboard-plus-filesystem .dashboard-plus-bar.progress { margin: 0; }
     .dashboard-plus-filesystem-detail { font-size: 0.9em; margin-top: 0.15em; }
 
+    /* System Information+: a ZFS pool, its usage bar, then health, errors and last scrub side by side */
+    .dashboard-plus-zfs + .dashboard-plus-zfs { margin-top: 0.75em; }
+    .dashboard-plus-zfs-usage { display: flex; align-items: center; gap: 0.75em; margin-top: 0.3em; }
+    .dashboard-plus-zfs-usage .dashboard-plus-bar.progress { flex: 1 1 auto; margin: 0; }
+    .dashboard-plus-zfs-usage strong { flex: none; min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
+    .dashboard-plus-zfs-detail { font-size: 0.9em; margin-top: 0.1em; font-variant-numeric: tabular-nums; }
+    .dashboard-plus-zfs-status { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35em 0; margin-top: 0.4em; }
+    .dashboard-plus-zfs-status > span { padding: 0 0.9em; border-left: 1px solid rgba(128, 128, 128, 0.35); }
+    .dashboard-plus-zfs-status > span:first-child { padding-left: 0; border-left: 0; }
+    /* the pill takes the theme's success, warning or danger color, a light fill and border made from it */
+    .dashboard-plus-zfs-status > .dashboard-plus-zfs-health { display: inline-flex; align-items: center; gap: 0.35em;
+        padding: 0.15em 0.65em; margin-right: 0.9em; border-radius: 0.35em; font-weight: 600;
+        background: color-mix(in srgb, currentColor 14%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 40%, transparent); }
+
     .dashboard-plus-traffic { padding: 0 0.25em; }
     .dashboard-plus-legend { display: flex; flex-wrap: wrap; gap: 0.2em 1em; white-space: nowrap; }
     .dashboard-plus-combined-legend { gap: 0.2em 0.75em; margin: 0 0.5em 0.35em; font-size: 0.82em; }
@@ -216,6 +231,11 @@ const STYLE = `
 `;
 
 /* Add the Dashboard Plus styles to the page once. */
+/* The theme color of a usage share, as every Dashboard Plus bar and gauge shows it. */
+export function usageColor(percent) {
+    return percent >= 80 ? 'danger' : percent >= 50 ? 'warning' : 'success';
+}
+
 export function ensureStyle() {
     if (!document.getElementById('dashboard-plus-style')) {
         $('<style id="dashboard-plus-style"></style>').text(STYLE).appendTo('head');

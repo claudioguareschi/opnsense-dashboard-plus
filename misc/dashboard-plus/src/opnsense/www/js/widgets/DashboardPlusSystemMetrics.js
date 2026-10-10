@@ -3,7 +3,7 @@
  * All rights reserved.
  */
 
-const {escapeHtml, renderTitle, ensureStyle, fill, sharedRequest, DashboardPlusWidget} =
+const {escapeHtml, renderTitle, ensureStyle, fill, sharedRequest, DashboardPlusWidget, usageColor} =
     await import(`./DashboardPlusCommon.js${new URL(import.meta.url).search}`);
 
 export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(BaseWidget) {
@@ -135,7 +135,7 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
 
     /* The theme's colors for a usage: busy from 50%, critical from 80%. */
     _usageColor(percent) {
-        return percent >= 80 ? 'danger' : percent >= 50 ? 'warning' : 'success';
+        return usageColor(percent);
     }
 
     _expandTemperatureScale(celsius) {

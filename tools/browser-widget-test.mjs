@@ -38,6 +38,7 @@ const mergeOrder = (order, selected) => {
     const wanted = [...new Set(Array.isArray(selected) ? selected : [])];
     return [...current.filter(item => wanted.includes(item)), ...wanted.filter(item => !current.includes(item))];
 };
+const usageColor = percent => (percent >= 80 ? 'danger' : percent >= 50 ? 'warning' : 'success');
 const makeSortable = () => {};
 const isDragging = () => false;
 const isEditMode = () => false;

@@ -40,15 +40,15 @@
             <zfs_no_errors>No errors</zfs_no_errors>
             <zfs_device_errors>Device errors ({count})</zfs_device_errors>
             <zfs_data_loss>Data loss ({count})</zfs_data_loss>
-            <zfs_capacity>{percent}% of {size}</zfs_capacity>
-            <zfs_last_scrub>Last scrub {date} ({age})</zfs_last_scrub>
-            <zfs_last_resilver>Last resilver {date} ({age})</zfs_last_resilver>
-            <zfs_scrub_canceled>Scrub canceled {date} ({age})</zfs_scrub_canceled>
-            <zfs_repaired>repaired {size}</zfs_repaired>
-            <zfs_scan_errors>{count} errors</zfs_scan_errors>
+            <zfs_used>{used} / {size}</zfs_used>
             <zfs_never_scrubbed>Never scrubbed</zfs_never_scrubbed>
-            <zfs_scrubbing>Scrub in progress: {percent}%</zfs_scrubbing>
-            <zfs_resilvering>Resilver in progress: {percent}%</zfs_resilvering>
+            <zfs_scrubbed>Scrubbed {age}</zfs_scrubbed>
+            <zfs_resilvered>Resilvered {age}</zfs_resilvered>
+            <zfs_scrub_found>Scrub found {count} errors</zfs_scrub_found>
+            <zfs_scrub_canceled>Scrub canceled</zfs_scrub_canceled>
+            <zfs_scrubbing>Scrubbing {percent}%</zfs_scrubbing>
+            <zfs_resilvering>Resilvering {percent}%</zfs_resilvering>
+            <zfs_scan_detail>{date}, repaired {size}</zfs_scan_detail>
             <zfs_today>today</zfs_today>
             <zfs_yesterday>yesterday</zfs_yesterday>
             <zfs_days_ago>{count} days ago</zfs_days_ago>
