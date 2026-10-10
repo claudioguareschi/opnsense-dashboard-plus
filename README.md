@@ -558,6 +558,11 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.61** (all packages): two Firewall Map+ IPv6 fixes. Investigating an IPv6 address on the
+  map page works again (it was refused as "not an IP address"). A dual-stack firewall is shown at
+  one place: IPv6 follows the IPv4 location unless it is precisely located elsewhere (new *IPv6
+  location* setting), so a WAN IPv6 address that the database knows only by country no longer
+  adds a second house. Dashboard Plus and VNStat Traffic+ are unchanged apart from the version.
 - **0.60** Firewall Map+ gets the collector audit remediation (bounded classification refresh,
   stricter request parsing, accounted response buffer, fuzzed decoder), adaptive refresh in the
   map and widget, a tabbed settings page with OPNsense's advanced mode, Country blocklists from
@@ -565,10 +570,6 @@ versions and signs the whole catalog.
   graphical ranking profile editor (read-only built-ins, new profiles with **+**).
   VNStat Traffic+ takes its select and table colors from the theme and its chart spans the full
   width; QuickAssist+'s live chart scrolls like Traffic's.
-  Investigating an IPv6 address on the Firewall Map page works again. A dual-stack firewall is
-  shown at one place: IPv6 follows the IPv4 location unless it is precisely located elsewhere
-  (*IPv6 location* setting), so a WAN IPv6 address that the database knows only by country no
-  longer adds a second house.
 - **0.59** (all packages): Firewall Map+ keeps complete shared incident snapshots while disclosing
   captured PF connection states only to users with OPNsense's native Diagnostics: Show States privilege.
 - **0.58** (all packages): refines Dashboard Plus QuickAssist+ with a Chart.js activity graph,
