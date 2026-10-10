@@ -2755,11 +2755,11 @@
 	function statusLine(summary, shown) {
 		const parts = host().statusParts(summary, shown, state.settings, TEXT);
 		const carp = summary.carp === "backup" ? parts.pop() : null;
-		$("#fwmap-status").html([
+		$("#fwmap-status").html(host().statusLine([
 			...parts,
 			...idsLinks(summary),
 			carp
-		].filter(Boolean).join(" · "));
+		]));
 		if (state.mode === "live") state.updatedAt = Date.now();
 		updatedLine();
 	}

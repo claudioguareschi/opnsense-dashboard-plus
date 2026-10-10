@@ -68,7 +68,7 @@ function statusLine(summary, shown) {
   const parts = host().statusParts(summary, shown, state.settings, TEXT);
   // the Suricata links sit before the CARP note, which stays last
   const carp = summary.carp === 'backup' ? parts.pop() : null;
-  $('#fwmap-status').html([...parts, ...idsLinks(summary), carp].filter(Boolean).join(' · '));
+  $('#fwmap-status').html(host().statusLine([...parts, ...idsLinks(summary), carp]));
   if (state.mode === 'live') {
     state.updatedAt = Date.now();
   }

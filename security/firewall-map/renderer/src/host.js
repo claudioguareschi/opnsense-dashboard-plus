@@ -160,6 +160,16 @@ export function wait(frame, message) {
 }
 
 /**
+ * The status line from its parts (HTML): one line while it fits, and when it does not, it wraps
+ * only between parts, each keeping its separator, never inside "10 below threshold".
+ */
+export function statusLine(parts) {
+  const shown = parts.filter(Boolean);
+  return shown.map((part, index) => `<span style="white-space: nowrap;">${part}${index < shown.length - 1 ? ' ·' : ''}</span>`)
+    .join(' ');
+}
+
+/**
  * The status line under a map, as HTML-escaped parts: flows, blocked sources, threats that got
  * through, CARP backup. `text` holds active_flows_one/_many, blocked_sources_one/_many,
  * below_threshold, listed_flows_one/_many, no_flows and map_carp_backup / map_carp_mirror.

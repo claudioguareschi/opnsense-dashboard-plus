@@ -88,3 +88,12 @@ test('a stretched refresh interval is said on the status line; the 2-second defa
   assert.deepEqual(statusParts({interval: 2}, shown, {}, text), ['1 active flow']);
   assert.deepEqual(statusParts({interval: 12}, shown, {}, text), ['1 active flow', 'refreshed every 12 s']);
 });
+
+test('the status line wraps only between its parts, each keeping its separator', async () => {
+  const {statusLine} = await import('../src/host.js');
+  assert.equal(statusLine(['50 active flows', '', '7 blocked sources', null, 'Balanced ranking']),
+    '<span style="white-space: nowrap;">50 active flows ·</span> '
+    + '<span style="white-space: nowrap;">7 blocked sources ·</span> '
+    + '<span style="white-space: nowrap;">Balanced ranking</span>');
+  assert.equal(statusLine([]), '');
+});

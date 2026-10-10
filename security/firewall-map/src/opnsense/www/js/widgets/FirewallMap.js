@@ -28,7 +28,7 @@
 const AUTO_HEIGHT = 10000;
 // the renderer's content hash, written by tools/build-renderer.sh: a new renderer has a new
 // address, so a browser never runs an old cached copy with a newer widget
-const RENDERER_VERSION = '7f49e1ecf3e3';
+const RENDERER_VERSION = '1f477444408e';
 // follow traffic is the map's own toggle, remembered per browser (as on the full-size map)
 const FOLLOW_KEY = 'firewallmap.widget.follow';
 
@@ -237,8 +237,11 @@ export default class FirewallMap extends BaseWidget {
                 <div id="${this.id}-firewall-map-grid" aria-hidden="true" style="pointer-events: none; position: absolute; inset: 0; z-index: 0; background-size: 36px 36px;"></div>
                 <div id="${this.id}-firewall-map-canvas" style="position: absolute; inset: 0; z-index: 1; text-align: left;"></div>
                 <div id="${this.id}-firewall-map-geo"></div>
-                <div id="${this.id}-firewall-map-status" style="position: absolute; left: 12px; right: 150px; bottom: 9px; z-index: 2; font-size: .82em; letter-spacing: .02em; pointer-events: none; text-align: left;"></div>
-                <div id="${this.id}-firewall-map-credit" style="position: absolute; right: 10px; bottom: 9px; z-index: 2; font-size: .75em; opacity: .7;"></div>
+                <!-- one row: the status takes the width the credit (DB-IP only) leaves, all of it without one -->
+                <div style="position: absolute; left: 12px; right: 10px; bottom: 9px; z-index: 2; display: flex; align-items: flex-end; gap: 12px; pointer-events: none;">
+                    <div id="${this.id}-firewall-map-status" style="flex: 1 1 auto; min-width: 0; font-size: .82em; letter-spacing: .02em; text-align: left;"></div>
+                    <div id="${this.id}-firewall-map-credit" style="flex: 0 0 auto; font-size: .75em; opacity: .7; white-space: nowrap; pointer-events: auto;"></div>
+                </div>
                 <div class="btn-group-vertical btn-group-sm" role="group" style="position: absolute; right: 10px; top: 10px; z-index: 3;">
                     <button type="button" class="btn btn-default" id="${this.id}-firewall-map-follow" aria-pressed="false" title="${this.translations.follow}" aria-label="${this.translations.follow}"><i class="fa fa-fw fa-crosshairs" aria-hidden="true"></i></button>
                     <button type="button" class="btn btn-default" id="${this.id}-firewall-map-camera" title="${this.translations.snapshot_take}" aria-label="${this.translations.snapshot_take}"><i class="fa fa-fw fa-camera" aria-hidden="true"></i></button>
@@ -428,7 +431,7 @@ export default class FirewallMap extends BaseWidget {
             $(`#${this.id}-firewall-map-credit`).html(host.creditHtml(summary.provider));
             const parts = host.statusParts(summary, summary, this.settings, this._text());
             // the parts are HTML-escaped: set them as HTML, not text
-            $(`#${this.id}-firewall-map-status`).html(parts.join(' · '));
+            $(`#${this.id}-firewall-map-status`).html(host.statusLine(parts));
         } catch (error) {
             console.error('Firewall Map+: flow update failed', error);
             this._status(this.translations.data_unavailable);
