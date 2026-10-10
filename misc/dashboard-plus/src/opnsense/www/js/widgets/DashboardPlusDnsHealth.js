@@ -145,7 +145,8 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             /* one column grid for every row: the names beside the icons, the addresses lined up after them */
             .dashboard-plus-dns-health-upstreams {
                 display: grid;
-                grid-template-columns: auto minmax(0, 1fr) auto;
+                /* the name keeps at least 8em before a long address has to break */
+                grid-template-columns: auto minmax(min(8em, 45%), 1fr) auto;
                 column-gap: 0.65em;
                 row-gap: 0.25em;
                 text-align: left;
@@ -173,8 +174,11 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
                 white-space: nowrap;
                 font-size: 0.88em;
             }
+            /* a full IPv6 address (39 characters, more with a port) stays on one line beside a name
+               shortened with an ellipsis; only in a very narrow widget does it break, after a colon */
             .dashboard-plus-dns-health-upstream-server {
                 text-align: left;
+                overflow-wrap: normal;
                 opacity: 0.62;
                 font-size: 0.76em;
                 font-variant-numeric: tabular-nums;
@@ -631,7 +635,7 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
             <div class="dashboard-plus-dns-health-upstream">
                 <i class="fa fa-fw fa-server dashboard-plus-dns-health-upstream-icon" title="${escapeHtml(this.translations.upstreams)}" aria-hidden="true"></i>
                 <div class="dashboard-plus-dns-health-upstream-name" title="${escapeHtml(upstream.domain || upstream.description || upstream.server)}">${escapeHtml(upstream.domain || upstream.description || upstream.server)}</div>
-                <div class="dashboard-plus-dns-health-upstream-server">${escapeHtml(upstream.server)}</div>
+                <div class="dashboard-plus-dns-health-upstream-server">${escapeHtml(upstream.server).replace(/:/g, ':<wbr>')}</div>
             </div>`).join('') : `<div class="dashboard-plus-dns-health-empty">${escapeHtml(this.translations.no_upstreams)}</div>`);
         this._renderTypes();
         this._renderQueryRate();
