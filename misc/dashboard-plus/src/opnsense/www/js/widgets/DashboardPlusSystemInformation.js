@@ -133,13 +133,15 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
         return `${size >= 10 || unit === 0 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`;
     }
 
+    /* A moment as "2026-10-05 08:00", as a short date ("Oct 5", with the year when it is another), and its age in days. */
     _when(epoch, now = Date.now() / 1000) {
-        const t = this.translations;
         const date = new Date(epoch * 1000);
         const pad = number => String(number).padStart(2, '0');
-        const text = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-        const days = Math.max(0, Math.floor((now - epoch) / 86400));
-        return {date: text, age: days === 0 ? t.zfs_today : days === 1 ? t.zfs_yesterday : fill(t.zfs_days_ago, {count: days}), days};
+        const full = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        const thisYear = date.getFullYear() === new Date(now * 1000).getFullYear();
+        const short = date.toLocaleDateString(undefined, thisYear ? {month: 'short', day: 'numeric'}
+            : {year: 'numeric', month: 'short', day: 'numeric'});
+        return {full, short, days: Math.max(0, Math.floor((now - epoch) / 86400))};
     }
 
     /* The last scrub or resilver in a few words, its date and repairs for the tooltip, and its color. */
@@ -154,14 +156,14 @@ export default class DashboardPlusSystemInformation extends DashboardPlusWidget(
                     color: resilver ? 'text-warning' : ''};
         }
         const when = this._when(scan.end || scan.start || 0, now);
-        const title = fill(t.zfs_scan_detail, {date: when.date, size: this._bytes(scan.repaired)});
+        const title = fill(t.zfs_scan_detail, {date: when.full, size: this._bytes(scan.repaired)});
         if (scan.state === 'canceled') {
             return {text: t.zfs_scrub_canceled, color: 'text-warning', title};
         }
         if (scan.errors) {
             return {text: fill(t.zfs_scrub_found, {count: scan.errors}), color: 'text-danger', title};
         }
-        return {text: fill(resilver ? t.zfs_resilvered : t.zfs_scrubbed, when), title,
+        return {text: fill(resilver ? t.zfs_resilvered : t.zfs_scrubbed, {date: when.short}), title,
                 color: when.days > SCRUB_DAYS ? 'text-warning' : ''};
     }
 

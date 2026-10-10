@@ -40,6 +40,8 @@ const NOW = Date.UTC(2026, 9, 10, 12) / 1000;
 const pool = (extra = {}) => ({name: 'zroot', state: 'ONLINE', layout: 'mirror', device_errors: 0, data_errors: 0,
     size: 229780750336, allocated: 1960869888, capacity: 0, scan: null, ...extra});
 const text = html => html.replace(/<[^>]+>/g, '|').replace(/\|+/g, '|');
+// the short date the widget writes, in this machine's locale
+const shortDate = epoch => new Date(epoch * 1000).toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
 
 test('ZFS: name and layout, a usage bar in the usage colors, then health, errors and last scrub', () => {
     const widget = new SystemInformation({translations});
@@ -51,7 +53,9 @@ test('ZFS: name and layout, a usage bar in the usage colors, then health, errors
     assert.match(html, /<strong>1%<\/strong>/);
     assert.match(html, /<div class="dashboard-plus-zfs-detail text-muted">0.9 GiB \/ 103 GiB<\/div>/);
     assert.match(html, /<span class="dashboard-plus-state-pill text-success"><i class="fa fa-fw fa-circle-check"[^>]*><\/i> Healthy<\/span>/);
-    assert.match(html, /<span>No errors<\/span><span title="\d{4}-\d\d-\d\d \d\d:\d\d, repaired 0 B">Scrubbed 5 days ago<\/span>/);
+    assert.ok(html.includes(`<span>No errors</span><span title="`), html);
+    assert.match(html, /title="\d{4}-\d\d-\d\d \d\d:\d\d, repaired 0 B"/);
+    assert.ok(html.includes(`>Scrubbed ${shortDate(NOW - 5 * 86400)}</span>`), html);
 });
 
 test('ZFS: a nearly full pool, never or long ago scrubbed, and problems stand out in the theme colors', () => {
@@ -60,7 +64,7 @@ test('ZFS: a nearly full pool, never or long ago scrubbed, and problems stand ou
     assert.match(widget._zfs([pool({capacity: 60})], NOW), /progress-bar-warning/);
     assert.match(widget._zfs([pool()], NOW), /<span class="text-warning">Never scrubbed<\/span>/);
     const stale = widget._zfs([pool({scan: {function: 'scrub', state: 'finished', end: NOW - 40 * 86400, errors: 0, repaired: 0}})], NOW);
-    assert.match(stale, /<span class="text-warning" title="[^"]+">Scrubbed 40 days ago<\/span>/);
+    assert.ok(stale.includes(`">Scrubbed ${shortDate(NOW - 40 * 86400)}</span>`) && /<span class="text-warning" title=/.test(stale), stale);
     const bad = widget._zfs([pool({state: 'DEGRADED', layout: 'raidz2', device_errors: 3, data_errors: 2,
         scan: {function: 'resilver', state: 'scanning', progress: 42}})], NOW);
     assert.match(bad, /· RAID-Z2/);

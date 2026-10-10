@@ -203,15 +203,17 @@ const STYLE = `
 
     /* System Information+: a ZFS pool, its usage bar, then health, errors and last scrub side by side */
     .dashboard-plus-zfs + .dashboard-plus-zfs { margin-top: 0.75em; }
-    .dashboard-plus-zfs-usage { display: flex; align-items: center; gap: 0.75em; margin-top: 0.3em; }
+    .dashboard-plus-zfs-usage { display: flex; align-items: center; gap: 0.5em; margin-top: 0.3em; }
     .dashboard-plus-zfs-usage .dashboard-plus-bar.progress { flex: 1 1 auto; margin: 0; }
-    .dashboard-plus-zfs-usage strong { flex: none; min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
+    .dashboard-plus-zfs-usage strong { flex: none; min-width: 2.4em; text-align: right; font-variant-numeric: tabular-nums; }
     .dashboard-plus-zfs-detail { font-size: 0.9em; margin-top: 0.1em; font-variant-numeric: tabular-nums; }
-    .dashboard-plus-zfs-status { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35em 0; margin-top: 0.4em; }
-    .dashboard-plus-zfs-status > span { padding: 0 0.9em; border-left: 1px solid rgba(128, 128, 128, 0.35); }
+    /* one row in a widget column: a slightly smaller font and tighter spacing than the lines above */
+    .dashboard-plus-zfs-status { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35em 0; margin-top: 0.4em;
+        font-size: 0.88em; white-space: nowrap; }
+    .dashboard-plus-zfs-status > span { padding: 0 0.55em; border-left: 1px solid rgba(128, 128, 128, 0.35); }
     .dashboard-plus-zfs-status > span:first-child { padding-left: 0; border-left: 0; }
     /* the pill takes the theme's success, warning or danger color, a light fill and border made from it */
-    .dashboard-plus-zfs-status > .dashboard-plus-state-pill { margin-right: 0.9em; }
+    .dashboard-plus-zfs-status > .dashboard-plus-state-pill { margin-right: 0.55em; padding: 0.1em 0.5em; }
 
     .dashboard-plus-traffic { padding: 0 0.25em; }
     .dashboard-plus-legend { display: flex; flex-wrap: wrap; gap: 0.2em 1em; white-space: nowrap; }

@@ -42,16 +42,13 @@
             <zfs_data_loss>Data loss ({count})</zfs_data_loss>
             <zfs_used>{used} / {size}</zfs_used>
             <zfs_never_scrubbed>Never scrubbed</zfs_never_scrubbed>
-            <zfs_scrubbed>Scrubbed {age}</zfs_scrubbed>
-            <zfs_resilvered>Resilvered {age}</zfs_resilvered>
+            <zfs_scrubbed>Scrubbed {date}</zfs_scrubbed>
+            <zfs_resilvered>Resilvered {date}</zfs_resilvered>
             <zfs_scrub_found>Scrub found {count} errors</zfs_scrub_found>
             <zfs_scrub_canceled>Scrub canceled</zfs_scrub_canceled>
             <zfs_scrubbing>Scrubbing {percent}%</zfs_scrubbing>
             <zfs_resilvering>Resilvering {percent}%</zfs_resilvering>
             <zfs_scan_detail>{date}, repaired {size}</zfs_scan_detail>
-            <zfs_today>today</zfs_today>
-            <zfs_yesterday>yesterday</zfs_yesterday>
-            <zfs_days_ago>{count} days ago</zfs_days_ago>
             <current>Current</current>
             <cpu_topology>{threads} CPUs: {packages} package(s) × {cores} core(s) × {threads_per_core} hardware threads</cpu_topology>
             <next>Next</next>
