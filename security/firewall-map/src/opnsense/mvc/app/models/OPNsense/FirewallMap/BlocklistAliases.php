@@ -52,7 +52,7 @@ class BlocklistAliases
     public static function feeds(): array
     {
         if (self::$feeds === null) {
-            $report = json_decode((string)(new Backend())->configdRun('firewallmap tables'), true);
+            $report = Reports::tables();
             self::$feeds = [];
             foreach ($report['tables'] ?? [] as $table) {
                 if (!empty($table['curated']) && !empty($table['url'])) {

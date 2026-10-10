@@ -170,7 +170,7 @@
         <id>profile.direction</id>
         <label>Direction</label>
         <type>dropdown</type>
-        <help>Equal: inbound and outbound flows count the same.</help>
+        <help>Equal: inbound and outbound flows count the same (the only choice for now).</help>
         <grid_view>
             <ignore>true</ignore>
         </grid_view>

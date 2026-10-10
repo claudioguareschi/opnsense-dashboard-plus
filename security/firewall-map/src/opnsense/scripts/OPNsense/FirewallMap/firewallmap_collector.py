@@ -89,13 +89,16 @@ from lib.leases import (
     lease_names,
 )
 from firewallmap_snapshots import (
-    MAX_DOCUMENT_BYTES, DocumentBudget, SnapshotTooLarge, json_size, valid_id as snapshot_valid_id,
+    DocumentBudget, SnapshotTooLarge, json_size, valid_id as snapshot_valid_id,
 )
 from lib.pf import (
     _Record, carp_backup_addresses, host_info, port_forwards, rule_descriptions,
 )
 from lib import collector as state_collector
 from lib.collector import CollectorEngine, CollectorError, PROTOCOL_VERSION, READ_TIMEOUT, memory_budget
+# snapshot budgets (neither live visualization nor PF admission limits): flows and PF states kept with a
+# saved snapshot, and its encoded size (the snapshot document's own limit, MAX_DOCUMENT_BYTES)
+from lib.collector import SNAPSHOT_BYTES, SNAPSHOT_FLOWS, SNAPSHOT_STATES
 
 
 EXTERNAL_IP_URL = "https://api.ipify.org"
@@ -146,11 +149,6 @@ FADE_SECONDS = 20.0
 HOST_REFRESH_SECONDS = 30.0
 MAX_SERVICES = 4
 MAX_INSIDE = 3
-# PF states kept with a saved snapshot, per remote address and in all
-SNAPSHOT_STATES_TOTAL = 5000
-# Snapshot-specific budgets: neither live visualization nor PF admission limits.
-SNAPSHOT_FLOWS = 5000
-SNAPSHOT_BYTES = MAX_DOCUMENT_BYTES
 
 
 def _ranked(counts, limit=None):
@@ -1046,7 +1044,7 @@ class Collector:
         payload["hostnames"] = {}
         payload["states"], payload["full"] = {}, True
         states = {"scope": "retained_logical_flows", "available": 0, "captured": 0,
-                  "total_limit": SNAPSHOT_STATES_TOTAL, "truncated": False, "complete": False}
+                  "total_limit": SNAPSHOT_STATES, "truncated": False, "complete": False}
         payload["capture"] = {"version": 2, "source": "collector", "detail_status": "complete",
                               "encoded_limit": SNAPSHOT_BYTES, "flows": coverage, "states": states,
                               "context": self.snapshot_context()}
@@ -1077,7 +1075,7 @@ class Collector:
         identities = [(flow["origin"], flow["dest"], (flow["origin"], flow["dest"]) in required_pairs)
                       for flow in payload["flows"]]
         payload["states"], states = self.collector_engine.snapshot_detail(
-            identities, max(0, budget.remaining), SNAPSHOT_STATES_TOTAL)
+            identities, max(0, budget.remaining), SNAPSHOT_STATES)
         payload["capture"]["states"] = states
         payload["capture"]["source"] = "state_collector"
         payload["capture"]["required_evidence_complete"] = (

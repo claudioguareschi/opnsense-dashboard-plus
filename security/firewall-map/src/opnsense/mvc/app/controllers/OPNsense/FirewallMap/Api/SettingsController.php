@@ -28,7 +28,7 @@ namespace OPNsense\FirewallMap\Api;
 
 use OPNsense\Base\ApiMutableModelControllerBase;
 use OPNsense\Core\Backend;
-use OPNsense\FirewallMap\BlocklistAliases;
+use OPNsense\FirewallMap\Reports;
 
 /**
  * Firewall Map+ settings (Reporting: Firewall Map: Settings): OPNsense's standard get and set; the
@@ -41,13 +41,14 @@ class SettingsController extends ApiMutableModelControllerBase
     protected static $internalModelClass = 'OPNsense\FirewallMap\FirewallMap';
 
     /**
-     * Validation checks the blocklist aliases against the curated feeds (see the model): ask configd
-     * for them before the config lock is taken, not while holding it.
+     * Validation reads configd's reports (the PF tables for the list fields and the blocklist
+     * aliases, the built-in profiles): ask for them before the config lock is taken, not while
+     * holding it.
      */
     public function setAction()
     {
         if ($this->request->isPost()) {
-            BlocklistAliases::feeds();
+            Reports::warm();
         }
         return parent::setAction();
     }

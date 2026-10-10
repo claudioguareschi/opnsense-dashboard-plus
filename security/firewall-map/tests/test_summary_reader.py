@@ -122,12 +122,13 @@ class SnapshotMainTest(unittest.TestCase):
         self.assertTrue(os.path.exists(SUMMARY.REQUEST_MARKER))
         self.assertFalse(os.path.exists(SUMMARY.HOSTNAME_MARKER))
 
-    def test_filters_blocks_and_hostnames_for_the_viewer(self):
+    def test_hostnames_for_the_viewer_and_every_blocked_source(self):
         self.write({"status": "ok", "flows": [], "hostnames": {"8.8.8.8": "dns.google"},
                     "blocks": [{"hits": 1}, {"hits": 5}]})
-        payload = SUMMARY.main(block_minimum=2)
+        payload = SUMMARY.main()
         self.assertNotIn("hostnames", payload)
-        self.assertEqual((len(payload["blocks"]), payload["blocks_below"]), (1, 1))
+        # every blocked source: the viewer's threshold is the API's (FlowSummary.php)
+        self.assertEqual((len(payload["blocks"]), "blocks_below" in payload), (2, False))
         payload = SUMMARY.main(want_hostnames=True)
         self.assertEqual(payload["hostnames"], {"8.8.8.8": "dns.google"})
         self.assertTrue(os.path.exists(SUMMARY.HOSTNAME_MARKER))

@@ -202,11 +202,6 @@ class BlockTest(unittest.TestCase):
                          datetime.fromisoformat("2026-09-25T21:27:07-04:00").timestamp())
         self.assertIsNone(BLOCKS.log_time("garbage"))
 
-    def test_reader_applies_viewer_threshold(self):
-        payload = {"blocks": [{"hits": 1}, {"hits": 3}, {"hits": 7}]}
-        result = SUMMARY.apply_block_threshold(payload, 3)
-        self.assertEqual([block["hits"] for block in result["blocks"]], [3, 7])
-        self.assertEqual(result["blocks_below"], 1)
 
 
 if __name__ == "__main__":

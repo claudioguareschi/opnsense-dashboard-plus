@@ -28,7 +28,7 @@
 namespace OPNsense\FirewallMap\FieldTypes;
 
 use OPNsense\Base\FieldTypes\BaseListField;
-use OPNsense\Core\Backend;
+use OPNsense\FirewallMap\Reports;
 
 /**
  * The active ranking profile, by UUID (never by name or position): the built-in profiles as the
@@ -44,7 +44,7 @@ class RankingProfileField extends BaseListField
     {
         if (self::$builtins === null) {
             self::$builtins = [];
-            $report = json_decode((string)(new Backend())->configdRun('firewallmap profiles'), true);
+            $report = Reports::profiles();
             foreach ($report['profiles'] ?? [] as $profile) {
                 if (!empty($profile['builtin']) && !empty($profile['uuid']) && !empty($profile['name'])) {
                     self::$builtins[$profile['uuid']] = $profile;

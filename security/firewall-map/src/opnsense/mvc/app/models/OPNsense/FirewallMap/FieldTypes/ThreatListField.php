@@ -28,7 +28,7 @@
 namespace OPNsense\FirewallMap\FieldTypes;
 
 use OPNsense\Base\FieldTypes\BaseListField;
-use OPNsense\Core\Backend;
+use OPNsense\FirewallMap\Reports;
 
 /**
  * The pf tables that can serve as threat lists: blocklist-type aliases and the curated feeds, as
@@ -41,7 +41,7 @@ class ThreatListField extends BaseListField
     {
         if (!$this->hasStaticOptions()) {
             $options = [];
-            $report = json_decode((string)(new Backend())->configdRun('firewallmap tables'), true);
+            $report = Reports::tables();
             foreach ($report['tables'] ?? [] as $table) {
                 if (!empty($table['name'])) {
                     $options[$table['name']] = $table['label'] ?? $table['name'];

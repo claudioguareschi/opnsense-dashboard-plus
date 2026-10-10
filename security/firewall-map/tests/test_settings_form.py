@@ -35,6 +35,7 @@ MVC = Path(__file__).resolve().parents[1] / "src/opnsense/mvc/app"
 FORMS = MVC / "controllers/OPNsense/FirewallMap/forms"
 MODEL = MVC / "models/OPNsense/FirewallMap/FirewallMap.xml"
 SET_FIELD = MVC / "models/OPNsense/FirewallMap/FieldTypes/ClassificationSetField.php"
+REPORTS = MVC / "models/OPNsense/FirewallMap/Reports.php"
 
 
 class SettingsFormTest(unittest.TestCase):
@@ -184,6 +185,7 @@ namespace OPNsense\Core {
 }
 namespace {
     if (!function_exists('gettext')) { function gettext($text) { return $text; } }
+    require getenv('REPORTS');
     require getenv('FIELD');
     $result = [];
     foreach (json_decode(file_get_contents('php://stdin'), true) as [$type, $value]) {
@@ -209,7 +211,7 @@ class ClassificationSetOptionsTest(unittest.TestCase):
         """Option lists of fields built in one request (one configd report), in order."""
         result = subprocess.run(["php", "-r", FIELD_HARNESS], input=json.dumps(fields), capture_output=True,
                                 text=True, check=True,
-                                env=dict(os.environ, FIELD=str(SET_FIELD), REPORT=json.dumps(REPORT)))
+                                env=dict(os.environ, FIELD=str(SET_FIELD), REPORTS=str(REPORTS), REPORT=json.dumps(REPORT)))
         return json.loads(result.stdout)
 
     def test_country_blocklists_offer_geoip_aliases_only(self):
@@ -226,7 +228,7 @@ class ClassificationSetOptionsTest(unittest.TestCase):
         report = {"sets": [table for table in REPORT["sets"] if table["type"] != "geoip"]}
         result = subprocess.run(["php", "-r", FIELD_HARNESS], input=json.dumps([["geoip", ""]]), capture_output=True,
                                 text=True, check=True,
-                                env=dict(os.environ, FIELD=str(SET_FIELD), REPORT=json.dumps(report)))
+                                env=dict(os.environ, FIELD=str(SET_FIELD), REPORTS=str(REPORTS), REPORT=json.dumps(report)))
         self.assertEqual(json.loads(result.stdout), [[]])
 
     def test_stored_choices_stay_representable(self):
@@ -236,6 +238,68 @@ class ClassificationSetOptionsTest(unittest.TestCase):
         self.assertEqual(country, {"Country_NL": "Country_NL (Netherlands)",
                                    "BeachLanSubnet": "BeachLanSubnet (Beach LAN)", "Gone": "Gone (not found)"})
 
+
+# configd's reports asked for once, before the config lock: a Backend that refuses to answer once the
+# "lock" is taken, then everything validation reads under it (W-C1)
+LOCK_HARNESS = FIELD_HARNESS.split("namespace OPNsense\\Core {")[0] + r"""
+namespace OPNsense\Core {
+    class Backend {
+        public static $locked = false;
+        public static $calls = [];
+        public function configdRun($action) {
+            if (self::$locked) { throw new \Exception("configd under the config lock: $action"); }
+            self::$calls[] = $action;
+            return $action === 'firewallmap profiles' ? getenv('PROFILES') : getenv('REPORT');
+        }
+    }
+}
+namespace {
+    if (!function_exists('gettext')) { function gettext($text) { return $text; } }
+    foreach (['REPORTS', 'FIELD', 'THREATS', 'PROFILE_FIELD', 'ALIASES'] as $file) { require getenv($file); }
+    OPNsense\FirewallMap\Reports::warm();
+    OPNsense\Core\Backend::$locked = true;
+    $threats = new OPNsense\FirewallMap\FieldTypes\ThreatListField('');
+    $sets = new OPNsense\FirewallMap\FieldTypes\ClassificationSetField('');
+    echo json_encode(['threats' => $threats->getNodeData(), 'sets' => $sets->getValidators() ?: $sets->getNodeData(),
+                      'builtins' => array_keys(OPNsense\FirewallMap\FieldTypes\RankingProfileField::builtins()),
+                      'feeds' => array_keys(OPNsense\FirewallMap\BlocklistAliases::feeds()),
+                      'calls' => OPNsense\Core\Backend::$calls]);
+}
+"""
+
+
+@unittest.skipUnless(shutil.which("php"), "needs the PHP command line")
+class ConfigLockTest(unittest.TestCase):
+    def test_validation_under_the_lock_never_asks_configd(self):
+        models = MVC / "models/OPNsense/FirewallMap"
+        report = {"tables": [{"name": "FWMAP_Feodo", "label": "abuse.ch Feodo Tracker", "curated": True,
+                              "url": "https://feodotracker.abuse.ch/downloads/ipblocklist.txt"}],
+                  "sets": REPORT["sets"]}
+        profiles = {"profiles": [{"uuid": "9bded7b2-a028-44ca-b7ab-4e3357694174", "name": "Balanced", "builtin": True}]}
+        result = subprocess.run(["php", "-r", LOCK_HARNESS], capture_output=True, text=True, check=True, env=dict(
+            os.environ, REPORT=json.dumps(report), PROFILES=json.dumps(profiles), REPORTS=str(REPORTS),
+            FIELD=str(SET_FIELD), THREATS=str(models / "FieldTypes/ThreatListField.php"),
+            PROFILE_FIELD=str(models / "FieldTypes/RankingProfileField.php"),
+            ALIASES=str(models / "BlocklistAliases.php")))
+        answer = json.loads(result.stdout)
+        self.assertEqual(answer["calls"], ["firewallmap tables", "firewallmap profiles"])
+        self.assertEqual(list(answer["threats"]), ["FWMAP_Feodo"])
+        self.assertEqual(answer["builtins"], ["9bded7b2-a028-44ca-b7ab-4e3357694174"])
+        self.assertEqual(answer["feeds"], ["FWMAP_Feodo"])
+
+    def test_every_locking_action_warms_the_reports_first(self):
+        api = MVC / "controllers/OPNsense/FirewallMap/Api"
+        for controller, action, lock in (("SettingsController", "setAction", "parent::setAction()"),
+                                         ("ProfilesController", "addItemAction", "$this->addBase("),
+                                         ("ProfilesController", "setItemAction", "$this->setBase("),
+                                         ("ProfilesController", "delItemAction", "$this->delBase("),
+                                         ("ProfilesController", "activateAction", "Config::getInstance()->lock()")):
+            with self.subTest(controller=controller, action=action):
+                source = (api / f"{controller}.php").read_text()
+                body = source[source.index(f"function {action}("):]
+                body = body[:body.index("\n    }\n")]
+                self.assertIn("Reports::warm();", body)
+                self.assertLess(body.index("Reports::warm();"), body.index(lock))
 
 if __name__ == "__main__":
     unittest.main()

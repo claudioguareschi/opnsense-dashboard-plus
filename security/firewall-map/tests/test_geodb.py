@@ -49,6 +49,14 @@ class GeoDatabaseTest(unittest.TestCase):
                 handle.write("[settings]\nurl=https://ipinfo.io/data/free/country.csv.gz?token=xyz\n")
             self.assertIsNone(GEODB.alias_license_key(path))
             self.assertIsNone(GEODB.alias_license_key(os.path.join(directory, "missing.conf")))
+            # MaxMind's hosts only, matched by name: a look-alike domain is not MaxMind
+            for url, key in (("https://notmaxmind.com/app?license_key=k1", None),
+                             ("https://download.maxmind.com.evil.example/app?license_key=k2", None),
+                             ("https://user@download.MaxMind.com:443/app?license_key=k3", "k3"),
+                             ("https://maxmind.com/app?license_key=k4", "k4")):
+                with open(path, "w") as handle:
+                    handle.write(f"[settings]\nurl={url}\n")
+                self.assertEqual(GEODB.alias_license_key(path), key, url)
 
     def test_automatic_provider_prefers_maxmind_with_a_key(self):
         with mock.patch.object(GEODB, "alias_license_key", lambda path=None: None):

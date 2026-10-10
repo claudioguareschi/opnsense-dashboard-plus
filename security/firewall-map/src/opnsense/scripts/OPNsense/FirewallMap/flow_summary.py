@@ -32,7 +32,7 @@ script when there is more to do: the summary is old or missing (the collector is
 by itself when no dashboard has asked for a while), or the geolocation database is missing or its
 download reports errors. The API applies the viewer's block threshold and host name setting.
 
-    flow_summary.py [hostnames] [minimum]    minimum: apply the block threshold here (older API)
+    flow_summary.py [hostnames]
 """
 
 import json
@@ -122,18 +122,7 @@ def fetch_database(marker=None, now=None):
         pass
 
 
-def apply_block_threshold(payload, minimum):
-    """Keep blocked sources with at least `minimum` hits in the window; count the rest."""
-    blocks = payload.get("blocks")
-    if blocks is None:
-        return payload
-    shown = [block for block in blocks if block.get("hits", 1) >= minimum]
-    payload["blocks"] = shown
-    payload["blocks_below"] = len(blocks) - len(shown)
-    return payload
-
-
-def main(want_hostnames=False, block_minimum=None):
+def main(want_hostnames=False):
     mark_request()
     if want_hostnames:
         mark_request(HOSTNAME_MARKER)
@@ -153,16 +142,12 @@ def main(want_hostnames=False, block_minimum=None):
         payload["geodb"] = view
     if not want_hostnames:
         payload.pop("hostnames", None)
-    # the API applies the viewer's threshold (FlowSummary.php), to this document as to the shell's
-    return payload if block_minimum is None else apply_block_threshold(payload, block_minimum)
+    # the API applies the viewer's block threshold (FlowSummary.php), to this document as to the shell's
+    return payload
 
 
 if __name__ == "__main__":
     # often the first script to create /var/run/firewallmap (the first dashboard poll): 0750 like
     # everything else here, not configd's default
     secure_umask()
-    arguments = sys.argv[1:]
-    minimum = next((int(value) for value in arguments if value.isdigit()), None)
-    print(json.dumps(main(want_hostnames="hostnames" in arguments,
-                          block_minimum=None if minimum is None else max(1, min(minimum, 100))),
-                     separators=(",", ":")))
+    print(json.dumps(main(want_hostnames="hostnames" in sys.argv[1:]), separators=(",", ":")))

@@ -247,7 +247,8 @@ until it is switched on.*
   - *Record in the background* keeps recording threats while no map is open, as long as the
     widget is on a dashboard.
   - *Maximum flows on the map* (Collector, 25 to 1000, default 150): how many flows the collector
-    ranks and sends to the map each sample. More flows take more processing time and memory; it
+    ranks and sends to the map each sample. More flows take more processing time and memory (at
+    1000 flows and a 2-second refresh, each open map receives 1 to 2 MB of JSON a refresh); it
     never limits firewall states or connections.
   - *Country blocklists* (OPNsense GeoIP aliases) and *Operational sets* (PF tables with a meaning
     of your own: partners, cloud providers...) name the sets a remote belongs to on the map.
@@ -342,6 +343,8 @@ threat feeds and the AbuseIPDB blacklist are, and any download errors. Each has 
 Its *State collector* section shows the state collector (`/usr/local/libexec/firewallmap-collector`):
 whether it is running, its collector protocol and the expected one (1), its process, restarts and the
 PF state ABI it was built for, the state limit its memory budget allows, the cost of the last sample,
+the flows on the map (the last sample's ranked flows of the maximum), whether the classification
+snapshot is current (a failed refresh keeps the previous PF tables, marked stale, with the reason),
 anything left out (unsupported states, candidates or threat remotes over their budgets) and the last
 refusal or error. A collector that speaks another protocol means the package's components come from
 different versions: the status says *Incompatible* and the fix is to reinstall or upgrade the
@@ -520,6 +523,15 @@ tools/build-renderer.sh --check   # rebuild and confirm the committed files are 
 It needs Node.js 20 or newer. The build also makes `firewall-map-diagnostics.js`, a diagnostics
 panel (add `?debug=1` to the map's address). It is kept in `security/firewall-map/devel/`, outside
 `src/`, so no package includes it; only development builds (`DEVEL=1 tools/build.sh`) add it.
+
+Firewall Map+'s tests run from `security/firewall-map` (the renderer's run with the build above).
+The Python suite compiles the collector with a synthetic PF reader, so it needs a C compiler; the
+PHP command line, when installed, also checks the models and controllers against the scripts:
+
+```sh
+cd security/firewall-map && python3 -m unittest discover -s tests
+FM_COLLECTOR_TEST_CC=clang FM_COLLECTOR_TEST_FLAGS="-g -fsanitize=address,undefined" python3 -m unittest discover -s tests
+```
 
 ### Publishing (maintainer)
 

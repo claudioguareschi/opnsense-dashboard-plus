@@ -122,7 +122,10 @@ def alias_license_key(path=GEOIP_ALIAS_CONF):
     except Exception:
         return None
     parsed = urlparse(url.strip())
-    if not parsed.netloc.endswith("maxmind.com"):
+    # MaxMind's own host (download.maxmind.com) or another of its names, never a look-alike
+    # (notmaxmind.com); the key is only ever sent to MaxMind's fixed download URL anyway
+    host = (parsed.hostname or "").lower()
+    if host != "maxmind.com" and not host.endswith(".maxmind.com"):
         return None
     key = parse_qs(parsed.query).get("license_key", [""])[0].strip()
     return key or None

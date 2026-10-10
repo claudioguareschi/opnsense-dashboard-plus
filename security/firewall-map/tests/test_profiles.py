@@ -181,7 +181,13 @@ class ModelParityTest(unittest.TestCase):
              "10.0.0.0/8 101", "10.0.0.0/8 -1", "10.0.0.0/8 NaN", "10.0.0.0/8 INF", "10.0.0.0/8 1e2",
              "192.168.1.5/24 2", "192.168.1.0/33 2", "192.168.1.0/024 2", "mail.example 2", "10.0.0.0/8",
              "10.0.0.0/8 0", "10.0.0.0/8 2000000", "10.0.0.0/8 x", "10.0.0.0/8 2\n10.0.0.0/8 3",
-             "10.0.0.0/8 2\n10.0.0.0/8 2", "2001:db8::1/64 2", "0.0.0.0/0 2", "\n\n"]
+             "10.0.0.0/8 2\n10.0.0.0/8 2", "2001:db8::1/64 2", "0.0.0.0/0 2", "\n\n",
+             # separators and characters the two languages read differently: refused alike
+             "10.0.0.0/8\f5", "10.0.0.0/8\x0b5", "10.0.0.0/8 5\x85192.168.0.0/16 2", "10.0.0.0/8 5\u2028",
+             "10.0.0.0/8\xa05", "10.0.0.0/8 5\r192.168.0.0/16 2", "10.0.0.0/8 5\x00", "10.0.0.0/8 5\x1c",
+             "10.0.0.0/8 \u0665", "10.0.0.0/8 1_0", "10.0.0.0/8 +5", "10.0.0.0/8 5.", "10.0.0.0/8 .5",
+             # and the ones both accept
+             "10.0.0.0/8\t5", "  10.0.0.0/8   5  ", "10.0.0.0/8 5\r\n192.168.0.0/16 2\r\n", "10.0.0.0/8 05"]
 
     def test_asset_rules_match(self):
         php = shutil.which("php")
@@ -201,6 +207,66 @@ class ModelParityTest(unittest.TestCase):
                 except PROFILES.ProfileError:
                     scripts = False
                 self.assertEqual(model, scripts)
+
+
+    # whole profiles: the model's own validateProfile (weights total, security shares, asset rules),
+    # its field validators' bounds (checked against the model XML below), and the scripts' validate
+    PROFILES_CASES = [
+        ({"byte_rate": 100}, (0, 0, 0)), ({"byte_rate": 99}, (0, 0, 0)), ({"byte_rate": 101}, (0, 0, 0)),
+        ({}, (0, 0, 0)), ({"byte_rate": 50, "ids_evidence": 50}, (50, 30, 20)),
+        ({"byte_rate": 50, "ids_evidence": 50}, (50, 30, 21)), ({"byte_rate": 100}, (100, 0, 0)),
+        ({feature: 12 for feature in PROFILES.FEATURES[:8]} | {"byte_rate": 16}, (4, 2, 1)),
+    ]
+
+    def test_profiles_match(self):
+        php = shutil.which("php")
+        if not php:
+            raise unittest.SkipTest("PHP unavailable")
+        cases = [{**{feature: str(weights.get(feature, 0)) for feature in PROFILES.FEATURES},
+                  **dict(zip(PROFILES.FLOORS, map(str, floors))), "assets": "10.0.0.0/8 2"}
+                 for weights, floors in self.PROFILES_CASES]
+        # validateProfile reads a profile row's fields and uuid and appends messages: stand-ins for both
+        stub = (
+            "namespace OPNsense\\Base { class BaseModel {} } "
+            "namespace OPNsense\\Base\\Messages { class Message { function __construct($m, $f) {} } } "
+            "namespace { require getenv('MODEL'); "
+            "class Row { function __construct(public array $v) {} function __get($k) { return $this->v[$k] ?? ''; } "
+            "function getAttributes() { return ['uuid' => 'u']; } } "
+            "class Messages { public $n = 0; function appendMessage($m) { $this->n++; } } "
+            "$check = (new ReflectionClass('OPNsense\\FirewallMap\\FirewallMap'))->getMethod('validateProfile'); "
+            "$model = (new ReflectionClass('OPNsense\\FirewallMap\\FirewallMap'))->newInstanceWithoutConstructor(); "
+            "foreach (json_decode(file_get_contents('php://stdin'), true) as $row) "
+            "{ $m = new Messages(); $check->invoke($model, new Row($row), $m); echo json_encode($m->n === 0), \"\\n\"; } }")
+        result = subprocess.run([php, "-r", stub], input=json.dumps(cases), capture_output=True, text=True,
+                                env=dict(os.environ, MODEL=str(MODEL_PHP)), check=True)
+        accepted = [json.loads(line) for line in result.stdout.split()]
+        for (weights, floors), model in zip(self.PROFILES_CASES, accepted, strict=True):
+            with self.subTest(weights=weights, floors=floors):
+                profile = dict(example(), weights={feature: weights.get(feature, 0) for feature in PROFILES.FEATURES},
+                               floors=dict(zip(PROFILES.FLOORS, floors)), assets=PROFILES.parse_assets("10.0.0.0/8 2"))
+                try:
+                    PROFILES.validate(profile)
+                    scripts = True
+                except PROFILES.ProfileError:
+                    scripts = False
+                self.assertEqual(model, scripts)
+
+    def test_bounds_match_the_model(self):
+        """The limits the scripts enforce are the model's: the field bounds in FirewallMap.xml and the
+        constants in FirewallMap.php."""
+        import xml.etree.ElementTree as ET
+        row = ET.parse(MODEL_PHP.with_suffix(".xml")).getroot().find("./items/profiles/profile")
+        for key in (*PROFILES.FEATURES, *PROFILES.FLOORS):
+            field = row.find(key)
+            self.assertEqual((field.get("type"), field.findtext("MinimumValue"), field.findtext("MaximumValue")),
+                             ("IntegerField", "0", "100"), key)
+        multiplier = row.find("default_multiplier")
+        self.assertEqual((float(multiplier.findtext("MinimumValue")), float(multiplier.findtext("MaximumValue"))),
+                         (PROFILES.MULTIPLIER_MIN, PROFILES.MULTIPLIER_MAX))
+        php = MODEL_PHP.read_text()
+        for name, value in (("ASSET_RULES_MAX", PROFILES.ASSET_RULES_MAX), ("MULTIPLIER_MIN", int(PROFILES.MULTIPLIER_MIN)),
+                            ("MULTIPLIER_MAX", int(PROFILES.MULTIPLIER_MAX))):
+            self.assertIn(f"const {name} = {value};", php, name)
 
 
 class SettingsFileTest(unittest.TestCase):

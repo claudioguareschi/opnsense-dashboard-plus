@@ -62,7 +62,9 @@ TOUCHED = "(status != 'new' OR coalesce(note, '') != '')"
 # a touched entry ages from its last sighting or its last status change, whichever is later
 TOUCHED_AGE = "max(last_seen, coalesce(status_changed, 0))"
 MAX_ITEMS = 8  # per list kept for one address (targets, inside hosts, services, lists)
-MAX_NOTE = 1000
+# a note's characters: what the review page lets one type (queue.js maxlength) and ThreatsController's
+# NOTE_BYTES carries (three bytes a character, within configd's one message)
+MAX_NOTE = 800
 SCHEMA_VERSION = 1
 
 

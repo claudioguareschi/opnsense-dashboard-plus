@@ -116,16 +116,29 @@ def _number(value, what):
     return number
 
 
+# Asset rules as text, the same grammar as the model's FirewallMap::parseAssets (tests/test_profiles
+# runs both over the same cases): printable ASCII, tabs and line breaks (LF, or CR LF) only; one
+# "CIDR multiplier" per line, separated by spaces or tabs; the multiplier in plain decimal digits.
+ASSET_TEXT_BAD = re.compile(r"[^\t\n\r\x20-\x7e]|\r(?!\n)")
+ASSET_MULTIPLIER = re.compile(r"[0-9]+(?:\.[0-9]+)?")
+
+
 def parse_assets(text):
     """Asset rules from their configuration text: one "CIDR multiplier" per line (an address alone
     is a host: /32 or /128). Raises ProfileError on a malformed line."""
+    text = str(text or "")
+    if ASSET_TEXT_BAD.search(text):
+        raise ProfileError("asset rules: plain text only, one rule per line")
     rules = []
-    for number, line in enumerate(str(text or "").splitlines(), 1):
-        if not line.strip():
+    for number, line in enumerate(re.split(r"\r?\n", text), 1):
+        line = line.strip(" \t")
+        if not line:
             continue
-        parts = line.split()
+        parts = re.split(r"[ \t]+", line)
         if len(parts) != 2:
             raise ProfileError(f"asset rule {number}: expected \"CIDR multiplier\"")
+        if not ASSET_MULTIPLIER.fullmatch(parts[1]):
+            raise ProfileError(f"asset rule {number}: the multiplier is a number from 1 to 100")
         rules.append({"cidr": parts[0], "multiplier": parts[1]})
     return rules
 

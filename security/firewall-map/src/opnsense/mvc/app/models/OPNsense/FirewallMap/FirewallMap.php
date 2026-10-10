@@ -48,14 +48,21 @@ class FirewallMap extends BaseModel
      */
     public static function parseAssets($text)
     {
+        /* the same grammar as lib/profiles.py parse_assets (tests/test_profiles runs both over the
+           same cases): printable ASCII, tabs and line breaks (LF, or CR LF) only; one "CIDR
+           multiplier" per line, separated by spaces or tabs; the multiplier in plain decimal digits */
+        $text = (string)$text;
+        if (preg_match('/[^\t\n\r\x20-\x7e]|\r(?!\n)/', $text)) {
+            return gettext('Asset rules: plain text only, one rule per line.');
+        }
         $rules = [];
         $seen = [];
-        foreach (preg_split('/\r?\n/', (string)$text) as $number => $line) {
-            $line = trim($line);
+        foreach (preg_split('/\r?\n/', $text) as $number => $line) {
+            $line = trim($line, " \t");
             if ($line === '') {
                 continue;
             }
-            $parts = preg_split('/\s+/', $line);
+            $parts = preg_split('/[ \t]+/', $line);
             if (count($parts) !== 2) {
                 return sprintf(gettext('Asset rule %d: enter a network and a multiplier.'), $number + 1);
             }
@@ -75,7 +82,7 @@ class FirewallMap extends BaseModel
                                    $number + 1, $network);
                 }
             }
-            if (!is_numeric($multiplier) || (float)$multiplier < self::MULTIPLIER_MIN ||
+            if (!preg_match('/^[0-9]+(\.[0-9]+)?$/', $multiplier) || (float)$multiplier < self::MULTIPLIER_MIN ||
                 (float)$multiplier > self::MULTIPLIER_MAX) {
                 return sprintf(gettext('Asset rule %d: the multiplier is from 1 to 100.'), $number + 1);
             }

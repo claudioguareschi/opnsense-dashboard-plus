@@ -28,7 +28,7 @@
 namespace OPNsense\FirewallMap\FieldTypes;
 
 use OPNsense\Base\FieldTypes\BaseListField;
-use OPNsense\Core\Backend;
+use OPNsense\FirewallMap\Reports;
 
 /**
  * The pf tables that can serve as country or operational classification sets: every table loaded
@@ -49,7 +49,7 @@ class ClassificationSetField extends BaseListField
     {
         if (!$this->hasStaticOptions('')) {
             $offered = ['' => []];
-            $report = json_decode((string)(new Backend())->configdRun('firewallmap tables'), true);
+            $report = Reports::tables();
             foreach ($report['sets'] ?? [] as $table) {
                 if (!empty($table['name'])) {
                     $label = $table['description'] !== '' ? sprintf('%s (%s)', $table['name'], $table['description']) : $table['name'];

@@ -30,6 +30,7 @@ use OPNsense\Base\ApiMutableModelControllerBase;
 use OPNsense\Core\Config;
 use OPNsense\FirewallMap\FieldTypes\RankingProfileField;
 use OPNsense\FirewallMap\FirewallMap;
+use OPNsense\FirewallMap\Reports;
 
 /**
  * Ranking profiles (Reporting: Firewall Map: Settings), as a standard grid with an edit dialog.
@@ -101,6 +102,8 @@ class ProfilesController extends ApiMutableModelControllerBase
 
     public function addItemAction()
     {
+        /* configd's reports before the base class takes the config lock (Reports) */
+        Reports::warm();
         return $this->addBase('profile', 'profiles.profile');
     }
 
@@ -110,6 +113,7 @@ class ProfilesController extends ApiMutableModelControllerBase
         if ($this->isBuiltin($uuid) || $this->getModel()->getNodeByReference('profiles.profile.' . $uuid) === null) {
             return ['result' => 'failed'];
         }
+        Reports::warm();
         return $this->setBase('profile', 'profiles.profile', $uuid);
     }
 
@@ -119,6 +123,7 @@ class ProfilesController extends ApiMutableModelControllerBase
         if ((string)$this->getModel()->general->ranking_profile === (string)$uuid) {
             return ['result' => 'failed'];
         }
+        Reports::warm();
         return $this->delBase('profiles.profile', $uuid);
     }
 
@@ -128,11 +133,16 @@ class ProfilesController extends ApiMutableModelControllerBase
         if (!$this->request->isPost()) {
             return ['result' => 'failed'];
         }
+        Reports::warm();
         Config::getInstance()->lock();
         $model = $this->getModel();
         $model->general->ranking_profile = (string)$uuid;
-        foreach ($model->performValidation() as $message) {
-            if ($message->getField() === 'general.ranking_profile') {
+        /* the whole model: the activated profile's own row must be valid as well, or the collector
+           would refuse it and rank with Balanced while the grid shows it active */
+        $row = 'profiles.profile.' . $uuid . '.';
+        foreach ($model->performValidation(true) as $message) {
+            $field = $message->getField();
+            if ($field === 'general.ranking_profile' || strpos($field, $row) === 0) {
                 return ['result' => 'failed', 'message' => $message->getMessage()];
             }
         }

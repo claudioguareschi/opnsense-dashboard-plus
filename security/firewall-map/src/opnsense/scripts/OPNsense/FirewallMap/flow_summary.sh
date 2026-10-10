@@ -68,7 +68,14 @@ python_answers()
 
 modified=$(date -r "${SUMMARY}" +%s 2>/dev/null) || python_answers "$@"
 now=$(date +%s)
-[ $((now - modified)) -le ${FRESH_SECONDS} ] || python_answers "$@"
+# fresh for as long as flow_summary.py says (stale_after: 2.5 sampling intervals, never under 10 s),
+# a second early here: the document's own "interval", which the collector writes right after
+# "status" and "sampled_at" (any later one is nested); without it, FRESH_SECONDS
+interval=$(head -c 256 "${SUMMARY}" 2>/dev/null |
+	grep -Eo '^[{]"status":"[a-z_]+",("sampled_at":"[^"]*",)?"interval":[0-9]+([.][0-9]+)?[,}]' | head -n 1)
+fresh=$(echo "${interval##*:}" | awk -v floor=${FRESH_SECONDS} \
+	'{ i = $1 + 0; s = floor; if (i >= 2 && i <= 300 && int(2.5 * i) - 1 > s) s = int(2.5 * i) - 1; print s }')
+[ $((now - modified)) -le ${fresh:-${FRESH_SECONDS}} ] || python_answers "$@"
 
 # the map waits for a database (and may have to start its download): flow_summary.py says so
 case "$(head -c 24 "${SUMMARY}" 2>/dev/null)" in

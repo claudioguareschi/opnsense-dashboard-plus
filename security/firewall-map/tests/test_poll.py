@@ -52,6 +52,16 @@ PAYLOAD = {"status": "ok", "sampled_at": "2026-10-04T12:00:00.250000+00:00", "fl
            "provider": "dbip"}
 
 
+def blocks_at_least(payload, minimum):
+    """The viewer's block threshold as the API applies it: blocked sources with at least `minimum`
+    hits in the window, and how many were left out."""
+    blocks = payload.get("blocks")
+    if blocks is None:
+        return payload
+    shown = [block for block in blocks if block.get("hits", 1) >= minimum]
+    return {**payload, "blocks": shown, "blocks_below": len(blocks) - len(shown)}
+
+
 class ShellTest(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
@@ -108,6 +118,21 @@ class ShellTest(unittest.TestCase):
         self.assertEqual(self.poll("plain")["summary"]["status"], "python")
         self.write(PAYLOAD, age=5)
         self.assertEqual(self.poll("plain")["summary"], PAYLOAD)
+
+    def test_freshness_follows_the_sampling_interval(self):
+        """flow_summary.py's rule (2.5 intervals, at least 10 s), a second early: a busy firewall's
+        30 s interval keeps the fast path for up to 74 s; 300 s for up to 749 s."""
+        for interval, fresh, stale in ((30, 70, 80), (300.0, 740, 760), (5.25, 9, 15)):
+            payload = {"status": "ok", "sampled_at": PAYLOAD["sampled_at"], "interval": interval, "flows": []}
+            self.write(payload, age=fresh)
+            self.assertEqual(self.poll("plain")["summary"], payload, interval)
+            self.write(payload, age=stale)
+            self.assertEqual(self.poll("plain")["summary"]["status"], "python", interval)
+        # an interval out of bounds, or a nested one only, is no reason to trust an old document
+        for payload in ({"status": "ok", "interval": 1000, "flows": []},
+                        {"status": "ok", "sampled_at": PAYLOAD["sampled_at"], "collector": {"interval": 300}}):
+            self.write(payload, age=20)
+            self.assertEqual(self.poll("plain")["summary"]["status"], "python")
 
     def test_a_missing_database_goes_to_python(self):
         self.write({"status": "no_database", "reason": "database_missing", "flows": []})
@@ -185,7 +210,7 @@ class ApiTest(unittest.TestCase):
                     mock.patch.object(SUMMARY, "HOSTNAME_MARKER", os.path.join(directory, "hostnames")), \
                     mock.patch.object(SUMMARY, "GEODB_STATUS", os.path.join(directory, "geodb.json")):
                 for hostnames, minimum in ((False, 1), (False, 5), (True, 2), (True, 100)):
-                    before = SUMMARY.main(want_hostnames=hostnames, block_minimum=minimum)
+                    before = blocks_at_least(SUMMARY.main(want_hostnames=hostnames), minimum)
                     shell = self.from_backend({"modified": int(self.NOW) - 3, "summary": PAYLOAD}, hostnames, minimum)
                     python = self.from_backend({"summary": SUMMARY.main(want_hostnames=hostnames)}, hostnames, minimum)
                     for result in (shell, python):
