@@ -167,10 +167,10 @@ const STYLE = `
         background: color-mix(in srgb, currentColor 14%, transparent);
         box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 40%, transparent); }
     .dashboard-plus-state-pill > .fa { line-height: 1; }
+    /* in a table column beside numbers, the size the Bootstrap labels had there */
+    .dashboard-plus-state-pill.dashboard-plus-compact { font-size: 85%; padding: 0.1em 0.55em; }
     /* a dot in the pill's color, centered by the flex box rather than by a font's glyph metrics */
     .dashboard-plus-state-dot { width: 0.6em; height: 0.6em; border-radius: 50%; background: currentColor; flex: none; }
-    /* labels rounded into pills: Bootstrap 3 badges come in gray only */
-    .label.dashboard-plus-pill { border-radius: 10em; padding: 0.25em 0.75em; font-size: 85%; vertical-align: middle; }
     .dashboard-plus-bar.progress { height: 0.75em; margin: 0.2em 0 0; }
     .dashboard-plus-gateway-name { line-height: 1.35; }
 
@@ -234,8 +234,10 @@ const STYLE = `
     .dashboard-plus-interfaces .dashboard-plus-interface-name { font-weight: 600; font-size: 1.05em; color: inherit; }
     .dashboard-plus-interfaces .dashboard-plus-interface-addresses,
     .dashboard-plus-interfaces .dashboard-plus-interface-link { margin-top: 0.15em; line-height: 1.5; font-variant-numeric: tabular-nums; }
-    .dashboard-plus-interfaces .dashboard-plus-interface-link { margin-top: 0; padding-left: 1em; white-space: nowrap;
+    /* the media may wrap between its words in a narrow widget; the MAC address and the pill never do */
+    .dashboard-plus-interfaces .dashboard-plus-interface-link { margin-top: 0; padding: 0 0.25em 0 1em; overflow-wrap: normal;
         border-left: 1px solid rgba(128, 128, 128, 0.35); }
+    .dashboard-plus-interfaces .dashboard-plus-interface-link > div:nth-child(2) { white-space: nowrap; }
     .dashboard-plus-interfaces .dashboard-plus-state-pill { margin-top: 0.35em; }
     /* IPv6 a little smaller, and broken only after a colon when it must wrap (<wbr> marks those) */
     .dashboard-plus-interfaces .dashboard-plus-interface-v6 { font-size: 0.9em; overflow-wrap: normal; }

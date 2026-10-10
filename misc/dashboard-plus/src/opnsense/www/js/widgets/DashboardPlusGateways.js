@@ -97,8 +97,9 @@ export default class DashboardPlusGateways extends DashboardPlusWidget(BaseWidge
 
     _row(gateway, fields) {
         const {label, state} = this._state(gateway);
-        // the theme's label colors; disabled, unmonitored and unknown gateways stay gray
-        const color = {online: 'success', offline: 'danger', warning: 'warning'}[state] ?? 'default';
+        // the state pill Interfaces+ and System Information+ use, in the theme's state colors;
+        // disabled, unmonitored and unknown gateways stay muted
+        const color = {online: 'text-success', offline: 'text-danger', warning: 'text-warning'}[state] ?? 'text-muted';
         const measured = state !== 'disabled' && state !== 'unmonitored';
         const values = {rtt: gateway.delay, rttd: gateway.stddev, loss: gateway.loss};
         const metric = value => escapeHtml(measured && value && value !== '~' ? value : '—');
@@ -119,7 +120,7 @@ export default class DashboardPlusGateways extends DashboardPlusWidget(BaseWidge
                 ${defaultMarker}
             </div>
             ${fields.map(field => `<div role="cell" class="dashboard-plus-number dashboard-plus-small">${metric(values[field])}</div>`).join('')}
-            <div role="cell" class="dashboard-plus-center"><span class="label label-${color} dashboard-plus-pill">${escapeHtml(label)}</span></div>
+            <div role="cell" class="dashboard-plus-center"><span class="dashboard-plus-state-pill dashboard-plus-compact ${color}"><span class="dashboard-plus-state-dot" aria-hidden="true"></span> ${escapeHtml(label)}</span></div>
         </div>`;
     }
 
