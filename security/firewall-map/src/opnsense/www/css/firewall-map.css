@@ -62,9 +62,20 @@
 #fwmap-more .badge:empty, #fwmap-mode .badge:empty, #fwmap-review-count:empty { display: none; }
 #fwmap-toolbar #fwmap-review { margin-left: auto; }
 
-/* labels rounded into pills: Bootstrap 3 badges come in gray only */
-.label.fwmap-pill { border-radius: 10em; padding: .2em .7em; font-size: 85%; font-weight: 500; vertical-align: middle; }
-.label.fwmap-pill-lg { font-size: 100%; font-weight: 600; padding: .3em .9em; }
+/* state pills as in Dashboard Plus: the theme's state color (the palette's --fwmap-state-* variables)
+   for the icon, a light fill and the border; the label mixes it with the theme's text color for contrast */
+.fwmap-pill { display: inline-flex; align-items: center; gap: .35em; padding: .15em .6em; border-radius: .35em;
+  font-size: 85%; font-weight: 600; line-height: 1.4; white-space: nowrap; vertical-align: middle;
+  --fwmap-state: var(--fwmap-state-muted, #777);
+  color: color-mix(in srgb, var(--fwmap-state) 60%, var(--fwmap-text, currentColor));
+  background: color-mix(in srgb, var(--fwmap-state) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fwmap-state) 45%, transparent); }
+.fwmap-pill-success { --fwmap-state: var(--fwmap-state-success, #5cb85c); }
+.fwmap-pill-warning { --fwmap-state: var(--fwmap-state-warning, #f0ad4e); }
+.fwmap-pill-danger { --fwmap-state: var(--fwmap-state-danger, #d9534f); }
+.fwmap-pill > .fa { line-height: 1; }
+.fwmap-pill-dot { width: .6em; height: .6em; border-radius: 50%; flex: none; background: var(--fwmap-state); }
+.fwmap-pill-lg { font-size: 100%; padding: .25em .8em; }
 
 /* layout: the map with its toolbar and status line, a splitter, the side panel. The 222 px are
    what OPNsense draws around the page content (top bar, page title, tabs and footer) plus the

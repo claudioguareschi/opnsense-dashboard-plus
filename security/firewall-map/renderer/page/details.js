@@ -78,7 +78,7 @@ function reputationCard(item) {
     [T.organization, escapeHtml(plain(item.as_org || ''))],
     [T.country, item.country ? `${flagHtml(item.country_code)} ${escapeHtml(plain(item.country))}` : ''],
     // PF membership, shown apart from the geolocation it may disagree with
-    [T.pf_sets, (item.sets || []).map((set) => `<span class="label label-default fwmap-pill" title="${escapeHtml(
+    [T.pf_sets, (item.sets || []).map((set) => `<span class="fwmap-pill fwmap-pill-default" title="${escapeHtml(
       set.category === 'country' ? T.set_country : T.set_operational)}">${escapeHtml(set.name)}</span>`).join(' ')],
   ]);
   return card('layer-group', T.sec_reputation, `<div class="fwmap-two">${left}${right}</div>`,
@@ -139,7 +139,7 @@ function flowModel(flow, context) {
       [T.protocol, escapeHtml(`${service.name}${service.port ? ` (${service.port.split('/')[0]})` : ''}`)],
       [T.remote_port, outbound && service.port ? escapeHtml(service.port.split('/')[1]) : ''],
       [T.other_services, (flow.services || []).slice(1).map(escapeHtml).join(', ')],
-      [T.state, (flow.activity || 0) > 0 ? pill('success', T.active, 'check') : pill('default', T.idle)],
+      [T.state, (flow.activity || 0) > 0 ? pill('success', T.active, 'check') : pill('default', T.idle, 'dot')],
       [T.started, flow.age ? escapeHtml(agoText(Date.now() / 1000 - flow.age)) : ''],
       [T.transferred, flow.transferred ? rateText(flow.transferred[0], flow.transferred[1], formatBytes) : ''],
       [T.current_rate, rateText(flow.rate_in, flow.rate_out)],
@@ -186,7 +186,7 @@ function idsFlowModel(ids, context) {
       [T.inside_side, escapeHtml(ids.inside || T.this_firewall)],
       [T.via, escapeHtml(ids.public)],
       [T.remote_side, escapeHtml(ids.remote)],
-      [T.state, ids.active ? pill('success', T.active, 'check') : pill('default', T.closed)],
+      [T.state, ids.active ? pill('success', T.active, 'check') : pill('default', T.closed, 'dot')],
       [T.started, ids.age ? escapeHtml(agoText(Date.now() / 1000 - ids.age)) : ''],
       [T.transferred, rateText(ids.bytes_in, ids.bytes_out, formatBytes)],
     ]),

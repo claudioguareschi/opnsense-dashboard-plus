@@ -731,11 +731,14 @@
 	//#endregion
 	//#region page/parts.js
 	/**
-	* A status pill: the theme's colored label (`color` is success, danger, warning or default),
-	* rounded, since Bootstrap 3 badges come in gray only. `big` is the details panel's verdict.
+	* A status pill, tinted like the Dashboard Plus state pills: `color` (success, danger, warning or
+	* default) picks the theme's state color for the fill, border and icon, and the label mixes it with
+	* the text color. `icon` is a Font Awesome name, or 'dot' for a plain state. `big` is the details
+	* panel's verdict.
 	*/
 	function pill(color, text, icon, big = false) {
-		return `<span class="label label-${color} fwmap-pill${big ? " fwmap-pill-lg" : ""}">${icon ? `${ic(icon)} ` : ""}${escapeHtml(text)}</span>`;
+		const mark = icon === "dot" ? "<span class=\"fwmap-pill-dot\" aria-hidden=\"true\"></span>" : icon ? ic(icon) : "";
+		return `<span class="fwmap-pill fwmap-pill-${color}${big ? " fwmap-pill-lg" : ""}">${mark}${escapeHtml(text)}</span>`;
 	}
 	function bigPill(color, text, icon) {
 		return pill(color, text, icon, true);
@@ -927,7 +930,7 @@
 			["ASN", item.asn ? escapeHtml(`AS${item.asn}`) : ""],
 			[T.organization, escapeHtml(plain(item.as_org || ""))],
 			[T.country, item.country ? `${flagHtml(item.country_code)} ${escapeHtml(plain(item.country))}` : ""],
-			[T.pf_sets, (item.sets || []).map((set) => `<span class="label label-default fwmap-pill" title="${escapeHtml(set.category === "country" ? T.set_country : T.set_operational)}">${escapeHtml(set.name)}</span>`).join(" ")]
+			[T.pf_sets, (item.sets || []).map((set) => `<span class="fwmap-pill fwmap-pill-default" title="${escapeHtml(set.category === "country" ? T.set_country : T.set_operational)}">${escapeHtml(set.name)}</span>`).join(" ")]
 		]);
 		return card("layer-group", T.sec_reputation, `<div class="fwmap-two">${left}${right}</div>`, state.can.manage ? {
 			cls: "fwmap-investigate",
@@ -986,7 +989,7 @@
 				[T.protocol, escapeHtml(`${service.name}${service.port ? ` (${service.port.split("/")[0]})` : ""}`)],
 				[T.remote_port, outbound && service.port ? escapeHtml(service.port.split("/")[1]) : ""],
 				[T.other_services, (flow.services || []).slice(1).map(escapeHtml).join(", ")],
-				[T.state, (flow.activity || 0) > 0 ? pill("success", T.active, "check") : pill("default", T.idle)],
+				[T.state, (flow.activity || 0) > 0 ? pill("success", T.active, "check") : pill("default", T.idle, "dot")],
 				[T.started, flow.age ? escapeHtml(agoText(Date.now() / 1e3 - flow.age)) : ""],
 				[T.transferred, flow.transferred ? rateText(flow.transferred[0], flow.transferred[1], formatBytes) : ""],
 				[T.current_rate, rateText(flow.rate_in, flow.rate_out)],
@@ -1042,7 +1045,7 @@
 				[T.inside_side, escapeHtml(ids.inside || T.this_firewall)],
 				[T.via, escapeHtml(ids.public)],
 				[T.remote_side, escapeHtml(ids.remote)],
-				[T.state, ids.active ? pill("success", T.active, "check") : pill("default", T.closed)],
+				[T.state, ids.active ? pill("success", T.active, "check") : pill("default", T.closed, "dot")],
 				[T.started, ids.age ? escapeHtml(agoText(Date.now() / 1e3 - ids.age)) : ""],
 				[T.transferred, rateText(ids.bytes_in, ids.bytes_out, formatBytes)]
 			]),
@@ -1906,7 +1909,7 @@
 		});
 		const $footer = $("<div class=\"pull-left text-left fwmap-q-footer\"></div>").append($record).append(blacklistStatus(status));
 		BootstrapDialog.show({
-			title: `${ic("list-check")} ${escapeHtml(T.review_queue)} <span class="label label-danger fwmap-pill fwmap-q-newcount"><b></b> ${escapeHtml(T.passed_attention)}</span><div class="small text-muted">${escapeHtml(T.review_intro)}</div>`,
+			title: `${ic("list-check")} ${escapeHtml(T.review_queue)} <span class="fwmap-pill fwmap-pill-danger fwmap-q-newcount"><b></b> ${escapeHtml(T.passed_attention)}</span><div class="small text-muted">${escapeHtml(T.review_intro)}</div>`,
 			type: BootstrapDialog.TYPE_DEFAULT,
 			size: BootstrapDialog.SIZE_WIDE,
 			message: $body,

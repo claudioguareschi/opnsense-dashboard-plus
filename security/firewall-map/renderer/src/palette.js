@@ -122,7 +122,7 @@ export function statusColors({dark, background, success, warning, danger}) {
 
 /** Map palette derived from the dashboard theme so the widget blends in. */
 export function palette(theme = DEFAULT_THEME) {
-  const {dark, background, text, accent, success, warning, danger} = {...DEFAULT_THEME, ...theme};
+  const {dark, background, text, accent, success, warning, danger, muted} = {...DEFAULT_THEME, ...theme};
   const status = statusColors({dark, background, success, warning, danger});
   const shade = (color, amount) => mix(color, dark ? [255, 255, 255] : text, amount);
   return {
@@ -148,6 +148,8 @@ export function palette(theme = DEFAULT_THEME) {
     // a saved snapshot on screen: the theme's warning color, made to stand out on its background
     frozen: standOut(warning, background, dark),
     label: rgb(mix(text, background, 0.15), 230),
+    // the theme's own state colors as it gives them, for the tinted state pills shared with Dashboard Plus
+    states: {success, warning, danger: danger || [217, 83, 79], muted: muted || mix(text, background, 0.4)},
     tooltip: {
       background: `rgb(${background.join(',')})`,
       text: `rgb(${text.join(',')})`,
@@ -182,6 +184,7 @@ export function cssVariables(colors) {
     '--fwmap-on-frozen': on(colors.frozen),
     // a wash of it for banners and selected rows, readable with the theme's own text color
     '--fwmap-frozen-soft': `rgba(${colors.frozen.join(', ')}, ${colors.dark ? 0.16 : 0.14})`,
+    ...Object.fromEntries(Object.entries(colors.states).map(([state, value]) => [`--fwmap-state-${state}`, color(value)])),
   };
 }
 
@@ -224,7 +227,11 @@ export function readTheme(element) {
   danger.className = 'text-danger';
   // no danger color read: the status colors stay the fixed set (statusColors)
   const red = probeColor(danger);
-  return {dark: brightness(background) < 0.5, background, text, accent, success: green, warning: amber, danger: red};
+  const muted = document.createElement('span');
+  muted.className = 'text-muted';
+  const gray = probeColor(muted);
+  return {dark: brightness(background) < 0.5, background, text, accent, success: green, warning: amber, danger: red,
+    muted: gray};
 }
 
 // categories for "color by service"; each flow uses its busiest service

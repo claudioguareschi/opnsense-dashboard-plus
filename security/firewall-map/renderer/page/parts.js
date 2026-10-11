@@ -31,12 +31,14 @@ import {T, TEXT} from './context.js';
 import {ic} from './icons.js';
 
 /**
- * A status pill: the theme's colored label (`color` is success, danger, warning or default),
- * rounded, since Bootstrap 3 badges come in gray only. `big` is the details panel's verdict.
+ * A status pill, tinted like the Dashboard Plus state pills: `color` (success, danger, warning or
+ * default) picks the theme's state color for the fill, border and icon, and the label mixes it with
+ * the text color. `icon` is a Font Awesome name, or 'dot' for a plain state. `big` is the details
+ * panel's verdict.
  */
 export function pill(color, text, icon, big = false) {
-  return `<span class="label label-${color} fwmap-pill${big ? ' fwmap-pill-lg' : ''}">`
-    + `${icon ? `${ic(icon)} ` : ''}${escapeHtml(text)}</span>`;
+  const mark = icon === 'dot' ? '<span class="fwmap-pill-dot" aria-hidden="true"></span>' : icon ? ic(icon) : '';
+  return `<span class="fwmap-pill fwmap-pill-${color}${big ? ' fwmap-pill-lg' : ''}">${mark}${escapeHtml(text)}</span>`;
 }
 
 export function bigPill(color, text, icon) {

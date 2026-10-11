@@ -369,7 +369,7 @@
                 <button id="fwmap-reset" class="btn btn-default btn-sm" type="button" title="{{ lang._('Reset filters') }}" aria-label="{{ lang._('Reset filters') }}" style="display:none"><i class="fa fa-fw fa-rotate-left" aria-hidden="true"></i></button>
             </div>
             <button id="fwmap-review" class="btn btn-default btn-sm" type="button" style="display:none" title="{{ lang._('Threats') }}">
-                <i class="fa fa-fw fa-list" aria-hidden="true"></i><span class="fwmap-tool-text">{{ lang._('Threats') }}</span> <span class="label label-danger fwmap-pill" id="fwmap-review-count"></span>
+                <i class="fa fa-fw fa-list" aria-hidden="true"></i><span class="fwmap-tool-text">{{ lang._('Threats') }}</span> <span class="fwmap-pill fwmap-pill-danger" id="fwmap-review-count"></span>
             </button>
         </div>
         <div id="fwmap-map">

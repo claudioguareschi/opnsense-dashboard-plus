@@ -480,7 +480,7 @@ export async function showQueue() {
   // what the queue is and where its data comes from, out of the way of the entries
   const $footer = $('<div class="pull-left text-left fwmap-q-footer"></div>').append($record).append(blacklistStatus(status));
   BootstrapDialog.show({
-    title: `${ic('list-check')} ${escapeHtml(T.review_queue)} <span class="label label-danger fwmap-pill fwmap-q-newcount"><b></b> ${escapeHtml(T.passed_attention)}</span>`
+    title: `${ic('list-check')} ${escapeHtml(T.review_queue)} <span class="fwmap-pill fwmap-pill-danger fwmap-q-newcount"><b></b> ${escapeHtml(T.passed_attention)}</span>`
       + `<div class="small text-muted">${escapeHtml(T.review_intro)}</div>`,
     type: BootstrapDialog.TYPE_DEFAULT, size: BootstrapDialog.SIZE_WIDE, message: $body, cssClass: 'fwmap-q-dialog',
     buttons: [{label: T.close, action: (dialog) => dialog.close()}],
