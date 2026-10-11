@@ -170,6 +170,7 @@ const STYLE = `
     .dashboard-plus-state-pill.text-warning { --dashboard-plus-state: var(--dashboard-plus-warning); }
     .dashboard-plus-state-pill.text-danger { --dashboard-plus-state: var(--dashboard-plus-danger); }
     .dashboard-plus-state-pill.text-muted { --dashboard-plus-state: var(--dashboard-plus-muted); }
+    .dashboard-plus-state-pill.text-info { --dashboard-plus-state: var(--dashboard-plus-info); }
     .dashboard-plus-state-pill.dashboard-plus-state-pill[class*="text-"] {
         color: color-mix(in srgb, var(--dashboard-plus-state) 60%, var(--dashboard-plus-ink));
         background: color-mix(in srgb, var(--dashboard-plus-state) 15%, transparent);
@@ -209,6 +210,43 @@ const STYLE = `
     .dashboard-plus-filesystem > div { padding-left: 0.75em; }
     .dashboard-plus-filesystem .dashboard-plus-bar.progress { margin: 0; }
     .dashboard-plus-filesystem-detail { font-size: 0.9em; margin-top: 0.15em; }
+
+    /* CARP+: the role and its scope beside preempt, skew and demotion; status lines with an icon in the
+       theme's state color; the VIPs, one line while they agree */
+    .dashboard-plus-carp { text-align: left; padding: 0.15em 0.25em 0.35em; }
+    .dashboard-plus-carp-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+        gap: 0.4em 1em; padding-bottom: 0.6em; border-bottom: 1px solid rgba(128, 128, 128, 0.2); }
+    .dashboard-plus-carp-role { display: flex; align-items: center; gap: 0.6em; }
+    .dashboard-plus-carp-role .dashboard-plus-state-pill { font-size: 1.05em; padding: 0.2em 0.75em; }
+    .dashboard-plus-carp-scope { font-weight: 600; }
+    .dashboard-plus-carp-flags { font-size: 0.88em; white-space: nowrap;
+        color: color-mix(in srgb, var(--dashboard-plus-ink) 75%, transparent); }
+    .dashboard-plus-carp-flags > .text-warning { font-weight: 600; }
+    .dashboard-plus-carp-separator { margin: 0 0.45em; opacity: 0.6; }
+    .dashboard-plus-carp-lines { display: grid; gap: 0.55em; padding: 0.65em 0; }
+    .dashboard-plus-carp-line { display: grid; grid-template-columns: 1.6em minmax(0, 1fr); column-gap: 0.4em; align-items: start; }
+    .dashboard-plus-carp-line > .fa { font-size: 1.05em; padding-top: 0.15em; text-align: center; }
+    .dashboard-plus-carp-detail { font-size: 0.88em; margin-top: 0.1em; font-variant-numeric: tabular-nums;
+        color: color-mix(in srgb, var(--dashboard-plus-ink) 75%, transparent); }
+    .dashboard-plus-carp-detail .fa { font-size: 0.85em; opacity: 0.85; }
+    .dashboard-plus-carp-quiet { opacity: 0.75; }
+    a.dashboard-plus-carp-quiet, a.dashboard-plus-carp-plain { color: inherit; }
+    .dashboard-plus-carp span.text-warning:not(.dashboard-plus-state-pill) {
+        color: color-mix(in srgb, var(--dashboard-plus-warning) 60%, var(--dashboard-plus-ink)); }
+    .dashboard-plus-carp span.text-danger:not(.dashboard-plus-state-pill) {
+        color: color-mix(in srgb, var(--dashboard-plus-danger) 70%, var(--dashboard-plus-ink)); }
+    .dashboard-plus-carp-toggle { margin-left: 0.4em; font-size: 0.88em; white-space: nowrap; }
+    .dashboard-plus-carp-toggle .fa { font-size: 0.8em; }
+    .dashboard-plus-carp-history { list-style: none; margin: 0.25em 0 0; padding: 0; display: grid; gap: 0.2em; }
+    .dashboard-plus-carp-history > li { display: grid; grid-template-columns: 6em minmax(0, 1fr); column-gap: 0.5em; }
+    .dashboard-plus-carp-when { white-space: nowrap; }
+    .dashboard-plus-carp-vips { border-top: 1px solid rgba(128, 128, 128, 0.2); padding-top: 0.55em; }
+    .dashboard-plus-carp-vips-head { display: flex; align-items: center; justify-content: space-between; gap: 1em; font-weight: 600; }
+    .dashboard-plus-carp-vips-head .fa-circle-nodes { opacity: 0.7; margin-right: 0.2em; }
+    /* the name and "VHID · description" share the first column, so the name never breaks */
+    .dashboard-plus-carp-table { --dashboard-plus-columns: minmax(0, 1fr) auto auto; margin-top: 0.35em; }
+    .dashboard-plus-carp-table > .dashboard-plus-row.dashboard-plus-row { padding: 0.4em 0; }
+    .dashboard-plus-carp-vip-name { font-weight: 600; }
 
     /* System Information+: a ZFS pool, its usage bar, then health, errors and last scrub side by side */
     .dashboard-plus-zfs + .dashboard-plus-zfs { margin-top: 0.75em; }
@@ -271,7 +309,7 @@ export function usageColor(percent) {
 function themeColors() {
     const root = document.documentElement.style;
     const probe = $('<span style="position: absolute; visibility: hidden;"></span>').appendTo('body');
-    for (const state of ['success', 'warning', 'danger', 'muted']) {
+    for (const state of ['success', 'warning', 'danger', 'muted', 'info']) {
         root.setProperty(`--dashboard-plus-${state}`, getComputedStyle(probe.attr('class', `text-${state}`)[0]).color);
     }
     probe.remove();

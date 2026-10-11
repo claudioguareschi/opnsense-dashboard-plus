@@ -4,7 +4,7 @@ Dashboard plus for [OPNsense](https://opnsense.org) provides a set of informativ
 
 | Package | What it adds |
 |---|---|
-| **os-dashboard-plus** | Enhanced dashboard widgets: System Information+, Traffic Graph+, System Metrics+, Thermal Sensors+, Interface Statistics+, Gateways+, Interfaces+, Firewall Logs+, Services+, DNS Health+ and QuickAssist+. |
+| **os-dashboard-plus** | Enhanced dashboard widgets: System Information+, Traffic Graph+, System Metrics+, Thermal Sensors+, Interface Statistics+, Gateways+, Interfaces+, Firewall Logs+, Services+, DNS Health+, QuickAssist+ and CARP+. |
 | **os-firewall-map** (Firewall Map+) | The firewall's live traffic (IPv4 and IPv6) on a world map, as a dashboard widget and a full-size page, with plain-language details, threat lists, Suricata alerts and a Threats panel. |
 | **os-vnstat-plus** (VNStat Plus) | A configurable VNStat traffic-history dashboard widget, with charts and tables for the interfaces collected by the official `os-vnstat` plugin. |
 
@@ -385,7 +385,7 @@ and background recording is on. It uses a few percent of one CPU core while a ma
 
 ## Dashboard Plus
 
-Eleven widgets that sit next to OPNsense's built-in ones in **Add widget**. Everything is read
+Twelve widgets that sit next to OPNsense's built-in ones in **Add widget**. Everything is read
 locally from the firewall's own API. Each widget's options are in its settings dialog (gear icon
 on the widget).
 
@@ -393,7 +393,8 @@ on the widget).
 details. The data a widget shows from OPNsense itself stays under OPNsense's own privileges, as for
 OPNsense's own widgets: a user sees a widget only with the privileges for everything it reads (for
 example Firewall Logs+ needs *Diagnostics: Logs: Firewall: Live View*). Interfaces+ has its own
-privilege, *Dashboard: Interfaces+ status*, like *Services+ control* and *DNS Health+ status*.
+privilege, *Dashboard: Interfaces+ status*, like *Services+ control*, *DNS Health+ status* and
+*Dashboard: CARP+ status*.
 Administrators see every widget. Upgrading from 0.50: a user who had only the Dashboard Plus privilege also needs those
 OPNsense privileges for the widgets that show firewall, gateway or interface data.
 
@@ -497,6 +498,20 @@ when the running QAT driver exposes it. It discovers the loaded QAT driver dynam
 unavailable or degraded states without changing driver, OCF or firewall configuration. Each
 two-second sample is one read of the QAT sysctl tree, parsed by the web server, with no script
 started.*
+
+### CARP+
+
+*High availability at a glance. The header gives this firewall's role over all its CARP virtual
+IPs in one pill (Master, Backup, Initializing, or Split when it is master for some and backup for
+others, the classic fault), with preempt, the advertising skew and the demotion counter. Below it:
+whether the peer is heard (advertisements per second from the master, or sent by this master; red
+when they stop), state sync over pfsync (sync interface and peer, bulk sync, state updates per
+second in and out, real errors only), where the configuration is synchronized to, and the last
+CARP change from the system log with up to eight more on request. The VIPs fold into one line
+while they all agree and open as a table (interface, VHID, description, addresses, state) when
+they do not. Every ten seconds it reads `ifconfig -L`, the CARP sysctls, `pfsync0` and the CARP and
+pfsync counters once, in one small shell script parsed by the web server; it changes nothing.
+The title opens OPNsense's CARP status page.*
 
 ## VNStat Plus
 

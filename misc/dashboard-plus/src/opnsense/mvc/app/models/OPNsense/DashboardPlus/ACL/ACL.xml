@@ -42,6 +42,17 @@
         </patterns>
     </page-dashboard-widget-dashboard-plus-interfaces>
 
+    <page-dashboard-widget-dashboard-plus-carp>
+        <!--
+            CARP roles, virtual IPs, pfsync and config sync for CARP+: what Interfaces: Virtual IPs:
+            Status shows, so kept apart from the general Dashboard Plus privilege.
+        -->
+        <name>Dashboard: CARP+ status</name>
+        <patterns>
+            <pattern>api/dashboardplus/system/carp</pattern>
+        </patterns>
+    </page-dashboard-widget-dashboard-plus-carp>
+
     <page-dashboard-widget-dashboard-plus-dns-health>
         <!--
             Read-only Unbound access required specifically by DNS Health+.

@@ -204,6 +204,71 @@
             <unconfigured>No Gateways configured. Click to configure gateways.</unconfigured>
         </translations>
     </dashboardplusgateways>
+    <dashboardpluscarp>
+        <filename>DashboardPlusCarp.js</filename>
+        <link>/ui/diagnostics/interface/vip</link>
+        <endpoints>
+            <endpoint>/api/dashboardplus/system/carp</endpoint>
+        </endpoints>
+        <translations>
+            <title>CARP+</title>
+            <dashboard_title>CARP</dashboard_title>
+            <role_master>Master</role_master>
+            <role_backup>Backup</role_backup>
+            <role_init>Initializing</role_init>
+            <role_split>Split</role_split>
+            <role_none>Not configured</role_none>
+            <state_master>Master</state_master>
+            <state_backup>Backup</state_backup>
+            <state_init>Init</state_init>
+            <scope_all>all {count} VIPs</scope_all>
+            <scope_one>its VIP</scope_one>
+            <scope_split>{master} master · {backup} backup</scope_split>
+            <scope_init>{init} of {count} VIPs initializing</scope_init>
+            <preempt_on>Preempt on</preempt_on>
+            <preempt_off>Preempt off</preempt_off>
+            <skew>Skew {skew}</skew>
+            <not_demoted>Not demoted</not_demoted>
+            <demoted>Demoted ({value})</demoted>
+            <demoted_title>The demotion counter is above zero: maintenance mode, or a failed interface or send error. A demoted node gives up MASTER.</demoted_title>
+            <master_advertising>Master advertising</master_advertising>
+            <no_advertisements>No advertisements from the master</no_advertisements>
+            <advertising>Advertising to the backup</advertising>
+            <not_advertising>Not advertising</not_advertising>
+            <per_second>{rate}/s</per_second>
+            <advertisements_per_second>{rate} advertisements/s</advertisements_per_second>
+            <errors_per_second>{rate} errors/s</errors_per_second>
+            <no_errors>no errors</no_errors>
+            <measuring>measuring…</measuring>
+            <pfsync_on>State sync on {interface} to {peer}</pfsync_on>
+            <pfsync_no_peer>State sync on {interface}</pfsync_no_peer>
+            <pfsync_off>State sync (pfsync) is not configured</pfsync_off>
+            <bulk_complete>Bulk sync complete</bulk_complete>
+            <bulk_pending>Bulk sync in progress</bulk_pending>
+            <received>received</received>
+            <sent>sent</sent>
+            <updates_title>State updates received and sent per second</updates_title>
+            <config_sync_to>Config sync to {target}</config_sync_to>
+            <config_sync_none>Config sync is not sent from this firewall</config_sync_none>
+            <last_change>Last change {age}</last_change>
+            <no_changes>No CARP changes logged recently</no_changes>
+            <show_history>History ({count})</show_history>
+            <hide_history>Hide history</hide_history>
+            <vips_summary>{count} VIPs · all {state}</vips_summary>
+            <vips_summary_one>1 VIP · {state}</vips_summary_one>
+            <vips_count>{count} VIPs</vips_count>
+            <vhid>VHID {vhid}</vhid>
+            <vip_title>{device} · advbase {advbase} · advskew {advskew}</vip_title>
+            <show>Show</show>
+            <hide>Hide</hide>
+            <just_now>just now</just_now>
+            <minutes_ago>{count} min ago</minutes_ago>
+            <hours_ago>{count} h ago</hours_ago>
+            <days_ago>{count} days ago</days_ago>
+            <unconfigured>No CARP virtual IPs configured. Click to configure CARP.</unconfigured>
+            <fetch_failed>CARP status is unavailable</fetch_failed>
+        </translations>
+    </dashboardpluscarp>
     <dashboardplusinterfaces>
         <filename>DashboardPlusInterfaces.js</filename>
         <link>/interfaces.php</link>

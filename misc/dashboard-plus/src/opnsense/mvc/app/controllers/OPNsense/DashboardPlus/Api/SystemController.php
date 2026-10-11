@@ -30,6 +30,8 @@ namespace OPNsense\DashboardPlus\Api;
 
 use OPNsense\Base\ApiControllerBase;
 use OPNsense\Core\Backend;
+use OPNsense\Core\Config;
+use OPNsense\DashboardPlus\Carp;
 use OPNsense\DashboardPlus\Metrics;
 use OPNsense\DashboardPlus\QuickAssist;
 
@@ -86,6 +88,41 @@ class SystemController extends ApiControllerBase
             return ['status' => 'failed'];
         }
 
+        $result['status'] = 'ok';
+        return $result;
+    }
+
+    /**
+     * CARP+: this firewall's CARP role over all its VIPs, each VIP, pfsync and config sync, and the
+     * last CARP state changes, labelled with the configuration's interface and VIP names.
+     */
+    public function carpAction()
+    {
+        $backend = new Backend();
+        $output = $backend->configdRun('dashboardplus system carp');
+        $history = $backend->configdRun('dashboardplus system carp.history');
+        $config = Config::getInstance()->object();
+        $interfaces = [];
+        foreach ($config->interfaces->children() as $identifier => $node) {
+            $interfaces[$identifier] = ['if' => (string)$node->if, 'descr' => (string)$node->descr];
+        }
+        $vips = [];
+        if (isset($config->virtualip)) {
+            foreach ($config->virtualip->children() as $vip) {
+                if ((string)$vip->mode === 'carp') {
+                    $vips[] = ['interface' => (string)$vip->interface, 'vhid' => (string)$vip->vhid, 'descr' => (string)$vip->descr];
+                }
+            }
+        }
+        $hasync = isset($config->hasync) ? [
+            'pfsyncinterface' => (string)$config->hasync->pfsyncinterface,
+            'pfsyncpeerip' => (string)$config->hasync->pfsyncpeerip,
+            'synchronizetoip' => (string)$config->hasync->synchronizetoip,
+        ] : [];
+        $result = Carp::summary($output, $history, [
+            'interfaces' => $interfaces, 'vips' => $vips, 'hasync' => $hasync,
+            'hostname' => (string)$config->system->hostname,
+        ], microtime(true));
         $result['status'] = 'ok';
         return $result;
     }
