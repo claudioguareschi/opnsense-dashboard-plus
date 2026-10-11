@@ -26,6 +26,7 @@ models/OPNsense/DashboardPlus/Carp.php, which joins their output with the config
 from datetime import datetime
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import stat
@@ -309,7 +310,7 @@ class ScriptTest(unittest.TestCase):
     def test_the_actions_and_the_privilege(self):
         actions = (ROOT / "service/conf/actions.d/actions_dashboardplus.conf").read_text()
         status = actions[actions.index("[system.carp]"):].split("\n\n")[0]
-        history = actions[actions.index("[system.carp.history]"):].split("\n\n")[0]
+        history = actions[actions.index("[system.carp_history]"):].split("\n\n")[0]
         self.assertIn("\ncommand:/usr/local/opnsense/scripts/OPNsense/DashboardPlus/carp.sh\n", status)
         self.assertNotIn("cache_ttl", status)
         self.assertIn("\ncommand:/usr/local/opnsense/scripts/OPNsense/DashboardPlus/carp_history.sh\n", history)
@@ -320,6 +321,20 @@ class ScriptTest(unittest.TestCase):
             self.assertTrue(os.access(SCRIPTS / name, os.X_OK))
         acl = (ROOT / "mvc/app/models/OPNsense/DashboardPlus/ACL/ACL.xml").read_text()
         self.assertIn("<pattern>api/dashboardplus/system/carp</pattern>", acl)
+
+    def test_no_action_is_shadowed_by_a_shorter_one(self):
+        """configd walks an action name dot by dot and stops at the first action it finds, passing the
+        rest as parameters: with [system.carp] present, [system.carp.history] could never be called."""
+        actions = (ROOT / "service/conf/actions.d/actions_dashboardplus.conf").read_text()
+        names = [line[1:-1] for line in actions.splitlines() if line.startswith("[") and line.endswith("]")]
+        for name in names:
+            for other in names:
+                with self.subTest(name=name, other=other):
+                    self.assertFalse(other.startswith(name + "."), f"[{other}] is shadowed by [{name}]")
+        controllers = "".join(path.read_text() for path in (ROOT / "mvc/app/controllers").rglob("*.php"))
+        for called in set(re.findall(r"configdp?Run\('dashboardplus ([^' ]+) ([^' ]+)", controllers)):
+            with self.subTest(called=called):
+                self.assertIn(".".join(called), names)
 
 
 if __name__ == "__main__":

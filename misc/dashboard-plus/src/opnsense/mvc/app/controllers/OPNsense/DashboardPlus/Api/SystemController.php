@@ -100,7 +100,7 @@ class SystemController extends ApiControllerBase
     {
         $backend = new Backend();
         $output = $backend->configdRun('dashboardplus system carp');
-        $history = $backend->configdRun('dashboardplus system carp.history');
+        $history = $backend->configdRun('dashboardplus system carp_history');
         $config = Config::getInstance()->object();
         $interfaces = [];
         foreach ($config->interfaces->children() as $identifier => $node) {

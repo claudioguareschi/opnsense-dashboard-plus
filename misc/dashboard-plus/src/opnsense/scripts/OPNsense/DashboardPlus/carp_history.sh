@@ -26,7 +26,7 @@
 
 
 # CARP+: the last CARP state changes the kernel logged ("carp: 1@igb1: INIT -> BACKUP (...)"), from
-# today's and the previous system log (configd action dashboardplus system carp.history, cached).
+# today's and the previous system log (configd action dashboardplus system carp_history, cached).
 
 LOGS=${DASHBOARDPLUS_SYSTEM_LOGS:-/var/log/system}
 COUNT=${DASHBOARDPLUS_CARP_HISTORY:-20}
