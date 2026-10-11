@@ -213,7 +213,8 @@ const STYLE = `
 
     /* CARP+: the role and its scope beside preempt, skew and demotion; status lines with an icon in the
        theme's state color; the VIPs, one line while they agree */
-    .dashboard-plus-carp { text-align: left; padding: 0.15em 0.25em 0.35em; }
+    /* the inset of OPNsense's own widget tables (95% wide, rows padded 0.5em), and as far below the title */
+    .dashboard-plus-carp { text-align: left; width: 95%; margin: 0 auto; padding: 0.5em 0.5em 0.6em; }
     .dashboard-plus-carp-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
         gap: 0.4em 1em; padding-bottom: 0.6em; border-bottom: 1px solid rgba(128, 128, 128, 0.2); }
     .dashboard-plus-carp-role { display: flex; align-items: center; gap: 0.6em; }
@@ -237,6 +238,8 @@ const STYLE = `
         color: color-mix(in srgb, var(--dashboard-plus-danger) 70%, var(--dashboard-plus-ink)); }
     .dashboard-plus-carp-toggle { margin-left: 0.4em; font-size: 0.88em; white-space: nowrap; }
     .dashboard-plus-carp-toggle .fa { font-size: 0.8em; }
+    .dashboard-plus-carp-split { display: flex; align-items: baseline; justify-content: space-between; gap: 1em; }
+    .dashboard-plus-carp-split > .dashboard-plus-carp-toggle { margin-left: 0; }
     .dashboard-plus-carp-history { list-style: none; margin: 0.25em 0 0; padding: 0; display: grid; gap: 0.2em; }
     .dashboard-plus-carp-history > li { display: grid; grid-template-columns: 6em minmax(0, 1fr); column-gap: 0.5em; }
     .dashboard-plus-carp-when { white-space: nowrap; }
@@ -244,7 +247,7 @@ const STYLE = `
     .dashboard-plus-carp-vips-head { display: flex; align-items: center; justify-content: space-between; gap: 1em; font-weight: 600; }
     .dashboard-plus-carp-vips-head .fa-circle-nodes { opacity: 0.7; margin-right: 0.2em; }
     /* the name and "VHID · description" share the first column, so the name never breaks */
-    .dashboard-plus-carp-table { --dashboard-plus-columns: minmax(0, 1fr) auto auto; margin-top: 0.35em; }
+    .dashboard-plus-carp-table.flextable-container { --dashboard-plus-columns: minmax(0, 1fr) auto auto; width: 100%; margin: 0.35em 0 0; }
     .dashboard-plus-carp-table > .dashboard-plus-row.dashboard-plus-row { padding: 0.4em 0; }
     .dashboard-plus-carp-vip-name { font-weight: 600; }
 

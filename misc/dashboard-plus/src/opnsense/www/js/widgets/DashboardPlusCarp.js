@@ -199,10 +199,11 @@ export default class DashboardPlusCarp extends DashboardPlusWidget(BaseWidget) {
         }
         const latest = changes[0];
         const toggle = changes.length > 1
-            ? ` <a href="#" class="dashboard-plus-carp-toggle" data-toggle-section="history">${escapeHtml(this.expanded.history ? t.hide_history : fill(t.show_history, {count: Math.min(changes.length, HISTORY_SHOWN)}))}`
+            ? `<a href="#" class="dashboard-plus-carp-toggle" data-toggle-section="history">${escapeHtml(this.expanded.history ? t.hide_history : fill(t.show_history, {count: Math.min(changes.length, HISTORY_SHOWN)}))}`
               + ` <i class="fa fa-chevron-${this.expanded.history ? 'up' : 'down'}" aria-hidden="true"></i></a>`
             : '';
-        const main = `<span title="${escapeHtml(this._stamp(latest.time))}">${escapeHtml(fill(t.last_change, {age: this._age(latest.time)}))}</span>${toggle}`;
+        const main = `<div class="dashboard-plus-carp-split"><span title="${escapeHtml(this._stamp(latest.time))}">`
+            + `${escapeHtml(fill(t.last_change, {age: this._age(latest.time)}))}</span>${toggle}</div>`;
         let details = this._change(latest);
         if (this.expanded.history) {
             details = `<ol class="dashboard-plus-carp-history">${changes.slice(0, HISTORY_SHOWN).map(change => `
