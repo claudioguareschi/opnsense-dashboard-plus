@@ -49,10 +49,13 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 align-items: center;
                 justify-content: flex-start;
                 gap: 0.6em;
-                width: 100% !important;
-                min-width: 100% !important;
+                /* as wide as the table under it (OPNsense's widget tables are 95% wide), so the search
+                   lines up with the table's edges and the summary with the text of its rows */
+                width: 95% !important;
+                min-width: 0 !important;
                 max-width: none !important;
                 box-sizing: border-box;
+                margin: 0 auto;
                 padding: 0.25em 0 0.7em;
             }
             .dashboard-plus-services-summary {
@@ -63,7 +66,8 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 min-width: 0;
                 order: 3;
                 flex: 0 0 100%;
-                padding-left: 0.5em;
+                /* the rows' 0.5em padding, measured in this line's smaller font */
+                padding-left: calc(0.5em / 0.88);
                 font-size: 0.88em;
             }
             .dashboard-plus-services-summary span {
@@ -81,7 +85,6 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 max-width: none !important;
                 order: 1;
                 flex: 1 1 auto;
-                margin-left: 0.5em;
             }
             .dashboard-plus-services-toolbar > select {
                 order: 2;
@@ -89,7 +92,6 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 width: clamp(7em, 20%, 12em);
                 min-width: 7em;
                 max-width: 12em;
-                margin-right: 0.5em;
                 text-align: left;
                 text-align-last: left;
             }
@@ -100,11 +102,10 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
             }
             .dashboard-plus-services-status {
                 white-space: nowrap;
-                font-size: 0.88em;
-                font-weight: 600;
             }
-            .dashboard-plus-services-status i {
-                margin-right: 0.25em;
+            .dashboard-plus-services-locked {
+                margin-left: 0.35em;
+                opacity: 0.55;
             }
             .dashboard-plus-services-id {
                 opacity: 0.7;
@@ -126,7 +127,6 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 .dashboard-plus-services-summary {
                     order: 2;
                     flex: 0 0 auto;
-                    padding-left: 0.5em;
                 }
                 .dashboard-plus-services-search,
                 .dashboard-plus-services-toolbar > select {
@@ -135,7 +135,6 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                 .dashboard-plus-services-search {
                     order: 1;
                     width: auto;
-                    margin: 0 0.5em;
                 }
                 .dashboard-plus-services-toolbar > select {
                     order: 3;
@@ -143,7 +142,6 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
                     width: auto;
                     min-width: 0;
                     max-width: none;
-                    margin: 0 0.5em;
                 }
             }
         `;
@@ -205,8 +203,8 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
 
     _status(service) {
         return service.running
-            ? {label: this.translations.running, color: 'text-success', icon: 'check-circle-o'}
-            : {label: this.translations.stopped, color: 'text-danger', icon: 'times-circle-o'};
+            ? {label: this.translations.running, color: 'text-success'}
+            : {label: this.translations.stopped, color: 'text-danger'};
     }
 
     _actionButton(service, action, icon, title) {
@@ -240,11 +238,13 @@ export default class DashboardPlusServices extends DashboardPlusWidget(BaseWidge
 
     _row(service) {
         const status = this._status(service);
-        const locked = service.locked ? ` <span class="dashboard-plus-services-id">(${escapeHtml(this.translations.locked)})</span>` : '';
+        const locked = service.locked
+            ? ` <i class="fa fa-lock dashboard-plus-services-locked" title="${escapeHtml(this.translations.locked)}" aria-label="${escapeHtml(this.translations.locked)}"></i>`
+            : '';
         const busy = this.busyService === service.id;
         return `<div class="flextable-row dashboard-plus-row" role="row"${busy ? ' aria-busy="true"' : ''}>
-            <div role="cell" class="dashboard-plus-services-status ${status.color}">
-                <i class="fa fa-${status.icon}" aria-hidden="true"></i>${escapeHtml(status.label)}${locked}
+            <div role="cell" class="dashboard-plus-services-status">
+                <span class="dashboard-plus-state-pill dashboard-plus-compact ${status.color}"><span class="dashboard-plus-state-dot" aria-hidden="true"></span> ${escapeHtml(status.label)}</span>${locked}
             </div>
             <div role="cell" class="dashboard-plus-ellipsis">
                 <a href="/ui/core/service" target="_blank" rel="noopener noreferrer">${escapeHtml(service.description)}</a>
