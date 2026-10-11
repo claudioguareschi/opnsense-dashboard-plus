@@ -438,8 +438,8 @@ compact one. Settings: per-interface or combined display, which interfaces, and 
 
 <img src="docs/screenshots/gateways.png" alt="Gateways+" width="795">
 
-*Every gateway with its address, RTT, RTT deviation, packet loss and a status badge (online,
-warning, offline, unmonitored); the globe marks the default gateway. Rows can be dragged into any
+*Every gateway with its address, RTT, RTT deviation, packet loss and a status pill in the theme's
+colors (online, warning, offline, unmonitored); the globe marks the default gateway. Rows can be dragged into any
 order. Settings: which gateways and which metrics to show.*
 
 ### Interfaces+
@@ -477,7 +477,8 @@ interfaces, and how many rows.*
 
 ### Services+
 
-*A searchable and filterable service table with running, stopped and locked states. Services can
+*A searchable and filterable service table: each service's Running or Stopped pill (with a lock
+for the services OPNsense does not let you stop), its name and ID, and its actions. Services can
 be selected in the widget settings, and start, stop and restart actions require confirmation.*
 
 ### DNS Health+
@@ -570,8 +571,8 @@ FM_COLLECTOR_TEST_CC=clang FM_COLLECTOR_TEST_FLAGS="-g -fsanitize=address,undefi
 
 Releases share one version (`PLUGIN_VERSION` in each Makefile, no revision) and are published
 together: 0.50, 0.51, ... Between releases a package under development carries test builds
-numbered after the last release (Firewall Map+ 0.59.12, 0.59.13, ...), which are never tagged or
-published; at the next release every Makefile moves to the new version together (0.60).
+numbered after the last release (Dashboard Plus 0.61.1, 0.61.2, ...), which are never tagged or
+published; at the next release every Makefile moves to the new version together (0.62).
 The signed feed lives in the `packages` branch, kept as a single commit. On the machine holding
 the signing key:
 
@@ -586,6 +587,30 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.62** (all packages): Dashboard Plus adds CARP+, uses much less CPU and shows ZFS pools.
+  - CARP+, the twelfth widget: this firewall's role over all its CARP VIPs (Master, Backup,
+    Initializing, or Split when it is master for some and backup for others), preempt, skew and
+    demotion; whether the peer is heard (advertisements per second); pfsync state sync (bulk
+    sync, state updates per second, real errors only); where the configuration is synchronized
+    to; the recent CARP changes from the system log; and the VIPs, folded into one line while
+    they agree. It has its own privilege, *Dashboard: CARP+ status*.
+  - Less CPU: with every widget open, Dashboard Plus uses about a quarter of the CPU time of 0.61
+    (about 0.5 s instead of 2.1 s every 10 seconds on a test firewall). Interfaces+ reads
+    `ifconfig -L` once instead of OPNsense's interfaces overview, which also reads every SFP
+    module; DNS Health+ reads only Unbound's query counter every 2 seconds; System Metrics+ and
+    QuickAssist+ read through small shell commands parsed by the web server instead of starting
+    Python; and configd shares the interfaces, metrics and DNS counter between open dashboards
+    for a few seconds.
+  - System Information+ shows each ZFS pool: layout (stripe, mirror, RAID-Z), health, device
+    errors or data loss, a capacity bar and the last scrub (orange after 35 days).
+  - One state pill in the theme's colors for Interfaces+, Gateways+, Services+, the ZFS section
+    and CARP+. Interfaces+ rows are redesigned (name and addresses, then media, MAC address and
+    state); the Services+ toolbar lines up with its table; DNS Health+ forward zones are
+    left-aligned and fit a full IPv6 address.
+  - Firewall Map+: the same tinted pills in the details panel, Threats and the map's hover cards;
+    a quieter loading view (a spinner and a short caption, without the widget's second spinner);
+    and the status line stays on one line while it fits.
+  - VNStat Traffic+ is unchanged apart from the version.
 - **0.61** (all packages): two Firewall Map+ IPv6 fixes. Investigating an IPv6 address on the
   map page works again (it was refused as "not an IP address"). A dual-stack firewall is shown at
   one place: IPv6 follows the IPv4 location unless it is precisely located elsewhere (new *IPv6
