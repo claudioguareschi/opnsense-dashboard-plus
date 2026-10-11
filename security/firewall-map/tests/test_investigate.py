@@ -55,6 +55,22 @@ class InvestigateTest(unittest.TestCase):
         self.assertEqual(parsed["range"], "8.8.8.0 – 8.8.8.255")
         self.assertEqual(parsed["registered"], "2023-12-28")
 
+    def test_rdap_owner_is_the_registrant_organization(self):
+        # RIPE lists an administrative person and maintainer accounts before the organization
+        def entity(handle, roles, name, kind):
+            return {"handle": handle, "roles": roles,
+                    "vcardArray": ["vcard", [["fn", {}, "text", name], ["kind", {}, "text", kind]]]}
+        parsed = INVESTIGATE.parse_rdap({"entities": [
+            entity("DH5439-RIPE", ["administrative"], "A Person", "individual"),
+            entity("EXAMPLE-MNT", ["registrant"], "EXAMPLE-MNT", "individual"),
+            entity("ORG-EX1-RIPE", ["registrant"], "Example Limited", "org"),
+            entity("RIPE-NCC-HM-MNT", ["registrant"], "RIPE-NCC-HM-MNT", "individual"),
+        ]})
+        self.assertEqual(parsed["owner"], "Example Limited")
+        # with no registrant, an administrative contact still names the owner
+        only_admin = INVESTIGATE.parse_rdap({"entities": [entity("AC1", ["administrative"], "Admin Contact", "group")]})
+        self.assertEqual(only_admin["owner"], "Admin Contact")
+
     def test_rejects_private_and_invalid_addresses(self):
         self.assertEqual(INVESTIGATE.investigate("192.168.1.1", store=object(), fetchers={})["status"], "failed")
         self.assertEqual(INVESTIGATE.investigate("fd12:3456::1", store=object(), fetchers={})["status"], "failed")
@@ -67,8 +83,10 @@ class InvestigateTest(unittest.TestCase):
             sources["rdap"]()
             sources["ripestat"]()
             sources["abuseipdb"]()
-        urls = [call.args[0] for call in fetch.call_args_list]
-        self.assertTrue(all("2001%3A4860%3A4860%3A%3A8888" in url for url in urls))
+        rdap, *queries = [call.args[0] for call in fetch.call_args_list]
+        # a path segment keeps the colons (rdap.org refuses %3A with HTTP 400); query values are encoded
+        self.assertEqual(rdap, "https://rdap.org/ip/2001:4860:4860::8888")
+        self.assertTrue(all("2001%3A4860%3A4860%3A%3A8888" in url for url in queries))
 
     def test_caches_and_reports_errors_per_source(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -87,15 +87,30 @@ def walk_entities(entities):
         yield from walk_entities(entity.get("entities"))
 
 
+def owner_rank(entity, roles):
+    """How well an entity names the network's owner (lower is better), or None. RIPE lists an
+    administrative person and maintainer accounts (handles ending in -MNT) as well as the
+    organization; the registrant organization is the owner."""
+    kinds = [item[3] for item in (entity.get("vcardArray") or [None, []])[1] if len(item) >= 4 and item[0] == "kind"]
+    maintainer = str(entity.get("handle") or "").upper().endswith("-MNT")
+    if "registrant" in roles and not maintainer:
+        return 0 if "org" in kinds else 1
+    if "administrative" in roles:
+        return 2 if "org" in kinds else 3
+    return None
+
+
 def parse_rdap(data):
     owner = abuse_name = abuse_email = None
+    best = None
     for entity in walk_entities(data.get("entities")):
         roles = entity.get("roles") or []
         name, email = vcard(entity)
         if "abuse" in roles and not abuse_email:
             abuse_name, abuse_email = name, email
-        if ("registrant" in roles or "administrative" in roles) and not owner:
-            owner = name
+        rank = owner_rank(entity, roles)
+        if name and rank is not None and (best is None or rank < best):
+            owner, best = name, rank
     events = {event.get("eventAction"): event.get("eventDate") for event in data.get("events") or []}
     return {
         "name": data.get("name"),
@@ -138,8 +153,10 @@ def parse_abuseipdb(data):
 
 def lookups(address, key):
     quoted = urllib.parse.quote(address)
+    # in the RDAP path an IPv6 address keeps its colons: rdap.org answers HTTP 400 to %3A
+    path = urllib.parse.quote(address, safe=":")
     sources = {
-        "rdap": lambda: parse_rdap(fetch_json(f"https://rdap.org/ip/{quoted}")),
+        "rdap": lambda: parse_rdap(fetch_json(f"https://rdap.org/ip/{path}")),
         "ripestat": lambda: parse_ripestat(fetch_json(
             f"https://stat.ripe.net/data/prefix-overview/data.json?resource={quoted}&sourceapp=opnsense-firewallmap")),
     }
