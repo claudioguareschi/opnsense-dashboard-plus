@@ -213,10 +213,12 @@ const STYLE = `
 
     /* CARP+: the role and its scope beside preempt, skew and demotion; status lines with an icon in the
        theme's state color; the VIPs, one line while they agree */
-    /* the inset of OPNsense's own widget tables (95% wide, rows padded 0.5em), and as far below the title */
-    .dashboard-plus-carp { text-align: left; width: 95%; margin: 0 auto; padding: 0.5em 0.5em 0.6em; }
+    /* laid out like OPNsense's own widget tables: 95% wide, rules across the full width in the theme's
+       table border color, the content 0.5em inside them, and as far below the title */
+    .dashboard-plus-carp { text-align: left; width: 95%; margin: 0 auto; padding: 0.5em 0 0.6em; }
+    .dashboard-plus-carp > * { padding-left: 0.5em; padding-right: 0.5em; }
     .dashboard-plus-carp-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
-        gap: 0.4em 1em; padding-bottom: 0.6em; border-bottom: 1px solid rgba(128, 128, 128, 0.2); }
+        gap: 0.4em 1em; padding-bottom: 0.6em; border-bottom: 1px solid var(--dashboard-plus-rule); }
     .dashboard-plus-carp-role { display: flex; align-items: center; gap: 0.6em; }
     .dashboard-plus-carp-role .dashboard-plus-state-pill { font-size: 1.05em; padding: 0.2em 0.75em; }
     .dashboard-plus-carp-scope { font-weight: 600; }
@@ -224,7 +226,7 @@ const STYLE = `
         color: color-mix(in srgb, var(--dashboard-plus-ink) 75%, transparent); }
     .dashboard-plus-carp-flags > .text-warning { font-weight: 600; }
     .dashboard-plus-carp-separator { margin: 0 0.45em; opacity: 0.6; }
-    .dashboard-plus-carp-lines { display: grid; gap: 0.55em; padding: 0.65em 0; }
+    .dashboard-plus-carp-lines { display: grid; gap: 0.55em; padding: 0.65em 0.5em; }
     .dashboard-plus-carp-line { display: grid; grid-template-columns: 1.6em minmax(0, 1fr); column-gap: 0.4em; align-items: start; }
     .dashboard-plus-carp-line > .fa { font-size: 1.05em; padding-top: 0.15em; text-align: center; }
     .dashboard-plus-carp-detail { font-size: 0.88em; margin-top: 0.1em; font-variant-numeric: tabular-nums;
@@ -243,12 +245,13 @@ const STYLE = `
     .dashboard-plus-carp-history { list-style: none; margin: 0.25em 0 0; padding: 0; display: grid; gap: 0.2em; }
     .dashboard-plus-carp-history > li { display: grid; grid-template-columns: 6em minmax(0, 1fr); column-gap: 0.5em; }
     .dashboard-plus-carp-when { white-space: nowrap; }
-    .dashboard-plus-carp-vips { border-top: 1px solid rgba(128, 128, 128, 0.2); padding-top: 0.55em; }
-    .dashboard-plus-carp-vips-head { display: flex; align-items: center; justify-content: space-between; gap: 1em; font-weight: 600; }
+    .dashboard-plus-carp > .dashboard-plus-carp-vips { border-top: 1px solid var(--dashboard-plus-rule); padding: 0.55em 0 0; }
+    .dashboard-plus-carp-vips-head { display: flex; align-items: center; justify-content: space-between; gap: 1em;
+        padding: 0 0.5em; font-weight: 600; }
     .dashboard-plus-carp-vips-head .fa-circle-nodes { opacity: 0.7; margin-right: 0.2em; }
     /* the name and "VHID · description" share the first column, so the name never breaks */
     .dashboard-plus-carp-table.flextable-container { --dashboard-plus-columns: minmax(0, 1fr) auto auto; width: 100%; margin: 0.35em 0 0; }
-    .dashboard-plus-carp-table > .dashboard-plus-row.dashboard-plus-row { padding: 0.4em 0; }
+    .dashboard-plus-carp-table > .dashboard-plus-row.dashboard-plus-row { padding: 0.4em 0.5em; }
     .dashboard-plus-carp-vip-name { font-weight: 600; }
 
     /* System Information+: a ZFS pool, its usage bar, then health, errors and last scrub side by side */
@@ -317,6 +320,10 @@ function themeColors() {
     }
     probe.remove();
     root.setProperty('--dashboard-plus-ink', getComputedStyle(document.body).color);
+    // the border between rows of OPNsense's widget tables, for rules that match them
+    const row = $('<div class="flextable-row" style="position: absolute; visibility: hidden;"></div>').appendTo('body');
+    root.setProperty('--dashboard-plus-rule', getComputedStyle(row[0]).borderTopColor || 'rgba(128, 128, 128, 0.2)');
+    row.remove();
 }
 
 export function ensureStyle() {
