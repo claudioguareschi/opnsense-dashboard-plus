@@ -91,14 +91,14 @@ CLASS_STATUSES = {0: "ok", 1: "missing", 2: "too_large", 3: "unreadable"}
 _TABLE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,31}$")
 _GENERATION = re.compile(r"^[!-~]{1,63}$")
 
-# FMAGG4 record kinds
+# FMAGG5 record kinds
 HEADER, FLOW, CANDIDATE, THREAT_REMOTE, THREAT_CANDIDATE, EVENT_MATCH, TELEMETRY, CLASSIFIED, CLASS_SET = range(9)
 SNAPSHOT_CANDIDATE = 10
 FAILURE, FOOTER = 254, 255
 # record order within a response; telemetry, then the footer, end it
 _ORDER = {FLOW: 1, CANDIDATE: 2, THREAT_REMOTE: 3, THREAT_CANDIDATE: 4, EVENT_MATCH: 5, CLASSIFIED: 6,
           CLASS_SET: 7, SNAPSHOT_CANDIDATE: 8}
-_SNAPSHOT_CANDIDATE = struct.Struct("!17s17sBBdQQ")
+_SNAPSHOT_CANDIDATE = struct.Struct("!17s17s17sBBdQQ")
 # candidate kinds
 PROTOCOL, INSIDE_HOST, EGRESS_INTERFACE, SERVICE, REMOTE_TARGET, RULE_LABEL = range(1, 7)
 THREAT_CANDIDATE_KINDS = (INSIDE_HOST, SERVICE, REMOTE_TARGET)
@@ -110,7 +110,7 @@ FAILURE_CLASSES = {1: "structural", 2: "internal", 3: "incompatible", 4: "resour
 OMISSION_REASONS = ((1, "encoded_bytes"), (2, "state_count"), (4, "per_flow_evidence_limit"))
 SELECTION_POLICIES = {2: "bytes_desc_newest_identity_v1"}
 
-_FLOW = struct.Struct("!I17s17sQQQIIQQQQQQQBBIIBdddddBI")
+_FLOW = struct.Struct("!I17s17s17sQQQIIQQQQQQQBBIIBdddddBI")
 SECURITY_CLASSES = ("S0", "S1", "S2", "S3")
 # an age the kernel could not have measured (collector/lifetime.h FM_AGE_UNKNOWN): None, never 0
 AGE_UNKNOWN = 0xFFFFFFFF
@@ -247,7 +247,7 @@ def memory_budget(setting_mib=None, physical=None):
 def response_byte_limit(candidates_per_kind=CANDIDATES_PER_KIND, threat_remotes=THREAT_REMOTES,
                         queries=MAX_EVENT_QUERIES, classify=CLASS_MAX_ADDRESSES, class_sets=CLASS_MAX_SETS,
                         ranked_flows=RANKED_FLOWS_DEFAULT):
-    """The largest FMAGG4 response the budgets allow (framing included); more is a helper bug."""
+    """The largest FMAGG5 response the budgets allow (framing included); more is a helper bug."""
     flows = ranked_flows * (_FLOW_RECORD + RULE_LABEL * candidates_per_kind * _CANDIDATE_RECORD)
     threats = threat_remotes * (_THREAT_REMOTE_RECORD + len(THREAT_CANDIDATE_KINDS) * candidates_per_kind
                                 * _THREAT_CANDIDATE_RECORD)
@@ -310,6 +310,13 @@ def _address(data):
             raise CollectorError("noncanonical IPv4 address")
         return str(ipaddress.IPv4Address(data[1:5]))
     return str(ipaddress.IPv6Address(data[1:]))
+
+
+def _owner(data):
+    """A flow's owner: its inside host, or None for the firewall's own traffic (the zero address)."""
+    if data == bytes(17):
+        return None
+    return _address(data)
 
 
 def _text(data, encoding="utf-8"):
@@ -441,15 +448,15 @@ def _evidence_rows(evidence):
 
 def _class_mask(mask, categories):
     if mask >> len(categories):
-        raise CollectorError("FMAGG4 classification outside the requested sets")
+        raise CollectorError("FMAGG5 classification outside the requested sets")
     return mask
 
 
 def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANKED_FLOWS_DEFAULT, byte_limit=None,
             timeout=None, categories=(), asked=frozenset()):
-    """Read one complete FMAGG4 response."""
+    """Read one complete FMAGG5 response."""
     deadline = time.monotonic() + (timeout or READ_TIMEOUT)
-    _magic(stream, process, deadline, b"FMAGG4\0\0")
+    _magic(stream, process, deadline, b"FMAGG5\0\0")
     checksum, threats_present, telemetry, footer, previous_kind = 0, None, None, None, HEADER
     flows, candidates, matches = [], [], {}
     threat_remotes, threat_candidates = [], []
@@ -460,37 +467,37 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
             checksum = zlib.crc32(data, zlib.crc32(size, checksum))
         if threats_present is None:
             if kind != HEADER or len(data) != 9:
-                raise CollectorError("FMAGG4 header missing")
+                raise CollectorError("FMAGG5 header missing")
             version, flags = struct.unpack_from("!II", data, 1)
             if version != PROTOCOL_VERSION or flags & ~1:
-                raise CollectorError("FMAGG4 header version or flags")
+                raise CollectorError("FMAGG5 header version or flags")
             threats_present = bool(flags & 1)
             if require_threat_summary and not threats_present:
-                raise CollectorError("FMAGG4 threat summary missing")
+                raise CollectorError("FMAGG5 threat summary missing")
             continue
         if telemetry is not None and kind != FOOTER:
-            raise CollectorError("FMAGG4 record after telemetry")
+            raise CollectorError("FMAGG5 record after telemetry")
         rank = _ORDER.get(kind)
         if rank is not None:
             if rank < previous_kind:
-                raise CollectorError("FMAGG4 record order")
+                raise CollectorError("FMAGG5 record order")
             previous_kind = rank
         if kind == FLOW:
             if len(data) != 1 + _FLOW.size:
-                raise CollectorError("invalid FMAGG4 flow record")
-            (rank, local, remote, states, from_remote, to_remote, oldest, youngest, remote_weight, local_weight,
+                raise CollectorError("invalid FMAGG5 flow record")
+            (rank, local, remote, owner, states, from_remote, to_remote, oldest, youngest, remote_weight, local_weight,
              first, delta_from, delta_to, delta_packets, classes, evidence_mask, security_class, blocked_hits,
              ids_alerts, ids_severity, rate_from, rate_to, packet_rate, activity, score, presence,
              attempts) = _FLOW.unpack_from(data, 1)
             if presence >= len(PRESENCES):
-                raise CollectorError("invalid FMAGG4 flow presence")
+                raise CollectorError("invalid FMAGG5 flow presence")
             if evidence_mask & ~(evidence_facts.REQUEST_BITS | evidence_facts.THREAT_LIST) \
                     or security_class >= len(SECURITY_CLASSES) or ids_severity > 3:
-                raise CollectorError("invalid FMAGG4 flow evidence")
+                raise CollectorError("invalid FMAGG5 flow evidence")
             if rank != len(flows) or not all(math.isfinite(value) and value >= 0 for value in
                                              (rate_from, rate_to, packet_rate, activity, score)):
-                raise CollectorError("invalid FMAGG4 flow rank or rate")
-            flows.append({"key": (_address(local), _address(remote)), "states": states,
+                raise CollectorError("invalid FMAGG5 flow rank or rate")
+            flows.append({"key": (_address(local), _address(remote), _owner(owner)), "states": states,
                           "bytes_from_remote": from_remote, "bytes_to_remote": to_remote,
                           "oldest": _age(oldest), "youngest": _age(youngest),
                           "remote_initiated_weight": remote_weight, "local_initiated_weight": local_weight,
@@ -506,86 +513,87 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
                           "presence": PRESENCES[presence], "attempts": attempts})
         elif kind == CANDIDATE:
             if len(data) < 32:
-                raise CollectorError("invalid FMAGG4 candidate record")
+                raise CollectorError("invalid FMAGG5 candidate record")
             flow, candidate_kind, sequence, weight, association, length = struct.unpack_from("!IBQQQH", data, 1)
             if flow >= len(flows) or candidate_kind not in range(PROTOCOL, RULE_LABEL + 1) \
                     or length != len(data) - 32:
-                raise CollectorError("invalid FMAGG4 candidate identity")
+                raise CollectorError("invalid FMAGG5 candidate identity")
             candidates.append((flow, candidate_kind, sequence, weight, association, data[32:]))
         elif kind == THREAT_REMOTE:
             if not threats_present or len(data) != 58:
-                raise CollectorError("invalid FMAGG4 threat remote")
+                raise CollectorError("invalid FMAGG5 threat remote")
             index, = struct.unpack_from("!I", data, 1)
             remote_states, local_states, transferred, classes, youngest = struct.unpack_from("!QQQQI", data, 22)
             if index != len(threat_remotes):
-                raise CollectorError("FMAGG4 threat remote order")
+                raise CollectorError("FMAGG5 threat remote order")
             threat_remotes.append({"address": _address(data[5:22]), "remote_initiated_states": remote_states,
                                    "local_initiated_states": local_states, "bytes": transferred,
                                    "classes": _class_mask(classes, categories), "youngest": _age(youngest)})
         elif kind == THREAT_CANDIDATE:
             if not threats_present or len(data) < 24:
-                raise CollectorError("invalid FMAGG4 threat candidate")
+                raise CollectorError("invalid FMAGG5 threat candidate")
             remote, candidate_kind, sequence, association, length = struct.unpack_from("!IBQQH", data, 1)
             if remote >= len(threat_remotes) or candidate_kind not in THREAT_CANDIDATE_KINDS \
                     or length != len(data) - 24:
-                raise CollectorError("invalid FMAGG4 threat candidate identity")
+                raise CollectorError("invalid FMAGG5 threat candidate identity")
             threat_candidates.append((remote, candidate_kind, sequence, association, data[24:]))
         elif kind == EVENT_MATCH:
             key, match = _event_match(data, query_keys)
             if key in matches:
-                raise CollectorError("FMAGG4 duplicate event match")
+                raise CollectorError("FMAGG5 duplicate event match")
             matches[key] = match
         elif kind == CLASSIFIED:
             if len(data) != 36:
-                raise CollectorError("invalid FMAGG4 classified address")
+                raise CollectorError("invalid FMAGG5 classified address")
             address = _address(data[1:18])
             mask, evidence_mask, security_class, states = struct.unpack_from("!QBBQ", data, 18)
             if address not in asked or address in remotes or not (mask or evidence_mask or states) \
                     or evidence_mask & ~(evidence_facts.REQUEST_BITS | evidence_facts.THREAT_LIST) \
                     or security_class >= len(SECURITY_CLASSES) or bool(security_class) != bool(evidence_mask):
-                raise CollectorError("invalid FMAGG4 classified address identity")
+                raise CollectorError("invalid FMAGG5 classified address identity")
             remotes[address] = {"classes": _class_mask(mask, categories), "evidence": evidence_mask,
                                 "security_class": SECURITY_CLASSES[security_class], "states": states}
             if mask:
                 classified[address] = mask
         elif kind == SNAPSHOT_CANDIDATE:
             if len(data) != 1 + _SNAPSHOT_CANDIDATE.size or len(snapshot) >= SNAPSHOT_FLOWS:
-                raise CollectorError("invalid FMAGG4 snapshot candidate")
-            local, remote, evidence_mask, security_class, score, order, states = \
+                raise CollectorError("invalid FMAGG5 snapshot candidate")
+            local, remote, owner, evidence_mask, security_class, score, order, states = \
                 _SNAPSHOT_CANDIDATE.unpack_from(data, 1)
             if evidence_mask & ~(evidence_facts.REQUEST_BITS | evidence_facts.THREAT_LIST) \
                     or security_class >= len(SECURITY_CLASSES) or bool(security_class) != bool(evidence_mask) \
                     or not (math.isfinite(score) and score >= 0):
-                raise CollectorError("invalid FMAGG4 snapshot candidate")
-            snapshot.append({"local": _address(local), "remote": _address(remote), "evidence": evidence_mask,
+                raise CollectorError("invalid FMAGG5 snapshot candidate")
+            snapshot.append({"local": _address(local), "remote": _address(remote), "owner": _owner(owner),
+                             "evidence": evidence_mask,
                              "security_class": SECURITY_CLASSES[security_class], "score": score, "order": order,
                              "states": states})
         elif kind == CLASS_SET:
             if len(data) != 12:
-                raise CollectorError("invalid FMAGG4 classification set")
+                raise CollectorError("invalid FMAGG5 classification set")
             set_id, category, status, entries = struct.unpack_from("!BBBQ", data, 1)
             if set_id != len(class_sets) or set_id >= len(categories) or chr(category) != categories[set_id] \
                     or status not in CLASS_STATUSES or (status and entries):
-                raise CollectorError("invalid FMAGG4 classification set identity")
+                raise CollectorError("invalid FMAGG5 classification set identity")
             class_sets.append({"id": set_id, "category": categories[set_id], "status": CLASS_STATUSES[status],
                                "entries": entries})
         elif kind == TELEMETRY:
             if len(data) != 1 + _TELEMETRY.size:
-                raise CollectorError("invalid FMAGG4 telemetry")
+                raise CollectorError("invalid FMAGG5 telemetry")
             telemetry = dict(zip(_TELEMETRY_FIELDS, _TELEMETRY.unpack_from(data, 1)))
             if not all(math.isfinite(telemetry[name]) for name in _TELEMETRY_FIELDS[2:7]) \
                     or telemetry["regime"] >= len(REGIMES) or telemetry["next_regime"] >= len(REGIMES) \
                     or telemetry["flows_estimated"] > 1 \
                     or any(telemetry[f"quality_{axis}"] >= len(values) for axis, values in QUALITY.items()):
-                raise CollectorError("invalid FMAGG4 telemetry")
+                raise CollectorError("invalid FMAGG5 telemetry")
         elif kind == FOOTER:
             if len(data) != 1 + _FOOTER.size:
-                raise CollectorError("invalid FMAGG4 footer")
+                raise CollectorError("invalid FMAGG5 footer")
             footer = _FOOTER.unpack_from(data, 1)
         else:
-            raise CollectorError("unknown FMAGG4 record")
+            raise CollectorError("unknown FMAGG5 record")
     if threats_present is None or telemetry is None or footer is None:
-        raise CollectorError("incomplete FMAGG4 response")
+        raise CollectorError("incomplete FMAGG5 response")
     (outcome, context_kind, actual, limit, seen, retained, mapped, flow_total, flows_sent, candidates_sent,
      matches_sent, remotes_sent, remote_candidates_sent, classified_sent, class_sets_sent, snapshot_sent,
      expected) = footer
@@ -593,11 +601,11 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
     if expected != checksum or outcome not in OUTCOMES \
             or (flows_sent, candidates_sent, matches_sent, remotes_sent, remote_candidates_sent, classified_sent,
                 class_sets_sent, snapshot_sent) != tuple(map(len, records)) \
-            or len({(item["local"], item["remote"]) for item in snapshot}) != len(snapshot) \
+            or len({(item["local"], item["remote"], item["owner"]) for item in snapshot}) != len(snapshot) \
             or len(flows) > flow_limit or not mapped <= retained <= seen \
             or sum(flow["states"] for flow in flows) > mapped \
             or (outcome and (any(records) or threats_present)):
-        raise CollectorError("FMAGG4 completion validation failed")
+        raise CollectorError("FMAGG5 completion validation failed")
     refused = OUTCOMES[outcome] if outcome else None
     # a sample that skipped unsupported states is semantically incomplete; event matches say so,
     # since a skipped state could have shared their outside tuple
@@ -629,10 +637,10 @@ def _decode(stream, process, query_keys, require_threat_summary, flow_limit=RANK
 
 def _event_match(data, query_keys):
     if len(data) != 194:
-        raise CollectorError("invalid FMAGG4 event match")
+        raise CollectorError("invalid FMAGG5 event match")
     query_id, match_kind, proto = struct.unpack_from("!HBB", data, 1)
     if query_id >= len(query_keys) or match_kind not in EVENT_MATCH_KINDS:
-        raise CollectorError("invalid FMAGG4 event match identity")
+        raise CollectorError("invalid FMAGG5 event match identity")
     public, public_port = _address(data[5:22]), struct.unpack_from("!H", data, 22)[0]
     remote, remote_port = _address(data[24:41]), struct.unpack_from("!H", data, 41)[0]
     has_inside = data[43]
@@ -641,15 +649,15 @@ def _event_match(data, query_keys):
     age, from_remote, to_remote, packets_from, packets_to = struct.unpack_from("!IQQQQ", data, 76)
     remote_initiated, apparent = data[112], data[113]
     if not {has_inside, ambiguous, remote_initiated, apparent} <= {0, 1}:
-        raise CollectorError("invalid FMAGG4 event flags")
+        raise CollectorError("invalid FMAGG5 event flags")
     try:
         protocol = common.protocol_name(proto)
     except (OSError, ValueError) as error:
-        raise CollectorError("unknown FMAGG4 event protocol") from error
+        raise CollectorError("unknown FMAGG5 event protocol") from error
     key = (protocol, public, str(public_port) if public_port else "",
            remote, str(remote_port) if remote_port else "")
     if key != query_keys[query_id]:
-        raise CollectorError("FMAGG4 event tuple mismatch")
+        raise CollectorError("FMAGG5 event tuple mismatch")
     return key, {"kind": match_kind, "inside": _address(data[44:61]) if has_inside else None,
                  "inside_port": inside_port if has_inside else None,
                  "id": state_id, "creator": creator, "ambiguous": bool(ambiguous), "age": _age(age),
@@ -830,7 +838,7 @@ class CollectorEngine:
                               timeout=self.read_timeout, categories=categories, asked=asked)
             # a sample reports every requested set's status
             if not decoded["refused"] and len(decoded["class_sets"]) != len(categories):
-                raise CollectorError("FMAGG4 classification sets incomplete")
+                raise CollectorError("FMAGG5 classification sets incomplete")
             return decoded
         result = self._request(text, decode)
         telemetry = result["telemetry"]
@@ -885,7 +893,7 @@ class CollectorEngine:
         result = self._request(text, lambda stream, process: _decode(
             stream, process, (), False, flow_limit=SNAPSHOT_FLOWS, byte_limit=SNAPSHOT_BYTES,
             timeout=self.read_timeout, categories=self.snapshot_categories))
-        if [row["key"] for row in result["flows"]] != [tuple(item[:2]) for item in identities]:
+        if [row["key"] for row in result["flows"]] != [tuple(item[:3]) for item in identities]:
             self.close()
             raise CollectorError("collector snapshot selection identity mismatch")
         return result
@@ -935,12 +943,13 @@ def _identity_rows(identities):
     if len(identities) > SNAPSHOT_FLOWS:
         raise CollectorError("too many collector snapshot identities")
     seen, rows = set(), []
-    for local, remote, incident in identities:
-        pair = (str(ipaddress.ip_address(local)), str(ipaddress.ip_address(remote)))
-        if pair in seen or incident not in (True, False):
+    for local, remote, owner, incident in identities:
+        identity = (str(ipaddress.ip_address(local)), str(ipaddress.ip_address(remote)),
+                    None if owner is None else str(ipaddress.ip_address(owner)))
+        if identity in seen or incident not in (True, False):
             raise CollectorError("duplicate/invalid collector snapshot identity")
-        seen.add(pair)
-        rows.append(f"F {pair[0]} {pair[1]} {int(incident)}\n")
+        seen.add(identity)
+        rows.append(f"F {identity[0]} {identity[1]} {identity[2] or '-'} {int(incident)}\n")
     return "".join(rows) + "RUN\n"
 
 
@@ -978,7 +987,7 @@ def _decode_detail(stream, process, identities, generation, byte_limit, state_li
             if flow_id >= len(identities) or len(seen) >= state_limit:
                 raise CollectorError("collector snapshot state association/limit")
             row = json.loads(data[5:])
-            local, remote, _incident = identities[flow_id]
+            local, remote, _owner_address, _incident = identities[flow_id]
             if not isinstance(row, dict) or row.get("flow") != {"origin": local, "dest": remote}:
                 raise CollectorError("collector snapshot flow mismatch")
             identity = row.get("id"), row.get("creatorid")
@@ -1004,8 +1013,9 @@ def _decode_detail(stream, process, identities, generation, byte_limit, state_li
                     or captured > min(matching, quota) or reasons & ~7 \
                     or bool(matching - captured) != bool(reasons):
                 raise CollectorError("collector snapshot flow totals")
-            local, remote, required = identities[flow_id]
-            totals[flow_id] = {"origin": local, "dest": remote, "required": required, "matching": matching,
+            local, remote, owner, required = identities[flow_id]
+            totals[flow_id] = {"origin": local, "dest": remote, "owner": owner, "required": required,
+                               "matching": matching,
                                "matching_at_sample": sample_matching, "quota": quota,
                                "captured": captured, "omitted": matching - captured,
                                "complete": matching == captured,

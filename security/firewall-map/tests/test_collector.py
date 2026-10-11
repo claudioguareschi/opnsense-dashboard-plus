@@ -42,12 +42,14 @@ from collector_fixture import CollectorFixture  # noqa: E402
 class TrackerTest(unittest.TestCase):
     LOCAL = {"1.2.3.163"}
     PAIR = ("1.2.3.163", "45.56.79.53")
+    # a flow is (local, remote, owner): nat_state() is a port forward to 192.168.1.2
+    KEY = (*PAIR, "192.168.1.2")
 
     def test_compact_flow_keeps_every_field_and_exact_smoothing(self):
         tracker = REFERENCE.FlowTracker()
         tracker.update(PF.parse_states(nat_state(1000, 1000)), self.LOCAL, now=100.0)
         tracker.update(PF.parse_states(nat_state(1600, 1100, 10, 14)), self.LOCAL, now=102.0)
-        flow = tracker.flows[self.PAIR]
+        flow = tracker.flows[self.KEY]
         self.assertNotIsInstance(flow, dict)
         self.assertFalse(hasattr(flow, "__dict__"))
         self.assertEqual(dict(flow), {
@@ -56,7 +58,7 @@ class TrackerTest(unittest.TestCase):
             "services": ["HTTPS"], "service_ports": {"HTTPS": "443/tcp"}, "age": 605,
             "transferred": (1600, 1100), "rule": None, "inside": ["192.168.1.2"],
             "egress": "vlan01", "initiated": "remote", "targets": ["tcp|192.168.1.2|443"],
-            "presence": "traffic", "attempts": 0,
+            "presence": "traffic", "attempts": 0, "owner": "192.168.1.2",
         })
         entry = COLLECTOR._flow_entry(*self.PAIR, flow, 1.0, self.LOCAL, {}, 1002.0)
         injected = COLLECTOR._flow_entry(*self.PAIR, dict(flow), 1.0, self.LOCAL, {}, 1002.0)
@@ -70,15 +72,15 @@ class TrackerTest(unittest.TestCase):
         tracker = REFERENCE.FlowTracker()
         second = nat_state(1000, 1000).replace("45.56.79.53", "45.56.79.54").replace("f501b86a", "f501b86b")
         tracker.update(PF.parse_states(nat_state(1000, 1000) + second), self.LOCAL, now=100.0)
-        original = tracker.flows[self.PAIR]
+        original = tracker.flows[self.KEY]
         for flow in tracker.flows.values():
             flow["last_active"], flow["rate"] = 100.0, 1.0
         self.assertEqual([item[2] for item in tracker.visible(100.0)], ["45.56.79.53", "45.56.79.54"])
         tracker.update(PF.parse_states(second), self.LOCAL, now=102.0)
-        self.assertNotIn(self.PAIR, tracker.flows)
+        self.assertNotIn(self.KEY, tracker.flows)
         tracker.update(PF.parse_states(nat_state(1000, 1000) + second), self.LOCAL, now=104.0)
-        self.assertIsNot(tracker.flows[self.PAIR], original)
-        self.assertEqual(tracker.flows[self.PAIR]["first_seen"], 104.0)
+        self.assertIsNot(tracker.flows[self.KEY], original)
+        self.assertEqual(tracker.flows[self.KEY]["first_seen"], 104.0)
         for flow in tracker.flows.values():
             flow["last_active"], flow["rate"] = 104.0, 1.0
         self.assertEqual([item[2] for item in tracker.visible(104.0)], ["45.56.79.54", "45.56.79.53"])
@@ -86,13 +88,13 @@ class TrackerTest(unittest.TestCase):
     def test_dictionary_injected_flow_can_still_update_and_rank(self):
         tracker = REFERENCE.FlowTracker()
         tracker.update(PF.parse_states(nat_state(1000, 1000)), self.LOCAL, now=100.0)
-        injected = tracker.flows[self.PAIR] = dict(tracker.flows[self.PAIR])
+        injected = tracker.flows[self.KEY] = dict(tracker.flows[self.KEY])
         tracker.update(PF.parse_states(nat_state(1600, 1100)), self.LOCAL, now=102.0)
-        self.assertIs(tracker.flows[self.PAIR], injected)
+        self.assertIs(tracker.flows[self.KEY], injected)
         self.assertEqual(injected["rate"], 175.0)
         self.assertEqual(tracker.visible(102.0)[0][3], injected)
 
-    def test_compact_totals_preserve_weighted_metadata_ties_and_lan_rule_order(self):
+    def test_each_inside_host_is_its_own_flow_with_its_lan_rule(self):
         first = nat_state(1000, 1000).replace(" bytes\n", " bytes, rlabel wan1\n")
         second = first.replace("192.168.1.2:443", "192.168.1.3:80").replace("1.2.3.163:443", "1.2.3.163:80")
         second = second.replace("f501b86a", "f501b86b").replace("vlan01", "vlan02").replace("wan1", "wan2")
@@ -104,24 +106,32 @@ class TrackerTest(unittest.TestCase):
             tracker = REFERENCE.FlowTracker()
             records = PF.parse_states(text)
             totals, _ = tracker._totals(records, self.LOCAL, None)
-            self.assertNotIsInstance(totals[self.PAIR], dict)
-            self.assertFalse(hasattr(totals[self.PAIR], "__dict__"))
-            self.assertEqual(len(dict(totals[self.PAIR])), 16)
+            self.assertNotIsInstance(totals[self.KEY], dict)
+            self.assertFalse(hasattr(totals[self.KEY], "__dict__"))
+            self.assertEqual(len(dict(totals[self.KEY])), 16)
             tracker.update(records, self.LOCAL, now=100.0)
-            results.append(dict(tracker.flows[self.PAIR]))
+            results.append({key: dict(flow) for key, flow in tracker.flows.items()})
         self.assertEqual(results[0], results[1])
-        self.assertEqual(results[0]["services"], ["HTTPS", "HTTP"])
-        self.assertEqual(results[0]["inside"], ["192.168.1.2", "192.168.1.3"])
-        self.assertEqual(results[0]["targets"], ["tcp|192.168.1.2|443", "tcp|192.168.1.3|80"])
-        self.assertEqual((results[0]["egress"], results[0]["rule"]), ("vlan01", "lan1"))
+        # two inside hosts behind the same public address and remote are two flows, never one
+        # credited with both hosts' services
+        other = (*self.PAIR, "192.168.1.3")
+        self.assertEqual(set(results[0]), {self.KEY, other})
+        first, second = results[0][self.KEY], results[0][other]
+        self.assertEqual((first["services"], first["inside"], first["targets"]),
+                         (["HTTPS"], ["192.168.1.2"], ["tcp|192.168.1.2|443"]))
+        self.assertEqual((second["services"], second["inside"], second["targets"]),
+                         (["HTTP"], ["192.168.1.3"], ["tcp|192.168.1.3|80"]))
+        # the LAN-side state's rule names the flow of the host it belongs to
+        self.assertEqual((first["egress"], first["rule"]), ("vlan01", "lan1"))
+        self.assertEqual((second["egress"], second["rule"]), ("vlan02", "wan2"))
 
     def test_rate_comes_from_counter_deltas_not_totals(self):
         tracker = REFERENCE.FlowTracker(smoothing=1.0)
         tracker.update(PF.parse_states(nat_state(1000, 1000)), self.LOCAL, now=100.0)
-        self.assertIsNone(tracker.flows[self.PAIR]["last_active"])
+        self.assertIsNone(tracker.flows[self.KEY]["last_active"])
         self.assertEqual(tracker.visible(100.0), [])
         tracker.update(PF.parse_states(nat_state(1500, 2500)), self.LOCAL, now=102.0)
-        self.assertEqual(tracker.flows[self.PAIR]["rate"], 1000.0)
+        self.assertEqual(tracker.flows[self.KEY]["rate"], 1000.0)
         self.assertEqual(len(tracker.visible(102.0)), 1)
 
     def test_splits_rate_toward_and_away_from_firewall(self):
@@ -129,13 +139,13 @@ class TrackerTest(unittest.TestCase):
         # remote 45.56.79.53 initiated this state: first counter is remote -> firewall
         tracker.update(PF.parse_states(nat_state(1000, 1000)), self.LOCAL, now=0.0)
         tracker.update(PF.parse_states(nat_state(1600, 1100)), self.LOCAL, now=1.0)
-        flow = tracker.flows[self.PAIR]
+        flow = tracker.flows[self.KEY]
         self.assertEqual((flow["rate_in"], flow["rate_out"]), (600.0, 100.0))
 
     def test_names_the_responder_service(self):
         tracker = REFERENCE.FlowTracker(smoothing=1.0)
         tracker.update(PF.parse_states(nat_state(1000, 1000)), self.LOCAL, now=0.0)
-        self.assertEqual(tracker.flows[self.PAIR]["services"], ["HTTPS"])
+        self.assertEqual(tracker.flows[self.KEY]["services"], ["HTTPS"])
         self.assertEqual(COMMON.service_name("udp", "51820"), "WireGuard")
         self.assertEqual(COMMON.service_name("tcp", "9999"), "TCP/9999")
 
@@ -144,24 +154,24 @@ class TrackerTest(unittest.TestCase):
         tracker.update(PF.parse_states(nat_state(1000, 1000)), self.LOCAL, now=0.0)
         tracker.update(PF.parse_states(nat_state(2000, 1000)), self.LOCAL, now=1.0)
         tracker.update(PF.parse_states(nat_state(2000, 1000)), self.LOCAL, now=6.0)
-        flow = tracker.flows[self.PAIR]
+        flow = tracker.flows[self.KEY]
         self.assertEqual(flow["rate"], 0.0)
         self.assertAlmostEqual(tracker.activity(flow, 6.0), 0.5)
         self.assertEqual(tracker.visible(12.0), [])
         tracker.update([], self.LOCAL, now=13.0)
-        self.assertNotIn(self.PAIR, tracker.flows)
+        self.assertNotIn(self.KEY, tracker.flows)
 
     def test_new_state_counts_its_bytes(self):
         tracker = REFERENCE.FlowTracker(smoothing=1.0)
         tracker.update([], self.LOCAL, now=0.0)
         fresh = nat_state(300, 700).replace("age 00:10:05", "age 00:00:01")
         tracker.update(PF.parse_states(fresh), self.LOCAL, now=1.0)
-        self.assertEqual(tracker.flows[self.PAIR]["rate"], 1000.0)
+        self.assertEqual(tracker.flows[self.KEY]["rate"], 1000.0)
 
     def test_visible_flows_are_capped(self):
         tracker = REFERENCE.FlowTracker(smoothing=1.0)
         for index in range(5):
-            tracker.flows[("1.2.3.163", f"8.8.8.{index}")] = {
+            tracker.flows[("1.2.3.163", f"8.8.8.{index}", None)] = {
                 "rate": float(index), "rate_in": 0.0, "rate_out": 0.0, "packet_rate": 0.0,
                 "last_active": 0.0, "first_seen": 0.0,
             }
@@ -172,7 +182,7 @@ class TrackerTest(unittest.TestCase):
         tracker = COLLECTOR.FlowTracker()
         rows = []
         for index in reversed(range(150)):
-            rows.append({"key": ("192.168.1.1", f"203.0.113.{index + 1}"), "states": 1,
+            rows.append({"key": ("192.168.1.1", f"203.0.113.{index + 1}", None), "states": 1,
                          "bytes_from_remote": 10, "bytes_to_remote": 2,
                          "remote_initiated_weight": 1, "local_initiated_weight": 0, "oldest": 1,
                          "rate_from_remote": float(index + 1), "rate_to_remote": 0.0, "packet_rate": 1.0,
@@ -186,7 +196,7 @@ class TrackerTest(unittest.TestCase):
 
     def test_collector_aggregate_resolves_nonstandard_protocol_number(self):
         tracker = COLLECTOR.FlowTracker()
-        row = {"key": self.PAIR, "states": 1, "bytes_from_remote": 10, "bytes_to_remote": 2,
+        row = {"key": self.KEY, "states": 1, "bytes_from_remote": 10, "bytes_to_remote": 2,
                "remote_initiated_weight": 1, "local_initiated_weight": 0,
                "oldest": 1, "rate_from_remote": 1.0, "rate_to_remote": 0.0, "packet_rate": 1.0,
                "activity": 1.0, "score": 1.0}
@@ -195,12 +205,12 @@ class TrackerTest(unittest.TestCase):
 
         tracker.update_aggregate(aggregate, 10.0)
 
-        self.assertEqual(tracker.flows[self.PAIR]["protocols"], [COMMON.protocol_name(47)])
+        self.assertEqual(tracker.flows[self.KEY]["protocols"], [COMMON.protocol_name(47)])
 
     def test_private_origin_is_kept_without_a_map_anchor(self):
         tracker = REFERENCE.FlowTracker(smoothing=1.0)
         pair = ("192.168.0.2", "45.56.79.53")
-        tracker.flows[pair] = {
+        tracker.flows[(*pair, "192.168.30.60")] = {
             "rate": 1.0, "rate_in": 0.0, "rate_out": 1.0, "packet_rate": 1.0, "last_active": 0.0,
             "first_seen": 0.0, "states": 1, "protocols": ["tcp"], "services": ["HTTPS"],
             "service_ports": {"HTTPS": "443/tcp"}, "inside": ["192.168.30.60"], "egress": "igb1",
@@ -222,7 +232,7 @@ class TrackerTest(unittest.TestCase):
     def test_hostname_lookup_includes_unnamed_inside_hosts_under_the_existing_opt_in(self):
         tracker = REFERENCE.FlowTracker(smoothing=1.0)
         pair = ("1.2.3.163", "45.56.79.53")
-        tracker.flows[pair] = {
+        tracker.flows[(*pair, "192.168.1.2")] = {
             "rate": 1.0, "rate_in": 0.0, "rate_out": 1.0, "packet_rate": 1.0, "last_active": 0.0,
             "first_seen": 0.0, "states": 1, "protocols": ["tcp"], "services": ["HTTPS"],
             "service_ports": {"HTTPS": "443/tcp"}, "inside": ["192.168.1.2"], "egress": "igb1",
@@ -721,9 +731,10 @@ class SnapshotSafetyTest(CollectorLoopTest):
         from the sample's facts and the threat lists first, by rate; the rest by rate)."""
         facts = self.collector.evidence_facts()
         rows = []
-        for order, ((local, remote), flow) in enumerate(self.collector.tracker.flows.items()):
+        for order, ((local, remote, owner), flow) in enumerate(self.collector.tracker.flows.items()):
             mask = facts.get(remote, (0,))[0] | (EVIDENCE.THREAT_LIST if self.collector.blocklists.lookup(remote) else 0)
-            rows.append({"local": local, "remote": remote, "evidence": mask, "security_class": "S1" if mask else "S0",
+            rows.append({"local": local, "remote": remote, "owner": owner, "evidence": mask,
+                         "security_class": "S1" if mask else "S0",
                          "score": max(flow["rate"], 1.0), "order": order, "states": flow["states"]})
         rows.sort(key=lambda row: (not row["evidence"], -row["score"], row["order"]))
         self.collector.snapshot_candidates = rows
@@ -735,8 +746,9 @@ class SnapshotSafetyTest(CollectorLoopTest):
         self.collector.step()
         now = time.monotonic()
         original = next(iter(self.collector.tracker.flows.values()))
+        self.owner = original["owner"]
         self.collector.tracker.flows = {
-            ("1.2.3.163", f"34.1.{1 + number // 256}.{number % 256}"):
+            ("1.2.3.163", f"34.1.{1 + number // 256}.{number % 256}", self.owner):
                 {**original, "rate": 1000 - number, "last_active": now}
             for number in range(count)
         }
@@ -786,7 +798,7 @@ class SnapshotSafetyTest(CollectorLoopTest):
         for flow in self.collector.tracker.flows.values():
             flow["rule"] = "huge"
         self.collector.descriptions["huge"] = "x" * 20000
-        self.threat_list([remote for _, remote in self.collector.tracker.flows])
+        self.threat_list([remote for _, remote, _owner in self.collector.tracker.flows])
         with mock.patch.object(COLLECTOR, "SNAPSHOT_BYTES", 30000):
             payload = self.build_snapshot(now)
         coverage = payload["capture"]["flows"]
@@ -834,7 +846,7 @@ class SnapshotSafetyTest(CollectorLoopTest):
         for flow in self.collector.tracker.flows.values():
             flow["rule"] = "huge"
         self.collector.descriptions["huge"] = "x" * 20000
-        self.collector.tracker.flows[("1.2.3.163", "34.1.1.5")]["rule"] = ""
+        self.collector.tracker.flows[("1.2.3.163", "34.1.1.5", self.owner)]["rule"] = ""
         with mock.patch.object(COLLECTOR, "SNAPSHOT_BYTES", 12000):
             payload = self.build_snapshot(now)
         self.assertEqual([flow["dest"] for flow in payload["flows"]], ["34.1.1.5"])

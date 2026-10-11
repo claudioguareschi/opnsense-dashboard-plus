@@ -161,7 +161,7 @@ class CollectorFixture:
         records = self.current_records = self.records()
         now = time.monotonic()
         self.tracker.update(records, local, now, networks, interface_addresses=assigned, primary_wan_device=wan)
-        selected = [(tuple(row[1:3]), row[3]) for row in self.tracker.visible(now)]
+        selected = [((row[1], row[2], row[3]["owner"]), row[3]) for row in self.tracker.visible(now)]
         # like the helper, the threat summary covers only evidence and threat-listed remotes
         sets = (options.get("classification") or (None, []))[1]
         evidence = set(evidence)
@@ -178,9 +178,9 @@ class CollectorFixture:
         self.classify(result, options.get("classification"), options.get("classify", ()))
         # a sample opening a snapshot session lists what it may capture (here every flow, by rate)
         result["snapshot_candidates"] = [
-            {"local": local, "remote": remote, "evidence": 0, "security_class": "S0",
+            {"local": local, "remote": remote, "owner": owner, "evidence": 0, "security_class": "S0",
              "score": max(flow["rate"], 1.0), "order": index, "states": flow["states"]}
-            for index, ((local, remote), flow) in enumerate(self.tracker.flows.items())
+            for index, ((local, remote, owner), flow) in enumerate(self.tracker.flows.items())
         ] if options.get("snapshot") else []
         return result
 
@@ -210,10 +210,11 @@ class CollectorFixture:
 
     def snapshot_selection(self, identities):
         flows = self.snapshot_flows if self.snapshot_flows is not None else self.tracker.flows
-        return aggregate([((local, remote), flows[(local, remote)]) for local, remote, _required in identities])
+        return aggregate([((local, remote, owner), flows[(local, remote, owner)])
+                          for local, remote, owner, _required in identities])
 
     def snapshot_detail(self, identities, byte_limit, state_limit):
-        pairs = {(local, remote) for local, remote, _required in identities}
+        pairs = {(local, remote) for local, remote, _owner, _required in identities}
         rows = {}
         for record in self.current_records:
             pair = PF.flow_endpoints(record, {"1.2.3.163"})

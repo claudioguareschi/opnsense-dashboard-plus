@@ -399,6 +399,7 @@ static struct flow *flow_add(struct aggregate *a, const struct state_view *v,
   memset(&a->groups[*id], 0, sizeof(a->groups[*id]));
   f->local = v->local;
   f->remote = v->remote;
+  f->owner = state_owner(v);
   f->first = seq;
   /* one lookup per flow, never per state */
   f->classes = classifier_lookup(a->classifier, v->remote);
@@ -570,7 +571,7 @@ bool aggregate_add(struct aggregate *a, const struct state *s,
     return false;
   a->mapped++;
   unsigned char key[FM_FLOW_KEY_SIZE];
-  state_flow_key(key, v.local, v.remote);
+  state_flow_key(key, v.local, v.remote, state_owner(&v));
   uint64_t hash = index_hash(key, sizeof(key));
   const struct item *known = map_find_hashed(&a->flows, key, sizeof(key), hash);
   /* the state's local anchor: the inside host when known (an aggregate

@@ -73,6 +73,8 @@ export const state = {
   refresh: null,
   selection: null,
   detailsAddress: null,
+  // which flow at the address: its owner (an inside host), or null for the firewall's own traffic
+  detailsOwner: undefined,
   renderedSelection: null,
   renderedAddress: null,
   investigations: new Map(),

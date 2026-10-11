@@ -23,7 +23,7 @@
  */
 
 /* Persistent sample worker. Each request is an FMCONF2
- * context followed by RUN; each answer is one complete FMAGG4 response, or
+ * context followed by RUN; each answer is one complete FMAGG5 response, or
  * FMFAIL1 followed by exit. History, ranking and event correlation persist
  * across requests; the sample interval is measured here, never supplied. */
 #include "aggregate.h"

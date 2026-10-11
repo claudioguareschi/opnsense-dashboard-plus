@@ -24,7 +24,7 @@
 
 /* libFuzzer target: arbitrary PF states through the whole engine (state
  * normalization, history, aggregation, ranking, threat summary, correlation
- * and the FMAGG4 writer) with a fixed realistic context. Portable: needs no
+ * and the FMAGG5 writer) with a fixed realistic context. Portable: needs no
  * FreeBSD headers. The netlink decoder itself is fuzz_netlink.c (FreeBSD).
  * Input: a sequence of sizeof(struct state) records, each copied into a state
  * (strings forced NUL-terminated, as the decoder guarantees); every 64

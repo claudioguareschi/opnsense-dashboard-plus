@@ -90,7 +90,7 @@ class CollectorEngineSpecificationTest(unittest.TestCase):
     def test_rates_of_a_locally_initiated_flow_are_oriented_by_the_pf_initiator(self):
         _, second, third = self.samples(3)
         flow = second["flows"][0]
-        self.assertEqual(flow["key"], ("8.8.8.1", "9.9.9.9"))
+        self.assertEqual(flow["key"], ("8.8.8.1", "9.9.9.9", "10.0.0.2"))
         # local initiator: the remote's traffic is PF's reverse counter (12 states x 200 bytes / 2 s)
         self.assertEqual((flow["rate_from_remote"], flow["rate_to_remote"]), (600.0, 300.0))
         self.assertEqual(flow["packet_rate"], 6.0)  # 12 states x 2 packets / 2 s, smoothed by half
@@ -130,7 +130,7 @@ class CollectorEngineSpecificationTest(unittest.TestCase):
             sample = self.engine.sample(*CONTEXT, snapshot=True)
             labels = [value for _, kind, _, _, _, value in sample["candidates"] if kind == collector.RULE_LABEL]
             self.assertEqual(labels, [b"caf\xc3"])
-            identities = [(item["local"], item["remote"], False) for item in sample["snapshot_candidates"]]
+            identities = [(item["local"], item["remote"], item["owner"], False) for item in sample["snapshot_candidates"]]
             self.engine.snapshot_selection(identities)
             rows, _ = self.engine.snapshot_detail(identities, collector.SNAPSHOT_BYTES)
         self.assertEqual(rows["9.9.9.9"][0]["rule_label"], "caf\ufffd")

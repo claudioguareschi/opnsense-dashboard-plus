@@ -135,6 +135,8 @@ export function cards(text) {
       const egress = [...new Set(members.map((flow) => flow.egress).filter(Boolean))];
       const flagged = [...new Set(members.flatMap((flow) => flow.lists || []))];
       const sorted = members.slice().sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0));
+      // a LAN host and the firewall can each have a flow to one address: count addresses, not flows
+      const distinct = new Set(members.map((flow) => flow.dest)).size;
       const addresses = sorted.slice(0, 4).map((flow) => {
         const location = locations.get(flow.dest) || {};
         const hostname = hostnames?.[flow.dest];
@@ -148,7 +150,7 @@ export function cards(text) {
         services.join(', ')].filter(Boolean).map((part) => `<span>${escapeHtml(part)}</span>`).join('');
       const tone = outcome({flagged: flagged.length > 0, stopped: false});
       return `<div class="fmt fmt-tone-${tone}">${head(title,
-          members.length > 1 ? escapeHtml(plural(text, 'map_addresses', members.length)) : placeOf(place), outcomePill(tone))}
+          distinct > 1 ? escapeHtml(plural(text, 'map_addresses', distinct)) : placeOf(place), outcomePill(tone))}
         ${lists(flagged)}${addresses.join('')}${more}<div class="fmt-foot">${foot}</div></div>`;
     },
 

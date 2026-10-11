@@ -223,7 +223,7 @@ static bool collect(const struct state *recorded, void *arg, struct fm_error *er
   it->s = s;
   struct state_view v;
   if (!state_normalize(&s, c->run.ctx, &v, error)) return false;
-  if (v.mapped) state_flow_key(it->flow, v.local, v.remote);
+  if (v.mapped) state_flow_key(it->flow, v.local, v.remote, state_owner(&v));
   unsigned char *p = it->signature;
   *p++ = v.pf.proto;
   memcpy(p, v.inside.a.b, 16); p += 16;

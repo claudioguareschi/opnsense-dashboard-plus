@@ -19,7 +19,7 @@
 # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 
-"""FMAGG4/FMFAIL1 decoder contract tests with hand-built responses (collector/protocol.c layouts)."""
+"""FMAGG5/FMFAIL1 decoder contract tests with hand-built responses (collector/protocol.c layouts)."""
 
 import os
 import struct
@@ -45,8 +45,11 @@ def header(threats=False, version=collector.PROTOCOL_VERSION):
     return b"\x00" + struct.pack("!II", version, int(threats))
 
 
-def flow(rank=0, local="192.168.1.2", remote="203.0.113.3", rate=4.0, classes=0, presence=1, attempts=0):
+def flow(rank=0, local="192.168.1.2", remote="203.0.113.3", rate=4.0, classes=0, presence=1, attempts=0,
+         owner=None):
+    # owner: the flow's inside host, or the zero address for the firewall's own traffic
     return b"".join((b"\x01", struct.pack("!I", rank), address(local), address(remote),
+                     address(owner) if owner else bytes(17),
                      struct.pack("!QQQIIQQQQQQQ", 1, 400, 200, 20, 2, 1, 0, 9, 40, 20, 2, classes),
                      struct.pack("!BBIIB", 0, 0, 0, 0, 0),
                      struct.pack("!ddddd", rate, 2.0, 0.2, 0.5, 3.0),
@@ -93,7 +96,7 @@ def telemetry(interval=2.0, quality=(0,) * 26, lifetime=(0,) * 11):
     return b"\x06" + struct.pack("!IQddddd" + "Q" * 53, *values)
 
 
-def response(records, outcome=(0, 0, 0, 0), counts=None, corrupt=0, magic=b"FMAGG4\0\0", footer=True):
+def response(records, outcome=(0, 0, 0, 0), counts=None, corrupt=0, magic=b"FMAGG5\0\0", footer=True):
     body, checksum = b"", 0
     for record in records:
         encoded = frame(record)
@@ -144,10 +147,17 @@ class CollectorProtocolTest(unittest.TestCase):
         with self.assertRaises(collector.CollectorError):
             self.decode(response([header(True), flow(presence=4), telemetry()]))
 
+    def test_a_flow_owner_is_part_of_its_key(self):
+        for owner in ("10.0.0.2", None):
+            records = [header(True), flow(local="198.51.100.2", owner=owner), *VALID[2:]]
+            result = self.decode(response(records), require_threat_summary=True)
+            self.assertEqual(result["flows"][0]["key"], ("198.51.100.2", "203.0.113.3", owner))
+
     def test_decodes_every_record_kind(self):
         result = self.decode(response(VALID), require_threat_summary=True)
         flow_row = result["flows"][0]
-        self.assertEqual(flow_row["key"], ("192.168.1.2", "203.0.113.3"))
+        # the zero owner is the firewall's own traffic
+        self.assertEqual(flow_row["key"], ("192.168.1.2", "203.0.113.3", None))
         self.assertEqual((flow_row["rate_from_remote"], flow_row["bytes_from_remote"]), (4.0, 400))
         self.assertEqual((flow_row["presence"], flow_row["attempts"]), ("traffic", 0))
         self.assertEqual(result["candidates"], [(0, 1, 5, 1, 0, b"\x06")])
@@ -195,7 +205,7 @@ class CollectorProtocolTest(unittest.TestCase):
             "unknown record": response([header(), b"\x09" + b"x", telemetry()]),
             "nan rate": response([header(), flow(rate=float("nan")), telemetry()]),
             "empty frame": response([header(), b"", telemetry()]),
-            "oversized frame": b"FMAGG4\0\0" + struct.pack("!I", collector.MAX_FRAME + 1),
+            "oversized frame": b"FMAGG5\0\0" + struct.pack("!I", collector.MAX_FRAME + 1),
         }
         for name, data in cases.items():
             with self.subTest(case=name), self.assertRaises(collector.CollectorError):

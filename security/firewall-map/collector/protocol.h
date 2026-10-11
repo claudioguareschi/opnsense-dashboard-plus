@@ -34,7 +34,7 @@
  * lib/collector.py decodes): length-prefixed frames, fixed-size records. No
  * C structure is serialized.
  * The collector speaks exactly one protocol: it is announced in the banner and
- * carried by every response header (FMAGG4, FMSTATE2). */
+ * carried by every response header (FMAGG5, FMSTATE2). */
 #define FM_PROTOCOL_VERSION 1
 #define FM_FRAME_MAX 4096
 enum record_kind {
@@ -121,17 +121,17 @@ struct ranked_output {
   const struct ranking *ranking; /* the candidates' rates */
   const struct ranker *ranker;   /* the candidates' effective scores */
 };
-/* FMAGG4 sample response. */
+/* FMAGG5 sample response. */
 /* Fills the telemetry's omission counters before writing it. */
 bool protocol_write_ranked(FILE *, const struct aggregate *, const struct ranked_output *,
                            const struct threat_summary *, const struct event_match *, size_t,
                            const struct class_report *, size_t candidates_per_kind,
                            struct telemetry *, struct fm_error *);
-/* FMAGG4 response for a snapshot selection (explicit flows, no threats). */
+/* FMAGG5 response for a snapshot selection (explicit flows, no threats). */
 bool protocol_write_selected(FILE *, const struct aggregate *,
                              const struct ranked_flow *, size_t,
                              const struct telemetry *, struct fm_error *);
-/* FMAGG4 refusal: header, telemetry and footer only. */
+/* FMAGG5 refusal: header, telemetry and footer only. */
 bool protocol_write_refusal(FILE *, struct sample_outcome, uint64_t states_seen,
                             const struct telemetry *, struct fm_error *);
 /* FMFAIL1: best effort; the helper exits afterwards. */

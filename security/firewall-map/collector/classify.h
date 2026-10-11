@@ -46,7 +46,7 @@ struct class_entry {
   unsigned char prefix;
   bool negated;
 };
-/* Per-set load status (FMAGG4 class-set record). */
+/* Per-set load status (FMAGG5 class-set record). */
 enum class_status {
   CLASS_OK = 0,
   CLASS_MISSING = 1,   /* no such PF table (alias absent or not loaded) */

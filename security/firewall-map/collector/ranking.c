@@ -128,7 +128,7 @@ bool ranking_update(struct ranking *r, const struct aggregate *aggregate,
   for (size_t n = 0; n < total; n++) {
     const struct flow *flow = aggregate_flow(aggregate, n);
     unsigned char key[FM_FLOW_KEY_SIZE];
-    state_flow_key(key, flow->local, flow->remote);
+    state_flow_key(key, flow->local, flow->remote, flow->owner);
     struct item *item = map_insert(&current->keys, key, sizeof(key), error);
     if (!item)
       return false;

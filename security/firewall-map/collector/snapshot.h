@@ -48,7 +48,7 @@ struct ranker;
 #define SNAPSHOT_INCIDENT_FLOOR 20
 struct snapshot;
 struct snapshot_flow {
-  struct addr local, remote;
+  struct addr local, remote, owner; /* owner: the zero address for the firewall's own flow */
   bool incident;
   uint64_t sample_states; /* matching states in the sample: the quota demand */
 };

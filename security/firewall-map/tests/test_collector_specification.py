@@ -92,7 +92,7 @@ class SpecificationTest(unittest.TestCase):
                                        2: [state(1, "out", OUTBOUND_NAT, (1400, 9000, 14, 90))]},
                                       event_queries=[query])
         (flow,) = second["flows"]
-        self.assertEqual(flow["key"], (WAN, "1.1.1.1"))
+        self.assertEqual(flow["key"], (WAN, "1.1.1.1", "10.0.0.2"))
         # the remote's traffic is PF's reverse counter: (9000 - 5000) / 2 s, smoothed by half
         self.assertEqual((flow["rate_from_remote"], flow["rate_to_remote"]), (1000.0, 100.0))
         self.assertEqual((flow["bytes_from_remote"], flow["bytes_to_remote"]), (9000, 1400))
@@ -109,7 +109,7 @@ class SpecificationTest(unittest.TestCase):
                                        2: [state(1, "in", PORT_FORWARD, (6000, 300, 60, 3))]},
                                       event_queries=[query])
         (flow,) = second["flows"]
-        self.assertEqual(flow["key"], (WAN, "8.8.4.4"))
+        self.assertEqual(flow["key"], (WAN, "8.8.4.4", "10.0.0.5"))
         # the remote initiated: its traffic is PF's forward counter
         self.assertEqual((flow["rate_from_remote"], flow["rate_to_remote"]), (1000.0, 50.0))
         self.assertGreater(flow["remote_initiated_weight"], 0)
@@ -124,7 +124,7 @@ class SpecificationTest(unittest.TestCase):
         _, second = self.run_scenario({1: [state(1, "out", keys, (100, 100, 1, 1))],
                                        2: [state(1, "out", keys, (300, 500, 3, 5))]}, context)
         (flow,) = second["flows"]
-        self.assertEqual(flow["key"], ("192.168.1.2", "1.1.1.1"))
+        self.assertEqual(flow["key"], ("192.168.1.2", "1.1.1.1", "10.0.0.2"))
 
     def test_routed_public_ipv6_inside_host(self):
         context = {"local": {"2001:470:0:1::2"},
@@ -138,7 +138,7 @@ class SpecificationTest(unittest.TestCase):
         (flow,) = second["flows"]
         # no translation: the map anchors the flow at the firewall's own address on the egress
         # interface, and the routed host is its inside endpoint
-        self.assertEqual(flow["key"], ("2001:470:0:1::2", "2606:4700::1111"))
+        self.assertEqual(flow["key"], ("2001:470:0:1::2", "2606:4700::1111", "2001:470:1:2::10"))
         inside = ipaddress.ip_address("2001:470:1:2::10").packed
         self.assertEqual(self.candidates(second, collector.INSIDE_HOST), [bytes([6]) + inside])
         self.assertEqual((flow["rate_from_remote"], flow["rate_to_remote"]), (200.0, 50.0))
@@ -149,7 +149,7 @@ class SpecificationTest(unittest.TestCase):
         _, second = self.run_scenario({1: [state(1, "out", keys, (84, 84, 1, 1), protocols=(1, 1))],
                                        2: [state(1, "out", keys, (168, 168, 2, 2), protocols=(1, 1))]},
                                       event_queries=[query])
-        self.assertEqual(second["flows"][0]["key"], (WAN, "1.0.0.1"))
+        self.assertEqual(second["flows"][0]["key"], (WAN, "1.0.0.1", "10.0.0.2"))
         self.assertEqual(self.candidates(second, collector.PROTOCOL), [b"\x01"])
         match = second["matches"][query]
         self.assertEqual((match["inside"], match["inside_port"]), ("10.0.0.2", 4321))
@@ -206,7 +206,7 @@ class SpecificationTest(unittest.TestCase):
         keys = ("8.8.4.4:55000", "45.33.32.100:443", "8.8.4.4:55000", "10.0.0.5:8443")
         _, second = self.run_scenario({1: [state(1, "in", keys, (1000, 1000, 4, 4))],
                                        2: [state(1, "in", keys, (5000, 1000, 8, 4))]}, context)
-        self.assertEqual(second["flows"][0]["key"], ("45.33.32.100", "8.8.4.4"))
+        self.assertEqual(second["flows"][0]["key"], ("45.33.32.100", "8.8.4.4", "10.0.0.5"))
 
     def test_firewall_local_traffic_is_mapped_and_lan_internal_is_not(self):
         local = ("9.9.9.9:53", f"{WAN}:12345", "9.9.9.9:53", f"{WAN}:12345")
@@ -217,7 +217,7 @@ class SpecificationTest(unittest.TestCase):
                                        2: [state(1, "out", local, (50, 90, 1, 1), protocols=(17, 17)),
                                            state(2, "in", internal, (90, 90, 1, 1), interface="lan0",
                                                  original="lan0")]})
-        self.assertEqual([flow["key"] for flow in second["flows"]], [(WAN, "9.9.9.9")])
+        self.assertEqual([flow["key"] for flow in second["flows"]], [(WAN, "9.9.9.9", None)])
         self.assertEqual(self.candidates(second, collector.INSIDE_HOST), [])
         self.assertEqual((second["counts"]["states"], second["counts"]["retained"]), (2, 1))
 

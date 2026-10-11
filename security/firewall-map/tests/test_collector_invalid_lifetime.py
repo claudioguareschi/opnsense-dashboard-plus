@@ -147,7 +147,7 @@ class InvalidLifetimeTest(unittest.TestCase):
             warm = engine.sample(*args, snapshot=True)
             remotes = {item["remote"] for item in warm["snapshot_candidates"]}
             self.assertNotIn("2.2.2.2", remotes)
-            identities = [(item["local"], item["remote"], False) for item in warm["snapshot_candidates"]]
+            identities = [(item["local"], item["remote"], item["owner"], False) for item in warm["snapshot_candidates"]]
             engine.snapshot_selection(identities)
             rows, coverage = engine.snapshot_detail(identities, collector.SNAPSHOT_BYTES, 5000)
         self.assertEqual(len(rows["3.3.3.3"]), 1)  # the mixed flow's valid state only

@@ -57,3 +57,14 @@ test('sentences are whole phrases: rule, interface, services and targets', () =>
   const local = {initiated: 'local', inside: [{ip: '192.168.1.20'}], services: ['HTTPS', 'HTTP'], service_ports: {HTTPS: '443/tcp'}};
   assert.deepEqual(flowSummary(local, {ip: '203.0.113.5'}), ['192.168.1.20 opened HTTPS (443/tcp) and 1 other service to 203.0.113.5.']);
 });
+
+test('the firewall\'s own flow and a LAN host\'s flow to the same address are told apart', () => {
+  // the collector keeps them as two flows (owner null and owner 192.168.90.120): the tunnel is
+  // the firewall's, the HTTPS the host's
+  const tunnel = {initiated: 'local', owner: null, inside: [], services: ['ESP', 'IKE'], service_ports: {IKE: '500/udp'}};
+  const host = {initiated: 'local', owner: '192.168.90.120', inside: [{ip: '192.168.90.120', name: 'phone'}],
+    services: ['HTTPS'], service_ports: {HTTPS: '443/tcp'}};
+  const remote = {ip: '198.51.100.163'};
+  assert.match(flowSummary(tunnel, remote)[0], /^This firewall opened ESP and 1 other service to 198\.51\.100\.163/);
+  assert.match(flowSummary(host, remote)[0], /^phone \(192\.168\.90\.120\) opened HTTPS \(443\/tcp\) to 198\.51\.100\.163/);
+});

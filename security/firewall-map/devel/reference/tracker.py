@@ -70,7 +70,7 @@ class FlowTracker(production.FlowTracker):
 
     def _totals(self, records, local_addresses, elapsed, networks=None, sample=None,
                 interface_addresses=None, primary_wan_device=None):
-        """{(local, remote): totals} for this sample, and the counters to diff the next one against.
+        """{(local, remote, owner): totals} for this sample, and the counters to diff the next one against.
 
         sample: StateFacts.view() of these records, when the caller already has it. This runs for
         every state of every sample, so each state is folded into its flow's totals in place.
@@ -81,10 +81,11 @@ class FlowTracker(production.FlowTracker):
         views, lan_rules = sample if sample is not None else StateFacts().view(
             records, local_addresses, networks, interface_addresses, primary_wan_device)
         for record, facts in views:
-            pair = facts.pair
             state_id = record.id
-            if pair is None or state_id is None:
+            if facts.pair is None or state_id is None:
                 continue
+            # the flow's owner: its inside host, or None for the firewall's own traffic
+            pair = (*facts.pair, facts.inside.address if facts.inside else None)
             if facts.src_is_remote:
                 toward, away = record.bytes_in, record.bytes_out
             else:
@@ -188,6 +189,7 @@ class FlowTracker(production.FlowTracker):
         for pair, total in totals.items():
             flow = self.flows.setdefault(pair, _Flow(now))
             self._update_flow(flow, total, elapsed, now)
+            flow["owner"] = pair[2]
 
     def activity(self, flow, now):
         last_active = flow.last_active if isinstance(flow, _Flow) else flow["last_active"]
@@ -198,7 +200,7 @@ class FlowTracker(production.FlowTracker):
     def visible(self, now, limit=MAX_FLOWS):
         """Active or fading flows, strongest first, capped before they reach the browser (None: all)."""
         ranked = []
-        for (local, remote), flow in self.flows.items():
+        for (local, remote, _owner), flow in self.flows.items():
             activity = self.activity(flow, now)
             if activity > 0:
                 rate = flow.rate if isinstance(flow, _Flow) else flow["rate"]

@@ -28,11 +28,17 @@
 #include <string.h>
 
 void state_flow_key(unsigned char key[FM_FLOW_KEY_SIZE], struct addr local,
-                    struct addr remote) {
+                    struct addr remote, struct addr owner) {
   key[0] = local.af;
   memcpy(key + 1, local.b, 16);
   key[17] = remote.af;
   memcpy(key + 18, remote.b, 16);
+  key[34] = owner.af;
+  memcpy(key + 35, owner.b, 16);
+}
+struct addr state_owner(const struct state_view *v) {
+  struct addr none = {0};
+  return v->has_inside ? v->inside.a : none;
 }
 static bool is_public(const struct context *ctx, struct addr a) {
   return address_flags(ctx, a) & FM_PUBLIC;

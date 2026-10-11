@@ -164,12 +164,13 @@ class _Flow(_Record):
     """Persistent flow history and current metadata; the public payload is built separately."""
     __slots__ = ("rate", "rate_in", "rate_out", "packet_rate", "last_active", "first_seen", "states",
                  "protocols", "services", "service_ports", "age", "transferred", "rule", "inside", "egress",
-                 "initiated", "targets", "presence", "attempts")
+                 "initiated", "targets", "presence", "attempts", "owner")
 
     def __init__(self, first_seen):
         self.rate = self.rate_in = self.rate_out = self.packet_rate = 0.0
         self.last_active = None
         self.presence, self.attempts = "traffic", 0
+        self.owner = None
         self.first_seen = first_seen
         # Remaining presentation fields are filled by update_aggregate().
 
@@ -291,6 +292,8 @@ class FlowTracker:
             flow.initiated = "remote" if share >= 0.75 else "local" if share <= 0.25 else "both"
             flow.targets = _ranked(total.targets, MAX_INSIDE)
             flow.last_active = now - (1.0 - row["activity"]) * self.fade_seconds
+            # the flow's owner: its inside host, or None for the firewall's own traffic
+            flow.owner = pair[2]
             current_flows[pair] = flow
             visible.append((row["score"], pair[0], pair[1], flow, row["activity"]))
         self.flows = current_flows
@@ -316,6 +319,8 @@ def _flow_entry(local, remote, flow, activity, local_addresses, context, wall_ti
         "protocols": flow["protocols"],
         "services": flow.get("services", []),
         "inside": [describe_inside(address, names, networks, interfaces) for address in flow.get("inside", [])],
+        # the inside host the flow belongs to, or None for the firewall's own traffic
+        "owner": flow.get("owner"),
         "egress": interfaces.get(flow.get("egress"), flow.get("egress")),
         **threat_fields(remote, context.get("blocklists"), context.get("reputation")),
         "ids": alerts.summary(remote, wall_time) if alerts is not None else None,
@@ -1068,9 +1073,9 @@ class Collector:
             coverage["available"] += 1
             coverage["required"] += int(incident)
             if len(identities) < SNAPSHOT_FLOWS:
-                identities.append((incident, item["local"], item["remote"]))
+                identities.append((incident, item["local"], item["remote"], item["owner"]))
         aggregate = self.collector_engine.snapshot_selection(
-            [(local, remote, incident) for incident, local, remote in identities])
+            [(local, remote, owner, incident) for incident, local, remote, owner in identities])
         tracker = FlowTracker()
         tracker.update_aggregate(aggregate, now)
         selected = [(identity[0], *row) for identity, row in zip(identities, tracker.collector_visible)]
@@ -1090,7 +1095,7 @@ class Collector:
         budget = DocumentBudget(payload, SNAPSHOT_BYTES)
         locations = {location["id"]: location for location in locations}
         kept_locations = {location["id"] for location in payload["locations"]}
-        required_pairs = {(item[2], item[3]) for item in selected if item[0]}
+        required_pairs = {(item[2], item[3], item[4].owner) for item in selected if item[0]}
         for flow in flows:
             places = [locations[address] for address in dict.fromkeys((flow["origin"], flow["dest"]))
                       if address in locations and address not in kept_locations]
@@ -1100,7 +1105,7 @@ class Collector:
             # The wrapper overhead is conservative; no full document is encoded to test a fit.
             if not budget.take({"flow": flow, "locations": places, "hostnames": hostnames}):
                 coverage["omitted_bytes"] += 1
-                if (flow["origin"], flow["dest"]) in required_pairs:
+                if (flow["origin"], flow["dest"], flow["owner"]) in required_pairs:
                     coverage["omitted_required"] += 1
                 continue
             payload["flows"].append(flow)
@@ -1111,7 +1116,8 @@ class Collector:
         coverage["captured"] = len(payload["flows"])
         # required flows beyond the flow ceiling were never selected
         coverage["omitted_required"] += coverage["required"] - len(required_pairs)
-        identities = [(flow["origin"], flow["dest"], (flow["origin"], flow["dest"]) in required_pairs)
+        identities = [(flow["origin"], flow["dest"], flow["owner"],
+                       (flow["origin"], flow["dest"], flow["owner"]) in required_pairs)
                       for flow in payload["flows"]]
         payload["states"], states = self.collector_engine.snapshot_detail(
             identities, max(0, budget.remaining), SNAPSHOT_STATES)

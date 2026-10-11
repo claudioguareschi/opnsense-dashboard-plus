@@ -505,7 +505,7 @@ static bool select_scored(struct ranker *p, const struct aggregate *a, const str
     p->scores[f] = score;
     if (!(score > 0)) continue;
     unsigned char key[FM_FLOW_KEY_SIZE];
-    state_flow_key(key, flow->local, flow->remote);
+    state_flow_key(key, flow->local, flow->remote, flow->owner);
     if (map_find(&p->previous, key, sizeof(key))) score *= PROFILE_INCUMBENCY;
     struct candidate_row row = {(uint32_t)f, score, rates.order};
     /* a flow counts for its own (highest) class only, and competes for the
@@ -544,7 +544,7 @@ static bool select_scored(struct ranker *p, const struct aggregate *a, const str
   for (size_t k = 0; k < count; k++) {
     const struct flow *flow = aggregate_flow(a, p->selection[k].flow);
     unsigned char key[FM_FLOW_KEY_SIZE];
-    state_flow_key(key, flow->local, flow->remote);
+    state_flow_key(key, flow->local, flow->remote, flow->owner);
     if (!map_insert(&p->previous, key, sizeof(key), error)) return false;
   }
   return true;

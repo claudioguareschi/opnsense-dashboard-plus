@@ -32,7 +32,7 @@
 #include "index.h"
 struct aggregate;
 /* Attribution evidence kept per flow, deduplicated by (flow, kind, value) and
- * weighted by traffic. The numbers are part of the FMAGG4 wire format. */
+ * weighted by traffic. The numbers are part of the FMAGG5 wire format. */
 enum candidate_kind {
   CANDIDATE_PROTOCOL = 1,         /* value: protocol number (1 byte) */
   CANDIDATE_INSIDE_HOST = 2,      /* value: address (17 bytes) */
@@ -47,7 +47,9 @@ enum candidate_kind {
  * largest number sent (BUDGET_CANDIDATES_MAX is 64, the default 16). */
 #define CANDIDATE_SLOTS 32
 struct flow {
-  struct addr local, remote;
+  /* owner: the inside host behind the flow, or the zero address for the
+   * firewall's own traffic (part of the flow identity, state_flow_key) */
+  struct addr local, remote, owner;
   uint64_t states, bytes_from_remote, bytes_to_remote, remote_initiated_weight,
       local_initiated_weight, remote_initiated_states, local_initiated_states,
       first;

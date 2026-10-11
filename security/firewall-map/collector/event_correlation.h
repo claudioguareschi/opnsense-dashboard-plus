@@ -33,7 +33,7 @@
 struct event_history;
 struct event_sample;
 struct event_query { uint16_t id; struct outside_key key; };
-/* Wire values of event_match.kind (FMAGG4). */
+/* Wire values of event_match.kind (FMAGG5). */
 enum event_match_kind {
   EVENT_MATCH_CURRENT = 1, /* a PF state in this sample */
   EVENT_MATCH_RECENT = 2,  /* seen within the last 10 minutes, gone now */

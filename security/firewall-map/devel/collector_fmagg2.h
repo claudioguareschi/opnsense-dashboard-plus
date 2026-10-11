@@ -26,7 +26,7 @@
 
 /* Devel-only FMAGG2 aggregate dump (every flow, candidate and correlation)
  * for devel/collector_sample.c and the equivalence tools; never part of the
- * installed collector, whose protocol is FMAGG4 (collector/protocol.h). */
+ * installed collector, whose protocol is FMAGG5 (collector/protocol.h). */
 #ifndef FM_DEVEL_FMAGG2_H
 #define FM_DEVEL_FMAGG2_H
 #include "../collector/correlation.h"

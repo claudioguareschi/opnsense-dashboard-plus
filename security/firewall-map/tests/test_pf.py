@@ -37,6 +37,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from support import REFERENCE, REFERENCE_THREATS, BLOCKLISTS, CACHE, COMMON, LEASES, PF, NAT_OUT, nat_state  # noqa: E402
 
 
+def only_flow(tracker, pair):
+    """The one flow between a local and a remote address (flows are keyed with their owner too)."""
+    (flow,) = [flow for key, flow in tracker.flows.items() if key[:2] == tuple(pair)]
+    return flow
+
+
 class ParseTest(unittest.TestCase):
     def test_parses_verbose_state_record(self):
         records = PF.parse_states(nat_state(368, 5072))
@@ -307,7 +313,7 @@ vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
         tracker = REFERENCE.FlowTracker(smoothing=1.0)
         records = PF.parse_states(self.NAT_OUT)
         tracker.update(records, {"1.2.3.163"}, now=0.0)
-        flow = tracker.flows[("1.2.3.163", "34.209.15.107")]
+        flow = only_flow(tracker, ("1.2.3.163", "34.209.15.107"))
         self.assertEqual(flow["inside"], ["192.168.30.30"])
         self.assertEqual(flow["egress"], "igb1")
 
@@ -327,7 +333,7 @@ vlan03: flags=1008843<UP,BROADCAST,RUNNING> metric 0 mtu 1500
 
         tracker = REFERENCE.FlowTracker(smoothing=1.0)
         tracker.update([record], local, now=0.0, networks=networks)
-        flow = tracker.flows[pair]
+        flow = only_flow(tracker, pair)
         self.assertEqual((flow["inside"], flow["initiated"]), (["2606:4700:4701::20"], "local"))
 
         seen = REFERENCE_THREATS.observe([record], lambda address: ["IPv6 test"] if address == pair[1] else [],
@@ -378,7 +384,7 @@ class InitiatorTest(unittest.TestCase):
         tracker = REFERENCE.FlowTracker(smoothing=1.0)
         tracker.update([], {"1.2.3.163"}, now=0.0)
         tracker.update(PF.parse_states(self.INBOUND), {"1.2.3.163"}, now=2.0)
-        flow = tracker.flows[("1.2.3.163", "94.154.43.203")]
+        flow = only_flow(tracker, ("1.2.3.163", "94.154.43.203"))
         self.assertEqual(flow["initiated"], "remote")
         self.assertEqual(flow["targets"], ["tcp|192.168.1.2|443"])
         self.assertEqual((flow["service_ports"], flow["age"]), ({"HTTPS": "443/tcp"}, 1))
@@ -398,7 +404,7 @@ class InitiatorTest(unittest.TestCase):
         tracker = REFERENCE.FlowTracker(smoothing=1.0)
         tracker.update([], set(), now=0.0, interface_addresses=topology, primary_wan_device="igb1")
         tracker.update([record], set(), now=2.0, interface_addresses=topology, primary_wan_device="igb1")
-        flow = tracker.flows[pair]
+        flow = only_flow(tracker, pair)
         self.assertEqual((flow["initiated"], flow["targets"]), ("remote", ["tcp|192.168.1.2|443"]))
 
     def test_inbound_udp_to_the_firewall_keeps_its_protocol(self):
@@ -407,7 +413,7 @@ class InitiatorTest(unittest.TestCase):
         tracker = REFERENCE.FlowTracker(smoothing=1.0)
         tracker.update([], {"1.2.3.163"}, now=0.0)
         tracker.update(PF.parse_states(states), {"1.2.3.163"}, now=2.0)
-        flow = tracker.flows[("1.2.3.163", "94.154.43.203")]
+        flow = only_flow(tracker, ("1.2.3.163", "94.154.43.203"))
         self.assertEqual(flow["targets"], ["udp|1.2.3.163|51820"])
         target = LEASES.describe_target(flow["targets"][0], {}, [], {}, {"1.2.3.163"})
         self.assertEqual((target["name"], target["service"]), ("firewall", "WireGuard"))
@@ -415,7 +421,7 @@ class InitiatorTest(unittest.TestCase):
     def test_outbound_flows_are_local(self):
         tracker = REFERENCE.FlowTracker(smoothing=1.0)
         tracker.update(PF.parse_states(NAT_OUT), {"1.2.3.163"}, now=0.0)
-        self.assertEqual(tracker.flows[("1.2.3.163", "34.209.15.107")]["initiated"], "local")
+        self.assertEqual(only_flow(tracker, ("1.2.3.163", "34.209.15.107"))["initiated"], "local")
 
     def test_reputation_from_cached_lookups(self):
         with tempfile.TemporaryDirectory() as directory:

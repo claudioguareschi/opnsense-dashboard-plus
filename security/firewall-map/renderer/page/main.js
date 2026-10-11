@@ -329,6 +329,10 @@ function bindDetails() {
     state.detailsAddress = address($element);
     renderDetails();
   });
+  on('.fwmap-pick-owner', ($element) => {
+    state.detailsOwner = String($element.attr('data-owner') || '') || null;
+    renderDetails();
+  });
 }
 
 function bindControls() {

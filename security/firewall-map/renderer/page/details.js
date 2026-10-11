@@ -247,8 +247,10 @@ function alertModel(alert, context) {
 }
 
 /** Everything the panel shows for one remote address of the selection. */
-function detailsModel(selection, address) {
-  const flow = selection.kind === 'flow' ? (selection.members || []).find((member) => member.dest === address) : null;
+function detailsModel(selection, address, owner) {
+  // a LAN host and the firewall itself can both talk to one address: one flow each (owner)
+  const flow = selection.kind === 'flow' ? (selection.members || []).find((member) => member.dest === address
+    && (owner === undefined || (member.owner ?? null) === owner)) : null;
   const block = selection.kind === 'blocked' ? selection.block : null;
   const alert = selection.kind === 'alert' ? selection.alert : null;
   const ids = selection.kind === 'idsflow' ? selection.idsFlow : null;
@@ -325,7 +327,21 @@ export function renderDetails() {
     state.detailsAddress = addresses[0];
   }
   const address = state.detailsAddress;
-  const model = detailsModel(selection, address);
+  const here = selection.kind === 'flow' ? (selection.members || []).filter((member) => member.dest === address) : [];
+  const owners = here.map((member) => member.owner ?? null);
+  if (!owners.includes(state.detailsOwner)) {
+    state.detailsOwner = owners.length ? owners[0] : undefined;
+  }
+  const model = detailsModel(selection, address, state.detailsOwner);
+  // several flows to this address: who each belongs to, the inside host or this firewall
+  const ownerPicker = here.length > 1 ? `<div class="fwmap-picker"><span class="text-muted">${escapeHtml(here.length)} ${escapeHtml(T.connections_here)}</span>`
+    + here.map((member) => {
+      const owner = member.owner ?? null;
+      const label = owner ? (member.inside?.[0]?.name || owner) : T.this_firewall_title;
+      const active = owner === state.detailsOwner;
+      return `<a href="#" class="fwmap-pick-owner${active ? ' active' : ''}" data-owner="${escapeHtml(owner || '')}"`
+        + `${active ? ' aria-current="true"' : ''}>${escapeHtml(label)}</a>`;
+    }).join('') + '</div>' : '';
   const picker = addresses.length > 1 ? `<div class="fwmap-picker"><span class="text-muted">${escapeHtml(addresses.length)} ${escapeHtml(T.remote_addresses_here)}</span>`
     + addresses.slice(0, 12).map((entry) => `<a href="#" class="fwmap-pick${entry === address ? ' active' : ''}" data-address="${escapeHtml(entry)}"`
       + `${entry === address ? ' aria-current="true"' : ''}>${escapeHtml(entry)}</a>`).join('')
@@ -351,6 +367,7 @@ export function renderDetails() {
       </div>
       ${state.mode === 'snapshot' ? `<div class="alert alert-warning fwmap-snap-notice">${ic('camera')} ${escapeHtml(fill(T.as_captured_at, {time: capturedTime()}))} · ${escapeHtml(T.may_have_closed)}</div>` : ''}
       ${picker}
+      ${ownerPicker}
       ${diagramHtml(model.diagram)}
       <div class="fwmap-cards">
         ${card('chart-column', T.sec_connection, model.connection, state.can.states ? {cls: 'fwmap-states', address, title: T.show_states} : null)}

@@ -202,6 +202,7 @@
         other_services: {{ lang._('Other services')|json_encode }},
         port_forward: {{ lang._('Port forward')|json_encode }},
         remote_addresses_here: {{ lang._('addresses here:')|json_encode }},
+        connections_here: {{ lang._('connections to this address:')|json_encode }},
         remote_side: {{ lang._('Remote side')|json_encode }},
         sec_ids_long: {{ lang._('IDS (Suricata)')|json_encode }},
         started: {{ lang._('Started')|json_encode }},

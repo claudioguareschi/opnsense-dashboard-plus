@@ -116,12 +116,12 @@ bool protocol_frame(FILE *f, const void *data, size_t len, uint32_t *checksum,
   return true;
 }
 
-/* Sizes of the fixed FMAGG4 records (kind byte included). */
+/* Sizes of the fixed FMAGG5 records (kind byte included). */
 #define HEADER_RECORD_SIZE 9
-#define FLOW_RECORD_SIZE 183
+#define FLOW_RECORD_SIZE 200
 #define EVENT_RECORD_SIZE 194
 #define TELEMETRY_RECORD_SIZE 477
-#define SNAPSHOT_CANDIDATE_RECORD_SIZE 61
+#define SNAPSHOT_CANDIDATE_RECORD_SIZE 78
 #define FOOTER_RECORD_SIZE 125
 #define CLASSIFIED_RECORD_SIZE 36
 #define CLASS_SET_RECORD_SIZE 12
@@ -148,8 +148,8 @@ struct sent {
 
 static bool write_header(FILE *f, bool threats, uint32_t *checksum,
                          struct fm_error *error) {
-  if (fwrite("FMAGG4\0\0", 1, 8, f) != 8)
-    return fm_error_set(error, errno ? errno : EIO, "FMAGG4 header");
+  if (fwrite("FMAGG5\0\0", 1, 8, f) != 8)
+    return fm_error_set(error, errno ? errno : EIO, "FMAGG5 header");
   unsigned char b[HEADER_RECORD_SIZE + RECORD_SLACK], *p = b;
   *p++ = RECORD_HEADER;
   protocol_put(&p, FM_PROTOCOL_VERSION, 4);
@@ -164,6 +164,7 @@ static bool write_flow(FILE *f, size_t rank, const struct flow *flow,
   protocol_put(&p, rank, 4);
   protocol_address_put(&p, flow->local);
   protocol_address_put(&p, flow->remote);
+  protocol_address_put(&p, flow->owner);
   protocol_put(&p, flow->states, 8);
   protocol_put(&p, flow->bytes_from_remote, 8);
   protocol_put(&p, flow->bytes_to_remote, 8);
@@ -330,7 +331,7 @@ static bool write_footer(FILE *f, struct sample_outcome outcome,
   protocol_put(&p, sent->snapshot_candidates, 8);
   protocol_put(&p, checksum, 4);
   return record_frame(f, b, p, FOOTER_RECORD_SIZE, NULL, error) &&
-         (fflush(f) == 0 || fm_error_set(error, errno, "FMAGG4 flush"));
+         (fflush(f) == 0 || fm_error_set(error, errno, "FMAGG5 flush"));
 }
 
 /* A candidate of a sent flow, while choosing which ones fit the budget. */
@@ -565,6 +566,7 @@ bool protocol_write_ranked(FILE *f, const struct aggregate *a,
     *p++ = RECORD_SNAPSHOT_CANDIDATE;
     protocol_address_put(&p, flow->local);
     protocol_address_put(&p, flow->remote);
+    protocol_address_put(&p, flow->owner);
     *p++ = flow->evidence.mask;
     *p++ = (unsigned char)security_class(&flow->evidence);
     put_double(&p, ranker_score(ranked->ranker, ranked->snapshot[n]));

@@ -103,9 +103,15 @@ bool endpoint_equal(struct endpoint, struct endpoint);
 bool state_is_icmp(unsigned);
 #define FM_TUPLE_SIZE 39
 size_t state_tuple(unsigned char *, unsigned, struct endpoint, struct endpoint);
-/* Shared logical aggregate identity; never includes a discovered map anchor. */
-#define FM_FLOW_KEY_SIZE 34
-void state_flow_key(unsigned char[FM_FLOW_KEY_SIZE], struct addr, struct addr);
+/* Shared logical aggregate identity: local, remote and the flow's owner (the
+ * inside host behind it, or the zero address for the firewall's own traffic),
+ * so a LAN host's NAT state and the firewall's own state to the same remote
+ * stay separate flows. Never includes a discovered map anchor. */
+#define FM_FLOW_KEY_SIZE 51
+void state_flow_key(unsigned char[FM_FLOW_KEY_SIZE], struct addr local, struct addr remote,
+                    struct addr owner);
+/* The owner of a state's flow: its inside host, or the zero address. */
+struct addr state_owner(const struct state_view *);
 /* Oriented counters of one state: remote_initiated selects which PF counter
  * index carries the remote's traffic. */
 uint64_t state_bytes_from_remote(const struct state *, bool remote_initiated);

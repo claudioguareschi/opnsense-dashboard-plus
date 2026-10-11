@@ -186,7 +186,7 @@ struct snapshot *snapshot_create(const struct context *ctx,
   for (size_t n = 0; n < count; n++) {
     s->evidence[n].quota = quotas[n];
     unsigned char key[FM_FLOW_KEY_SIZE];
-    state_flow_key(key, flows[n].local, flows[n].remote);
+    state_flow_key(key, flows[n].local, flows[n].remote, flows[n].owner);
     struct item *i = map_insert(&s->selected, key, sizeof(key), error);
     if (!i || i->count) {
       if (i) fm_error_fail(error, FM_FAILURE_REQUEST, EINVAL, "duplicate snapshot flow");
@@ -372,7 +372,7 @@ bool snapshot_add(const struct state *state, void *arg, struct fm_error *error) 
   s->skipped += v.pf.skip != SKIP_NONE;
   if (!v.mapped) return true;
   unsigned char key[FM_FLOW_KEY_SIZE];
-  state_flow_key(key, v.local, v.remote);
+  state_flow_key(key, v.local, v.remote, state_owner(&v));
   const struct item *i = map_find(&s->selected, key, sizeof(key));
   if (!i) return true;
   s->observed++;
@@ -476,14 +476,22 @@ static bool parse_addr(const char *text, struct addr *a) {
   memset(a, 0, sizeof(*a)); a->af = strchr(text, ':') ? 6 : 4;
   return inet_pton(a->af == 4 ? AF_INET : AF_INET6, text, a->b) == 1;
 }
+/* A flow's owner: an address, or - for the firewall's own flow (the zero address). */
+static bool parse_owner(const char *text, struct addr *a) {
+  if (strcmp(text, "-")) return parse_addr(text, a);
+  memset(a, 0, sizeof(*a));
+  return true;
+}
 static bool identities(FILE *in, struct snapshot_flow *flows, size_t count,
                        struct fm_error *error) {
-  char line[256], a[64], b[64], extra;
+  char line[256], a[64], b[64], o[64], extra;
   unsigned incident;
   for (size_t n = 0; n < count; n++) {
     if (!line_read(in, line, error)) return false;
-    if (sscanf(line, "F %63s %63s %u %c", a, b, &incident, &extra) != 3 ||
-        incident > 1 || !parse_addr(a, &flows[n].local) || !parse_addr(b, &flows[n].remote))
+    /* F <local> <remote> <owner, or - for the firewall's own flow> <incident> */
+    if (sscanf(line, "F %63s %63s %63s %u %c", a, b, o, &incident, &extra) != 4 ||
+        incident > 1 || !parse_addr(a, &flows[n].local) || !parse_addr(b, &flows[n].remote) ||
+        !parse_owner(o, &flows[n].owner))
       return fm_error_fail(error, FM_FAILURE_REQUEST, EPROTO, "snapshot flow row");
     flows[n].incident = incident;
   }
@@ -495,7 +503,7 @@ static bool select_rows(const struct aggregate *a, const struct ranking *r, cons
                         struct ranked_flow *rows, struct fm_error *error) {
   struct map selected = {0}; bool ok = false;
   for (size_t n = 0; n < count; n++) {
-    unsigned char key[FM_FLOW_KEY_SIZE]; state_flow_key(key, flows[n].local, flows[n].remote);
+    unsigned char key[FM_FLOW_KEY_SIZE]; state_flow_key(key, flows[n].local, flows[n].remote, flows[n].owner);
     struct item *i = map_insert(&selected, key, sizeof(key), error);
     if (!i || i->count) {
       if (i) fm_error_fail(error, FM_FAILURE_REQUEST, EINVAL, "duplicate snapshot selection");
@@ -514,7 +522,7 @@ static bool select_rows(const struct aggregate *a, const struct ranking *r, cons
     struct ranked_flow row = {n, rates.rate_from_remote, rates.rate_to_remote, rates.packet_rate, rates.activity,
                               ranker_score(ranker, n), 0, rates.attempts};
     const struct flow *flow = aggregate_flow(a, row.flow);
-    unsigned char key[FM_FLOW_KEY_SIZE]; state_flow_key(key, flow->local, flow->remote);
+    unsigned char key[FM_FLOW_KEY_SIZE]; state_flow_key(key, flow->local, flow->remote, flow->owner);
     const struct item *i = map_find(&selected, key, sizeof(key));
     if (i) { rows[i->value] = row; found++; }
   }

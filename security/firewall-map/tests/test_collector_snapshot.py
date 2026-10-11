@@ -63,7 +63,7 @@ class CollectorSnapshotTest(unittest.TestCase):
             args = ({"8.8.8.1", "2001:4860::1"}, [], {}, None)
             cold = self.engine.sample(*args)
             warm = self.engine.sample(*args, snapshot=True, evidence=evidence)
-            identities = [(item["local"], item["remote"], incident) for item in warm["snapshot_candidates"]
+            identities = [(item["local"], item["remote"], item["owner"], incident) for item in warm["snapshot_candidates"]
                           if select is None or select(item["remote"])]
             summary = self.engine.snapshot_selection(identities)
             rows, coverage = self.engine.snapshot_detail(identities, byte_limit, state_limit)
@@ -101,7 +101,11 @@ class CollectorSnapshotTest(unittest.TestCase):
     def test_multiple_flows_nat_ipv6_icmp_association(self):
         _, _, summary, rows, meta = self.capture("mixed", 18)
         self.assertEqual(meta["captured"], 18)
-        self.assertEqual(len(summary["flows"]), 2)
+        # the inside host's NAT states and the firewall's own states to the same remote are
+        # separate flows: the firewall's are never credited to the inside host
+        self.assertEqual({flow["key"]: flow["states"] for flow in summary["flows"]}, {
+            ("8.8.8.1", "9.9.9.9", "10.0.0.2"): 9, ("8.8.8.1", "9.9.9.9", None): 3,
+            ("2001:4860::1", "2001:4860::2", "fd00::2"): 6})
         for remote, records in rows.items():
             for row in records:
                 self.assertEqual(row["flow"]["dest"], remote)
@@ -117,7 +121,7 @@ class CollectorSnapshotTest(unittest.TestCase):
         _, warm, selected, rows, meta = self.capture("many", 700, select=lambda remote: remote == "9.1.2.187",
                                                      evidence={"9.1.2.187": EVIDENCE.facts(5)})
         self.assertEqual(len(warm["flows"]), 150)
-        self.assertEqual(selected["flows"][0]["key"], ("8.8.8.1", "9.1.2.187"))
+        self.assertEqual(selected["flows"][0]["key"], ("8.8.8.1", "9.1.2.187", "10.0.0.2"))
         self.assertEqual(meta["captured"], 1)
         self.assertEqual(meta["traversed"], 700)
         self.assertEqual(list(rows), ["9.1.2.187"])
@@ -202,7 +206,7 @@ class CollectorSnapshotTest(unittest.TestCase):
 
         valid = response()
 
-        def decode(data, identities=(("8.8.8.1", "9.9.9.9", False),)):
+        def decode(data, identities=(("8.8.8.1", "9.9.9.9", None, False),)):
             with tempfile.TemporaryFile() as stream:
                 stream.write(data)
                 stream.seek(0)
@@ -218,10 +222,10 @@ class CollectorSnapshotTest(unittest.TestCase):
             with self.subTest(length=len(invalid)), self.assertRaises(collector.CollectorError):
                 decode(invalid)
         with self.assertRaises(collector.CollectorError):
-            decode(valid, (("8.8.8.2", "9.9.9.9", False),))
+            decode(valid, (("8.8.8.2", "9.9.9.9", None, False),))
         # a flow without its totals record is incomplete evidence accounting
         with self.assertRaises(collector.CollectorError):
-            decode(valid, (("8.8.8.1", "9.9.9.9", False), ("8.8.8.1", "9.9.9.8", False)))
+            decode(valid, (("8.8.8.1", "9.9.9.9", None, False), ("8.8.8.1", "9.9.9.8", None, False)))
 
     def test_the_retired_page_command_is_refused(self):
         with patch.dict(os.environ, FM_TEST_MODE="one", FM_TEST_COUNT="12"):
@@ -245,7 +249,7 @@ class CollectorSnapshotTest(unittest.TestCase):
         self.assertEqual([item["remote"] for item in candidates[:2]], ["9.1.0.7", "9.1.0.9"])
         self.assertEqual([item["security_class"] for item in candidates[:2]], ["S3", "S2"])
         union = {flow["key"] for flow in warm["flows"]}
-        self.assertTrue(union <= {(item["local"], item["remote"]) for item in candidates})
+        self.assertTrue(union <= {(item["local"], item["remote"], item["owner"]) for item in candidates})
         self.assertLessEqual(len(candidates), collector.SNAPSHOT_FLOWS)
         self.engine.snapshot_cancel()
 

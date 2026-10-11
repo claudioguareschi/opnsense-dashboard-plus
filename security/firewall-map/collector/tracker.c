@@ -168,7 +168,7 @@ static size_t promotion_candidates(struct tracker *t, const struct profile *def,
 }
 static bool pin(struct tracker *t, const struct flow *f, struct fm_error *error) {
   unsigned char key[FM_FLOW_KEY_SIZE];
-  state_flow_key(key, f->local, f->remote);
+  state_flow_key(key, f->local, f->remote, f->owner);
   return map_insert(&t->pinned, key, sizeof(key), error) != NULL;
 }
 
@@ -254,7 +254,7 @@ bool tracker_finish(struct tracker *t, const struct aggregate *a, const struct r
     for (size_t n = 0; n < counts.flows && kept < room; n++) {
       const struct flow *f = aggregate_flow(a, t->scored[n].flow);
       unsigned char key[FM_FLOW_KEY_SIZE];
-      state_flow_key(key, f->local, f->remote);
+      state_flow_key(key, f->local, f->remote, f->owner);
       if (map_find(&t->pinned, key, sizeof(key))) continue;
       if (!map_insert(&t->pinned, key, sizeof(key), error)) return false;
       kept++;
