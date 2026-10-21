@@ -592,6 +592,11 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.64** (all packages): a System Metrics+ fix.
+  - The CPU and temperature graphs each take a full-width row, like the gauges and the
+    filesystems. At some widget widths they were placed side by side, each half as wide as the
+    widget ([#15](https://github.com/claudioguareschi/opnsense-dashboard-plus/issues/15)).
+  - Firewall Map+ and VNStat Traffic+ are unchanged apart from the version.
 - **0.63** (all packages): Firewall Map+ fixes.
   - A connection is shown as belonging to whoever made it: the firewall's own traffic (for
     example a site-to-site VPN tunnel) and each device's traffic to the same address are separate
