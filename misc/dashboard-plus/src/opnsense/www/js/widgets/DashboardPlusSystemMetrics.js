@@ -201,7 +201,7 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
                     ${heading(this.translations.temperature, `<span id="${this.id}-temperature-current">--</span>`)}
                     <div class="canvas-container-noaspectratio dashboard-plus-chart"><canvas id="${this.id}-temperature-chart"></canvas></div>
                 </section>
-                <section class="dashboard-plus-wide">
+                <section>
                     <div id="${this.id}-gauges" class="dashboard-plus-inner dashboard-plus-gauges">
                         ${this._gaugeMarkup('memory', this.translations.memory)}
                         ${this._gaugeMarkup('states', this.translations.states,
@@ -210,7 +210,7 @@ export default class DashboardPlusSystemMetrics extends DashboardPlusWidget(Base
                         ${this._gaugeMarkup('swap', this.translations.swap)}
                     </div>
                 </section>
-                <section class="dashboard-plus-wide">
+                <section>
                     ${heading(this.translations.filesystems)}
                     <div id="${this.id}-filesystems" class="dashboard-plus-inner dashboard-plus-filesystems"></div>
                 </section>

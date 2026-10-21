@@ -189,8 +189,7 @@ const STYLE = `
     .dashboard-plus-panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1em; margin: 0 0.25em; }
     .dashboard-plus-panel-head h3 { margin: 0; }
     .dashboard-plus-chart { margin: 0 0.5em; }
-    .dashboard-plus-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1em; padding: 0 0.25em; }
-    .dashboard-plus-metrics .dashboard-plus-wide { grid-column: 1 / -1; }
+    .dashboard-plus-metrics { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1em; padding: 0 0.25em; }
     .dashboard-plus-metrics canvas { width: 100%; height: 90px; }
     .dashboard-plus-metrics-load { font-size: 0.9em; margin: 0.25em 0; }
 
