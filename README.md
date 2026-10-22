@@ -608,7 +608,8 @@ FM_COLLECTOR_TEST_CC=clang FM_COLLECTOR_TEST_FLAGS="-g -fsanitize=address,undefi
 Releases share one version (`PLUGIN_VERSION` in each Makefile, no revision) and are published
 together: 0.50, 0.51, ... Between releases a package under development carries test builds
 numbered after the last release (Firewall Map+ 0.62.1, 0.62.2, ...), which are never tagged or
-published; at the next release every Makefile moves to the new version together (0.63).
+published; at the next release every Makefile moves to the new version together (0.63). A fix
+published right after a release is a release of its own with every package at y.xx.z (0.65.1).
 The signed feed lives in the `packages` branch, kept as a single commit. On the machine holding
 the signing key:
 
@@ -623,6 +624,10 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.65.1** (all packages): Firewall Map+ details panel layout fix.
+  - The details cards share each row, and a card left alone in the last row takes the whole row:
+    since 0.65 added the CrowdSec card, the Reputation card used only half the width.
+  - Dashboard Plus and VNStat Traffic+ are unchanged apart from the version.
 - **0.65** (all packages): Firewall Map+ integrates CrowdSec and files Suricata IPS drops correctly.
   - With the CrowdSec plugin installed, every banned address shows why: the scenario, where the
     ban comes from (detected on this firewall, an administrator, a subscribed blocklist or the

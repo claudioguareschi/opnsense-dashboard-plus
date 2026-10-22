@@ -1,5 +1,5 @@
 PLUGIN_NAME=		vnstat-plus
-PLUGIN_VERSION=		0.65
+PLUGIN_VERSION=		0.65.1
 PLUGIN_COMMENT=	Extended VNStat dashboard widget
 PLUGIN_MAINTAINER=	cguareschimd@gmail.com
 PLUGIN_WWW=		https://github.com/claudioguareschi/opnsense-dashboard-plus
