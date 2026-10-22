@@ -197,6 +197,40 @@ class CorrelationTest(unittest.TestCase):
                          ("current", "192.168.30.52:52114", "IoT to Internet"))
         self.assertEqual(flow["connection"]["state"], "10/1")
 
+    def passed_entry(self, states):
+        return {"162.217.103.70": {
+            "lists": ["AbuseIPDB blacklist"], "inbound": 0, "outbound": states, "targets": [],
+            "inside": ["192.168.30.52"], "services": ["HTTPS"], "bytes": 9400, "youngest": 240,
+            "service_ports": {}}}
+
+    def test_open_connections_suricata_dropped_are_ips_drops_not_passed(self):
+        # issue #7: an inline IPS drops packets of a connection PF passed, so PF keeps its state
+        correlator = PRODUCTION_IDS.Correlator()
+        alert = self.alert("1.2.3.163", 13526, "162.217.103.70", 443)
+        alert["action"] = "blocked"
+        correlator.add_alert(alert, 1000.0)
+        key = PRODUCTION_IDS.outside_key("tcp", "1.2.3.163", 13526, "162.217.103.70", 443)
+        match = {key: {"kind": 1, "inside": "192.168.30.52", "inside_port": 52114,
+                       "id": 10, "creator": 1, "ambiguous": False, "age": 240,
+                       "bytes_in": 400, "bytes_out": 9000, "remote_started": False,
+                       "interface": "igb1", "rule": "abc123"}}
+        correlator.observe_collector_matches(match, 1002.0)
+        correlator.resolve_collector_matches(match, self.LOCAL, 1002.0)
+        self.assertEqual(PRODUCTION_IDS.ips_dropped_states(correlator), {"162.217.103.70": 1})
+        (entry,) = PRODUCTION_IDS.contain_ips_drops(self.passed_entry(1), correlator).values()
+        self.assertEqual((entry["disposition"], entry["lists"]), ("ips_dropped", ["AbuseIPDB blacklist", "Suricata IDS"]))
+        # another state of the address, which Suricata did not drop: some traffic got through
+        (entry,) = PRODUCTION_IDS.contain_ips_drops(self.passed_entry(2), correlator).values()
+        self.assertNotIn("disposition", entry)
+        # an alert Suricata only logged leaves the address passed
+        correlator.flows[key]["alerts"]["1"][1]["action"] = "allowed"
+        (entry,) = PRODUCTION_IDS.contain_ips_drops(self.passed_entry(1), correlator).values()
+        self.assertNotIn("disposition", entry)
+        # a closed connection is no longer one of the address's states
+        correlator.flows[key]["alerts"]["1"][1]["action"] = "blocked"
+        correlator.observe_collector_matches({}, 1004.0)
+        self.assertEqual(PRODUCTION_IDS.ips_dropped_states(correlator), {})
+
     def test_collector_recent_match_resolves_pending_alert_without_exporting_index(self):
         correlator = IDS.Correlator()
         alert = self.alert("1.2.3.163", 13526, "162.217.103.70", 443)

@@ -65,7 +65,7 @@ MAX_ITEMS = 8  # per list kept for one address (targets, inside hosts, services,
 # a note's characters: what the review page lets one type (queue.js maxlength) and ThreatsController's
 # NOTE_BYTES carries (three bytes a character, within configd's one message)
 MAX_NOTE = 800
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def connect(path=DATABASE):
@@ -82,12 +82,32 @@ def connect(path=DATABASE):
     )
     # one-time steps, recorded in user_version (not repeated on every connection, which is every
     # list request)
-    if db.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
+    version = db.execute("PRAGMA user_version").fetchone()[0]
+    if version < 1:
         db.execute("CREATE INDEX IF NOT EXISTS threats_view ON threats(status, disposition, last_seen DESC)")
         # a move that failed (cache.db locked or unreadable) is tried again on the next connection
         if path != DATABASE or move_from_cache(db):
-            db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            version = 1
+            db.execute("PRAGMA user_version = 1")
+    if version == 1:
+        refile_ips_drops(db)
+        db.execute("PRAGMA user_version = 2")
     return db
+
+
+def refile_ips_drops(db):
+    """Rows filed as passed although every passed connection they kept was dropped by Suricata's
+    IPS (before 0.64.1, an open PF state made any address passed; issue #7) become IPS drops."""
+    rows = []
+    for address, data in db.execute("SELECT address, data FROM threats WHERE disposition = 'passed'"):
+        try:
+            data = json.loads(data)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(data, dict) and "got_through" not in data and _only_ips_dropped(data):
+            rows.append((address,))
+    if rows:
+        db.executemany("UPDATE threats SET disposition = 'ips_dropped' WHERE address = ?", rows)
 
 
 def move_from_cache(db, cache=None):
@@ -237,6 +257,7 @@ def _record(db, seen, now):
             data.pop("youngest")
             data.pop("status_hint", None)
             data.pop("disposition", None)
+            data["got_through"] = disposition == "passed"
             status = "new"
             data["connections"] = merge_connections([], entry.get("connections") or [])
             data["remote"] = entry.get("remote") or {}
@@ -251,6 +272,13 @@ def _record(db, seen, now):
         except ValueError:
             data = {}
         stored = row[3] or "passed"
+        # Some traffic of the address got through. Rows recorded before 0.64.1 have no flag:
+        # those filed as passed although every passed connection they kept was dropped by
+        # Suricata's IPS (PF passed the handshake) are taken as IPS drops (issue #7).
+        through = disposition == "passed" or data.get("got_through", not _only_ips_dropped(data))
+        if stored == "passed" and not through:
+            stored = "ips_dropped"
+        data["got_through"] = through
         # a blocked attempt from an address that once got through adds its facts after the ones
         # that got through, so the bounded lists (and the card's headline) keep the passed traffic
         weaker = rank.get(disposition, -1) < rank.get(stored, -1)
@@ -280,6 +308,12 @@ def _record(db, seen, now):
             status = "new"
         db.execute("UPDATE threats SET last_seen = ?, samples = samples + 1, data = ?, status = ?, disposition = ? "
                    "WHERE address = ?", (now, json.dumps(data), status, disposition, address))
+
+
+def _only_ips_dropped(data):
+    """True when the connections kept with a row show only passed traffic Suricata dropped."""
+    passed = [item for item in data.get("connections") or [] if item.get("decision") == "pass"]
+    return bool(passed) and all(item.get("ips_dropped") for item in passed)
 
 
 MAX_CONNECTIONS = 8

@@ -266,6 +266,51 @@ class ThreatQueueTest(unittest.TestCase):
             self.assertEqual(row["connections"][0]["key"], "pass")
             self.assertEqual(row["lists"], ["FWMAP_FireHOL_L1", "AbuseIPDB blacklist"])
 
+    def test_ips_drops_and_passed_traffic_of_one_address(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = THREATS.connect(os.path.join(directory, "cache.db"))
+            entry = self.observe(self.INBOUND)["108.188.77.155"]
+            dropped = {"key": "k1", "decision": "pass", "ips_dropped": True, "seen": 100}
+            THREATS.record(db, {"108.188.77.155": {**entry, "disposition": "ips_dropped",
+                                                   "connections": [dropped]}}, now=100.0)
+            self.assertEqual(THREATS.listing(db)["rows"][0]["disposition"], "ips_dropped")
+            # traffic that got through makes it passed, and a later drop does not undo that
+            THREATS.record(db, {"108.188.77.155": {**entry, "connections": []}}, now=200.0)
+            THREATS.record(db, {"108.188.77.155": {**entry, "disposition": "ips_dropped",
+                                                   "connections": [dropped]}}, now=300.0)
+            self.assertEqual(THREATS.listing(db)["rows"][0]["disposition"], "passed")
+
+    def test_rows_misfiled_as_passed_before_the_fix_become_ips_drops(self):
+        # issue #7: before 0.64.1 an open PF state filed an address as passed even when
+        # Suricata's IPS dropped the connection
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "cache.db")
+            db = THREATS.connect(path)
+            entry = self.observe(self.INBOUND)["108.188.77.155"]
+            THREATS.record(db, {
+                "108.188.77.155": {**entry, "connections": [
+                    {"key": "k1", "decision": "pass", "ips_dropped": True, "seen": 100}]},
+                "34.1.1.1": {**entry, "connections": [
+                    {"key": "k2", "decision": "pass", "ips_dropped": True, "seen": 100},
+                    {"key": "k3", "decision": "pass", "ips_dropped": False, "seen": 100}]},
+                "34.1.1.2": {**entry, "connections": []},
+            }, now=100.0)
+            for address in ("108.188.77.155", "34.1.1.1", "34.1.1.2"):
+                (data,) = db.execute("SELECT data FROM threats WHERE address = ?", (address,)).fetchone()
+                data = json.loads(data)
+                data.pop("got_through")
+                db.execute("UPDATE threats SET data = ? WHERE address = ?", (json.dumps(data), address))
+            db.execute("PRAGMA user_version = 1")
+            db.close()
+            db = THREATS.connect(path)
+            self.assertEqual(dict(db.execute("SELECT address, disposition FROM threats")), {
+                "108.188.77.155": "ips_dropped", "34.1.1.1": "passed", "34.1.1.2": "passed"})
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], THREATS.SCHEMA_VERSION)
+            # a row without the flag seen again: its kept connections decide, as in the step above
+            db.execute("UPDATE threats SET disposition = 'passed' WHERE address = '108.188.77.155'")
+            THREATS.record(db, {"108.188.77.155": {**entry, "disposition": "ips_dropped", "connections": []}}, now=200.0)
+            self.assertEqual(THREATS.listing(db)["rows"][0]["disposition"], "ips_dropped")
+
     def test_rejects_bad_input(self):
         with tempfile.TemporaryDirectory() as directory:
             db = THREATS.connect(os.path.join(directory, "cache.db"))

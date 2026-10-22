@@ -83,7 +83,7 @@ from lib.common import (
 from lib.config import interface_names, ranking_profiles as configured_profiles, settings, topology, widget_in_use
 from lib.ids import (
     ALERT_BACKLOG_BYTES, EVE_LOG, AlertTracker, Correlator, alert_summary, connection_keys, connection_summary, firewall_blocks,
-    ips_drops,
+    contain_ips_drops, ips_drops,
 )
 from lib.leases import (
     INSIDE_HOSTNAME_TTL, INSIDE_NEGATIVE_TTL, HostnameResolver, describe_inside, describe_target, host_names,
@@ -481,7 +481,7 @@ class ThreatRecorder:
             def lists_for(address):
                 return threat_lists_for(address, blocklists, reputation, correlator)
 
-            seen = threats.observe_aggregates(sample, lists_for)
+            seen = contain_ips_drops(threats.observe_aggregates(sample, lists_for), correlator)
             seen.update(ips_drops(correlator, seen, self.last_wall, blocklists, reputation))
             seen.update(firewall_blocks(correlator, seen, self.last_wall, blocklists, reputation))
             if collector.geo is not None and seen:

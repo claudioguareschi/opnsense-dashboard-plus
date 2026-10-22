@@ -680,6 +680,36 @@ def firewall_blocks(correlator, seen, since, blocklists=None, reputation=None):
     return entries
 
 
+def ips_dropped_states(correlator):
+    """{remote address: open firewall states whose connection Suricata dropped (IPS)}.
+
+    An inline IPS drops packets of a connection PF already passed (the handshake gets through,
+    the matching packet does not), so PF keeps a state for traffic Suricata stopped.
+    """
+    counts = {}
+    for key, flow in correlator.flows.items():
+        if key in correlator.current and any(
+                item.get("action") == "blocked" for item in Correlator._alert_items(flow)):
+            counts[key[3]] = counts.get(key[3], 0) + 1
+    return counts
+
+
+def contain_ips_drops(seen, correlator):
+    """Passed entries whose every open state is a connection Suricata dropped become IPS drops.
+
+    `seen` comes from the collector's per-remote summary, which counts every PF state as passed;
+    an address is only passed when some of its traffic got through without an IPS drop.
+    """
+    dropped = ips_dropped_states(correlator)
+    for address, entry in seen.items():
+        states = entry["inbound"] + entry["outbound"]
+        if entry.get("disposition", "passed") == "passed" and states and dropped.get(address, 0) >= states:
+            entry["disposition"] = "ips_dropped"
+            if IDS_LIST not in entry["lists"]:
+                entry["lists"] = entry["lists"] + [IDS_LIST]
+    return seen
+
+
 def ips_drops(correlator, seen, since, blocklists=None, reputation=None):
     """Addresses whose traffic Suricata dropped (IPS) since the last recording, as queue entries.
 
