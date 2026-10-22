@@ -293,15 +293,19 @@ def alerts_for(address, now=None):
     now = time.time() if now is None else now
     decisions = run_cscli(["decisions", "list", "-a", "-i", address]) or []
     addresses, _ranges = parse_decisions(decisions, now)
-    bans = []
+    # each blocklist update repeats its bans: one entry per reason, origin and type, ending last
+    bans = {}
     for alert in decisions if isinstance(decisions, list) else []:
         for decision in (alert.get("decisions") or []) if isinstance(alert, dict) else []:
             remaining = duration_seconds(decision.get("duration")) if isinstance(decision, dict) else None
             if remaining is None or remaining <= 0 or decision.get("simulated"):
                 continue
-            bans.append({"reason": _text(decision.get("scenario")), "origin": origin_kind(decision.get("origin")),
-                         "type": _text(decision.get("type")) or "ban", "until": round(now + remaining)})
-    bans.sort(key=lambda item: (-STRENGTH[item["origin"]], -item["until"]))
+            ban = {"reason": _text(decision.get("scenario")), "origin": origin_kind(decision.get("origin")),
+                   "type": _text(decision.get("type")) or "ban", "until": round(now + remaining)}
+            key = (ban["reason"], ban["origin"], ban["type"])
+            if key not in bans or ban["until"] > bans[key]["until"]:
+                bans[key] = ban
+    bans = sorted(bans.values(), key=lambda item: (-STRENGTH[item["origin"]], -item["until"]))
     seen = []
     raw = run_cscli(["alerts", "list", "-i", address, "-l", str(MAX_ALERTS)]) or []
     for alert in raw if isinstance(raw, list) else []:

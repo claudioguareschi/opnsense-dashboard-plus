@@ -203,6 +203,20 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(command, [CROWDSEC.CSCLI, "decisions", "delete", "-i", "2606:4700:4700::1111"])
         self.assertEqual(result["removed"], 2)
 
+    def test_investigate_lists_each_ban_once_and_what_was_detected(self):
+        answers = {
+            "decisions": [{"decisions": [decision("198.211.110.53", scenario="tcp:scan", duration="1h")]},
+                          {"decisions": [decision("198.211.110.53", scenario="tcp:scan", duration="2h")]}],
+            "alerts": [{"scenario": "firewallservices/pf-scan-multi_ports", "events_count": 12,
+                        "start_at": "2026-10-20T10:00:00Z", "stop_at": "2026-10-20T10:01:00Z",
+                        "source": {"as_name": "DIGITALOCEAN-ASN", "cn": "US"}}],
+        }
+        with mock.patch.object(CROWDSEC, "run_cscli", side_effect=lambda arguments: answers[arguments[0]]):
+            result = CROWDSEC.alerts_for("198.211.110.53", now=NOW)
+        self.assertEqual(result["bans"], [{"reason": "tcp:scan", "origin": "community", "type": "ban", "until": NOW + 7200}])
+        self.assertEqual(result["alerts"][0]["scenario"], "firewallservices/pf-scan-multi_ports")
+        self.assertEqual((result["alerts"][0]["events"], result["banned"]), (12, True))
+
     def test_refuses_what_it_must_not_ban(self):
         for address, duration in (("192.168.1.2", "4h"), ("10.0.0.1", "4h"), ("example.com", "4h"),
                                   ("45.56.79.53", "1000h"), ("45.56.79.53 -d 1h", "4h")):
