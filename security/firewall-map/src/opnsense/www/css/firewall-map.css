@@ -178,7 +178,9 @@ body.fwmap-resizing, body.fwmap-resizing * { user-select: none !important; }
 .fwmap-link-arrow::before { content: ""; position: absolute; left: 0; right: 7px; top: 6px; border-top: 1.5px solid currentColor; opacity: .6; }
 .fwmap-link-arrow::after { content: ""; position: absolute; right: 0; top: 2px; border: 5px solid transparent; border-left: 8px solid currentColor; opacity: .6; }
 .fwmap-link-arrow .fa { position: relative; z-index: 1; }
-.fwmap-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 8px; }
+/* cards share each row; one left alone in the last row (an odd count) takes the whole row */
+.fwmap-cards { display: flex; flex-wrap: wrap; gap: 0 8px; }
+.fwmap-cards > .fwmap-card { flex: 1 1 220px; min-width: 0; }
 .fwmap-card { margin-bottom: 8px; min-width: 0; }
 .fwmap-card-go { color: inherit; opacity: .5; }
 .fwmap-card-go:hover, .fwmap-card-go:focus-visible { opacity: 1; }
