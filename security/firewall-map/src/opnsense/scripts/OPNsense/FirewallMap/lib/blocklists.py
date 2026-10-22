@@ -34,6 +34,7 @@ from .common import (
     ABUSEIPDB_BLACKLIST, REPUTATION_KIND, REPUTATION_MAX_AGE, log_warning, public_ip,
 )
 from .config import aliases as configured_aliases
+from .crowdsec import LIST as CROWDSEC_LIST, LOCAL_LIST as CROWDSEC_LOCAL_LIST, TABLES as CROWDSEC_TABLES
 from .pf import blocked_rule_tables, pf_tables
 
 
@@ -152,13 +153,14 @@ def chosen_sets(setting):
     return names & tables, names - tables
 
 
-def chosen_threat_lists(setting):
+def chosen_threat_lists(setting, crowdsec=False):
     """(PF tables to classify with, chosen lists without a PF table).
 
     The administrator's choice when set, otherwise the automatic selection. Only PF tables
     classify: a curated feed counts through its FWMAP_* alias, and the AbuseIPDB blacklist through
     FWMAP_AbuseIPDB (both kept by "Maintain blocklist aliases"); a list with no table is reported,
-    never silently replaced by another source."""
+    never silently replaced by another source. With `crowdsec` (*Use CrowdSec*), the CrowdSec
+    plugin's ban tables always count."""
     names = {name.strip() for name in (setting or "").split(",") if name.strip()}
     tables = set(pf_tables())
     chosen = (names & tables) if names else blocklist_tables(list(tables))
@@ -169,6 +171,8 @@ def chosen_threat_lists(setting):
         unavailable.add(ABUSEIPDB_TABLE)
     if WATCHLIST_TABLE in tables:
         chosen.add(WATCHLIST_TABLE)
+    if crowdsec:
+        chosen.update(table for table in CROWDSEC_TABLES if table in tables)
     return chosen, unavailable
 
 
@@ -182,8 +186,11 @@ CLASS_VOLATILE_REFRESH_SECONDS = 300
 
 
 def list_label(table):
-    """How a threat list is named on the map: FWMAP_AbuseIPDB keeps its historical badge."""
-    return ABUSEIPDB_LIST if table == ABUSEIPDB_TABLE else table
+    """How a threat list is named on the map: FWMAP_AbuseIPDB keeps its historical badge, and the
+    CrowdSec plugin's IPv4 and IPv6 ban tables are one list, CrowdSec."""
+    if table == ABUSEIPDB_TABLE:
+        return ABUSEIPDB_LIST
+    return CROWDSEC_LIST if table in CROWDSEC_TABLES else table
 
 
 class ThreatClassification:
@@ -282,8 +289,9 @@ class ThreatClassification:
     @property
     def names(self):
         """The threat lists in use, as the map names them."""
-        return [list_label(table) for table in self.tables
-                if self.status.get(table, {}).get("status", "ok") == "ok"]
+        # the CrowdSec plugin's two tables are one list
+        return list(dict.fromkeys(list_label(table) for table in self.tables
+                                  if self.status.get(table, {}).get("status", "ok") == "ok"))
 
     def lookup(self, address):
         """The threat lists containing an address."""
@@ -313,9 +321,10 @@ class ThreatClassification:
                 "missing": list(self.missing), "duplicates": list(self.duplicates)}
 
 
-def threat_lists_for(address, blocklists, reputation, ids_evidence=None):
-    """The threat lists an address is on: chosen lists, the AbuseIPDB verdict and, with
-    `ids_evidence` (anything with flags(address): the Correlator, an AlertTracker), IDS alerts.
+def threat_lists_for(address, blocklists, reputation, ids_evidence=None, crowdsec=None):
+    """The threat lists an address is on: chosen lists, the AbuseIPDB verdict, a CrowdSec ban for
+    what it detected on this firewall and, with `ids_evidence` (anything with flags(address): the
+    Correlator, an AlertTracker), IDS alerts.
     Only globally reachable addresses can be threats: lists that also name private or bogon
     space (FireHOL level 1 does) must not flag the site's own or CGNAT/VPN peers."""
     if not public_ip(address):
@@ -323,18 +332,24 @@ def threat_lists_for(address, blocklists, reputation, ids_evidence=None):
     lists = blocklists.lookup(address) if blocklists else []
     if reputation is not None and address in reputation.flagged:
         lists = lists + [REPUTATION_LIST]
+    if crowdsec is not None and crowdsec.detected(address):
+        lists = lists + [CROWDSEC_LOCAL_LIST]
     if ids_evidence is not None and ids_evidence.flags(address):
         lists = lists + [IDS_LIST]
     return lists
 
 
-def threat_fields(address, blocklists, reputation):
-    """The threat facts every map entry carries: the lists naming the address, its AbuseIPDB score
-    and the country/operational sets that contain it."""
+def threat_fields(address, blocklists, reputation, crowdsec=None):
+    """The threat facts every map entry carries: the lists naming the address, its AbuseIPDB score,
+    the CrowdSec ban in force (reason, origin, type, end) and the country/operational sets that
+    contain it."""
     fields = {
-        "lists": threat_lists_for(address, blocklists, reputation),
+        "lists": threat_lists_for(address, blocklists, reputation, crowdsec=crowdsec),
         "abuseipdb": reputation.scores.get(address) if reputation is not None else None,
     }
+    ban = crowdsec.lookup(address) if crowdsec is not None else None
+    if ban:
+        fields["crowdsec"] = {key: ban[key] for key in ("reason", "origin", "type", "until", "bans")}
     # the country/operational sets naming it (PF membership, not GeoIP), only when there are any
     described = blocklists.described(address) if blocklists else []
     if described:

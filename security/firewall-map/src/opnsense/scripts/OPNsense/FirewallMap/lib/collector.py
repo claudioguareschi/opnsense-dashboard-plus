@@ -448,7 +448,8 @@ def _evidence_rows(evidence):
         if address is None or not mask:
             continue
         if mask & ~evidence_facts.REQUEST_BITS or (mask, blocked, alerts, severity) != evidence_facts.facts(
-                blocked, alerts, severity, bool(mask & evidence_facts.REPUTATION)):
+                blocked, alerts, severity, bool(mask & evidence_facts.REPUTATION),
+                bool(mask & evidence_facts.CROWDSEC)):
             raise CollectorError("inconsistent evidence facts")
         rows[address] = (mask, blocked, alerts, severity)
     strongest = sorted(rows, key=lambda address: (not rows[address][0] & evidence_facts.IDS_HIGH,

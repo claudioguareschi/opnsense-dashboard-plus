@@ -31,7 +31,7 @@
 /* Security evidence of a flow's remote. Each
  * source is its own fact; a flow may have several, and none is ever folded
  * into another. Python collects the bounded evidence (filterlog, Suricata,
- * AbuseIPDB verdicts) and sends it with EVIDENCE rows; THREAT_LIST is
+ * AbuseIPDB verdicts, CrowdSec detections) and sends it with EVIDENCE rows; THREAT_LIST is
  * derived here from the PF-table set mask, which is kept separately. */
 enum evidence_bit {
   EVIDENCE_THREAT_LIST = 1, /* the remote is in a threat-category PF table */
@@ -39,10 +39,11 @@ enum evidence_bit {
   EVIDENCE_IDS = 4,         /* Suricata alerts involve it (alert window) */
   EVIDENCE_IDS_HIGH = 8,    /* one of them has severity 1 or 2 */
   EVIDENCE_REPUTATION = 16, /* an AbuseIPDB lookup scored it abusive */
+  EVIDENCE_CROWDSEC = 32,   /* CrowdSec banned it for what it detected on this firewall */
 };
 /* The bits a request may set (THREAT_LIST is the collector's own). */
 #define EVIDENCE_REQUEST_BITS \
-  (EVIDENCE_PF_BLOCKED | EVIDENCE_IDS | EVIDENCE_IDS_HIGH | EVIDENCE_REPUTATION)
+  (EVIDENCE_PF_BLOCKED | EVIDENCE_IDS | EVIDENCE_IDS_HIGH | EVIDENCE_REPUTATION | EVIDENCE_CROWDSEC)
 /* Counts are Python's bounded window counts, capped here. */
 #define EVIDENCE_COUNT_MAX 1000000u
 /* Suricata severities 1 (highest) to 3; IDS_HIGH is a worst severity at or
@@ -68,8 +69,9 @@ static inline bool evidence_valid(const struct evidence *e) {
 
 /* The security class, derived (never stored as evidence) for reservations:
  *   S3  high-severity IDS evidence
- *   S2  other IDS evidence, or strong blocked activity (at least
- *       SECURITY_BLOCKED_STRONG_HITS logged blocks in the window)
+ *   S2  other IDS evidence, a CrowdSec detection on this firewall, or strong
+ *       blocked activity (at least SECURITY_BLOCKED_STRONG_HITS logged blocks
+ *       in the window)
  *   S1  any other evidence: threat list, reputation, weaker blocked activity
  *   S0  no evidence
  * so a flow has a class above S0 exactly when it has any evidence. The one
@@ -78,7 +80,7 @@ static inline bool evidence_valid(const struct evidence *e) {
 enum security_class { SECURITY_S0 = 0, SECURITY_S1 = 1, SECURITY_S2 = 2, SECURITY_S3 = 3 };
 static inline enum security_class security_class(const struct evidence *e) {
   if (e->mask & EVIDENCE_IDS_HIGH) return SECURITY_S3;
-  if ((e->mask & EVIDENCE_IDS) ||
+  if ((e->mask & (EVIDENCE_IDS | EVIDENCE_CROWDSEC)) ||
       ((e->mask & EVIDENCE_PF_BLOCKED) && e->blocked_hits >= SECURITY_BLOCKED_STRONG_HITS))
     return SECURITY_S2;
   return e->mask ? SECURITY_S1 : SECURITY_S0;

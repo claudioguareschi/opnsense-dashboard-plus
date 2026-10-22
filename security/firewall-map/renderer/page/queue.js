@@ -27,13 +27,13 @@
 /* Threat history: flagged traffic organized by what the firewall or IPS actually did. */
 import {escapeHtml, fill, flagHtml, formatBytes, hostPort, listLabel, plain, privateAddress, protocolLabel, splitHostPort} from '../src/format.js';
 import {flowSummary} from '../src/summaries.js';
-import {addAddressToAlias, chooseAlias, killStates, showStates} from './actions.js';
+import {addAddressToAlias, banWithCrowdsec, chooseAlias, killStates, showStates} from './actions.js';
 import {confirmAction, getJSON, notifyFailure, postJSON} from './api.js';
 import {state, T, TEXT} from './context.js';
 import {remoteOf} from './details.js';
 import {ic} from './icons.js';
 import {investigate, investigationPanel} from './investigate.js';
-import {ago, agoText, idsLines, pill} from './parts.js';
+import {ago, agoText, crowdsecEnds, crowdsecOrigin, idsLines, pill} from './parts.js';
 
 const VIEWS = ['passed', 'firewall_blocked', 'ips_dropped', 'all', 'reviewed', 'dismissed'];
 const QUEUE_PAGE = 100;
@@ -195,6 +195,7 @@ function queueItem(row, names) {
           ${rule ? `<li title="${escapeHtml(T.rule)}">${ic('shield-halved')} ${escapeHtml(rule)}</li>` : ''}
         </ul>
         ${idsLines(row.ids, TEXT)}
+        ${crowdsecLine(row.crowdsec)}
       </div>
       <div class="text-muted fwmap-q-when">
         <span title="${escapeHtml(new Date(row.last_seen * 1000).toLocaleString())}">${ic('clock')} ${escapeHtml(agoText(row.last_seen))}</span>
@@ -229,6 +230,7 @@ function queueItem(row, names) {
           <button type="button" class="btn ${state.can.aliases ? 'btn-danger' : 'btn-default'} dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-label="${escapeHtml(T.more)}">${state.can.aliases ? '' : `${escapeHtml(T.more)} `}<span class="caret"></span></button>
           <ul class="dropdown-menu dropdown-menu-right">
             <li><a href="#" class="fwmap-q-edit-note">${ic('pen')} ${escapeHtml(T.edit_note)}</a></li>
+            ${state.can.manage && state.data?.crowdsec?.enabled ? `<li><a href="#" class="fwmap-q-crowdsec-ban">${ic('shield-virus')} ${escapeHtml(T.crowdsec_ban)}</a></li>` : ''}
             ${state.can.kill ? `<li><a href="#" class="fwmap-q-kill">${ic('trash-can')} ${escapeHtml(T.kill_states)}</a></li>` : ''}
           </ul>
         </div>
@@ -237,6 +239,17 @@ function queueItem(row, names) {
   </div>`;
 }
 
+
+/** Why CrowdSec banned the address when it was last recorded: reason, where it came from, end. */
+function crowdsecLine(ban) {
+  if (!ban) {
+    return '';
+  }
+  const ended = ban.until <= Date.now() / 1000;
+  return `<div class="${ban.origin === 'local' ? 'text-danger' : 'text-muted'}">${ic('shield-virus')} CrowdSec: `
+    + `${escapeHtml(ban.reason || '—')} · ${escapeHtml(crowdsecOrigin(ban.origin))} · `
+    + `${escapeHtml(ended ? T.crowdsec_ended : crowdsecEnds(ban.until))}</div>`;
+}
 
 /** Country name to code from the live map (older queue entries only stored the name). */
 function countryCodeOf(name) {
@@ -463,6 +476,10 @@ export async function showQueue() {
           await setThreat(address, 'blocked', note);
         }));
       });
+    })
+    .on('click', '.fwmap-q-crowdsec-ban', function (event) {
+      event.preventDefault();
+      banWithCrowdsec(addressOf(this));
     })
     .on('click', '.fwmap-q-investigate, .fwmap-inv-retry', (event) => {
       event.preventDefault();

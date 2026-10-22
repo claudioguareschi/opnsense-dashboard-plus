@@ -32,6 +32,8 @@ Queries, only when an administrator asks for this address:
   - RDAP (registry whois, via the rdap.org bootstrap): network name, range, owner, abuse contact
   - RIPEstat prefix overview: announced prefix and origin AS
   - AbuseIPDB (only when an API key is configured): abuse confidence and reports
+  - CrowdSec (with *Use CrowdSec* and the CrowdSec plugin, read locally with cscli): the bans it
+    holds for the address and what it detected from it
 
 Results are cached in the collector's SQLite store, so repeated clicks do not repeat the
 lookups. The AbuseIPDB key comes from the plugin settings file and is never printed.
@@ -48,7 +50,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 from lib.cache import CacheStore
 from lib.common import REPUTATION_KIND, REPUTATION_MAX_AGE, secure_umask
-from lib.config import abuseipdb_key
+from lib.config import abuseipdb_key, settings
+from lib import crowdsec as crowdsec_source
 
 TIMEOUT = 10
 # an RDAP, RIPEstat or AbuseIPDB answer is a few kB; anything far larger is not one
@@ -166,9 +169,10 @@ def lookups(address, key):
     return sources
 
 
-def investigate(address, store=None, key=None, fetchers=None, now=None, sources=None):
+def investigate(address, store=None, key=None, fetchers=None, now=None, sources=None, crowdsec=None):
     """Look `address` up in every source, or only in `sources` (e.g. {"abuseipdb"} for the
-    Reputation card's check), from the cache where it is fresh."""
+    Reputation card's check), from the cache where it is fresh. `crowdsec` (the address's bans
+    and alerts, read locally and never cached) is asked in a full investigation only."""
     try:
         parsed = ipaddress.ip_address(address)
     except ValueError:
@@ -210,7 +214,19 @@ def investigate(address, store=None, key=None, fetchers=None, now=None, sources=
             store.put_many(REPUTATION_KIND, [(address, {"score": data.get("score")})], now=now)
             store.prune(REPUTATION_KIND, max_age=REPUTATION_MAX_AGE, keep=20000, now=now)
         result[source] = data
+    if crowdsec is not None and not sources:
+        try:
+            result["crowdsec"] = crowdsec(address)
+        except crowdsec_source.CrowdSecError as error:
+            result["crowdsec"] = {"error": str(error)}
     return result
+
+
+def crowdsec_lookup():
+    """CrowdSec's answer for an address, when *Use CrowdSec* is on and the plugin is installed."""
+    if settings().get("crowdsec", "1") == "1" and crowdsec_source.available():
+        return crowdsec_source.alerts_for
+    return None
 
 
 if __name__ == "__main__":
@@ -219,4 +235,4 @@ if __name__ == "__main__":
     # "all", or a comma-separated subset of rdap, ripestat and abuseipdb
     wanted = sys.argv[2] if len(sys.argv) > 2 else "all"
     sources = None if wanted == "all" else set(wanted.split(",")) & set(MAX_AGE)
-    print(json.dumps(investigate(target, key=abuseipdb_key(), sources=sources)))
+    print(json.dumps(investigate(target, key=abuseipdb_key(), sources=sources, crowdsec=crowdsec_lookup())))

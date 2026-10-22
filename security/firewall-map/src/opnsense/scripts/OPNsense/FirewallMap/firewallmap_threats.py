@@ -297,6 +297,8 @@ def _record(db, seen, now):
         data["connections"] = merge_connections(data.get("connections") or [], entry.get("connections") or [])
         if entry.get("ids"):
             data["ids"] = entry["ids"]  # the latest Suricata picture for this address
+        if entry.get("crowdsec"):
+            data["crowdsec"] = entry["crowdsec"]  # the latest CrowdSec ban (it may since have ended)
         status = row[1]
         disposition = max((stored, disposition), key=lambda value: rank.get(value, -1))
         # only a connection opened after the block reopens it; existing and closing states
@@ -396,7 +398,7 @@ def search_text(row, names):
     parts = [row["address"], row.get("note"), *(row.get("lists") or []),
              *(name.replace("FWMAP_", "").replace("_", " ") for name in row.get("lists") or []),
              *(remote.get(key) for key in ("hostname", "org", "country", "country_code", "city")),
-             *(row.get("services") or [])]
+             *(row.get("services") or []), (row.get("crowdsec") or {}).get("reason")]
     for address in row.get("inside") or []:
         parts += [address, names.get(address)]
     for target in row.get("targets") or []:

@@ -38,7 +38,7 @@ static int expect(const char *what, bool ok) {
 int main(void) {
   static const uint32_t counts[] = {0, 1, 29, 30, 31, EVIDENCE_COUNT_MAX, EVIDENCE_COUNT_MAX + 1};
   int failed = 0;
-  for (unsigned mask = 0; mask < 32; mask++)
+  for (unsigned mask = 0; mask < 64; mask++)
     for (unsigned severity = 0; severity <= 4; severity++)
       for (unsigned b = 0; b < sizeof(counts) / sizeof(*counts); b++)
         for (unsigned i = 0; i < sizeof(counts) / sizeof(*counts); i++) {
@@ -58,7 +58,8 @@ int main(void) {
             e.mask = (uint8_t)(mask | (list ? EVIDENCE_THREAT_LIST : 0));
             enum security_class want =
                 (e.mask & EVIDENCE_IDS_HIGH) ? SECURITY_S3
-                : (e.mask & EVIDENCE_IDS) || ((e.mask & EVIDENCE_PF_BLOCKED) && counts[b] >= 30) ? SECURITY_S2
+                : (e.mask & (EVIDENCE_IDS | EVIDENCE_CROWDSEC)) || ((e.mask & EVIDENCE_PF_BLOCKED) && counts[b] >= 30)
+                    ? SECURITY_S2
                 : e.mask ? SECURITY_S1 : SECURITY_S0;
             snprintf(what, sizeof(what), "class mask %u blocked %u", e.mask, counts[b]);
             failed |= expect(what, security_class(&e) == want);

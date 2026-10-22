@@ -80,6 +80,7 @@ from lib.common import (
     protocol_name, requested, secure_umask, service_name, service_port_label, write_json,
     write_text,
 )
+from lib.crowdsec import CrowdSec, LOCAL_LIST as CROWDSEC_LOCAL_LIST
 from lib.config import interface_names, ranking_profiles as configured_profiles, settings, topology, widget_in_use
 from lib.ids import (
     ALERT_BACKLOG_BYTES, EVE_LOG, AlertTracker, Correlator, alert_summary, connection_keys, connection_summary, firewall_blocks,
@@ -322,7 +323,7 @@ def _flow_entry(local, remote, flow, activity, local_addresses, context, wall_ti
         # the inside host the flow belongs to, or None for the firewall's own traffic
         "owner": flow.get("owner"),
         "egress": interfaces.get(flow.get("egress"), flow.get("egress")),
-        **threat_fields(remote, context.get("blocklists"), context.get("reputation")),
+        **threat_fields(remote, context.get("blocklists"), context.get("reputation"), context.get("crowdsec")),
         "ids": alerts.summary(remote, wall_time) if alerts is not None else None,
         "initiated": flow.get("initiated", "local"),
         "targets": [describe_target(target, names, networks, interfaces, local_addresses)
@@ -479,11 +480,11 @@ class ThreatRecorder:
                 self.db = threats.connect(self.path)
 
             def lists_for(address):
-                return threat_lists_for(address, blocklists, reputation, correlator)
+                return threat_lists_for(address, blocklists, reputation, correlator, collector.crowdsec)
 
             seen = contain_ips_drops(threats.observe_aggregates(sample, lists_for), correlator)
-            seen.update(ips_drops(correlator, seen, self.last_wall, blocklists, reputation))
-            seen.update(firewall_blocks(correlator, seen, self.last_wall, blocklists, reputation))
+            seen.update(ips_drops(correlator, seen, self.last_wall, blocklists, reputation, collector.crowdsec))
+            seen.update(firewall_blocks(correlator, seen, self.last_wall, blocklists, reputation, collector.crowdsec))
             if collector.geo is not None and seen:
                 collector.geo.resolve(list(seen))
             index = connection_keys(correlator) if seen else None
@@ -491,6 +492,9 @@ class ThreatRecorder:
             for address, entry in seen.items():
                 entry["remote"] = self._identity(address, collector)
                 entry["ids"] = collector.alerts.summary(address)
+                ban = collector.crowdsec.lookup(address)
+                if ban:
+                    entry["crowdsec"] = {key: ban[key] for key in ("reason", "origin", "type", "until")}
                 entry["connections"] = connection_summary(address, correlator, names, collector.interfaces,
                                                           index=index)
             threats.record(self.db, seen)
@@ -656,6 +660,8 @@ class Collector:
         # threat lists: PF tables the state collector classifies with (lookups answer from the last sample)
         self.blocklists = ThreatClassification()
         self.reputation = Reputation(self.store)
+        # CrowdSec's bans (reason, origin, end), with *Use CrowdSec*
+        self.crowdsec = CrowdSec()
         self.recorder = ThreatRecorder()
         # the active ranking profile (an administrative setting; refreshed with the settings)
         self.profile, self.profile_problem = ranking_profiles.resolve()
@@ -729,6 +735,7 @@ class Collector:
             self.checked["host"] = now
         if self._due("settings", now, SETTINGS_REFRESH_SECONDS):
             self.values = settings()
+            self.crowdsec.configure(self.values.get("crowdsec", "1") == "1")
             self.recording = recording_wanted(self.values)
             # the active profile is the collector's startup configuration: another active profile or
             # another definition of it (its fingerprint) restarts it; edits to other profiles change
@@ -783,13 +790,14 @@ class Collector:
             self.correlator.forwards = port_forwards()
             self.checked["metadata"] = now
         if self._due("blocklists", now, BLOCKLIST_REFRESH_SECONDS):
-            tables, unavailable = chosen_threat_lists(self.values.get("threat_lists"))
+            tables, unavailable = chosen_threat_lists(self.values.get("threat_lists"), self.crowdsec.enabled)
             countries, missing_countries = chosen_sets(self.values.get("country_sets"))
             operational, missing_operational = chosen_sets(self.values.get("operational_sets"))
             self.blocklists.configure(tables, now, unavailable, countries, operational,
                                       missing_countries | missing_operational)
             self.checked["blocklists"] = now
         self.reputation.refresh(now)
+        self.crowdsec.refresh()
 
     def ingest(self, sample, now, wall, foreground):
         """Feed collector matches, blocked attempts and Suricata alerts to Python policy.
@@ -905,6 +913,7 @@ class Collector:
         context = {
             "names": self.host_names(), "networks": self.networks, "interfaces": self.interfaces,
             "blocklists": self.blocklists, "reputation": self.reputation, "alerts": self.alerts,
+            "crowdsec": self.crowdsec,
             "descriptions": self.descriptions,
         }
         homes = self.home_plan(now)
@@ -916,23 +925,27 @@ class Collector:
             geo.resolve([origin])
         payload["blocks"] = block_summary(
             self.blocks, geo, self.local_addresses, origin, now, self.descriptions, self.interfaces,
-            self.blocklists, self.reputation, self.alerts,
+            self.blocklists, self.reputation, self.alerts, self.crowdsec,
         )
         shown = {flow["dest"] for flow in payload["flows"]} | {block["source"] for block in payload["blocks"]}
         if snapshot:
             # Keep address-alert evidence independently of ordinary flow byte selection.
             shown = {block["source"] for block in payload["blocks"]}
-        payload["alerts"] = alert_summary(self.alerts, geo, origin, shown, self.blocklists, self.reputation)
+        payload["alerts"] = alert_summary(self.alerts, geo, origin, shown, self.blocklists, self.reputation,
+                                          crowdsec=self.crowdsec)
         if not snapshot:
             self.add_security_objects(payload, geo)
         payload["ids_flows"] = self.correlator.summary(geo, origin, self.host_names(), self.networks, self.interfaces,
-                                                       self.blocklists, self.reputation)
+                                                       self.blocklists, self.reputation, crowdsec=self.crowdsec)
         # which lists are consulted, so the details can show "not listed" per list
         # every configured interface, so the interface filter lists the quiet ones too
         # (not loopback or the IPsec encapsulation device: no inside host lives behind them)
         payload["interfaces"] = sorted({name for device, name in self.interfaces.items()
                                         if not re.match(r"^(lo|enc)\d+$", device)}, key=str.lower)
-        payload["threat_lists"] = list(self.blocklists.names) + ([REPUTATION_LIST] if self.reputation.scores else [])
+        payload["threat_lists"] = list(self.blocklists.names) + ([REPUTATION_LIST] if self.reputation.scores else []) \
+            + ([CROWDSEC_LOCAL_LIST] if self.crowdsec.enabled else [])
+        # with Use CrowdSec, the details show a CrowdSec card (banned or not) and its actions
+        payload["crowdsec"] = {"enabled": self.crowdsec.enabled}
         if origin and not any(location["id"] == origin for location in payload["locations"]):
             location = homes.location(origin)
             if location is None and geo.get(origin):
@@ -962,7 +975,11 @@ class Collector:
         geo.resolve([item["address"] for item in objects])
         for item in objects:
             location = geo.get(item["address"]) or {}
-            item["lists"] = threat_lists_for(item["address"], self.blocklists, self.reputation)
+            item["lists"] = threat_lists_for(item["address"], self.blocklists, self.reputation,
+                                             crowdsec=self.crowdsec)
+            ban = self.crowdsec.lookup(item["address"])
+            if ban:
+                item["crowdsec"] = {key: ban[key] for key in ("reason", "origin", "type", "until", "bans")}
             item.update({key: location.get(source) for key, source in (
                 ("lat", "lat"), ("lon", "lon"), ("country", "country_name"), ("country_code", "country"))})
         payload["security"] = objects
@@ -1351,7 +1368,7 @@ class Collector:
     def evidence_facts(self):
         """{remote: facts} of IDS, blocked-attempt and reputation evidence (lib/evidence.py), for the
         collector's ranking, forced tracking and threat summary."""
-        facts = evidence_facts.gather(self.alerts, self.correlator, self.blocks, self.reputation)
+        facts = evidence_facts.gather(self.alerts, self.correlator, self.blocks, self.reputation, self.crowdsec)
         self.evidence_omitted = max(0, len(facts) - state_collector.THREAT_REMOTES)
         self.sent_evidence = facts
         return facts
@@ -1362,6 +1379,7 @@ class Collector:
         evidence.update(key[3] for key in self.correlator.blocked)
         evidence.update(self.blocks.sources)
         evidence.update(self.reputation.flagged)
+        evidence.update(address for address in self.crowdsec.local if self.crowdsec.detected(address))
         return evidence
 
     def _record_collector(self, sample=None, error=None):
@@ -1436,6 +1454,7 @@ class Collector:
                         "window": self.alerts.window, "sources": len(self.alerts.sources),
                         "cap": self.alerts.max_sources},
                 "reputation": {"flagged": len(self.reputation.flagged)},
+                "crowdsec": self.crowdsec.status(),
                 "remotes": {"sent": len(self.sent_evidence), "omitted": self.evidence_omitted,
                             "cap": state_collector.THREAT_REMOTES}}
             current["ingest_rejected"] = dict(self.ingest_rejected)

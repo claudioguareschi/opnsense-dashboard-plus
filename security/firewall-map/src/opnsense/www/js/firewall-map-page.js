@@ -591,6 +591,56 @@
 			}
 		});
 	}
+	var CROWDSEC_DURATIONS = [
+		["1h", "crowdsec_1h"],
+		["4h", "crowdsec_4h"],
+		["24h", "crowdsec_24h"],
+		["168h", "crowdsec_7d"],
+		["720h", "crowdsec_30d"]
+	];
+	/** Ban one address with CrowdSec; the CrowdSec plugin applies it to its ban tables. */
+	function banWithCrowdsec(address) {
+		const $duration = $("<select class=\"form-control\"></select>").attr("aria-label", T.crowdsec_duration).html(CROWDSEC_DURATIONS.map(([value, key]) => `<option value="${value}"${value === "24h" ? " selected" : ""}>${escapeHtml(T[key])}</option>`).join(""));
+		const $reason = $("<input type=\"text\" class=\"form-control\" maxlength=\"100\">").attr("placeholder", T.crowdsec_reason_hint).attr("aria-label", T.crowdsec_reason);
+		const $form = $("<div></div>").append($(`<label>${escapeHtml(T.crowdsec_duration)}</label>`), $duration).append($(`<label class="__mt">${escapeHtml(T.crowdsec_reason)}</label>`), $reason).append($(`<div class="help-block">${escapeHtml(T.crowdsec_ban_help)}</div>`));
+		BootstrapDialog.show({
+			title: escapeHtml(`${T.crowdsec_ban}: ${address}`),
+			message: $form,
+			buttons: [{
+				label: T.cancel,
+				action: (dialog) => dialog.close()
+			}, {
+				label: T.crowdsec_ban,
+				cssClass: "btn-danger",
+				action: async (dialog) => {
+					dialog.close();
+					try {
+						const result = await postJSON(`/api/firewallmap/crowdsec/ban/${encodeURIComponent(address)}`, {
+							duration: $duration.val(),
+							reason: $reason.val()
+						});
+						if (result.status !== "ok") throw new Error(result.error || T.action_failed);
+						notify(`${address}: ${T.crowdsec_banned}`, BootstrapDialog.TYPE_SUCCESS);
+					} catch (error) {
+						notifyFailure(error);
+					}
+				}
+			}]
+		});
+	}
+	/** Remove the bans CrowdSec holds for one address. */
+	function unbanInCrowdsec(address, origin) {
+		const comeback = origin === "community" || origin === "list" ? ` ${T.crowdsec_comeback}` : "";
+		confirmAction(`${T.crowdsec_unban_confirm} ${address}?${comeback}`, async () => {
+			try {
+				const result = await postJSON(`/api/firewallmap/crowdsec/unban/${encodeURIComponent(address)}`, {});
+				if (result.status !== "ok") throw new Error(result.error || T.action_failed);
+				notify(`${address}: ${T.crowdsec_unbanned}`, BootstrapDialog.TYPE_SUCCESS);
+			} catch (error) {
+				notifyFailure(error);
+			}
+		});
+	}
 	function addCountry(code) {
 		chooseAlias(["geoip", "geoip (ip in country)"], escapeHtml(`${T.add_country} (${code})`), (name, uuid) => {
 			confirmAction(`${T.add_confirm} ${code} → ${name}?`, async () => {
@@ -802,6 +852,14 @@
 		const hours = Math.floor(minutes % 1440 / 60);
 		return days ? `${unit("map_days", days)} ${unit("map_hours", hours)}` : `${unit("map_hours", hours)} ${unit("map_minutes", minutes % 60)}`;
 	}
+	/** Where a CrowdSec ban came from, as the map says it (lib/crowdsec.py origins). */
+	function crowdsecOrigin(origin) {
+		return T[`crowdsec_origin_${origin}`] || T.crowdsec_origin_other;
+	}
+	/** "ends in 3 h" for a ban's end (epoch seconds). */
+	function crowdsecEnds(until) {
+		return fill(T.crowdsec_ends, { time: spanText(Math.max(0, until - Date.now() / 1e3)) });
+	}
 	//#endregion
 	//#region page/investigate.js
 	function scoreBadge(score) {
@@ -839,6 +897,12 @@
 			["ISP", escapeHtml([abuse.isp, abuse.domain].filter(Boolean).join(" · "))]
 		]));
 		else if (!result.abuseipdb_configured) html += `<div class="text-muted fwmap-inv-section">${escapeHtml(T.abuseipdb_hint)}</div>`;
+		const crowdsec = result.crowdsec;
+		if (crowdsec) {
+			const bans = (crowdsec.bans || []).map((ban) => `${escapeHtml(ban.reason || "—")} <span class="text-muted">${escapeHtml(crowdsecOrigin(ban.origin))} · ${escapeHtml(crowdsecEnds(ban.until))}</span>`);
+			const seen = (crowdsec.alerts || []).map((alert) => `${escapeHtml(alert.scenario || "—")} <span class="text-muted">${escapeHtml([alert.events !== null && alert.events !== void 0 ? `${alert.events} ${T.crowdsec_events}` : "", alert.stop || alert.start].filter(Boolean).join(" · "))}</span>`);
+			html += section("CrowdSec", crowdsec, table([[T.crowdsec_bans_label, bans.length ? bans.join("<br>") : escapeHtml(T.crowdsec_not_banned)], [T.crowdsec_detected, seen.length ? seen.join("<br>") : escapeHtml(T.crowdsec_nothing_seen)]]));
+		}
 		return html;
 	}
 	/** Keep a card for the most recent addresses only. */
@@ -959,6 +1023,21 @@
 			title: T.open_ids
 		});
 	}
+	function crowdsecCard(ban, address) {
+		if (!state.data?.crowdsec?.enabled) return "";
+		const actions = state.can.manage && state.mode !== "snapshot" ? `<div class="__mt">${ban ? `<button type="button" class="btn btn-default btn-xs fwmap-crowdsec-unban" data-address="${escapeHtml(address)}" data-origin="${escapeHtml(ban.origin)}">${ic("unlock")} ${escapeHtml(T.crowdsec_unban)}</button>` : `<button type="button" class="btn btn-default btn-xs fwmap-crowdsec-ban" data-address="${escapeHtml(address)}">${ic("ban")} ${escapeHtml(T.crowdsec_ban)}</button>`}</div>` : "";
+		const body = ban ? rows([
+			[T.decision, pill(ban.origin === "local" ? "danger" : "warning", ban.type === "ban" ? T.crowdsec_banned_pill : ban.type, "ban")],
+			[T.crowdsec_reason_label, escapeHtml(ban.reason || "—")],
+			[T.crowdsec_source, escapeHtml(crowdsecOrigin(ban.origin))],
+			[T.crowdsec_until, escapeHtml(crowdsecEnds(ban.until))],
+			[T.crowdsec_bans, ban.bans > 1 ? escapeHtml(ban.bans) : ""]
+		]) + actions : `<div class="text-success">${ic("check")} ${escapeHtml(T.crowdsec_not_banned)}</div>${actions}`;
+		return card("shield-virus", "CrowdSec", ban ? `<div>${body}</div>` : body, {
+			href: "/ui/crowdsec/decisions/index",
+			title: T.crowdsec_open
+		});
+	}
 	function firewallBox(sub) {
 		return endBox("shield-halved", T.this_firewall_title, [sub]);
 	}
@@ -1005,6 +1084,7 @@
 				["NAT", inside && outbound ? escapeHtml(`${T.yes} (${inside.ip} → ${flow.origin})`) : target && !target.firewall ? escapeHtml(`${T.port_forward} (${flow.origin} → ${hostPort(target.ip, target.port)})`) : escapeHtml(T.no)]
 			]),
 			ids: idsCard(flow.ids, null),
+			crowdsec: crowdsecCard(flow.crowdsec || item.crowdsec, address),
 			reputation: reputationCard({
 				...item,
 				address,
@@ -1058,6 +1138,7 @@
 				["IPS", ids.ips_dropped ? pill(serious ? "warning" : "default", T.ips_dropped) : ""]
 			]),
 			ids: idsCard(null, ids.groups),
+			crowdsec: crowdsecCard(ids.crowdsec || item.crowdsec, address),
 			reputation: reputationCard({
 				...item,
 				address
@@ -1093,6 +1174,7 @@
 				[T.target, escapeHtml(block.target || "")]
 			]),
 			ids: idsCard(block.ids, null),
+			crowdsec: crowdsecCard(block.crowdsec || item.crowdsec, address),
 			reputation: reputationCard({
 				...item,
 				address
@@ -1108,6 +1190,7 @@
 			connection: `<div class="text-muted">${escapeHtml(T.no_connection)}</div>`,
 			firewall: `<div class="text-muted">${escapeHtml(T.no_connection)}</div>`,
 			ids: idsCard(alert?.ids, null),
+			crowdsec: crowdsecCard(alert?.crowdsec || item.crowdsec, address),
 			reputation: reputationCard({
 				...item,
 				address
@@ -1232,6 +1315,7 @@
 			title: T.open_log
 		})}
         ${model.ids}
+        ${model.crowdsec || ""}
         ${model.reputation}
       </div>
       ${investigation ? investigationPanel(investigation) : ""}
@@ -1662,6 +1746,7 @@
           ${rule ? `<li title="${escapeHtml(T.rule)}">${ic("shield-halved")} ${escapeHtml(rule)}</li>` : ""}
         </ul>
         ${idsLines(row.ids, TEXT)}
+        ${crowdsecLine(row.crowdsec)}
       </div>
       <div class="text-muted fwmap-q-when">
         <span title="${escapeHtml((/* @__PURE__ */ new Date(row.last_seen * 1e3)).toLocaleString())}">${ic("clock")} ${escapeHtml(agoText(row.last_seen))}</span>
@@ -1695,12 +1780,19 @@
           <button type="button" class="btn ${state.can.aliases ? "btn-danger" : "btn-default"} dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-label="${escapeHtml(T.more)}">${state.can.aliases ? "" : `${escapeHtml(T.more)} `}<span class="caret"></span></button>
           <ul class="dropdown-menu dropdown-menu-right">
             <li><a href="#" class="fwmap-q-edit-note">${ic("pen")} ${escapeHtml(T.edit_note)}</a></li>
+            ${state.can.manage && state.data?.crowdsec?.enabled ? `<li><a href="#" class="fwmap-q-crowdsec-ban">${ic("shield-virus")} ${escapeHtml(T.crowdsec_ban)}</a></li>` : ""}
             ${state.can.kill ? `<li><a href="#" class="fwmap-q-kill">${ic("trash-can")} ${escapeHtml(T.kill_states)}</a></li>` : ""}
           </ul>
         </div>
       </div>
     </div>
   </div>`;
+	}
+	/** Why CrowdSec banned the address when it was last recorded: reason, where it came from, end. */
+	function crowdsecLine(ban) {
+		if (!ban) return "";
+		const ended = ban.until <= Date.now() / 1e3;
+		return `<div class="${ban.origin === "local" ? "text-danger" : "text-muted"}">${ic("shield-virus")} CrowdSec: ${escapeHtml(ban.reason || "—")} · ${escapeHtml(crowdsecOrigin(ban.origin))} · ${escapeHtml(ended ? T.crowdsec_ended : crowdsecEnds(ban.until))}</div>`;
 	}
 	/** Country name to code from the live map (older queue entries only stored the name). */
 	function countryCodeOf(name) {
@@ -1908,6 +2000,9 @@
 					await setThreat(address, "blocked", note);
 				}));
 			});
+		}).on("click", ".fwmap-q-crowdsec-ban", function(event) {
+			event.preventDefault();
+			banWithCrowdsec(addressOf(this));
 		}).on("click", ".fwmap-q-investigate, .fwmap-inv-retry", (event) => {
 			event.preventDefault();
 			investigate(addressOf(event.currentTarget), render);
@@ -2990,6 +3085,8 @@
 		on(".fwmap-kill", ($element) => killStates(address($element)));
 		on(".fwmap-alias", ($element) => addToAlias(address($element)));
 		on(".fwmap-mark", ($element) => markThreat(address($element)));
+		on(".fwmap-crowdsec-ban", ($element) => banWithCrowdsec(address($element)));
+		on(".fwmap-crowdsec-unban", ($element) => unbanInCrowdsec(address($element), String($element.data("origin") || "")));
 		on(".fwmap-country", ($element) => addCountry(String($element.data("code"))));
 		on(".fwmap-abuse-check", ($element) => checkAbuse(address($element), renderDetails));
 		on(".fwmap-investigate", ($element) => investigate(address($element), renderDetails));

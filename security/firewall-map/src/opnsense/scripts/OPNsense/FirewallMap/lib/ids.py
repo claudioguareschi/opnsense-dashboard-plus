@@ -52,7 +52,7 @@ MAX_SIGNATURES_PER_SOURCE = 10
 ALERT_BACKLOG_BYTES = 2 * 1024 * 1024
 
 
-def alert_summary(alerts, geo, origin, shown, blocklists=None, reputation=None, now=None):
+def alert_summary(alerts, geo, origin, shown, blocklists=None, reputation=None, now=None, crowdsec=None):
     """Alerting addresses with no arc on the map right now (the connection ended or never got one)."""
     if alerts is None:
         return []
@@ -67,7 +67,7 @@ def alert_summary(alerts, geo, origin, shown, blocklists=None, reputation=None, 
             "source": address,
             "target": origin,
             **location_fields(location),
-            **threat_fields(address, blocklists, reputation),
+            **threat_fields(address, blocklists, reputation, crowdsec),
             "ids": alerts.summary(address, now),
         })
     return result
@@ -364,7 +364,8 @@ class Correlator:
             "ips_dropped": any(item["action"] == "blocked" for item in items),
         }
 
-    def summary(self, geo, origin, names, networks, interfaces, blocklists=None, reputation=None, now=None):
+    def summary(self, geo, origin, names, networks, interfaces, blocklists=None, reputation=None, now=None,
+                crowdsec=None):
         """Correlated connections for the map: each is drawn as its own arc."""
         now = time.time() if now is None else now
         geo.resolve([key[3] for key in self.flows])
@@ -376,7 +377,7 @@ class Correlator:
             result.append({
                 **self._flow_entry(key, flow, origin, names, networks, interfaces, now),
                 **location_fields(location),
-                **threat_fields(key[3], blocklists, reputation),
+                **threat_fields(key[3], blocklists, reputation, crowdsec),
             })
         return result
 
@@ -647,14 +648,14 @@ def connection_summary(address, correlator, names, interfaces, wall=None, index=
                      key=lambda item: (not item["ids"], -((item["bytes_in"] or 0) + (item["bytes_out"] or 0))))
 
 
-def firewall_blocks(correlator, seen, since, blocklists=None, reputation=None):
+def firewall_blocks(correlator, seen, since, blocklists=None, reputation=None, crowdsec=None):
     """Flagged sources PF blocked since the last history recording."""
     entries = {}
     for key, connection in correlator.blocked.items():
         remote = key[3]
         if remote in seen or (connection.get("seen") or 0) < since:
             continue
-        lists = threat_lists_for(remote, blocklists, reputation)
+        lists = threat_lists_for(remote, blocklists, reputation, crowdsec=crowdsec)
         if not lists:
             continue
         inside = connection.get("inside")
@@ -710,7 +711,7 @@ def contain_ips_drops(seen, correlator):
     return seen
 
 
-def ips_drops(correlator, seen, since, blocklists=None, reputation=None):
+def ips_drops(correlator, seen, since, blocklists=None, reputation=None, crowdsec=None):
     """Addresses whose traffic Suricata dropped (IPS) since the last recording, as queue entries.
 
     They carry the same fields as allowed traffic, so the queue shows them the same way, under
@@ -729,7 +730,7 @@ def ips_drops(correlator, seen, since, blocklists=None, reputation=None):
         started_by_remote = bool(connection.get("remote_started"))
         port = (inside_port or key[2]) if started_by_remote else key[4]
         entry = entries.setdefault(remote, {
-            "lists": threat_lists_for(remote, blocklists, reputation) + [IDS_LIST],
+            "lists": threat_lists_for(remote, blocklists, reputation, crowdsec=crowdsec) + [IDS_LIST],
             "inbound": 0, "outbound": 0, "targets": [], "inside": [], "services": [], "bytes": 0,
             "youngest": None, "service_ports": {}, "disposition": "ips_dropped",
         })

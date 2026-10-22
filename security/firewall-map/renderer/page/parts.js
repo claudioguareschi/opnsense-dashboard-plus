@@ -126,3 +126,13 @@ export function spanText(seconds) {
   const hours = Math.floor((minutes % 1440) / 60);
   return days ? `${unit('map_days', days)} ${unit('map_hours', hours)}` : `${unit('map_hours', hours)} ${unit('map_minutes', minutes % 60)}`;
 }
+
+/** Where a CrowdSec ban came from, as the map says it (lib/crowdsec.py origins). */
+export function crowdsecOrigin(origin) {
+  return T[`crowdsec_origin_${origin}`] || T.crowdsec_origin_other;
+}
+
+/** "ends in 3 h" for a ban's end (epoch seconds). */
+export function crowdsecEnds(until) {
+  return fill(T.crowdsec_ends, {time: spanText(Math.max(0, until - Date.now() / 1000))});
+}

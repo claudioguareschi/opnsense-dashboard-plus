@@ -677,7 +677,7 @@ class CollectorLoopTest(unittest.TestCase):
         engine = self.collector.collector_status["state_collector"]
         self.assertEqual(engine["ranking_profile"], dict(profiles.descriptor(balanced), problem=None))
         self.assertEqual(engine["collector_generation"], self.collector.collector_status["generation"])
-        self.assertEqual(set(engine["evidence_sources"]), {"blocks", "ids", "reputation", "remotes"})
+        self.assertEqual(set(engine["evidence_sources"]), {"blocks", "ids", "reputation", "crowdsec", "remotes"})
         self.assertEqual(engine["evidence_sources"]["remotes"]["cap"], COLLECTOR.state_collector.THREAT_REMOTES)
         self.assertFalse({"focus", "focus_default", "profiles"} & set(saved))
         self.assertNotIn("profiles", context)
@@ -892,6 +892,7 @@ class ThreatRecorderTest(unittest.TestCase):
         collector.geo, collector.hostnames = None, None
         collector.alerts.summary.return_value = None
         collector.correlator = COLLECTOR.Correlator()
+        collector.crowdsec = COLLECTOR.CrowdSec()
         names = {"192.168.1.2": "mail"}
         collector.host_names.return_value = names
         records = PF.parse_states(nat_state(100, 100) + nat_state(100, 100).replace("45.56.79.53", "34.1.1.1"))
@@ -913,6 +914,7 @@ class ThreatRecorderTest(unittest.TestCase):
         collector = mock.Mock()
         collector.local_addresses, collector.networks = {"1.2.3.163"}, []
         collector.correlator = COLLECTOR.Correlator()
+        collector.crowdsec = COLLECTOR.CrowdSec()
         with mock.patch.object(COLLECTOR, "threat_lists_for", return_value=[]):
             recorder.update(self.collector_sample(PF.parse_states(nat_state(100, 100))), collector, now=0.0)
         collector.host_names.assert_not_called()
@@ -928,6 +930,7 @@ class ThreatRecorderTest(unittest.TestCase):
             collector.hostnames.names = {"45.56.79.53": ("scanner.example", 0.0)}
             collector.alerts.summary.return_value = None
             collector.correlator = COLLECTOR.Correlator()
+            collector.crowdsec = COLLECTOR.CrowdSec()
             collector.leases, collector.interfaces = {}, {}
             records = PF.parse_states(nat_state(100, 100))
             with mock.patch.object(COLLECTOR, "threat_lists_for", lambda address, *args: ["Test list"]):
@@ -948,6 +951,7 @@ class ThreatRecorderCommitTest(unittest.TestCase):
         collector.geo, collector.hostnames = None, None
         collector.alerts.summary.return_value = None
         collector.correlator = COLLECTOR.Correlator()
+        collector.crowdsec = COLLECTOR.CrowdSec()
         records = PF.parse_states(nat_state(100, 100))
         sample = flagged_sample(records)
         windows = []

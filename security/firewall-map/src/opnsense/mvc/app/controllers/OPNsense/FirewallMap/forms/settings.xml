@@ -163,6 +163,12 @@
             <help>Deletes the AbuseIPDB key when you save. Abuse reports and the blacklist stop until a new key is entered.</help>
         </field>
         <field>
+            <id>firewallmap.general.crowdsec</id>
+            <label>Use CrowdSec</label>
+            <type>checkbox</type>
+            <help>With the CrowdSec plugin installed: its ban tables count as threat lists, the map and threat history show why each address is banned (the scenario, whether CrowdSec detected it on this firewall or it comes from a blocklist, and when the ban ends), and administrators can ban or unban an address with CrowdSec. Firewall Map+ reads CrowdSec with cscli and registers nothing with it.</help>
+        </field>
+        <field>
             <type>header</type>
             <label>Blocklist integration</label>
         </field>

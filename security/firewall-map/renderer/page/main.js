@@ -32,7 +32,7 @@
 import {escapeHtml, fill} from '../src/format.js';
 import {parseSettings, summaryQuery} from '../src/options.js';
 import {createRefreshLoop, REFRESH_APPLIED_KEY} from '../src/refresh.js';
-import {addCountry, addToAlias, killStates, markThreat, showStates} from './actions.js';
+import {addCountry, addToAlias, banWithCrowdsec, killStates, markThreat, showStates, unbanInCrowdsec} from './actions.js';
 import {getJSON} from './api.js';
 import {resetFilters, state, T, TEXT} from './context.js';
 import {renderDetails} from './details.js';
@@ -322,6 +322,8 @@ function bindDetails() {
   on('.fwmap-kill', ($element) => killStates(address($element)));
   on('.fwmap-alias', ($element) => addToAlias(address($element)));
   on('.fwmap-mark', ($element) => markThreat(address($element)));
+  on('.fwmap-crowdsec-ban', ($element) => banWithCrowdsec(address($element)));
+  on('.fwmap-crowdsec-unban', ($element) => unbanInCrowdsec(address($element), String($element.data('origin') || '')));
   on('.fwmap-country', ($element) => addCountry(String($element.data('code'))));
   on('.fwmap-abuse-check', ($element) => checkAbuse(address($element), renderDetails));
   on('.fwmap-investigate', ($element) => investigate(address($element), renderDetails));

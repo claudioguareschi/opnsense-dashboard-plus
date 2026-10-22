@@ -29,7 +29,7 @@ import {escapeHtml} from '../src/format.js';
 import {errorText, notify, postJSON} from './api.js';
 import {MAX_ABUSE_SCORES, MAX_INVESTIGATIONS, state, T} from './context.js';
 import {ic} from './icons.js';
-import {pill, rows} from './parts.js';
+import {crowdsecEnds, crowdsecOrigin, pill, rows} from './parts.js';
 
 function scoreBadge(score) {
   return pill(score >= 25 ? (score >= 75 ? 'danger' : 'warning') : score > 0 ? 'default' : 'success', `${score}%`);
@@ -74,6 +74,18 @@ function investigationCard(result) {
     ]));
   } else if (!result.abuseipdb_configured) {
     html += `<div class="text-muted fwmap-inv-section">${escapeHtml(T.abuseipdb_hint)}</div>`;
+  }
+  const crowdsec = result.crowdsec;
+  if (crowdsec) {
+    const bans = (crowdsec.bans || []).map((ban) => `${escapeHtml(ban.reason || '—')} <span class="text-muted">`
+      + `${escapeHtml(crowdsecOrigin(ban.origin))} · ${escapeHtml(crowdsecEnds(ban.until))}</span>`);
+    const seen = (crowdsec.alerts || []).map((alert) => `${escapeHtml(alert.scenario || '—')} <span class="text-muted">`
+      + `${escapeHtml([alert.events !== null && alert.events !== undefined ? `${alert.events} ${T.crowdsec_events}` : '',
+        alert.stop || alert.start].filter(Boolean).join(' · '))}</span>`);
+    html += section('CrowdSec', crowdsec, table([
+      [T.crowdsec_bans_label, bans.length ? bans.join('<br>') : escapeHtml(T.crowdsec_not_banned)],
+      [T.crowdsec_detected, seen.length ? seen.join('<br>') : escapeHtml(T.crowdsec_nothing_seen)],
+    ]));
   }
   return html;
 }

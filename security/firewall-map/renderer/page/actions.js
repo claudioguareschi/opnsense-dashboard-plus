@@ -24,7 +24,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* Actions on an address: states, aliases, the watchlist, GeoIP countries. They change the firewall. */
+/* Actions on an address: states, aliases, the watchlist, GeoIP countries, CrowdSec bans. They change the firewall. */
 import {escapeHtml, hostPort, plain} from '../src/format.js';
 import {confirmAction, errorText, getJSON, notify, notifyFailure, postJSON} from './api.js';
 import {T, WATCHLIST} from './context.js';
@@ -136,6 +136,58 @@ export function markThreat(address) {
         await addAddressToAlias(WATCHLIST, address);
       }
       notify(`${address} → ${WATCHLIST}. ${T.marked}`, BootstrapDialog.TYPE_SUCCESS);
+    } catch (error) {
+      notifyFailure(error);
+    }
+  });
+}
+
+// how long a ban made from the map lasts (lib/crowdsec.py DURATIONS, CrowdsecController)
+const CROWDSEC_DURATIONS = [['1h', 'crowdsec_1h'], ['4h', 'crowdsec_4h'], ['24h', 'crowdsec_24h'],
+  ['168h', 'crowdsec_7d'], ['720h', 'crowdsec_30d']];
+
+/** Ban one address with CrowdSec; the CrowdSec plugin applies it to its ban tables. */
+export function banWithCrowdsec(address) {
+  const $duration = $('<select class="form-control"></select>').attr('aria-label', T.crowdsec_duration)
+    .html(CROWDSEC_DURATIONS.map(([value, key]) => `<option value="${value}"${value === '24h' ? ' selected' : ''}>${escapeHtml(T[key])}</option>`).join(''));
+  const $reason = $('<input type="text" class="form-control" maxlength="100">').attr('placeholder', T.crowdsec_reason_hint)
+    .attr('aria-label', T.crowdsec_reason);
+  const $form = $('<div></div>')
+    .append($(`<label>${escapeHtml(T.crowdsec_duration)}</label>`), $duration)
+    .append($(`<label class="__mt">${escapeHtml(T.crowdsec_reason)}</label>`), $reason)
+    .append($(`<div class="help-block">${escapeHtml(T.crowdsec_ban_help)}</div>`));
+  BootstrapDialog.show({
+    title: escapeHtml(`${T.crowdsec_ban}: ${address}`), message: $form,
+    buttons: [
+      {label: T.cancel, action: (dialog) => dialog.close()},
+      {label: T.crowdsec_ban, cssClass: 'btn-danger', action: async (dialog) => {
+        dialog.close();
+        try {
+          const result = await postJSON(`/api/firewallmap/crowdsec/ban/${encodeURIComponent(address)}`,
+            {duration: $duration.val(), reason: $reason.val()});
+          if (result.status !== 'ok') {
+            throw new Error(result.error || T.action_failed);
+          }
+          notify(`${address}: ${T.crowdsec_banned}`, BootstrapDialog.TYPE_SUCCESS);
+        } catch (error) {
+          notifyFailure(error);
+        }
+      }},
+    ],
+  });
+}
+
+/** Remove the bans CrowdSec holds for one address. */
+export function unbanInCrowdsec(address, origin) {
+  // a community or blocklist ban can come back with CrowdSec's next blocklist update
+  const comeback = origin === 'community' || origin === 'list' ? ` ${T.crowdsec_comeback}` : '';
+  confirmAction(`${T.crowdsec_unban_confirm} ${address}?${comeback}`, async () => {
+    try {
+      const result = await postJSON(`/api/firewallmap/crowdsec/unban/${encodeURIComponent(address)}`, {});
+      if (result.status !== 'ok') {
+        throw new Error(result.error || T.action_failed);
+      }
+      notify(`${address}: ${T.crowdsec_unbanned}`, BootstrapDialog.TYPE_SUCCESS);
     } catch (error) {
       notifyFailure(error);
     }

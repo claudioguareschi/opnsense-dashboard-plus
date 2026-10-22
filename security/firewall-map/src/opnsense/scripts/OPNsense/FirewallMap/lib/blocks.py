@@ -243,7 +243,7 @@ def _service(port, hits):
 
 
 def block_summary(blocks, geo, local_addresses, origin, now, descriptions, interfaces, blocklists=None,
-                  reputation=None, alerts=None):
+                  reputation=None, alerts=None, crowdsec=None):
     """Map-ready blocked sources; each arc ends at the firewall address that was hit."""
     visible = blocks.visible(now)
     geo.resolve([address for address, _ in visible])
@@ -273,7 +273,7 @@ def block_summary(blocks, geo, local_addresses, origin, now, descriptions, inter
             "interface": interfaces.get(entry["interface"], entry["interface"]),
             **location_fields(location),
             "accuracy_km": location.get("accuracy_km"),
-            **threat_fields(address, blocklists, reputation),
+            **threat_fields(address, blocklists, reputation, crowdsec),
             "ids": alerts.summary(address) if alerts is not None else None,
         })
     return result

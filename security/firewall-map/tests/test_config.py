@@ -60,7 +60,7 @@ class SettingsFileTest(unittest.TestCase):
                         "record_threats": "1", "blocklist_aliases": "0", "helper_memory": None,
                         "ranking_profile": "6c02d03d-4087-46a9-b5bc-6378fb5eeada", "country_sets": "Country_CN",
                         "operational_sets": "", "carp_backup_view": "mirror", "interval_min": 2, "interval_max": 60,
-                        "max_flows": 150}
+                        "max_flows": 150, "crowdsec": "1"}
             self.assertEqual(CONFIG.settings(path), expected)
             self.assertEqual(CONFIG.abuseipdb_key(path), "key")
             self.assertEqual([alias["name"] for alias in CONFIG.aliases(path)], ["Drop"])

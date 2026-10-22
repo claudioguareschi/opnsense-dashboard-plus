@@ -21,7 +21,8 @@
         "carp_backup_view": {{ general.carp_backup_view | default('mirror', true) | tojson }},
         "record_threats": {{ general.record_threats | default('1', true) | tojson }},
         "ranking_profile": {{ general.ranking_profile | default('', true) | tojson }},
-        "blocklist_aliases": {{ general.blocklist_aliases | default('0', true) | tojson }}
+        "blocklist_aliases": {{ general.blocklist_aliases | default('0', true) | tojson }},
+        "crowdsec": {{ general.crowdsec | default('1', true) | tojson }}
     },
     "ranking_profiles": [
 {% for profile in helpers.toList('OPNsense.FirewallMap.profiles.profile') %}

@@ -78,6 +78,10 @@
             evidence_blocks: {{ lang._('%s sources in the last %s (at most %s); only rules with logging enabled are seen')|json_encode }},
             evidence_ids: {{ lang._('%s sources in the last %s (at most %s)')|json_encode }},
             evidence_reputation: {{ lang._('%s addresses rated abusive by an AbuseIPDB lookup')|json_encode }},
+            evidence_crowdsec: {{ lang._('%s banned addresses and %s ranges, %s detected on this firewall; read %s')|json_encode }},
+            crowdsec_off: {{ lang._('Off (Use CrowdSec in the settings)')|json_encode }},
+            crowdsec_missing: {{ lang._('The CrowdSec plugin is not installed')|json_encode }},
+            crowdsec_pending: {{ lang._('Reading the bans…')|json_encode }},
             evidence_remotes: {{ lang._('%s remotes with evidence sent to the collector (at most %s), %s left out')|json_encode }},
             no_key: {{ lang._('No AbuseIPDB API key')|json_encode }},
             key_plugin: {{ lang._('Stored in the Firewall Map settings')|json_encode }},
@@ -262,6 +266,13 @@
             $('#evidence-blocks').html(source(sources.blocks, T.evidence_blocks));
             $('#evidence-ids').html(source(sources.ids, T.evidence_ids));
             $('#evidence-reputation').text(sources.reputation ? fill(T.evidence_reputation, count(sources.reputation.flagged)) : '—');
+            const crowdsec = sources.crowdsec;
+            $('#evidence-crowdsec').html(!crowdsec ? '—' : !crowdsec.available ? escape(T.crowdsec_missing)
+                : !crowdsec.enabled ? escape(T.crowdsec_off)
+                : crowdsec.error ? state(crowdsec.error)
+                : !crowdsec.updated ? escape(T.crowdsec_pending)
+                : escape(fill(T.evidence_crowdsec, count(crowdsec.bans), count(crowdsec.ranges), count(crowdsec.local), ''))
+                    + when(crowdsec.updated, now));
             $('#evidence-remotes').text(sources.remotes ? fill(T.evidence_remotes, count(sources.remotes.sent),
                 count(sources.remotes.cap), count(sources.remotes.omitted)) : '—');
 
@@ -443,6 +454,7 @@
             <tr><td style="width: 25%;">{{ lang._('Logged blocks') }}</td><td id="evidence-blocks"></td></tr>
             <tr><td>{{ lang._('IDS alerts') }}</td><td id="evidence-ids"></td></tr>
             <tr><td>{{ lang._('Reputation') }}</td><td id="evidence-reputation"></td></tr>
+            <tr><td>{{ lang._('CrowdSec') }}</td><td id="evidence-crowdsec"></td></tr>
             <tr><td>{{ lang._('Sent to the collector') }}</td><td id="evidence-remotes"></td></tr>
         </tbody>
     </table>

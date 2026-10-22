@@ -12,8 +12,9 @@
     <page-firewall-map-settings>
         <!--
             Also covers the status page (collector start, stop and restart, "Update now"), the lookups
-            an investigation makes to outside services, the review queue (including deleting reviewed
-            or dismissed entries) and deleting saved map snapshots.
+            an investigation makes to outside services, banning and unbanning addresses with CrowdSec,
+            the review queue (including deleting reviewed or dismissed entries) and deleting saved
+            map snapshots.
         -->
         <name>Firewall Map+: settings, investigations and threats</name>
         <patterns>
@@ -23,6 +24,7 @@
             <pattern>api/firewallmap/settings/*</pattern>
             <pattern>api/firewallmap/profiles/*</pattern>
             <pattern>api/firewallmap/investigate/*</pattern>
+            <pattern>api/firewallmap/crowdsec/*</pattern>
             <pattern>api/firewallmap/threats/*</pattern>
             <pattern>api/firewallmap/snapshot_admin/*</pattern>
         </patterns>

@@ -91,7 +91,7 @@ def settings(path=SETTINGS_FILE):
     values = {"provider": "auto", "license_key": "", "update_days": 3, "threat_lists": "",
               "record_threats": "1", "blocklist_aliases": "0", "helper_memory": "", "ranking_profile": "",
               "country_sets": "", "operational_sets": "", "carp_backup_view": "mirror",
-              "interval_min": "2", "interval_max": "60", "max_flows": str(RANKED_FLOWS_DEFAULT)}
+              "interval_min": "2", "interval_max": "60", "max_flows": str(RANKED_FLOWS_DEFAULT), "crowdsec": "1"}
     general = _read(path).get("general") or {}
     for field in values:
         if str(general.get(field) or "").strip():

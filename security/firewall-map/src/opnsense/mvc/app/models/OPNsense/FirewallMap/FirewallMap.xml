@@ -41,6 +41,11 @@
                 <ValidationMessage>An AbuseIPDB API key contains only letters and digits.</ValidationMessage>
             </abuseipdb_key>
             <remove_abuseipdb_key type="BooleanField" volatile="true"/>
+            <!-- read CrowdSec's bans (reason, origin, end) with cscli, and count its ban tables as threat lists -->
+            <crowdsec type="BooleanField">
+                <Default>1</Default>
+                <Required>Y</Required>
+            </crowdsec>
             <!-- pf tables that count as threat lists; empty: automatic -->
             <threat_lists type=".\ThreatListField">
                 <Multiple>Y</Multiple>

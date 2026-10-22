@@ -29,23 +29,24 @@
 Each source stays its own fact, so a remote can be blocked, IDS-detected and reputation-flagged at
 once; the collector adds the threat-list fact from its PF tables and derives the security class
 (S0-S3) from all of them. Everything here is read from already bounded trackers: filterlog hits in
-the block window, Suricata alerts in the alert window, AbuseIPDB verdicts in the cache.
+the block window, Suricata alerts in the alert window, AbuseIPDB verdicts in the cache, CrowdSec's
+bans for what it detected on this firewall (lib/crowdsec.py).
 """
 
 from .common import public_ip
 
-THREAT_LIST, PF_BLOCKED, IDS, IDS_HIGH, REPUTATION = 1, 2, 4, 8, 16
+THREAT_LIST, PF_BLOCKED, IDS, IDS_HIGH, REPUTATION, CROWDSEC = 1, 2, 4, 8, 16, 32
 # what a request may say (THREAT_LIST is the collector's own, from its PF tables)
-REQUEST_BITS = PF_BLOCKED | IDS | IDS_HIGH | REPUTATION
+REQUEST_BITS = PF_BLOCKED | IDS | IDS_HIGH | REPUTATION | CROWDSEC
 COUNT_MAX = 1000000
 # Suricata severities run from 1 (highest) to 3: IDS_HIGH is a worst severity of 1 or 2, the map's
 # long-standing rule for flagging an address (lib/ids.py ALERT_FLAG_SEVERITY)
 IDS_HIGH_SEVERITY = 2
 NAMES = {THREAT_LIST: "threat_list", PF_BLOCKED: "pf_blocked", IDS: "ids", IDS_HIGH: "ids_high",
-         REPUTATION: "reputation"}
+         REPUTATION: "reputation", CROWDSEC: "crowdsec"}
 
 
-def facts(blocked_hits=0, ids_alerts=0, ids_severity=0, reputation=False):
+def facts(blocked_hits=0, ids_alerts=0, ids_severity=0, reputation=False, crowdsec=False):
     """(mask, blocked hits, IDS alerts, IDS worst severity) as an EVIDENCE row carries them."""
     blocked_hits, ids_alerts = min(int(blocked_hits), COUNT_MAX), min(int(ids_alerts), COUNT_MAX)
     mask = PF_BLOCKED if blocked_hits > 0 else 0
@@ -56,6 +57,8 @@ def facts(blocked_hits=0, ids_alerts=0, ids_severity=0, reputation=False):
         ids_severity = 0
     if reputation:
         mask |= REPUTATION
+    if crowdsec:
+        mask |= CROWDSEC
     return mask, blocked_hits, ids_alerts, ids_severity
 
 
@@ -89,7 +92,7 @@ def security_objects(facts, remotes, shown, limit=MAX_SECURITY_OBJECTS):
     return objects[:limit], max(0, len(objects) - limit)
 
 
-def gather(alerts=None, correlator=None, blocks=None, reputation=None):
+def gather(alerts=None, correlator=None, blocks=None, reputation=None, crowdsec=None):
     """{remote: facts} for every public remote with evidence."""
     blocked, ids = {}, {}
     if blocks is not None:
@@ -112,10 +115,12 @@ def gather(alerts=None, correlator=None, blocks=None, reputation=None):
             if entry["signatures"]:
                 ids[address] = (entry["count"], min(item["severity"] for item in entry["signatures"].values()))
     flagged = reputation.flagged if reputation is not None else set()
+    detected = {address for address in crowdsec.local if crowdsec.detected(address)} if crowdsec is not None else set()
     result = {}
-    for address in set(blocked) | set(ids) | set(flagged):
+    for address in set(blocked) | set(ids) | set(flagged) | detected:
         if not public_ip(address):
             continue
         alerts_count, severity = ids.get(address, (0, 0))
-        result[address] = facts(blocked.get(address, 0), alerts_count, severity, address in flagged)
+        result[address] = facts(blocked.get(address, 0), alerts_count, severity, address in flagged,
+                                address in detected)
     return result

@@ -30,7 +30,7 @@ import {idsOutcome} from '../src/summaries.js';
 import {ABUSEIPDB_BLACKLIST_LIST, ABUSEIPDB_LOOKUP_LIST, state, T} from './context.js';
 import {ic} from './icons.js';
 import {investigationPanel} from './investigate.js';
-import {agoText, bigPill, card, endBox, pill, place, rows, serviceParts, spanText} from './parts.js';
+import {agoText, bigPill, card, crowdsecEnds, crowdsecOrigin, endBox, pill, place, rows, serviceParts, spanText} from './parts.js';
 
 // Investigate scrolls its card into view slowly enough to follow
 const REVEAL_MS = 900;
@@ -102,6 +102,30 @@ function idsCard(ids, groups) {
       </div>`).join(''), {href: '/ui/ids#alerts', title: T.open_ids});
 }
 
+// with Use CrowdSec: why CrowdSec bans the address, or that it does not
+function crowdsecCard(ban, address) {
+  if (!state.data?.crowdsec?.enabled) {
+    return '';
+  }
+  const actions = state.can.manage && state.mode !== 'snapshot'
+    ? `<div class="__mt">${ban
+      ? `<button type="button" class="btn btn-default btn-xs fwmap-crowdsec-unban" data-address="${escapeHtml(address)}" data-origin="${escapeHtml(ban.origin)}">${ic('unlock')} ${escapeHtml(T.crowdsec_unban)}</button>`
+      : `<button type="button" class="btn btn-default btn-xs fwmap-crowdsec-ban" data-address="${escapeHtml(address)}">${ic('ban')} ${escapeHtml(T.crowdsec_ban)}</button>`}</div>`
+    : '';
+  const body = ban
+    ? rows([
+      [T.decision, pill(ban.origin === 'local' ? 'danger' : 'warning', ban.type === 'ban' ? T.crowdsec_banned_pill : ban.type, 'ban')],
+      [T.crowdsec_reason_label, escapeHtml(ban.reason || '—')],
+      [T.crowdsec_source, escapeHtml(crowdsecOrigin(ban.origin))],
+      [T.crowdsec_until, escapeHtml(crowdsecEnds(ban.until))],
+      [T.crowdsec_bans, ban.bans > 1 ? escapeHtml(ban.bans) : ''],
+    ]) + actions
+    : `<div class="text-success">${ic('check')} ${escapeHtml(T.crowdsec_not_banned)}</div>${actions}`;
+  // a table body sits flush in the card: keep the buttons inside a body of their own
+  return card('shield-virus', 'CrowdSec', ban ? `<div>${body}</div>` : body,
+    {href: '/ui/crowdsec/decisions/index', title: T.crowdsec_open});
+}
+
 function firewallBox(sub) {
   return endBox('shield-halved', T.this_firewall_title, [sub]);
 }
@@ -155,6 +179,7 @@ function flowModel(flow, context) {
         : target && !target.firewall ? escapeHtml(`${T.port_forward} (${flow.origin} → ${hostPort(target.ip, target.port)})`) : escapeHtml(T.no)],
     ]),
     ids: idsCard(flow.ids, null),
+    crowdsec: crowdsecCard(flow.crowdsec || item.crowdsec, address),
     reputation: reputationCard({...item, address, lists: flow.lists, abuseipdb: flow.abuseipdb, sets: flow.sets}),
   };
 }
@@ -198,6 +223,7 @@ function idsFlowModel(ids, context) {
       ['IPS', ids.ips_dropped ? pill(serious ? 'warning' : 'default', T.ips_dropped) : ''],
     ]),
     ids: idsCard(null, ids.groups),
+    crowdsec: crowdsecCard(ids.crowdsec || item.crowdsec, address),
     reputation: reputationCard({...item, address}),
   };
 }
@@ -227,6 +253,7 @@ function blockModel(block, context) {
       [T.target, escapeHtml(block.target || '')],
     ]),
     ids: idsCard(block.ids, null),
+    crowdsec: crowdsecCard(block.crowdsec || item.crowdsec, address),
     reputation: reputationCard({...item, address}),
   };
 }
@@ -242,6 +269,7 @@ function alertModel(alert, context) {
     connection: `<div class="text-muted">${escapeHtml(T.no_connection)}</div>`,
     firewall: `<div class="text-muted">${escapeHtml(T.no_connection)}</div>`,
     ids: idsCard(alert?.ids, null),
+    crowdsec: crowdsecCard(alert?.crowdsec || item.crowdsec, address),
     reputation: reputationCard({...item, address}),
   };
 }
@@ -373,6 +401,7 @@ export function renderDetails() {
         ${card('chart-column', T.sec_connection, model.connection, state.can.states ? {cls: 'fwmap-states', address, title: T.show_states} : null)}
         ${card('shield-halved', T.sec_firewall, model.firewall, {href: '/ui/diagnostics/firewall/log', title: T.open_log})}
         ${model.ids}
+        ${model.crowdsec || ''}
         ${model.reputation}
       </div>
       ${investigation ? investigationPanel(investigation) : ''}
