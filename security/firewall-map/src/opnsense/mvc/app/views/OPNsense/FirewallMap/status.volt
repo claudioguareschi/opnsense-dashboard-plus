@@ -78,7 +78,9 @@
             evidence_blocks: {{ lang._('%s sources in the last %s (at most %s); only rules with logging enabled are seen')|json_encode }},
             evidence_ids: {{ lang._('%s sources in the last %s (at most %s)')|json_encode }},
             evidence_reputation: {{ lang._('%s addresses rated abusive by an AbuseIPDB lookup')|json_encode }},
-            evidence_crowdsec: {{ lang._('%s banned addresses and %s ranges, %s detected on this firewall; read %s')|json_encode }},
+            evidence_crowdsec: {{ lang._('%s banned addresses and %s ranges, %s detected on this firewall; %s, updated %s')|json_encode }},
+            crowdsec_stream: {{ lang._('from the decision stream (bouncer firewallmap)')|json_encode }},
+            crowdsec_cscli: {{ lang._('read with cscli (the local API cannot be used)')|json_encode }},
             crowdsec_off: {{ lang._('Off (Use CrowdSec in the settings)')|json_encode }},
             crowdsec_missing: {{ lang._('The CrowdSec plugin is not installed')|json_encode }},
             crowdsec_pending: {{ lang._('Reading the bans…')|json_encode }},
@@ -271,8 +273,8 @@
                 : !crowdsec.enabled ? escape(T.crowdsec_off)
                 : crowdsec.error ? state(crowdsec.error)
                 : !crowdsec.updated ? escape(T.crowdsec_pending)
-                : escape(fill(T.evidence_crowdsec, count(crowdsec.bans), count(crowdsec.ranges), count(crowdsec.local), ''))
-                    + when(crowdsec.updated, now));
+                : escape(fill(T.evidence_crowdsec, count(crowdsec.bans), count(crowdsec.ranges), count(crowdsec.local),
+                    crowdsec.mode === 'stream' ? T.crowdsec_stream : T.crowdsec_cscli, '')) + when(crowdsec.updated, now));
             $('#evidence-remotes').text(sources.remotes ? fill(T.evidence_remotes, count(sources.remotes.sent),
                 count(sources.remotes.cap), count(sources.remotes.omitted)) : '—');
 

@@ -28,6 +28,7 @@
 
     firewallmap_crowdsec.py ban <address> <duration> [reason]
     firewallmap_crowdsec.py unban <address>
+    firewallmap_crowdsec.py unregister      (the plugin is removed: drop its bouncer registration)
 
 Prints one JSON object: {"status": "ok", ...} or {"status": "failed", "error": ...}. Needs
 *Use CrowdSec* and the CrowdSec plugin; the plugin applies the change to its ban tables.
@@ -38,10 +39,12 @@ import sys
 
 from lib.common import secure_umask
 from lib.config import settings
-from lib.crowdsec import CrowdSecError, available, ban, unban
+from lib.crowdsec import CrowdSecError, available, ban, unban, unregister
 
 
 def main(arguments):
+    if arguments[:1] == ["unregister"]:
+        return {"status": "ok", "removed": unregister()}
     if settings().get("crowdsec", "1") != "1":
         return {"status": "failed", "error": "Use CrowdSec is off"}
     if not available():

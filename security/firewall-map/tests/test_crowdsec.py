@@ -38,9 +38,12 @@ from lib import collector as STATE_COLLECTOR  # noqa: E402
 NOW = 1_800_000_000.0
 
 
+_IDS = iter(range(1000, 100000))
+
+
 def decision(value, origin="CAPI", scenario="ssh:bruteforce", duration="24h0m0s", scope="Ip", **extra):
     return {"value": value, "origin": origin, "scenario": scenario, "duration": duration, "scope": scope,
-            "type": "ban", "id": 7, "simulated": False, **extra}
+            "type": "ban", "id": next(_IDS), "simulated": False, **extra}
 
 
 # the shape of `cscli decisions list -a -o json`: alerts, each with its decisions
@@ -80,7 +83,7 @@ class ParseTest(unittest.TestCase):
         # detected here outranks the community blocklist, whatever ends later
         self.assertEqual(addresses["45.56.79.53"], {
             "reason": "firewallservices/pf-scan-multi_ports", "origin": "local", "type": "ban",
-            "until": round(NOW + 3 * 3600 + 59 * 60 + 1), "id": 7, "bans": 2})
+            "until": round(NOW + 3 * 3600 + 59 * 60 + 1), "id": addresses["45.56.79.53"]["id"], "bans": 2})
         self.assertEqual((addresses["185.220.101.1"]["origin"], addresses["185.220.101.1"]["reason"]),
                          ("community", "tcp:scan"))
         self.assertEqual(addresses["94.154.43.203"]["origin"], "manual")
@@ -92,10 +95,39 @@ class ParseTest(unittest.TestCase):
             self.assertEqual(CROWDSEC.parse_decisions(answer, NOW), ({}, []))
 
 
+def flat(alerts):
+    """The stream's shape: decisions, not alerts."""
+    return [item for alert in alerts if isinstance(alert, dict) for item in alert.get("decisions") or []]
+
+
+class FakeStream:
+    """CrowdSec's decision stream: every ban on startup, then the queued changes."""
+
+    def __init__(self, decisions):
+        self.decisions = list(decisions)
+        self.queued = {"new": [], "deleted": []}
+        self.calls = []
+        self.refuse = False
+
+    def __call__(self, key, startup):
+        self.calls.append((key, startup))
+        if self.refuse:
+            self.refuse = False
+            raise CROWDSEC.StreamRefused("HTTP 403")
+        if startup:
+            self.queued = {"new": [], "deleted": []}
+            return {"new": list(self.decisions), "deleted": []}
+        changes, self.queued = self.queued, {"new": [], "deleted": []}
+        return changes
+
+
 class SourceTest(unittest.TestCase):
     @staticmethod
-    def source(answer=ALERTS):
-        source = CROWDSEC.CrowdSec(reader=lambda: answer, clock=lambda: NOW)
+    def source(answer=ALERTS, streamer=None):
+        keys = iter(f"key{n:020d}" for n in range(100))
+        streamer = streamer or FakeStream(flat(answer))
+        source = CROWDSEC.CrowdSec(streamer=streamer, registrar=lambda: next(keys), key_reader=lambda: None,
+                                   reader=lambda: answer, clock=lambda: NOW)
         with mock.patch.object(CROWDSEC, "available", return_value=True):
             source.configure(True)
         source.refresh(wait=True)
@@ -110,8 +142,50 @@ class SourceTest(unittest.TestCase):
         self.assertFalse(source.detected("185.220.101.1"))
         with mock.patch.object(CROWDSEC, "available", return_value=True):
             status = source.status()
-        self.assertEqual({key: status[key] for key in ("enabled", "bans", "ranges", "local", "updated", "error")},
-                         {"enabled": True, "bans": 3, "ranges": 1, "local": 1, "updated": NOW, "error": None})
+        self.assertEqual({key: status[key] for key in ("enabled", "mode", "bans", "ranges", "local", "updated", "error")},
+                         {"enabled": True, "mode": "stream", "bans": 3, "ranges": 1, "local": 1, "updated": NOW,
+                          "error": None})
+
+    def test_the_stream_sends_only_changes(self):
+        stream = FakeStream(flat(ALERTS))
+        source = SourceTest.source(streamer=stream)
+        before = source.bans
+        local_ban = next(item for item in flat(ALERTS) if item["origin"] == "crowdsec")
+        stream.queued = {"new": [decision("203.0.114.9", origin="cscli", duration="1h", id=99)],
+                         "deleted": [local_ban]}
+        source.refresh(now=NOW + CROWDSEC.STREAM_SECONDS, wait=True)
+        self.assertEqual(stream.calls[-1], ("key00000000000000000000", False))
+        self.assertEqual(source.lookup("203.0.114.9")["origin"], "manual")
+        # the local detection ended: the community ban of the same address speaks for it now
+        self.assertEqual(source.lookup("45.56.79.53")["origin"], "community")
+        self.assertFalse(source.detected("45.56.79.53"))
+        # the changes went into a copy: what the collector was iterating did not change under it
+        self.assertIn("45.56.79.53", before.local)
+        self.assertIsNot(source.bans, before)
+        # nothing changed: no new copy
+        current = source.bans
+        source.refresh(now=NOW + 2 * CROWDSEC.STREAM_SECONDS, wait=True)
+        self.assertIs(source.bans, current)
+        # everything again after RESYNC_SECONDS
+        source.clock = lambda: NOW + CROWDSEC.RESYNC_SECONDS + 1
+        source.refresh(now=NOW + CROWDSEC.RESYNC_SECONDS + 1, wait=True)
+        self.assertEqual(stream.calls[-1][1], True)
+
+    def test_a_refused_key_registers_again(self):
+        stream = FakeStream(flat(ALERTS))
+        source = SourceTest.source(streamer=stream)
+        stream.refuse = True
+        source.refresh(now=NOW + CROWDSEC.STREAM_SECONDS, wait=True)
+        self.assertEqual(stream.calls[-1], ("key00000000000000000001", True))
+        self.assertEqual((source.mode, source.error), ("stream", None))
+
+    def test_without_the_local_api_every_ban_is_read_with_cscli(self):
+        def down(key, startup):
+            raise CROWDSEC.CrowdSecError("the local API did not answer")
+        source = SourceTest.source(streamer=down)
+        self.assertEqual((source.mode, source.error), ("cscli", None))
+        self.assertEqual(source.lookup("185.220.101.1")["origin"], "community")
+        self.assertTrue(source.detected("45.56.79.53"))
 
     def test_a_ban_that_ended_is_not_in_force(self):
         source = SourceTest.source()
@@ -121,14 +195,24 @@ class SourceTest(unittest.TestCase):
 
     def test_off_or_without_cscli_reads_nothing(self):
         calls = []
-        source = CROWDSEC.CrowdSec(reader=lambda: calls.append(1) or ALERTS, clock=lambda: NOW)
+        source = CROWDSEC.CrowdSec(reader=lambda: calls.append(1) or ALERTS, streamer=lambda *a: calls.append(2),
+                                   clock=lambda: NOW)
         with mock.patch.object(CROWDSEC, "available", return_value=False):
             source.configure(True)
         source.refresh(wait=True)
         self.assertEqual((calls, source.enabled, source.lookup("185.220.101.1")), ([], False, None))
 
-    def test_a_failed_read_keeps_the_last_bans_and_is_retried_sooner(self):
+    def test_turning_it_off_removes_the_registration(self):
         source = SourceTest.source()
+        with mock.patch.object(CROWDSEC, "available", return_value=True), \
+                mock.patch.object(CROWDSEC.os.path, "exists", return_value=True), \
+                mock.patch.object(CROWDSEC, "unregister") as unregister:
+            source.configure(False)
+        unregister.assert_called_once_with()
+        self.assertEqual((source.enabled, source.lookup("185.220.101.1"), source.mode), (False, None, None))
+
+    def test_a_failed_read_keeps_the_last_bans_and_is_retried_sooner(self):
+        source = SourceTest.source(streamer=lambda key, startup: (_ for _ in ()).throw(CROWDSEC.CrowdSecError("down")))
 
         def fail():
             raise CROWDSEC.CrowdSecError("cscli did not answer")
@@ -141,6 +225,36 @@ class SourceTest(unittest.TestCase):
         self.assertIsNotNone(source.error)
         source.refresh(now=NOW + CROWDSEC.REFRESH_SECONDS + CROWDSEC.RETRY_SECONDS, wait=True)
         self.assertEqual((source.error, source.lookup("185.220.101.1")), (None, None))
+
+
+class KeyTest(unittest.TestCase):
+    def test_key_file_is_root_only_and_registration_replaces_a_lost_one(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "crowdsec.key")
+            with mock.patch.object(CROWDSEC.subprocess, "run") as run:
+                run.return_value = mock.Mock(returncode=0, stdout="AbCdEf0123456789abcdef0123\n", stderr="")
+                self.assertEqual(CROWDSEC.register(path), "AbCdEf0123456789abcdef0123")
+            self.assertEqual([call.args[0][1:3] for call in run.call_args_list],
+                             [["bouncers", "delete"], ["bouncers", "add"]])
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+            self.assertEqual(CROWDSEC.read_key(path), "AbCdEf0123456789abcdef0123")
+            with mock.patch.object(CROWDSEC, "available", return_value=True), \
+                    mock.patch.object(CROWDSEC.subprocess, "run") as run:
+                self.assertTrue(CROWDSEC.unregister(path))
+            self.assertEqual(run.call_args.args[0], [CROWDSEC.CSCLI, "bouncers", "delete", CROWDSEC.BOUNCER])
+            self.assertFalse(os.path.exists(path))
+            self.assertFalse(CROWDSEC.unregister(path))
+
+    def test_api_address_from_the_crowdsec_configuration(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+            handle.write("api:\n  server:\n    enable: true\n    listen_uri: 127.0.0.1:8081\n")
+        try:
+            self.assertEqual(CROWDSEC.api_address(handle.name), "127.0.0.1:8081")
+        finally:
+            os.unlink(handle.name)
+        self.assertEqual(CROWDSEC.api_address("/nonexistent"), CROWDSEC.DEFAULT_API)
 
 
 class ThreatFactsTest(unittest.TestCase):
@@ -184,6 +298,7 @@ class RecordingTest(unittest.TestCase):
         (row,) = THREATS.listing(db, "all")["rows"]
         self.assertEqual(row["crowdsec"]["reason"], "ssh:bruteforce")
         self.assertIn("45.56.79.53", [item["address"] for item in THREATS.listing(db, "all", query="bruteforce")["rows"]])
+        db.close()
 
 
 class CommandTest(unittest.TestCase):

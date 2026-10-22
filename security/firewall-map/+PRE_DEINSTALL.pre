@@ -1,6 +1,9 @@
 if [ -x /usr/local/etc/rc.d/firewallmap ]; then
 	/usr/local/etc/rc.d/firewallmap onestop > /dev/null 2>&1
 fi
+# the CrowdSec bouncer registration and its key (Use CrowdSec); the collector registers again
+# after an upgrade
+/usr/local/bin/python3 /usr/local/opnsense/scripts/OPNsense/FirewallMap/firewallmap_crowdsec.py unregister > /dev/null 2>&1
 # the snapshot and markers are ephemeral
 rm -rf /var/run/firewallmap
 # the settings file rendered from the configuration (it holds the keys); an upgrade renders it again

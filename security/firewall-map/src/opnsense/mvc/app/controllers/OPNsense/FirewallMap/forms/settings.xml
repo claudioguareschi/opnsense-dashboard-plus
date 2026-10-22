@@ -166,7 +166,7 @@
             <id>firewallmap.general.crowdsec</id>
             <label>Use CrowdSec</label>
             <type>checkbox</type>
-            <help>With the CrowdSec plugin installed: its ban tables count as threat lists, the map and threat history show why each address is banned (the scenario, whether CrowdSec detected it on this firewall or it comes from a blocklist, and when the ban ends), and administrators can ban or unban an address with CrowdSec. Firewall Map+ reads CrowdSec with cscli and registers nothing with it.</help>
+            <help>With the CrowdSec plugin installed: its ban tables count as threat lists, the map and threat history show why each address is banned (the scenario, whether CrowdSec detected it on this firewall or it comes from a blocklist, and when the ban ends), and administrators can ban or unban an address with CrowdSec. Firewall Map+ registers with CrowdSec as a bouncer named firewallmap, which can only read the bans, and removes that registration when this is turned off or the plugin is removed.</help>
         </field>
         <field>
             <type>header</type>

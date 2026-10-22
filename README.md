@@ -228,8 +228,12 @@ investigations, the Threats panel and *Block…*. An address with a port reads `
 ### CrowdSec
 
 With the [CrowdSec plugin](https://docs.opnsense.org/manual/how-tos/crowdsec.html) installed and
-**Use CrowdSec** on (the default; **Settings ▸ Security**), Firewall Map+ reads CrowdSec's bans
-locally with `cscli` every five minutes. It registers nothing with CrowdSec.
+**Use CrowdSec** on (the default; **Settings ▸ Security**), Firewall Map+ follows CrowdSec's bans
+through its decision stream, the way CrowdSec's own bouncers do: it registers as a bouncer named
+`firewallmap` (a key that can only read bans, kept root-only), reads every ban once and then only
+the changes, every 15 seconds. Turning the setting off or removing the plugin removes the
+registration. When CrowdSec's local API cannot be used, the bans are read with `cscli` every five
+minutes instead.
 
 - The plugin's ban tables (`crowdsec_blocklists`, `crowdsec6_blocklists`) always count as one
   threat list, *CrowdSec*, whichever lists you selected.
@@ -245,11 +249,12 @@ locally with `cscli` every five minutes. It registers nothing with CrowdSec.
   with a connection that got through is flagged as allowed traffic from a listed address.
 - Administrators can *Ban with CrowdSec* (1 hour to 30 days, with an optional reason) and *Unban
   in CrowdSec* from the details panel, and ban from a Threats card. Both run `cscli`, are logged
-  when *Log administrator actions* is on, and take effect when the plugin updates its tables.
+  when *Log administrator actions* is on, take effect when the plugin updates its tables and show
+  on the map within a minute.
   Unbanning removes every ban of the address; a community or blocklist ban may come back with that
   list's next update (a CrowdSec allowlist keeps an address unbanned).
-- The Status page shows how many bans CrowdSec holds, how many it detected here and when they were
-  last read.
+- The Status page shows how many bans CrowdSec holds, how many it detected here, whether they come
+  from the decision stream or `cscli`, and when they were last updated.
 
 ### Suricata (Intrusion Detection)
 
