@@ -281,7 +281,7 @@ class ThreatQueueTest(unittest.TestCase):
             self.assertEqual(THREATS.listing(db)["rows"][0]["disposition"], "passed")
 
     def test_rows_misfiled_as_passed_before_the_fix_become_ips_drops(self):
-        # issue #7: before 0.64.1 an open PF state filed an address as passed even when
+        # issue #7: before 0.65 an open PF state filed an address as passed even when
         # Suricata's IPS dropped the connection
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "cache.db")

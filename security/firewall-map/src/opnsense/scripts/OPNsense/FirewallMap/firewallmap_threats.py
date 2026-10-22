@@ -97,7 +97,7 @@ def connect(path=DATABASE):
 
 def refile_ips_drops(db):
     """Rows filed as passed although every passed connection they kept was dropped by Suricata's
-    IPS (before 0.64.1, an open PF state made any address passed; issue #7) become IPS drops."""
+    IPS (before 0.65, an open PF state made any address passed; issue #7) become IPS drops."""
     rows = []
     for address, data in db.execute("SELECT address, data FROM threats WHERE disposition = 'passed'"):
         try:
@@ -272,7 +272,7 @@ def _record(db, seen, now):
         except ValueError:
             data = {}
         stored = row[3] or "passed"
-        # Some traffic of the address got through. Rows recorded before 0.64.1 have no flag:
+        # Some traffic of the address got through. Rows recorded before 0.65 have no flag:
         # those filed as passed although every passed connection they kept was dropped by
         # Suricata's IPS (PF passed the handshake) are taken as IPS drops (issue #7).
         through = disposition == "passed" or data.get("got_through", not _only_ips_dropped(data))

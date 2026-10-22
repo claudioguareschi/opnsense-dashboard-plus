@@ -623,6 +623,21 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.65** (all packages): Firewall Map+ integrates CrowdSec and files Suricata IPS drops correctly.
+  - With the CrowdSec plugin installed, every banned address shows why: the scenario, where the
+    ban comes from (detected on this firewall, an administrator, a subscribed blocklist or the
+    community blocklist) and when it ends, in the details panel, the Threats cards and
+    *Investigate*. The bans follow CrowdSec's decision stream, so changes reach the map within
+    seconds. See [CrowdSec](#crowdsec).
+  - An address CrowdSec banned for what it detected on this firewall counts as evidence of its
+    own; its ban tables always count as one threat list, *CrowdSec*.
+  - Administrators can ban an address with CrowdSec (1 hour to 30 days) and unban it, from the
+    details panel or a Threats card.
+  - Threats: an address whose connections Suricata's IPS dropped is filed under *Dropped by IPS*
+    instead of *Passed*, even though the firewall had let the connection start; entries filed
+    wrongly by earlier versions are corrected on upgrade
+    ([#7](https://github.com/claudioguareschi/opnsense-dashboard-plus/issues/7)).
+  - Dashboard Plus and VNStat Traffic+ are unchanged apart from the version.
 - **0.64** (all packages): a System Metrics+ fix.
   - The CPU and temperature graphs each take a full-width row, like the gauges and the
     filesystems. At some widget widths they were placed side by side, each half as wide as the
