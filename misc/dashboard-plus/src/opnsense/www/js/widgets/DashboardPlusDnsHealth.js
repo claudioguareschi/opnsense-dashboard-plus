@@ -630,7 +630,9 @@ export default class DashboardPlusDnsHealth extends DashboardPlusWidget(BaseWidg
         $(`#${this._elementId('mode')}`).text(this._mode());
         this._renderMetrics(stats);
 
-        const upstreams = Array.isArray(this.data.upstreams) ? this.data.upstreams : [];
+        const upstreams = Array.isArray(this.data.upstreams)
+            ? this.data.upstreams.filter(upstream => String(upstream.enabled ?? '') === '1')
+            : [];
         $(`#${this._elementId('upstreams')}`).html(this.loading ? `<div class="dashboard-plus-dns-health-empty">${escapeHtml(this.translations.waiting)}</div>` : upstreams.length ? upstreams.map(upstream => `
             <div class="dashboard-plus-dns-health-upstream">
                 <i class="fa fa-fw fa-server dashboard-plus-dns-health-upstream-icon" title="${escapeHtml(this.translations.upstreams)}" aria-hidden="true"></i>
