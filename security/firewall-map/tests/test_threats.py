@@ -280,6 +280,16 @@ class ThreatQueueTest(unittest.TestCase):
                                                    "connections": [dropped]}}, now=300.0)
             self.assertEqual(THREATS.listing(db)["rows"][0]["disposition"], "passed")
 
+    def test_inline_suricata_ips_drop_without_pf_decision(self):
+        # Suricata drops inline before PF state creation: decision is None, ips_dropped is True
+        with tempfile.TemporaryDirectory() as directory:
+            db = THREATS.connect(os.path.join(directory, "cache.db"))
+            entry = self.observe(self.INBOUND)["108.188.77.155"]
+            # Even if entry arrives without disposition set (defaults to passed), inline drop should classify as ips_dropped
+            inline_drop = {"key": "k1", "decision": None, "ips_dropped": True, "seen": 100}
+            THREATS.record(db, {"108.188.77.155": {**entry, "connections": [inline_drop]}}, now=100.0)
+            self.assertEqual(THREATS.listing(db)["rows"][0]["disposition"], "ips_dropped")
+
     def test_rows_misfiled_as_passed_before_the_fix_become_ips_drops(self):
         # issue #7: before 0.65 an open PF state filed an address as passed even when
         # Suricata's IPS dropped the connection
