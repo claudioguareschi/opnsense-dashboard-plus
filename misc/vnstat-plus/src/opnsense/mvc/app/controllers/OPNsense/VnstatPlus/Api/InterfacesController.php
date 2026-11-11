@@ -51,7 +51,10 @@ class InterfacesController extends ApiControllerBase
 
         foreach ($config->interfaces->children() as $alias => $interface) {
             $device = (string)$interface->if;
-            if (!in_array((string)$alias, $configured, true) || !in_array($device, $tracked, true)) {
+            if (!empty($configured) && !in_array((string)$alias, $configured, true)) {
+                continue;
+            }
+            if (!in_array($device, $tracked, true)) {
                 continue;
             }
             $description = trim((string)$interface->descr);
