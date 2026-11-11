@@ -132,11 +132,18 @@ class Metrics
             if (!is_numeric($temperature)) {
                 continue;
             }
+            $isZone = strpos($oid, 'hw.acpi') !== false;
+            if (preg_match('/(?:core|cpu|tz|sensor)[._]?(\d+)/i', $oid, $matches)) {
+                $seq = $matches[1];
+            } else {
+                $seq = preg_replace('/\D/', '', $oid);
+            }
             $readings[] = [
                 'device' => $oid,
-                'device_seq' => preg_replace('/[^0-9+-]/', '', $oid),
+                'device_seq' => $seq,
                 'temperature' => $temperature,
-                'type' => strpos($oid, 'hw.acpi') !== false ? 'zone' : 'cpu',
+                'type' => $isZone ? 'zone' : 'cpu',
+                'type_translated' => $isZone ? gettext('Thermal Zone') : gettext('Core'),
             ];
         }
         return $readings;

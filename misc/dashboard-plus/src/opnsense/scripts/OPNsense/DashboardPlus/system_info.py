@@ -666,7 +666,7 @@ def collect():
 
     accelerator = collect_qat(
         run([PCICONF, "-lv"]),
-        run([SYSCTL, "-a"]),
+        run([SYSCTL, "-i", "-e", "dev.qat", "dev.qat_ocf"]),
         slot_output,
     )
     cpu_algorithms = collect_cpu_crypto(dmesg_output)

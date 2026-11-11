@@ -23,7 +23,8 @@ export default class DashboardPlusThermalSensors extends DashboardPlusWidget(Bas
         if (sensor.type === 'cpu') {
             return fill(this.translations.core, {number: sensor.device_seq});
         }
-        return `${sensor.type_translated} ${sensor.device_seq}`;
+        const typeLabel = sensor.type_translated || this.translations[sensor.type] || 'Zone';
+        return `${typeLabel} ${sensor.device_seq}`;
     }
 
     /* The theme's progress bar colors: hot from 70 °C, critical from 80 °C. */
