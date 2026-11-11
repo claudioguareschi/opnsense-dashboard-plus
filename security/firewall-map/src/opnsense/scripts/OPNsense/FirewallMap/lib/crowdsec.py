@@ -330,7 +330,7 @@ def stream(key, startup, address=None, timeout=TIMEOUT_SECONDS):
     """One answer of the decision stream: {"new": [...], "deleted": [...]}."""
     request = urllib.request.Request(
         f"http://{address or api_address()}/v1/decisions/stream?startup={'true' if startup else 'false'}",
-        headers={"X-Api-Key": key, "User-Agent": "firewallmap"})
+        headers={"X-Api-Key": key, "User-Agent": "crowdsec-firewallmap/v1.0"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             body = response.read(MAX_STREAM_BYTES + 1)

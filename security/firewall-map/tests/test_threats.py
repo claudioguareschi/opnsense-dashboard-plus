@@ -176,7 +176,7 @@ class ThreatQueueTest(unittest.TestCase):
             THREATS.record(db, self.observe(self.INBOUND), now=400.0)
             row = THREATS.listing(db)["rows"][0]
             self.assertEqual((row["status"], row["seen_after_block"]), ("new", True))
-            self.assertEqual(THREATS.listing(db)["counts"], {"passed": 1, "firewall_blocked": 0,
+            self.assertEqual(THREATS.listing(db)["counts"], {"passed": 1, "passed_outbound": 0, "firewall_blocked": 0,
                              "ips_dropped": 0, "reviewed": 0, "dismissed": 0, "all": 1})
             self.assertEqual(THREATS.listing(db, "counts")["rows"], [])
             THREATS.set_status(db, "108.188.77.155", "reviewed")
@@ -289,6 +289,37 @@ class ThreatQueueTest(unittest.TestCase):
             inline_drop = {"key": "k1", "decision": None, "ips_dropped": True, "seen": 100}
             THREATS.record(db, {"108.188.77.155": {**entry, "connections": [inline_drop]}}, now=100.0)
             self.assertEqual(THREATS.listing(db)["rows"][0]["disposition"], "ips_dropped")
+
+    def test_outbound_flagged_traffic_classified_as_passed_outbound(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = THREATS.connect(os.path.join(directory, "cache.db"))
+            entry = self.observe(self.INBOUND)["108.188.77.155"]
+            outbound_entry = {**entry, "inbound": 0, "outbound": 1, "connections": [
+                {"key": "k1", "decision": None, "ips_dropped": False, "seen": 100, "remote_started": False}
+            ]}
+            THREATS.record(db, {"108.188.77.155": outbound_entry}, now=100.0)
+            rows = THREATS.listing(db)["rows"]
+            self.assertEqual(rows[0]["disposition"], "passed_outbound")
+            self.assertFalse(rows[0]["got_through"])
+            counts = THREATS.listing(db)["counts"]
+            self.assertEqual(counts["passed"], 0)
+            self.assertEqual(counts["passed_outbound"], 1)
+
+    def test_rows_misfiled_as_passed_become_passed_outbound(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "cache.db")
+            db = THREATS.connect(path)
+            entry = self.observe(self.INBOUND)["108.188.77.155"]
+            THREATS.record(db, {
+                "84.50.88.210": {**entry, "inbound": 0, "outbound": 1, "connections": []},
+            }, now=100.0)
+            db.execute("UPDATE threats SET disposition = 'passed' WHERE address = '84.50.88.210'")
+            db.execute("PRAGMA user_version = 2")
+            db.close()
+            db = THREATS.connect(path)
+            self.assertEqual(dict(db.execute("SELECT address, disposition FROM threats")), {
+                "84.50.88.210": "passed_outbound"})
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], THREATS.SCHEMA_VERSION)
 
     def test_rows_misfiled_as_passed_before_the_fix_become_ips_drops(self):
         # issue #7: before 0.65 an open PF state filed an address as passed even when

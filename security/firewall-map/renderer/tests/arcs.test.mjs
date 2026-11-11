@@ -94,3 +94,25 @@ test('a mirrored arc (CARP backup) carries a closely spaced pair of dots at one 
   assert.equal(pulses(arcs).filter((item) => item.arc !== mirror).length, 1);
   assert.equal(marchingPulses([mirror]).length, 6);
 });
+
+test('connections take the shortest path around the globe and do not shoot over the poles', () => {
+  const sfHome = {id: '192.0.2.1', lat: 37.77, lon: -122.42, local: true};
+  const tokyo = place('198.51.100.1', 35.68, 139.69);
+  const data = {
+    locations: [sfHome, tokyo],
+    flows: [flow(tokyo.id)],
+  };
+  const arcs = buildArcs(data, DEFAULT_OPTIONS);
+  assert.equal(arcs.length, 1);
+  const path = arcs[0].path;
+  // Span must be the shortest route across the Pacific (~98 degrees), not eastwards across the Atlantic (~262 degrees)
+  const [startLon] = path[0];
+  const [endLon] = path[path.length - 1];
+  const lonSpan = Math.abs(endLon - startLon);
+  assert.ok(lonSpan <= 180, `longitudinal span ${lonSpan} should be <= 180`);
+  // All latitudes must remain bounded and not arch over the North Pole
+  for (const [, lat] of path) {
+    assert.ok(lat < 70, `latitude ${lat} should remain below 70 degrees N`);
+    assert.ok(lat > -60, `latitude ${lat} should remain above 60 degrees S`);
+  }
+});

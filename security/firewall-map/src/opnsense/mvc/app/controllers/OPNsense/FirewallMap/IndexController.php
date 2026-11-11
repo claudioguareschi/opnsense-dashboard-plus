@@ -34,11 +34,11 @@ use OPNsense\Core\ACL;
  */
 class IndexController extends \OPNsense\Base\IndexController
 {
-    /** A file's modification time as its cache-busting version, 0 when it is not installed. */
+    /** A file's SHA-256 content hash as its cache-busting version, 0 when it is not installed. */
     private function version($path)
     {
         $file = '/usr/local/opnsense/www/' . $path;
-        return is_file($file) ? filemtime($file) : 0;
+        return is_file($file) ? substr(hash_file('sha256', $file), 0, 12) : 0;
     }
 
     /**

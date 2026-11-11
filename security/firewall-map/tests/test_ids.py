@@ -29,6 +29,7 @@ import ipaddress
 import os
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -265,6 +266,34 @@ class CorrelationTest(unittest.TestCase):
         summary = alerts.summary("2001:4860:4860::8888", now=1000.0)
         self.assertTrue(summary["outbound"])
         self.assertEqual(summary["targets"], ["[2606:4700:4701::20]:52114/tcp"])
+
+    def test_outbound_return_packet_alert_identified_as_outbound_and_not_remote_started(self):
+        # EVE alert on a return packet from a remote Tor node (37.46.199.86) to LAN client (192.168.1.5)
+        eve_line = json.dumps({
+            "timestamp": "2026-11-10T21:53:22.326906-0500", "flow_id": 310502694680373, "event_type": "alert",
+            "src_ip": "37.46.199.86", "src_port": 49405, "dest_ip": "192.168.1.5", "dest_port": 49834,
+            "proto": "TCP", "direction": "to_client",
+            "flow": {"src_ip": "192.168.1.5", "dest_ip": "37.46.199.86", "src_port": 49834, "dest_port": 49405,
+                     "pkts_toserver": 1, "pkts_toclient": 1, "bytes_toserver": 74, "bytes_toclient": 74,
+                     "start": "2026-11-10T21:53:21.924262-0500"},
+            "alert": {"action": "allowed", "signature_id": 2522401, "signature": "ET TOR Known Tor Relay", "severity": 2},
+        })
+        parsed = IDS.parse_alert(eve_line)
+        self.assertEqual(parsed["direction"], "to_client")
+        self.assertEqual(parsed["flow_src"], "192.168.1.5")
+        local = {"192.168.1.1"}
+        networks = [(ipaddress.ip_network("192.168.1.0/24"), "lan")]
+        alerts = IDS.AlertTracker()
+        alerts.add(parsed, local, networks=networks)
+        summary = alerts.summary("37.46.199.86", now=time.time())
+        self.assertTrue(summary["outbound"])
+        self.assertFalse(summary["inbound"])
+
+        correlator = IDS.Correlator()
+        key = ("tcp", "192.168.1.5", "49834", "37.46.199.86", "49405")
+        conn = correlator.alert_connection(key, parsed, 1000.0)
+        self.assertFalse(conn["remote_started"])
+        self.assertEqual(conn["source"], "suricata")
 
     def test_port_forward_recent_blocked_and_unmatched(self):
         correlator = IDS.Correlator()

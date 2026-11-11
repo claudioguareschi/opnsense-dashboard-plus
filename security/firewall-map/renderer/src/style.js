@@ -170,6 +170,7 @@ export function createStyle(view) {
       getPosition: (item) => pulsePosition(item.arc, seconds, item.reverse, item.period, item.phase),
       getRadius: (item) => item.march ? (item.arc.heavy ? 2.6 : 1.9) : item.arc.heavy ? 3.4 : 2.4,
       radiusUnits: 'pixels',
+      wrapLongitude: true,
       getFillColor: (item) => pulseColor(item),
       updateTriggers: {getPosition: seconds, getFillColor: [view.colors.toward.pulse, view.colors.away.pulse, view.colors.inbound.pulse, view.settings.colorMode, categoryKey]},
     });
@@ -184,6 +185,7 @@ export function createStyle(view) {
         getPosition: (block) => pulsePosition(block, seconds, false),
         getRadius: (block) => block.threat ? 3.6 : 2.6,
         radiusUnits: 'pixels',
+        wrapLongitude: true,
         getFillColor: (block) => rgb(blockColor(block), Math.round((80 + 175 * block.activity) * view.blockFader.opacity(block, view.frameNow))),
         updateTriggers: {getPosition: seconds, getFillColor: [view.colors.blocked, view.colors.contained]},
       }),
@@ -198,6 +200,7 @@ export function createStyle(view) {
         filled: false,
         lineWidthUnits: 'pixels',
         getLineWidth: 1.5,
+        wrapLongitude: true,
         getLineColor: (block) => rgb(blockColor(block), Math.round(220 * (1 - (seconds / THREAT_THROB_PERIOD) % 1))),
         updateTriggers: {getRadius: seconds, getLineColor: [seconds, view.colors.blocked, view.colors.contained]},
       }),

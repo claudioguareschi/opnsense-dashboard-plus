@@ -38,7 +38,7 @@ use OPNsense\FirewallMap\ConfigdArgument;
 class ThreatsController extends ApiControllerBase
 {
     private const STATUSES = ['new', 'reviewed', 'dismissed', 'blocked'];
-    private const VIEWS = ['passed', 'firewall_blocked', 'ips_dropped', 'all', 'reviewed', 'dismissed'];
+    private const VIEWS = ['passed', 'passed_outbound', 'firewall_blocked', 'ips_dropped', 'all', 'reviewed', 'dismissed'];
 
     /* a note's limit in bytes, not characters: configd reads one 4 kB message, and base64 grows the
        text by a third (2400 bytes: 800 characters of CJK, 600 emoji, 2400 of Latin text) */

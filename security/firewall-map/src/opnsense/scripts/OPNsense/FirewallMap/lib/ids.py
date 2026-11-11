@@ -253,12 +253,15 @@ class Correlator:
         return outside_key(alert["protocol"], dst, alert["dst_port"], src, alert["src_port"])
 
     def alert_connection(self, key, alert, now):
-        # The alert's src is the source of the packet that raised it, which is the flow's
-        # client only for alerts on client-to-server packets. Whether the installed
-        # Suricata reports the flow direction (and in which field) must be verified on the
-        # target before byte orientation is derived from it; until then this keeps the
-        # packet-source approximation (pending target verification).
-        remote_started = alert["src"] == key[3]
+        # Determine flow initiator from Suricata EVE flow metadata or packet direction
+        if alert.get("flow_src"):
+            remote_started = alert["flow_src"] == key[3]
+        elif alert.get("direction") == "to_client":
+            remote_started = alert["dst"] == key[3]
+        elif alert.get("direction") == "to_server":
+            remote_started = alert["src"] == key[3]
+        else:
+            remote_started = alert["src"] == key[3]
         flow = alert.get("flow") or {}
         # Suricata counts to_server/to_client; the map counts bytes from/to the remote side
         to_server, to_client = flow.get("bytes_toserver"), flow.get("bytes_toclient")
@@ -449,6 +452,11 @@ def parse_alert(line):
     severity = alert.get("severity")
     sid = alert.get("signature_id")
     flow_id = event.get("flow_id")
+    direction = _string(event.get("direction"), None)
+    flow_src = _address(flow["src_ip"]) if isinstance(flow.get("src_ip"), str) else None
+    flow_dst = _address(flow["dest_ip"]) if isinstance(flow.get("dest_ip"), str) else None
+    flow_src_port = _port(flow.get("src_port")) if flow.get("src_port") is not None else None
+    flow_dst_port = _port(flow.get("dest_port")) if flow.get("dest_port") is not None else None
     return {
         "time": eve_time(_string(event.get("timestamp"))),
         "src": _address(event.get("src_ip")),
@@ -462,6 +470,11 @@ def parse_alert(line):
         "severity": severity if isinstance(severity, int) and not isinstance(severity, bool) else 3,
         "action": _string(alert.get("action"), "allowed") or "allowed",
         "flow_id": flow_id if isinstance(flow_id, int) and not isinstance(flow_id, bool) else None,
+        "direction": direction,
+        "flow_src": flow_src,
+        "flow_dst": flow_dst,
+        "flow_src_port": flow_src_port,
+        "flow_dst_port": flow_dst_port,
         "flow": {**{key: (value if isinstance(value, int) and not isinstance(value, bool) else None)
                     for key, value in ((key, flow.get(key)) for key in (
                         "pkts_toserver", "pkts_toclient", "bytes_toserver", "bytes_toclient"))},
@@ -488,9 +501,23 @@ class AlertTracker:
     def add(self, alert, local_addresses, now=None, networks=None):
         at = alert["time"] if alert["time"] is not None else (now or time.time())
         src, dst = alert["src"], alert["dst"]
-        # the remote side is the public address that is not this firewall; internal-only alerts
-        # have no place on the map
-        if inside_address(src, networks, local_addresses) and public_ip(dst):
+        flow_src = alert.get("flow_src")
+        direction = alert.get("direction")
+        if flow_src:
+            client = flow_src
+            server = alert.get("flow_dst") or (dst if client == src else src)
+            inbound = not inside_address(client, networks, local_addresses)
+            remote = client if inbound else server
+            local = server if inbound else client
+        elif direction == "to_client":
+            inbound = not inside_address(dst, networks, local_addresses)
+            remote = dst if inbound else src
+            local = src if inbound else dst
+        elif direction == "to_server":
+            inbound = not inside_address(src, networks, local_addresses)
+            remote = src if inbound else dst
+            local = dst if inbound else src
+        elif inside_address(src, networks, local_addresses) and public_ip(dst):
             remote, local, inbound = dst, src, False
         elif inside_address(dst, networks, local_addresses) and public_ip(src):
             remote, local, inbound = src, dst, True
@@ -524,8 +551,8 @@ class AlertTracker:
             signature["action"] = alert["action"]
         else:
             self.dropped_signatures += 1
-        port = alert["dst_port"] if inbound else alert["src_port"]
-        target = f'{host_port(local, port)}/{alert["protocol"]}' if port else f'{local}/{alert["protocol"]}'
+        local_port = alert["src_port"] if local == src else alert["dst_port"]
+        target = f'{host_port(local, local_port)}/{alert["protocol"]}' if local_port else f'{local}/{alert["protocol"]}'
         if target in entry["targets"] or len(entry["targets"]) < MAX_SIGNATURES_PER_SOURCE:
             entry["targets"][target] = entry["targets"].get(target, 0) + 1
         else:
@@ -720,7 +747,17 @@ def ips_drops(correlator, seen, since, blocklists=None, reputation=None, crowdse
     entries = {}
     for key, flow in correlator.flows.items():
         remote = key[3]
-        if remote in seen or flow["last"] < since:
+        if remote in seen:
+            if any(item.get("action") == "blocked" for item in Correlator._alert_items(flow)):
+                entry = seen[remote]
+                if entry.get("disposition") in (None, "passed"):
+                    remote_flows = [f for k, f in correlator.flows.items() if k[3] == remote]
+                    if all(any(item.get("action") == "blocked" for item in Correlator._alert_items(rf)) for rf in remote_flows):
+                        entry["disposition"] = "ips_dropped"
+                        if IDS_LIST not in entry.get("lists", []):
+                            entry["lists"] = (entry.get("lists") or []) + [IDS_LIST]
+            continue
+        if flow["last"] < since:
             continue
         if not any(item.get("action") == "blocked" for item in Correlator._alert_items(flow)):
             continue
