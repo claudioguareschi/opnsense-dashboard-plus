@@ -33,6 +33,7 @@ import subprocess
 from .common import PFCTL, RULES_DEBUG, host_port, ip_object, private_ip, public_ip
 
 IFCONFIG = "/sbin/ifconfig"
+NETSTAT = "/usr/bin/netstat"
 
 
 class _Record:
@@ -181,6 +182,27 @@ def host_info():
     else:
         role = "backup"
     return addresses, role, interface_networks(output), interface_addresses(output)
+
+
+def active_wan_device(output=None):
+    """The interface carrying the IPv4 default route, or None.
+
+    `primary_wan_device` is rendered once from the interface assigned to OPNsense's `wan` role.
+    Under multi-WAN that interface can be the one that is down, or (issue #24) the plugin's
+    template can miss it entirely when WAN sits on an interface such as `opt1`. The default
+    route names whichever WAN actually carries traffic, regardless of its OPNsense role name."""
+    if output is None:
+        try:
+            output = subprocess.run(
+                [NETSTAT, "-rn", "-f", "inet"], capture_output=True, check=False, text=True, timeout=2,
+            ).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) >= 4 and fields[0] == "default":
+            return fields[-1]
+    return None
 
 
 def blocked_rule_tables(path=RULES_DEBUG):

@@ -94,7 +94,7 @@ from firewallmap_snapshots import (
     DocumentBudget, SnapshotTooLarge, json_size, valid_id as snapshot_valid_id,
 )
 from lib.pf import (
-    _Record, carp_backup_addresses, host_info, port_forwards, rule_descriptions,
+    _Record, active_wan_device, carp_backup_addresses, host_info, port_forwards, rule_descriptions,
 )
 from lib import collector as state_collector
 from lib.collector import CollectorEngine, CollectorError, PROTOCOL_VERSION, READ_TIMEOUT, memory_budget
@@ -786,7 +786,9 @@ class Collector:
         if self._due("metadata", now, METADATA_REFRESH_SECONDS):
             self.descriptions, self.interfaces, self.leases = rule_descriptions(), interface_names(), lease_names()
             self.location_settings = topology()
-            self.primary_wan_device = self.location_settings["primary_wan_device"]
+            # Prefer the WAN that carries the default route. The configured one can be down
+            # (multi-WAN) or missing from the template (issue #24); use it only as a fallback.
+            self.primary_wan_device = active_wan_device() or self.location_settings["primary_wan_device"]
             self.correlator.forwards = port_forwards()
             self.checked["metadata"] = now
         if self._due("blocklists", now, BLOCKLIST_REFRESH_SECONDS):

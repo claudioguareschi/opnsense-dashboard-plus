@@ -555,5 +555,22 @@ igb2: flags=1008943<UP> metric 0 mtu 1500
         self.assertEqual(PF.carp_backup_addresses("igb0: flags=0\n\tinet 192.168.2.1 netmask 0xffffff00\n"), set())
 
 
+class ActiveWanTest(unittest.TestCase):
+    """The WAN that carries the default route, for multi-WAN failover and issue #24."""
+
+    NETSTAT_FAILOVER = (
+        "Routing tables\n\nInternet:\n"
+        "Destination        Gateway            Flags         Netif Expire\n"
+        "default            198.51.100.1       UGS            igb1\n"
+        "203.0.113.1        198.51.100.1       UGHS           igb1\n"
+    )
+
+    def test_default_route_names_the_active_wan(self):
+        self.assertEqual(PF.active_wan_device(self.NETSTAT_FAILOVER), "igb1")
+
+    def test_no_default_route_gives_none(self):
+        self.assertIsNone(PF.active_wan_device("Internet:\n127.0.0.1 link#2 UH lo0\n"))
+
+
 if __name__ == "__main__":
     unittest.main()
