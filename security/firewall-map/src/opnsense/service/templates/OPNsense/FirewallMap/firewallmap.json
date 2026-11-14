@@ -64,8 +64,8 @@
     },
     "topology": {
         "primary_wan_device": {{ interfaces.get('wan', {}).get('if', '') | tojson }},
-{#- every interface with an upstream gateway: the wan role, a gateway of its own, or a dynamic
-    address (DHCP, PPPoE...): the WAN devices (several under multi-WAN, or a WAN assigned to optX) #}
+{# every interface with an upstream gateway: the wan role, a gateway of its own, or a dynamic
+   address (DHCP, PPPoE...): the WAN devices (several under multi-WAN, or a WAN assigned to optX) -#}
         "wan_devices": [{% for name, interface in interfaces.items() if interface['if'] is defined and interface['if'] and (name == 'wan' or (interface.gateway is defined and interface.gateway) or (interface.gatewayv6 is defined and interface.gatewayv6) or (interface.ipaddr is defined and interface.ipaddr in ('dhcp', 'pppoe', 'pptp', 'l2tp', 'ppp')) or (interface.ipaddrv6 is defined and interface.ipaddrv6 in ('dhcp6', 'slaac', '6rd', '6to4'))) %}{{ interface['if'] | tojson }}{{ ", " if not loop.last else "" }}{% endfor %}],
         "discover_external_ip": {{ general.discover_external_ip | default('0', true) | tojson }},
         "latitude": {{ general.latitude | default('', true) | tojson }},
