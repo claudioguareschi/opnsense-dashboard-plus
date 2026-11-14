@@ -631,16 +631,20 @@ versions and signs the whole catalog.
 
 ## Changelog
 
-- **0.66** (in development; test builds from 0.65.2). Dashboard Plus: Thermal Sensors+ names an
-  amdtemp reading as its core's sensor ("Core 1, sensor 0", with the chip on a board that has
-  several) instead of the digits of its sysctl name; System Information+ reads only the QAT sysctl
-  trees instead of every MIB (idea from PR #22). Firewall Map+: multi-WAN and a WAN assigned
-  to another role than `wan` behind an upstream NAT show their traffic (#24, #26): every interface
-  with an upstream gateway, and the interface carrying the default route, is a WAN to the
-  collector, and a backup WAN that takes over anchors the firewall's place on the map. Top talkers
-  mark inside hosts that only ever received connection attempts nothing answered as *no answer*,
-  and the firewall's own addresses (a transit or tunnel address it sends from, a port forward
-  aimed at itself) are never inside hosts (#20).
+- **0.66** (all packages): Firewall Map+ shows multi-WAN and WAN-on-`optX` traffic and names
+  phantom inside hosts; Dashboard Plus names AMD sensors; VNStat Traffic+ needs no selection.
+  - Firewall Map+: every interface with an upstream gateway, and the interface carrying the
+    default route (or the half routes a VPN installs over it), is a WAN to the collector: multi-WAN
+    failover and a WAN assigned to another role than `wan` behind an upstream NAT show their
+    traffic, and a backup WAN that takes over anchors the firewall's place on the map (#24, #26).
+  - Firewall Map+: Top talkers mark an inside host that only ever received connection attempts
+    nothing answered as *no answer*, and the firewall's own addresses (a transit or tunnel
+    address it sends from, a port forward aimed at itself) are never inside hosts (#20).
+  - Dashboard Plus: Thermal Sensors+ names an amdtemp reading as its core's sensor ("Core 1,
+    sensor 0", with the chip on a board that has several) instead of the digits of its sysctl
+    name; System Information+ reads only the QAT sysctl trees instead of every MIB (from PR #22).
+  - VNStat Traffic+ shows every interface `os-vnstat` collects while none is selected in its
+    settings (PR #23).
 - **0.65.1** (all packages): Firewall Map+ details panel layout fix.
   - The details cards share each row, and a card left alone in the last row takes the whole row:
     since 0.65 added the CrowdSec card, the Reputation card used only half the width.
