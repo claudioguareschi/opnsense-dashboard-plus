@@ -580,6 +580,15 @@ default                           fe80::1%igb1                  UG             i
         self.assertEqual(PF.default_route_devices("Internet:\n127.0.0.1 link#2 UH lo0\n"), [])
         self.assertEqual(PF.default_route_devices("default link#2 UH lo0\n"), [])
 
+    def test_the_half_routes_of_a_vpn_or_policy_override_count_as_the_default(self):
+        # no "default" entry at all: 0.0.0.0/1 and 128.0.0.0/1 (and ::/1, 8000::/1) cover everything
+        routes = ("Internet:\nDestination Gateway Flags Netif Expire\n"
+                  "0.0.0.0/1          192.168.254.1      UGS            igb4\n"
+                  "128.0.0.0/1        192.168.254.1      UGS            igb4\n"
+                  "10.255.254.2       link#9             UHS             lo0\n"
+                  "Internet6:\n::/1 fe80::1%wg0 UG wg0\n8000::/1 fe80::1%wg0 UG wg0\n")
+        self.assertEqual(PF.default_route_devices(routes), ["igb4", "wg0"])
+
 
 if __name__ == "__main__":
     unittest.main()

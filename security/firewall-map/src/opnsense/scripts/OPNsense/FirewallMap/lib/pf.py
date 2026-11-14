@@ -50,11 +50,15 @@ def default_route_devices(output=None):
                 continue
     devices = []
     for line in output.splitlines():
-        # Destination Gateway Flags Netif [Expire]
+        # Destination Gateway Flags Netif [Expire]: the default route, or the two half routes a VPN
+        # or a multi-WAN policy installs over it (0.0.0.0/1 and 128.0.0.0/1, ::/1 and 8000::/1)
         fields = line.split()
-        if len(fields) >= 4 and fields[0] == "default" and fields[3] != "lo0" and fields[3] not in devices:
+        if len(fields) >= 4 and fields[0] in DEFAULT_ROUTES and fields[3] != "lo0" and fields[3] not in devices:
             devices.append(fields[3])
     return devices
+
+
+DEFAULT_ROUTES = ("default", "0.0.0.0/1", "128.0.0.0/1", "::/1", "8000::/1")
 
 
 class _Record:
