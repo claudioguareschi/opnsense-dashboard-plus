@@ -41,8 +41,8 @@ Then install from **System ▸ Firmware ▸ Plugins** (`os-dashboard-plus`,
 firmware updates. The repository contains these three packages.
 
 VNStat Plus installs its `os-vnstat` dependency automatically when it is available from the
-OPNsense plugin repository. Configure VNStat and choose the interfaces it collects before adding
-the **VNStat Traffic+** widget; it shows only interfaces collected by `os-vnstat`.
+OPNsense plugin repository. The **VNStat Traffic+** widget shows the interfaces selected in
+VNStat's settings or, while none is selected there, every interface `os-vnstat` collects.
 
 Firewall Map+ works best with a free MaxMind GeoLite2 key and a free AbuseIPDB key: see
 [Firewall Map+](#firewall-map) below for where to get them.
@@ -559,8 +559,9 @@ The title opens OPNsense's CARP status page.*
 ## VNStat Plus
 
 **VNStat Traffic+** is a separate dashboard widget package for traffic history. It requires the
-official `os-vnstat` plugin and uses the interfaces selected there; `os-vnstat-plus` does not
-collect traffic on its own. Select an interface and hourly, daily, monthly or yearly history, then
+official `os-vnstat` plugin and uses the interfaces selected there (every interface `os-vnstat`
+collects, while none is selected); `os-vnstat-plus` does not collect traffic on its own. Select an
+interface and hourly, daily, monthly or yearly history, then
 use the chart and table to compare download, upload and total traffic. Settings choose the visible
 sections, chart window and refresh interval.
 
