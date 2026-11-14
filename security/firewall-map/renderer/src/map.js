@@ -96,7 +96,7 @@ export function createFirewallMap(container, options = {}) {
     _onMetrics: (metrics) => {
       deckMetrics = {...metrics};
     },
-    views: new MapView({repeat: false}),
+    views: new MapView({repeat: true}),
     viewState,
     onViewStateChange: ({viewState: next, interactionState}) => {
       if (interactionState && (interactionState.isDragging || interactionState.isPanning || interactionState.isZooming)) {
@@ -302,6 +302,7 @@ export function createFirewallMap(container, options = {}) {
         jointRounded: true,
         pickable: true,
         widthMinPixels: 1,
+        wrapLongitude: true,
         getColor: (arc) => arcColor(arc),
         updateTriggers: {getColor: [colors.toward.link, colors.away.link, colors.inbound.link, settings.colorMode, style.categoryKey(), fadeKey], getPath: clearKey},
       }),
@@ -314,6 +315,7 @@ export function createFirewallMap(container, options = {}) {
         capRounded: true,
         jointRounded: true,
         pickable: true,
+        wrapLongitude: true,
         // bright while hits arrive, then a faint trace that can still be hovered
         getColor: (block) => rgb(blockColor(block), Math.round((35 + 185 * block.activity) * blockFader.opacity(block, frameNow))),
         updateTriggers: {getColor: [colors.blocked, colors.contained, fadeKey], getPath: clearKey},
@@ -325,6 +327,7 @@ export function createFirewallMap(container, options = {}) {
         getRadius: (block) => block.threat ? 3.5 : 2.5,
         radiusUnits: 'pixels',
         pickable: true,
+        wrapLongitude: true,
         getFillColor: (block) => rgb(blockColor(block), Math.round((90 + 165 * block.activity) * blockFader.opacity(block, frameNow))),
         updateTriggers: {getFillColor: [colors.blocked, colors.contained, fadeKey]},
       }),
@@ -338,6 +341,7 @@ export function createFirewallMap(container, options = {}) {
         filled: false,
         lineWidthUnits: 'pixels',
         getLineWidth: 1.5,
+        wrapLongitude: true,
         getLineColor: (location) => faded(rgb(outcomeColor(idsHistory.get(location.id)), 230), endpointFader.opacity(location, frameNow)),
         pickable: false,
         updateTriggers: {getLineColor: [colors.danger, colors.contained, fadeKey]},
@@ -351,6 +355,7 @@ export function createFirewallMap(container, options = {}) {
         radiusUnits: 'pixels',
         stroked: true,
         filled: true,
+        wrapLongitude: true,
         getFillColor: (item) => faded(rgb(colors.background.slice(0, 3), 240), arcOpacity(item.arc)),
         getLineColor: (item) => faded(rgb(outcomeColor(idsOutcome(item.arc.ids))), arcOpacity(item.arc)),
         lineWidthUnits: 'pixels',
@@ -368,6 +373,7 @@ export function createFirewallMap(container, options = {}) {
         fontWeight: 700,
         characterSet: ['!'],
         pickable: false,
+        wrapLongitude: true,
         updateTriggers: {getColor: [colors.danger, colors.contained, fadeKey]},
       }),
       new ScatterplotLayer({
@@ -379,6 +385,7 @@ export function createFirewallMap(container, options = {}) {
         radiusUnits: 'pixels',
         stroked: true,
         filled: true,
+        wrapLongitude: true,
         getFillColor: (alert) => faded(rgb(colors.background.slice(0, 3), 220), alertFader.opacity(alert, frameNow)),
         getLineColor: (alert) => faded(rgb(outcomeColor(alertOutcome(alert))), alertFader.opacity(alert, frameNow)),
         lineWidthUnits: 'pixels',
@@ -394,6 +401,7 @@ export function createFirewallMap(container, options = {}) {
         radiusUnits: 'pixels',
         stroked: false,
         filled: true,
+        wrapLongitude: true,
         getFillColor: (location) => faded(colors.endpoint, endpointFader.opacity(location, frameNow)),
         pickable: true,
         radiusMinPixels: 2.5,
@@ -416,6 +424,7 @@ export function createFirewallMap(container, options = {}) {
         getSize: 15,
         sizeUnits: 'pixels',
         alphaCutoff: 0,
+        wrapLongitude: true,
         getColor: (location) => faded(colors.endpoint, endpointFader.opacity(location, frameNow)),
         pickable: true,
         updateTriggers: {getColor: [colors.endpoint, fadeKey]},
@@ -512,6 +521,7 @@ export function createFirewallMap(container, options = {}) {
         getLineColor: colors.border,
         lineWidthMinPixels: 0.6,
         pickable: false,
+        wrapLongitude: true,
         updateTriggers: {getFillColor: colors.land, getLineColor: colors.border},
       }),
     ];

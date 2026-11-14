@@ -212,7 +212,7 @@ body.fwmap-resizing, body.fwmap-resizing * { user-select: none !important; }
 
 /* Threats */
 .fwmap-q-dialog .modal-dialog { width: min(1320px, 94vw); max-width: none; }
-.fwmap-q-newcount { margin-left: 8px; }
+.fwmap-q-newcount, .fwmap-q-outboundcount { margin-left: 8px; }
 .fwmap-q-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .fwmap-q-tabs .badge { margin-left: 4px; }
 .fwmap-q-searchbox { width: 38%; min-width: 240px; margin-bottom: 12px; }

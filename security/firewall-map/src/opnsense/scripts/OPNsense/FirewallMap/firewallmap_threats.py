@@ -51,7 +51,7 @@ from lib.leases import host_names
 
 DATABASE = THREATS_DB
 STATUSES = ("new", "reviewed", "dismissed", "blocked")
-DISPOSITIONS = ("passed", "firewall_blocked", "ips_dropped")
+DISPOSITIONS = ("passed", "passed_outbound", "firewall_blocked", "ips_dropped")
 VIEWS = (*DISPOSITIONS, "all", "reviewed", "dismissed")
 KEEP_SECONDS = 90 * 86400
 KEEP_ROWS = 5000
@@ -65,7 +65,7 @@ MAX_ITEMS = 8  # per list kept for one address (targets, inside hosts, services,
 # a note's characters: what the review page lets one type (queue.js maxlength) and ThreatsController's
 # NOTE_BYTES carries (three bytes a character, within configd's one message)
 MAX_NOTE = 800
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def connect(path=DATABASE):
@@ -91,7 +91,11 @@ def connect(path=DATABASE):
             db.execute("PRAGMA user_version = 1")
     if version == 1:
         refile_ips_drops(db)
+        version = 2
         db.execute("PRAGMA user_version = 2")
+    if version == 2:
+        refile_outbound_passed(db)
+        db.execute("PRAGMA user_version = 3")
     return db
 
 
@@ -108,6 +112,29 @@ def refile_ips_drops(db):
             rows.append((address,))
     if rows:
         db.executemany("UPDATE threats SET disposition = 'ips_dropped' WHERE address = ?", rows)
+
+
+def refile_outbound_passed(db):
+    """Rows filed as passed although all their traffic was outbound (LAN-initiated) become passed_outbound."""
+    rows = []
+    for address, data in db.execute("SELECT address, data FROM threats WHERE disposition = 'passed'"):
+        try:
+            data = json.loads(data)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(data, dict) and not data.get("inbound") and data.get("outbound"):
+            rows.append((address,))
+    if rows:
+        db.executemany("UPDATE threats SET disposition = 'passed_outbound' WHERE address = ?", rows)
+        for (addr,) in rows:
+            row = db.execute("SELECT data FROM threats WHERE address = ?", (addr,)).fetchone()
+            if row:
+                try:
+                    d = json.loads(row[0])
+                    d["got_through"] = False
+                    db.execute("UPDATE threats SET data = ? WHERE address = ?", (json.dumps(d), addr))
+                except Exception:
+                    pass
 
 
 def move_from_cache(db, cache=None):
@@ -243,7 +270,7 @@ BLOCK_SLACK_SECONDS = 30
 
 
 def _record(db, seen, now):
-    rank = {"firewall_blocked": 0, "ips_dropped": 1, "passed": 2}
+    rank = {"firewall_blocked": 0, "ips_dropped": 1, "passed_outbound": 2, "passed": 3}
     for address, entry in seen.items():
         row = db.execute("SELECT data, status, status_changed, disposition FROM threats WHERE address = ?",
                          (address,)).fetchone()
@@ -257,12 +284,16 @@ def _record(db, seen, now):
             data.pop("youngest")
             data.pop("status_hint", None)
             data.pop("disposition", None)
-            data["got_through"] = disposition == "passed"
-            status = "new"
             data["connections"] = merge_connections([], entry.get("connections") or [])
             data["remote"] = entry.get("remote") or {}
             if not data.get("ids"):
                 data.pop("ids", None)
+            if disposition != "firewall_blocked" and _only_ips_dropped(data):
+                disposition = "ips_dropped"
+            elif disposition == "passed" and not data.get("inbound") and data.get("outbound"):
+                disposition = "passed_outbound"
+            data["got_through"] = disposition == "passed"
+            status = "new"
             db.execute(
                 "INSERT INTO threats (address, first_seen, last_seen, samples, data, status, note, status_changed, disposition) "
                 "VALUES (?, ?, ?, 1, ?, ?, '', NULL, ?)", (address, now, now, json.dumps(data), status, disposition))
@@ -272,12 +303,17 @@ def _record(db, seen, now):
         except ValueError:
             data = {}
         stored = row[3] or "passed"
-        # Some traffic of the address got through. Rows recorded before 0.65 have no flag:
-        # those filed as passed although every passed connection they kept was dropped by
-        # Suricata's IPS (PF passed the handshake) are taken as IPS drops (issue #7).
-        through = disposition == "passed" or data.get("got_through", not _only_ips_dropped(data))
+        if disposition != "firewall_blocked" and _only_ips_dropped(entry):
+            disposition = "ips_dropped"
+        elif disposition == "passed" and not (data.get("inbound") or entry.get("inbound", 0) > 0) and (data.get("outbound") or entry.get("outbound", 0) > 0):
+            disposition = "passed_outbound"
+        through = data.get("got_through")
+        if through is None:
+            through = not _only_ips_dropped(data) and (data.get("inbound") or not data.get("outbound"))
+        if not through and disposition == "passed" and not _only_ips_dropped(entry) and (data.get("inbound") or entry.get("inbound", 0) > 0):
+            through = True
         if stored == "passed" and not through:
-            stored = "ips_dropped"
+            stored = "ips_dropped" if _only_ips_dropped(data) else ("passed_outbound" if not data.get("inbound") and data.get("outbound") else "passed")
         data["got_through"] = through
         # a blocked attempt from an address that once got through adds its facts after the ones
         # that got through, so the bounded lists (and the card's headline) keep the passed traffic
@@ -301,6 +337,9 @@ def _record(db, seen, now):
             data["crowdsec"] = entry["crowdsec"]  # the latest CrowdSec ban (it may since have ended)
         status = row[1]
         disposition = max((stored, disposition), key=lambda value: rank.get(value, -1))
+        if disposition == "passed_outbound" and data["inbound"]:
+            disposition = "passed"
+            data["got_through"] = True
         # only a connection opened after the block reopens it; existing and closing states
         # (TIME_WAIT lingers for a minute or more) are not new traffic
         youngest = entry.get("youngest")
@@ -313,9 +352,15 @@ def _record(db, seen, now):
 
 
 def _only_ips_dropped(data):
-    """True when the connections kept with a row show only passed traffic Suricata dropped."""
-    passed = [item for item in data.get("connections") or [] if item.get("decision") == "pass"]
-    return bool(passed) and all(item.get("ips_dropped") for item in passed)
+    """True when the connections kept with a row show only traffic Suricata dropped (IPS)."""
+    conns = data.get("connections") or []
+    if conns:
+        if any(item.get("decision") == "pass" and not item.get("ips_dropped") for item in conns):
+            return False
+        return all(item.get("ips_dropped") or any(s.get("action") == "blocked" for s in (item.get("ids") or [])) for item in conns)
+    ids = data.get("ids") or {}
+    sigs = ids.get("signatures") or []
+    return bool(sigs) and all(s.get("action") == "blocked" for s in sigs)
 
 
 MAX_CONNECTIONS = 8

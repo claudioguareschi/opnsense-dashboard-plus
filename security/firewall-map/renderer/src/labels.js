@@ -127,6 +127,7 @@ export function createLabels(view) {
       outlineColor: view.colors.background,
       fontSettings: {sdf: true},
       characterSet: 'auto',
+      wrapLongitude: true,
       updateTriggers: {getColor: view.colors.label},
     });
   }

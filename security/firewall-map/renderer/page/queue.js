@@ -35,7 +35,7 @@ import {ic} from './icons.js';
 import {investigate, investigationPanel} from './investigate.js';
 import {ago, agoText, crowdsecEnds, crowdsecOrigin, idsLines, pill} from './parts.js';
 
-const VIEWS = ['passed', 'firewall_blocked', 'ips_dropped', 'all', 'reviewed', 'dismissed'];
+const VIEWS = ['passed', 'passed_outbound', 'firewall_blocked', 'ips_dropped', 'all', 'reviewed', 'dismissed'];
 const QUEUE_PAGE = 100;
 
 // inside host names from the live map, for addresses recorded in the queue
@@ -57,11 +57,11 @@ function queueItem(row, names) {
   const ports = row.service_ports || {};
   const serviceFor = (protocol, port) => Object.keys(ports).find((name) => ports[name] === `${port}/${protocol}`)
     || (port ? `${protocolLabel(protocol)}/${port}` : 'ICMP');
-  const disposition = ['passed', 'firewall_blocked', 'ips_dropped'].includes(row.disposition) ? row.disposition : 'passed';
+  const disposition = ['passed', 'passed_outbound', 'firewall_blocked', 'ips_dropped'].includes(row.disposition) ? row.disposition : 'passed';
   // the per-connection snapshot the collector took from PF (and Suricata) for this address. The
   // card leads with a connection that shows the disposition: an address that got through once and
   // was blocked later is filed under Passed, so its headline is the connection that passed.
-  const wanted = {passed: 'pass', firewall_blocked: 'block'}[disposition];
+  const wanted = {passed: 'pass', passed_outbound: 'pass', firewall_blocked: 'block'}[disposition];
   const conns = [...(row.connections || [])].sort((a, b) => (b.decision === wanted) - (a.decision === wanted));
   const lead = conns[0];
   const leadTarget = lead && lead.remote_started ? (() => {
@@ -163,13 +163,17 @@ function queueItem(row, names) {
   const review = status === 'new'
     ? btn('fwmap-q-status', 'check', T.mark_reviewed, 'data-status="reviewed"')
     : btn('fwmap-q-status', 'rotate-left', T.reopen, 'data-status="new"');
-  const dispositionColor = {passed: 'danger', firewall_blocked: 'default', ips_dropped: 'warning'}[disposition];
+  const dispositionColor = {passed: 'danger', passed_outbound: 'warning', firewall_blocked: 'default', ips_dropped: 'warning'}[disposition];
+  const isOutboundOnly = Boolean(row.outbound && !row.inbound);
+  const dispLabel = (disposition === 'passed_outbound' || (disposition === 'passed' && isOutboundOnly))
+    ? (T.disposition_passed_outbound || 'Passed · outbound')
+    : T[`disposition_${disposition}`];
   return `<div class="panel panel-default fwmap-q-item fwmap-q-${status}" data-address="${address}" data-status="${status}">
     <div class="panel-body">
     <div class="fwmap-q-top">
       <div class="fwmap-q-who">
         <div class="fwmap-q-ipline"><span class="fwmap-q-ip">${address}</span>
-          ${pill(dispositionColor, T[`disposition_${disposition}`])}
+          ${pill(dispositionColor, dispLabel)}
           ${status !== 'new' ? `<span class="text-muted text-uppercase small">${escapeHtml(T[`status_${status}`])}</span>` : ''}</div>
         ${remote.hostname ? `<div class="text-muted fwmap-q-hostname" title="${escapeHtml(remote.hostname)}">${escapeHtml(remote.hostname)}</div>` : ''}
         ${org || remote.country ? `<div class="fwmap-q-org">${escapeHtml(org || '')}${org && remote.country ? ' · ' : ''}${remote.country ? `${flagHtml(cc)}${escapeHtml(remote.country)}` : ''}</div>` : ''}
@@ -353,7 +357,7 @@ export async function showQueue() {
     // act on what the search shows and say so.
     const count = view.query ? view.total : view.counts[view.status] || 0;
     const bulk = [];
-    if (['passed', 'firewall_blocked', 'ips_dropped'].includes(view.status) && count) {
+    if (['passed', 'passed_outbound', 'firewall_blocked', 'ips_dropped'].includes(view.status) && count) {
       const label = view.query ? T.dismiss_shown : T.dismiss_all;
       bulk.push(`<button type="button" class="btn btn-default fwmap-q-bulk" data-to="dismissed">${ic('eye-slash')} ${escapeHtml(fill(label, {count}))}</button>`);
     }
@@ -364,6 +368,7 @@ export async function showQueue() {
     $bulk.html(bulk.join(''));
   };
 
+  let initial = true;
   const url = (offset, limit) => `/api/firewallmap/threats/list/${view.status}?offset=${offset}&limit=${limit}`
     + (view.query ? `&q=${encodeURIComponent(view.query)}` : '');
   /** First page of the current tab and search; `more` appends the next page instead. */
@@ -374,11 +379,27 @@ export async function showQueue() {
       if (seq !== view.seq) {
         return;  // a newer request (another tab, more typing) owns the list now
       }
+      view.counts = result.counts || {};
+      if (initial && view.status === 'passed' && !view.counts.passed && view.counts.passed_outbound) {
+        initial = false;
+        view.status = 'passed_outbound';
+        load();
+        return;
+      }
+      initial = false;
       view.rows = more ? view.rows.concat(result.rows || []) : result.rows || [];
       view.total = result.total ?? view.rows.length;
-      view.counts = result.counts || {};
       view.names = result.names || {};
-      $('.fwmap-q-newcount b').text(view.counts.passed || 0);
+      if (view.counts.passed) {
+        $('.fwmap-q-newcount').show().find('b').text(view.counts.passed);
+      } else {
+        $('.fwmap-q-newcount').hide();
+      }
+      if (view.counts.passed_outbound) {
+        $('.fwmap-q-outboundcount').show().find('b').text(view.counts.passed_outbound);
+      } else {
+        $('.fwmap-q-outboundcount').hide();
+      }
       $('#fwmap-review-count').text(view.counts.passed || '');
     } catch (error) {
       if (seq === view.seq) {
@@ -497,14 +518,21 @@ export async function showQueue() {
   // what the queue is and where its data comes from, out of the way of the entries
   const $footer = $('<div class="pull-left text-left fwmap-q-footer"></div>').append($record).append(blacklistStatus(status));
   BootstrapDialog.show({
-    title: `${ic('list-check')} ${escapeHtml(T.review_queue)} <span class="fwmap-pill fwmap-pill-danger fwmap-q-newcount"><b></b> ${escapeHtml(T.passed_attention)}</span>`
+    title: `${ic('list-check')} ${escapeHtml(T.review_queue)} `
+      + `<span class="fwmap-pill fwmap-pill-danger fwmap-q-newcount" style="display:none"><b></b> ${escapeHtml(T.passed_attention)}</span>`
+      + `<span class="fwmap-pill fwmap-pill-warning fwmap-q-outboundcount" style="display:none"><b></b> ${escapeHtml(T.status_passed_outbound || 'Passed · outbound')}</span>`
       + `<div class="small text-muted">${escapeHtml(T.review_intro)}</div>`,
     type: BootstrapDialog.TYPE_DEFAULT, size: BootstrapDialog.SIZE_WIDE, message: $body, cssClass: 'fwmap-q-dialog',
     buttons: [{label: T.close, action: (dialog) => dialog.close()}],
     onshown: (dialog) => {
       dialog.getModalFooter().prepend($footer);
       // the list can load before the header exists
-      $('.fwmap-q-newcount b').text(view.counts.passed ?? '');
+      if (view.counts.passed) {
+        $('.fwmap-q-newcount').show().find('b').text(view.counts.passed);
+      }
+      if (view.counts.passed_outbound) {
+        $('.fwmap-q-outboundcount').show().find('b').text(view.counts.passed_outbound);
+      }
     },
     onhidden: () => refreshQueueCount(),
   });

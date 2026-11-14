@@ -132,26 +132,44 @@ export function buildArcs(data, options = DEFAULT_OPTIONS) {
   flows.forEach(({key, flow, origin, dest, members}, index) => {
     const x0 = origin.lon;
     const y0 = mercatorY(origin.lat);
-    const x1 = dest.lon;
+    let x1 = dest.lon;
     const y1 = mercatorY(dest.lat);
-    const dx = x1 - x0;
+    let dx = x1 - x0;
+    if (dx > 180) {
+      x1 -= 360;
+      dx -= 360;
+    } else if (dx < -180) {
+      x1 += 360;
+      dx += 360;
+    }
     const dy = y1 - y0;
     const length = Math.hypot(dx, dy);
     if (length < 0.3) {
       return;
     }
     const lane = laneOf.get(key);
-    // unit normal, oriented so the first lane bows towards the pole side of the map
+    // unit normal
     let nx = -dy / length;
     let ny = dx / length;
-    if (ny < 0) {
+    const midY = (y0 + y1) / 2;
+    // Bow away from the equator towards the local hemisphere
+    if (midY >= 0 ? ny < 0 : ny > 0) {
       nx = -nx;
       ny = -ny;
     }
     const side = lane % 2 === 0 ? 1 : -1;
-    const bend = Math.max(length * (0.2 + 0.12 * Math.floor(lane / 2)), 1.2 + lane * 0.6) * side;
+    // Cap bend so long-distance trans-oceanic arcs remain gentle and do not arch over the poles
+    const maxBend = 14 + lane * 1.5;
+    const bend = Math.min(maxBend, Math.max(length * (0.15 + 0.08 * Math.floor(lane / 2)), 1.2 + lane * 0.6)) * side;
     const cx = (x0 + x1) / 2 + nx * bend;
-    const cy = (y0 + y1) / 2 + ny * bend;
+    let cy = (y0 + y1) / 2 + ny * bend;
+    const MAX_CY = mercatorY(66);
+    const MIN_CY = mercatorY(-55);
+    if (cy > MAX_CY) {
+      cy = MAX_CY;
+    } else if (cy < MIN_CY) {
+      cy = MIN_CY;
+    }
     const path = [];
     for (let step = 0; step <= ARC_SAMPLES; step++) {
       const t = step / ARC_SAMPLES;
@@ -218,18 +236,34 @@ function initiatedBy(members) {
 function blockPath(source, target) {
   const x0 = source.lon;
   const y0 = mercatorY(source.lat);
-  const x1 = target.lon;
+  let x1 = target.lon;
   const y1 = mercatorY(target.lat);
-  const length = Math.hypot(x1 - x0, y1 - y0) || 1;
+  let dx = x1 - x0;
+  if (dx > 180) {
+    x1 -= 360;
+    dx -= 360;
+  } else if (dx < -180) {
+    x1 += 360;
+    dx += 360;
+  }
+  const length = Math.hypot(dx, y1 - y0) || 1;
   let nx = -(y1 - y0) / length;
-  let ny = (x1 - x0) / length;
-  if (ny > 0) {
+  let ny = dx / length;
+  const midY = (y0 + y1) / 2;
+  if (midY >= 0 ? ny < 0 : ny > 0) {
     nx = -nx;
     ny = -ny;
   }
-  const bend = Math.max(length * 0.18, 1);
+  const bend = Math.min(10, Math.max(length * 0.12, 1));
   const cx = (x0 + x1) / 2 + nx * bend;
-  const cy = (y0 + y1) / 2 + ny * bend;
+  let cy = (y0 + y1) / 2 + ny * bend;
+  const MAX_CY = mercatorY(66);
+  const MIN_CY = mercatorY(-55);
+  if (cy > MAX_CY) {
+    cy = MAX_CY;
+  } else if (cy < MIN_CY) {
+    cy = MIN_CY;
+  }
   const path = [];
   for (let step = 0; step <= ARC_SAMPLES; step++) {
     const t = step / ARC_SAMPLES;
@@ -378,7 +412,8 @@ export function pulsePosition(arc, seconds, reverse, period = arc.period, phase 
   if (reverse) {
     t = 1 - t;
   }
-  return pointAt(path, t * ARC_SAMPLES);
+  const [x, y] = pointAt(path, t * ARC_SAMPLES);
+  return [((x + 180) % 360 + 360) % 360 - 180, y];
 }
 
 // a mirrored arc (CARP backup): a closely spaced pair of dots at one fixed pace, since there are
