@@ -21,6 +21,11 @@ export default class DashboardPlusThermalSensors extends DashboardPlusWidget(Bas
 
     _sensorLabel(sensor) {
         if (sensor.type === 'cpu') {
+            // an amdtemp reading: core N's sensor M, and its chip on a board with several
+            if (sensor.sensor !== undefined) {
+                const template = sensor.chip !== undefined ? this.translations.chip_core_sensor : this.translations.core_sensor;
+                return fill(template, {chip: sensor.chip, number: sensor.device_seq, sensor: sensor.sensor});
+            }
             return fill(this.translations.core, {number: sensor.device_seq});
         }
         return `${sensor.type_translated} ${sensor.device_seq}`;

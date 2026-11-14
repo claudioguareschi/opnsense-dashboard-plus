@@ -631,7 +631,10 @@ versions and signs the whole catalog.
 
 ## Changelog
 
-- **0.66** (in development; Firewall Map+ test builds from 0.65.2): multi-WAN and a WAN assigned
+- **0.66** (in development; test builds from 0.65.2). Dashboard Plus: Thermal Sensors+ names an
+  amdtemp reading as its core's sensor ("Core 1, sensor 0", with the chip on a board that has
+  several) instead of the digits of its sysctl name; System Information+ reads only the QAT sysctl
+  trees instead of every MIB (idea from PR #22). Firewall Map+: multi-WAN and a WAN assigned
   to another role than `wan` behind an upstream NAT show their traffic (#24, #26): every interface
   with an upstream gateway, and the interface carrying the default route, is a WAN to the
   collector, and a backup WAN that takes over anchors the firewall's place on the map. Top talkers

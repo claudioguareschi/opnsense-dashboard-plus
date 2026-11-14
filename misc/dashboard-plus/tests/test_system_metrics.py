@@ -206,6 +206,18 @@ class ParseTest(unittest.TestCase):
             {"device": "dev.cpu.4.temperature", "device_seq": "4", "temperature": "-1", "type": "cpu"},
         ])
 
+    def test_amdtemp_readings_are_a_cores_sensor_with_the_chip_only_on_a_multi_chip_board(self):
+        # one chip: core and sensor (the digits of the OID were "010" and "011" before)
+        oids = ["dev.amdtemp.0.core1.sensor0", "dev.amdtemp.0.core1.sensor1", "dev.cpu.2.temperature"]
+        values = {oid: "45.5C" for oid in oids}
+        readings = one("temperatures", oids, values)
+        self.assertEqual([(r["device_seq"], r.get("sensor"), r.get("chip"), r["type"]) for r in readings],
+                         [("1", "0", None, "cpu"), ("1", "1", None, "cpu"), ("2", None, None, "cpu")])
+        # two chips: the chip tells them apart
+        oids = ["dev.amdtemp.0.core0.sensor0", "dev.amdtemp.1.core0.sensor0"]
+        readings = one("temperatures", oids, {oid: "40.0C" for oid in oids})
+        self.assertEqual([(r["device_seq"], r["sensor"], r["chip"]) for r in readings], [("0", "0", "0"), ("0", "0", "1")])
+
     def test_swapinfo_devices_without_the_total_line(self):
         self.assertEqual(one("swap", SWAPINFO), [
             {"device": "/dev/gpt/swap0", "total": 2097152, "used": 10240},

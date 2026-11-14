@@ -141,6 +141,14 @@ qat2@pci0:10:0:0: class=0x0b4000 rev=0x04 hdr=0x00 vendor=0x8086 device=0x37c8
         sysctls = self.qat_sysctls([("up", "sym;dc")])
         self.assertEqual(self.collect_states(pciconf, sysctls), [(True, True)])
 
+    def test_the_qat_sysctls_are_read_in_sysctl_default_output_format(self):
+        # collect() asks sysctl for the two QAT trees without -e: the parser reads "name: value"
+        # lines, which also keeps the "=" inside a multi-line dev_cfg value out of the keys
+        parsed = SYSTEM_INFO.parse_sysctls("dev.qat_ocf.0.enable: 1\ndev.qat.0.dev_cfg: [GENERAL]\n"
+                                           "Device_Capabilities_Mask = 0x0001020f\n")
+        self.assertEqual(parsed, {"dev.qat_ocf.0.enable": "1", "dev.qat.0.dev_cfg": "[GENERAL]"})
+        self.assertEqual(SYSTEM_INFO.parse_sysctls("dev.qat_ocf.0.enable=1\n"), {}, "the -e form is not read")
+
     def test_disabled_or_missing_qat_ocf_leaves_qat_inactive(self):
         for ocf_enable in ("0", None):
             sysctls = self.qat_sysctls([("up", "sym;dc")] * 3, ocf_enable)

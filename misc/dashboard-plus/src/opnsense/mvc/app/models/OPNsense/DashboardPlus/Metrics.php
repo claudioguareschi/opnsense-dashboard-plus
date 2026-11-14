@@ -123,21 +123,41 @@ class Metrics
         ];
     }
 
-    /** The readings of the known sensors, shaped like OPNsense's temperature endpoint. */
+    /**
+     * The readings of the known sensors, shaped like OPNsense's temperature endpoint. An amdtemp
+     * reading (dev.amdtemp.<chip>.core<N>.sensor<M>) is core N's sensor M, with its chip only on a
+     * board that has more than one; the digits of any other OID are its sequence, as in core.
+     */
     public static function temperatures(array $oids, array $values)
     {
         $readings = [];
+        $chips = [];
         foreach ($oids as $oid) {
             $temperature = trim(str_replace('C', '', $values[$oid] ?? ''));
             if (!is_numeric($temperature)) {
                 continue;
             }
-            $readings[] = [
+            $reading = [
                 'device' => $oid,
                 'device_seq' => preg_replace('/[^0-9+-]/', '', $oid),
                 'temperature' => $temperature,
                 'type' => strpos($oid, 'hw.acpi') !== false ? 'zone' : 'cpu',
             ];
+            if (preg_match('/^dev\.amdtemp\.(\d+)\.core(\d+)\.sensor(\d+)$/', $oid, $parts)) {
+                $reading['device_seq'] = $parts[2];
+                $reading['sensor'] = $parts[3];
+                $reading['chip'] = $parts[1];
+                $chips[$parts[1]] = true;
+            } elseif (preg_match('/^(?:dev\.cpu\.|hw\.acpi\.thermal\.tz)(\d+)\.temperature$/', $oid, $parts)) {
+                $reading['device_seq'] = $parts[1];
+            }
+            $readings[] = $reading;
+        }
+        if (count($chips) < 2) {
+            foreach ($readings as &$reading) {
+                unset($reading['chip']);
+            }
+            unset($reading);
         }
         return $readings;
     }

@@ -664,9 +664,12 @@ def collect():
     boot_environments = collect_boot_environments(run([BECTL, "list", "-H"]))
     zfs_pools = parse_zpool_status(run([ZPOOL, "status", "-j", "--json-int"]))
 
+    # only the QAT trees, not every MIB (sysctl -a walks them all and prints deprecation
+    # warnings on the way); -i keeps a firewall without QAT quiet. Not -e: parse_sysctls reads
+    # the default "name: value" lines, and the multi-line dev_cfg values hold "=" themselves
     accelerator = collect_qat(
         run([PCICONF, "-lv"]),
-        run([SYSCTL, "-a"]),
+        run([SYSCTL, "-i", "dev.qat", "dev.qat_ocf"]),
         slot_output,
     )
     cpu_algorithms = collect_cpu_crypto(dmesg_output)

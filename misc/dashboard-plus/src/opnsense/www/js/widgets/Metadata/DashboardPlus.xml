@@ -151,6 +151,8 @@
             <dashboard_title>Thermal Sensors</dashboard_title>
             <sensors>Sensors</sensors>
             <core>Core {number}</core>
+            <core_sensor>Core {number}, sensor {sensor}</core_sensor>
+            <chip_core_sensor>CPU {chip}, core {number}, sensor {sensor}</chip_core_sensor>
             <no_sensors>No sensors selected</no_sensors>
         </translations>
     </dashboardplusthermalsensors>
