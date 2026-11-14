@@ -296,7 +296,7 @@ def flow_endpoints(record, local_addresses, networks=None, interface_addresses=N
         # the flow from a same-family firewall address while retaining the host as `inside`.
         if not networks:
             return None
-        inside = inside_endpoint(record, networks, local_addresses)
+        inside = inside_endpoint(record, networks, local_addresses, own_addresses(interface_addresses))
         if inside is None or not public_ip(inside["address"]):
             return None
         remote_side = record["dst"] if inside is record["src"] else record["src"]
@@ -310,22 +310,32 @@ def flow_endpoints(record, local_addresses, networks=None, interface_addresses=N
     return local, remote
 
 
-def inside_endpoint(record, networks=None, local_addresses=None):
-    """The protected endpoint behind NAT or within a directly routed interface prefix."""
+def own_addresses(interface_addresses):
+    """Every address assigned to the firewall's interfaces ({device: addresses}), as a set."""
+    return frozenset().union(*interface_addresses.values()) if interface_addresses else frozenset()
+
+
+def inside_endpoint(record, networks=None, local_addresses=None, own=()):
+    """The protected endpoint behind NAT or within a directly routed interface prefix. `own`: the
+    addresses assigned to the firewall's interfaces, never an inside host (a private transit or
+    tunnel address it originates traffic from, a port forward aimed at itself: its own traffic)."""
     # On inbound NAT, both the WAN translation and the protected target can be private behind
     # upstream NAT. PF's destination is the protected side; prefer it over the wire translation.
     sides = (record["dst"], record["nat"], record["src"]) if record.get("direction") == "in" \
         else (record["nat"], record["src"], record["dst"])
+    inside = None
     for side in sides:
         if side and private_ip(side["address"]):
-            return side
+            inside = side
+            break
     # Public prefixes are unambiguous only when pfctl supplied the state's outside interface.
     outside = record.get("origif")
-    if outside:
+    if inside is None and outside:
         for side in (record["src"], record["dst"]):
             if inside_address(side["address"], networks, local_addresses, outside):
-                return side
-    return None
+                inside = side
+                break
+    return None if inside is None or inside["address"] in own else inside
 
 
 def lan_rule_index(records):
@@ -421,7 +431,7 @@ class StateFacts:
             self.pair = pair = flow_endpoints(record, local_addresses, networks, interface_addresses, primary_wan_device)
             if pair is None:
                 return
-            self.inside = inside = inside_endpoint(record, networks, local_addresses)
+            self.inside = inside = inside_endpoint(record, networks, local_addresses, own_addresses(interface_addresses))
             self.src_is_remote = src["address"] == pair[1]
             self.remote_started, self.service_port = orientation(record, pair[1], networks, local_addresses)
             self.service = service_name(record["protocol"], self.service_port)

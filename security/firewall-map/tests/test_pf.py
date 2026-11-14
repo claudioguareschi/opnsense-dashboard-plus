@@ -555,6 +555,21 @@ igb2: flags=1008943<UP> metric 0 mtu 1500
         self.assertEqual(PF.carp_backup_addresses("igb0: flags=0\n\tinet 192.168.2.1 netmask 0xffffff00\n"), set())
 
 
+class OwnAddressTest(unittest.TestCase):
+    """The firewall's own addresses are never inside hosts (the reference agrees with the collector)."""
+
+    def test_a_private_transit_address_the_firewall_sends_from_is_not_an_inside_host(self):
+        record, = PF.parse_states(NAT_OUT)
+        inside = PF.inside_endpoint(record)["address"]
+        self.assertEqual(PF.inside_endpoint(record, own={inside}), None)
+        own = PF.own_addresses({"igb1": {"1.2.3.163"}, "igb4": {inside}})
+        self.assertEqual(own, frozenset({"1.2.3.163", inside}))
+        views, _ = PF.StateFacts().view([record], {"1.2.3.163"}, None, {"igb4": {inside}})
+        self.assertIsNone(views[0][1].inside)
+        views, _ = PF.StateFacts().view([record], {"1.2.3.163"}, None, {"igb4": {"192.168.254.9"}})
+        self.assertEqual(views[0][1].inside["address"], inside)
+
+
 class DefaultRouteTest(unittest.TestCase):
     """The WANs in use right now, from the default routes (multi-WAN failover, a WAN on optX)."""
 

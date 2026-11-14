@@ -634,8 +634,9 @@ versions and signs the whole catalog.
   to another role than `wan` behind an upstream NAT show their traffic (#24, #26): every interface
   with an upstream gateway, and the interface carrying the default route, is a WAN to the
   collector, and a backup WAN that takes over anchors the firewall's place on the map. Top talkers
-  mark inside hosts that only ever received connection attempts nothing answered as *no answer*
-  (#20).
+  mark inside hosts that only ever received connection attempts nothing answered as *no answer*,
+  and the firewall's own addresses (a transit or tunnel address it sends from, a port forward
+  aimed at itself) are never inside hosts (#20).
 - **0.65.1** (all packages): Firewall Map+ details panel layout fix.
   - The details cards share each row, and a card left alone in the last row takes the whole row:
     since 0.65 added the CrowdSec card, the Reputation card used only half the width.

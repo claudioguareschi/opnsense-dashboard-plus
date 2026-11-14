@@ -194,6 +194,13 @@ bool state_normalize(const struct state *s, const struct context *ctx,
         break;
       }
     }
+  /* the firewall's own address (assigned to any of its interfaces: a private
+   * transit or tunnel address it originates traffic from, a port forward
+   * aimed at itself) is never an inside host: that traffic is the firewall's */
+  if (inside && context_is_assigned(ctx, inside->a)) {
+    inside = NULL;
+    inside_flags = 0;
+  }
   struct addr loc, remote;
   int tunnel = 0;
   if (has_nat && (nat_flags & FM_PUBLIC))

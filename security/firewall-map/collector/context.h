@@ -91,7 +91,7 @@ struct context {
   char wans[CONTEXT_MAX_WANS][FM_INTERFACE_SIZE];
   size_t nw;
   /* derived by context_prepare */
-  struct addr *local_sorted, *wan_sorted;
+  struct addr *local_sorted, *wan_sorted, *assigned_sorted;
   size_t nwan;
   const char **local_device; /* device of local[i], or NULL */
   struct net_group *groups; /* longest prefix first */
@@ -122,6 +122,9 @@ bool context_is_local(const struct context *, struct addr);
 bool context_is_wan_address(const struct context *, struct addr);
 /* One of the WAN devices (W rows). */
 bool context_is_wan_device(const struct context *, const char *device);
+/* An address assigned to any of the firewall's interfaces (A rows): the
+ * firewall's own, never an inside host. */
+bool context_is_assigned(const struct context *, struct addr);
 /* The device of the most specific network containing the address, skipping
  * networks on `excluded` (may be NULL); Python's order breaks ties. */
 const char *context_device(const struct context *, struct addr, const char *excluded);

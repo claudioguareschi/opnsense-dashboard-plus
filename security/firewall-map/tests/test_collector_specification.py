@@ -147,6 +147,25 @@ class SpecificationTest(unittest.TestCase):
         _, second = self.run_scenario(samples, only_backup)
         self.assertEqual([flow["key"] for flow in second["flows"]], [("192.168.5.2", "1.1.1.1", "10.0.0.3")])
 
+    def test_the_firewalls_own_addresses_are_never_inside_hosts(self):
+        """The firewall's private transit address (a second WAN, a tunnel) it originates NAT'd
+        traffic from, and a port forward aimed at the firewall itself, are the firewall's own
+        traffic: owner none, no inside host (#20: a host that never existed on the LAN)."""
+        context = dict(CONTEXT, networks=[LAN_NET, WAN_NET, (ipaddress.ip_network("192.168.254.0/24"), "igb4")],
+                       assigned={"wan0": {WAN}, "igb4": {"192.168.254.2"}, "lan0": {"10.0.0.1"}})
+        transit = ("1.1.1.1:443", f"{WAN}:50002", "1.1.1.1:443", "192.168.254.2:40002")
+        to_itself = ("8.8.4.4:55000", f"{WAN}:8443", "8.8.4.4:55000", "10.0.0.1:443")
+        a_host = ("9.9.9.9:443", f"{WAN}:50003", "9.9.9.9:443", "10.0.0.2:40003")
+        samples = {1: [state(1, "out", transit, (100, 100, 1, 1)), state(2, "in", to_itself, (1000, 1000, 4, 4)),
+                       state(3, "out", a_host, (100, 100, 1, 1))],
+                   2: [state(1, "out", transit, (300, 500, 3, 5)), state(2, "in", to_itself, (5000, 1000, 8, 4)),
+                       state(3, "out", a_host, (300, 500, 3, 5))]}
+        _, second = self.run_scenario(samples, context)
+        self.assertEqual(sorted(flow["key"] for flow in second["flows"]),
+                         [(WAN, "1.1.1.1", None), (WAN, "8.8.4.4", None), (WAN, "9.9.9.9", "10.0.0.2")])
+        inside = ipaddress.ip_address("10.0.0.2").packed
+        self.assertEqual(self.candidates(second, collector.INSIDE_HOST), [bytes([4]) + inside + bytes(12)])
+
     def test_routed_public_ipv6_inside_host(self):
         context = {"local": {"2001:470:0:1::2"},
                    "networks": [(ipaddress.ip_network("2001:470:1:2::/64"), "lan0"),

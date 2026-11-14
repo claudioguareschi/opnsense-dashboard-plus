@@ -47,6 +47,7 @@ void context_destroy(struct context *ctx) {
   fm_free(ctx->services);
   fm_free(ctx->local_sorted);
   fm_free(ctx->wan_sorted);
+  fm_free(ctx->assigned_sorted);
   fm_free(ctx->local_device);
   fm_free(ctx->services_sorted);
   fm_free(ctx);
@@ -197,6 +198,14 @@ bool context_prepare(struct context *ctx, struct fm_error *error) {
         ctx->wan_sorted[w++] = ctx->assigned[n].a;
     qsort(ctx->wan_sorted, ctx->nwan, sizeof(*ctx->wan_sorted), compare_addresses);
   }
+  if (ctx->na) {
+    ctx->assigned_sorted = fm_malloc(ctx->na * sizeof(*ctx->assigned_sorted));
+    if (!ctx->assigned_sorted)
+      return fm_error_set(error, errno, "assigned address index");
+    for (size_t n = 0; n < ctx->na; n++)
+      ctx->assigned_sorted[n] = ctx->assigned[n].a;
+    qsort(ctx->assigned_sorted, ctx->na, sizeof(*ctx->assigned_sorted), compare_addresses);
+  }
   if (ctx->ns) {
     ctx->services_sorted = fm_malloc(ctx->ns * sizeof(*ctx->services_sorted));
     if (!ctx->services_sorted)
@@ -234,6 +243,9 @@ bool context_is_local(const struct context *ctx, struct addr a) {
 }
 bool context_is_wan_address(const struct context *ctx, struct addr a) {
   return contains(ctx->wan_sorted, ctx->nwan, a);
+}
+bool context_is_assigned(const struct context *ctx, struct addr a) {
+  return contains(ctx->assigned_sorted, ctx->na, a);
 }
 const char *context_device(const struct context *ctx, struct addr a, const char *excluded) {
   for (size_t g = 0; g < ctx->ngroups; g++) {
