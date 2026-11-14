@@ -86,6 +86,22 @@ bool context_add_assigned(struct context *c, struct assigned v, struct fm_error 
 bool context_add_service(struct context *c, struct service v, struct fm_error *e) {
   return append((void **)&c->services, &c->ns, CONTEXT_MAX_SERVICES, sizeof(v), &v, e);
 }
+bool context_is_wan_device(const struct context *c, const char *device) {
+  for (size_t n = 0; n < c->nw; n++)
+    if (!strcmp(c->wans[n], device))
+      return true;
+  return false;
+}
+int context_add_wan(struct context *c, const char *device) {
+  if (context_is_wan_device(c, device))
+    return EEXIST;
+  if (c->nw >= CONTEXT_MAX_WANS)
+    return E2BIG;
+  size_t length = strnlen(device, FM_INTERFACE_SIZE - 1);
+  memcpy(c->wans[c->nw], device, length);
+  c->wans[c->nw++][length] = '\0';
+  return 0;
+}
 
 bool address_equal(struct addr a, struct addr b) {
   return a.af == b.af && !memcmp(a.b, b.b, 16);
@@ -171,13 +187,13 @@ bool context_prepare(struct context *ctx, struct fm_error *error) {
     qsort(ctx->local_sorted, ctx->nl, sizeof(*ctx->local_sorted), compare_addresses);
   }
   for (size_t n = 0; n < ctx->na; n++)
-    ctx->nwan += !strcmp(ctx->assigned[n].device, ctx->wan);
+    ctx->nwan += context_is_wan_device(ctx, ctx->assigned[n].device);
   if (ctx->nwan) {
     ctx->wan_sorted = fm_malloc(ctx->nwan * sizeof(*ctx->wan_sorted));
     if (!ctx->wan_sorted)
       return fm_error_set(error, errno, "WAN address index");
     for (size_t n = 0, w = 0; n < ctx->na; n++)
-      if (!strcmp(ctx->assigned[n].device, ctx->wan))
+      if (context_is_wan_device(ctx, ctx->assigned[n].device))
         ctx->wan_sorted[w++] = ctx->assigned[n].a;
     qsort(ctx->wan_sorted, ctx->nwan, sizeof(*ctx->wan_sorted), compare_addresses);
   }

@@ -2531,13 +2531,17 @@
 		for (const flow of summary.flows || []) {
 			const rate = flow.rate || 0;
 			const dest = locations.get(flow.dest) || {};
-			for (const inside of (flow.inside || []).slice(0, 1)) add("hosts", inside.ip, {
-				label: inside.name || inside.ip,
-				ip: inside.ip,
-				iface: inside.interface,
-				icon: "laptop",
-				filter: { host: inside.ip }
-			}, rate);
+			for (const inside of (flow.inside || []).slice(0, 1)) {
+				add("hosts", inside.ip, {
+					label: inside.name || inside.ip,
+					ip: inside.ip,
+					iface: inside.interface,
+					icon: "laptop",
+					filter: { host: inside.ip },
+					unanswered: true
+				}, rate);
+				if (flow.presence !== "probe") groups.hosts.get(inside.ip).unanswered = false;
+			}
 			if (dest.country) add("countries", dest.country, {
 				label: plain(dest.country),
 				flag: flagHtml(dest.country_code),
@@ -2683,7 +2687,7 @@
 			return;
 		}
 		$list.html(`<table class="table table-condensed table-hover fwmap-talkers-table"><tbody>${rows.map((row, index) => {
-			const sub = row.ip ? `${escapeHtml(row.ip)}${row.iface ? ` · <span title="${escapeHtml(row.iface)}">${escapeHtml(shortInterface(row.iface))}</span>` : ""}` : escapeHtml(row.sub || "");
+			const sub = row.ip ? `${escapeHtml(row.ip)}${row.iface ? ` · <span title="${escapeHtml(row.iface)}">${escapeHtml(shortInterface(row.iface))}</span>` : ""}` + (row.unanswered ? ` · <span class="text-warning" title="${escapeHtml(T.host_unanswered_hint)}">${escapeHtml(T.host_unanswered)}</span>` : "") : escapeHtml(row.sub || "");
 			const value = ids ? `<span class="${row.severity <= 2 ? "text-danger fwmap-ids-high" : "fwmap-ids"}">${escapeHtml(row.count)} ${escapeHtml(T.alerts_short)}</span>` : escapeHtml(formatRate(row.rate));
 			const extra = ids ? `${escapeHtml(T.severity)} ${escapeHtml(row.severity)}` : `${escapeHtml(row.flows)} ${escapeHtml(row.flows === 1 ? T.flow_one : T.flow_many)}`;
 			const active = talkerActive(row);

@@ -126,6 +126,27 @@ class SpecificationTest(unittest.TestCase):
         (flow,) = second["flows"]
         self.assertEqual(flow["key"], ("192.168.1.2", "1.1.1.1", "10.0.0.2"))
 
+    def test_every_wan_device_anchors_its_private_wan_flows(self):
+        """Multi-WAN behind upstream NATs, or a WAN assigned to optX (#24, #26): the states of a
+        second private WAN are anchored on that WAN's own address as long as it is among the W
+        rows; a device that is not one is not a WAN, so its flows have no anchor."""
+        networks = [LAN_NET, (ipaddress.ip_network("192.168.1.0/24"), "wan0"),
+                    (ipaddress.ip_network("192.168.5.0/24"), "igb3")]
+        assigned = {"wan0": {"192.168.1.2"}, "igb3": {"192.168.5.2"}}
+        backup = ("1.1.1.1:443", "192.168.5.2:50001", "1.1.1.1:443", "10.0.0.3:40001")
+        primary = ("1.1.1.1:443", "192.168.1.2:50000", "1.1.1.1:443", "10.0.0.2:40000")
+        samples = {1: [state(1, "out", backup, (100, 100, 1, 1), interface="igb3", original="igb3"),
+                       state(2, "out", primary, (100, 100, 1, 1))],
+                   2: [state(1, "out", backup, (300, 500, 3, 5), interface="igb3", original="igb3"),
+                       state(2, "out", primary, (300, 500, 3, 5))]}
+        both = {"local": set(), "networks": networks, "assigned": assigned, "wan": ["wan0", "igb3"]}
+        _, second = self.run_scenario(samples, both)
+        self.assertEqual(sorted(flow["key"] for flow in second["flows"]),
+                         [("192.168.1.2", "1.1.1.1", "10.0.0.2"), ("192.168.5.2", "1.1.1.1", "10.0.0.3")])
+        only_backup = dict(both, wan=["igb3"])
+        _, second = self.run_scenario(samples, only_backup)
+        self.assertEqual([flow["key"] for flow in second["flows"]], [("192.168.5.2", "1.1.1.1", "10.0.0.3")])
+
     def test_routed_public_ipv6_inside_host(self):
         context = {"local": {"2001:470:0:1::2"},
                    "networks": [(ipaddress.ip_network("2001:470:1:2::/64"), "lan0"),

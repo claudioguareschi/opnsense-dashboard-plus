@@ -32,7 +32,7 @@ import json
 import os
 import time
 
-from .collector import RANKED_FLOWS_DEFAULT, RANKED_FLOWS_MAX, RANKED_FLOWS_MIN
+from .collector import _DEVICE, RANKED_FLOWS_DEFAULT, RANKED_FLOWS_MAX, RANKED_FLOWS_MIN
 from .common import STATE_DIR
 
 SETTINGS_FILE = "/usr/local/etc/firewallmap/firewallmap.json"
@@ -155,8 +155,18 @@ def topology(path=SETTINGS_FILE):
         coordinates = (latitude, longitude) if -90 <= latitude <= 90 and -180 <= longitude <= 180 else (None, None)
     except (TypeError, ValueError):
         coordinates = (None, None)
+    # every interface with an upstream gateway (the template), the primary first: the WANs the
+    # collector anchors private-WAN flows on (several under multi-WAN, or a WAN on optX)
+    primary = str(values.get("primary_wan_device") or "") or None
+    devices = values.get("wan_devices")
+    wan_devices = []
+    for device in ([primary] if primary else []) + (devices if isinstance(devices, list) else []):
+        device = str(device or "")
+        if _DEVICE.match(device) and device not in wan_devices:
+            wan_devices.append(device)
     return {
-        "primary_wan_device": str(values.get("primary_wan_device") or "") or None,
+        "primary_wan_device": primary or (wan_devices[0] if wan_devices else None),
+        "wan_devices": wan_devices,
         "discover_external_ip": str(values.get("discover_external_ip") or "0") == "1",
         "latitude": coordinates[0], "longitude": coordinates[1],
         # IPv6 joins the IPv4 home when it agrees ("auto"), or always ("ipv4"); lib/home.py

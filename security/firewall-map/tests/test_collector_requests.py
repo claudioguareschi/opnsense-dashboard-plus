@@ -108,8 +108,18 @@ class RequestRowTest(unittest.TestCase):
         # parsed as a C string, "W wan0" would pass and the rest would vanish
         self.refused("W wan0\x00 ignored\nRUN\n", "NUL byte")
 
-    def test_a_second_w_row_is_refused(self):
-        self.refused("W wan0\nW wan1\nRUN\n", "duplicate request keyword")
+    def test_w_rows_name_each_wan_device_once(self):
+        # several WAN devices (multi-WAN, a WAN on optX) are several rows; the same one twice, or
+        # more than the collector keeps, is a malformed request
+        self.assertIsNone(self.send("W wan0\nW igb3\nRUN\n")["refused"])
+        self.refused("W wan0\nW wan0\nRUN\n", "duplicate W device")
+        self.refused("".join(f"W wan{n}\n" for n in range(collector.WAN_DEVICES_MAX + 1)) + "RUN\n", "too many W rows")
+
+    def test_the_service_sends_each_wan_device_once_within_the_limit(self):
+        self.assertEqual(collector.wan_device_rows("igb0"), ["W igb0"])
+        self.assertEqual(collector.wan_device_rows(["igb0", "pppoe0", "igb0", "", "bad name", None]), ["W igb0", "W pppoe0"])
+        self.assertEqual(collector.wan_device_rows(None), [])
+        self.assertEqual(len(collector.wan_device_rows([f"wan{n}" for n in range(40)])), collector.WAN_DEVICES_MAX)
 
     def test_a_last_row_without_a_newline_is_refused(self):
         # on an open pipe the collector waits for the rest of the row; at the end of its input
@@ -117,7 +127,7 @@ class RequestRowTest(unittest.TestCase):
         self.assertEqual(self.direct(b"FMCONF2\nRUN"), "request row without a newline")
 
     def test_every_single_keyword_row_is_single(self):
-        for row in ("THREATS\n", "SNAPSHOT\n", "CORRELATION 1\n", "MIRROR 0\n", "CLASSGEN g1\n", "W wan0\n"):
+        for row in ("THREATS\n", "SNAPSHOT\n", "CORRELATION 1\n", "MIRROR 0\n", "CLASSGEN g1\n"):
             with self.subTest(row=row.strip()):
                 self.refused(row + row + "RUN\n", "duplicate request keyword")
         self.refused(f"BUDGET {collector.memory_budget()} 16 20000\nRUN\n", "duplicate request keyword")

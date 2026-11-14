@@ -127,7 +127,10 @@ flagged traffic got through*, or *Blocked*), then one sentence per address, for 
   interface, inside host, country and network (click an ASN).
 - **Color**: inbound/outbound (default), download/upload, egress interface or service, with a
   legend.
-- **Top talkers** by host, country and network with sparklines; click one to filter the map.
+- **Top talkers** by host, country and network with sparklines; click one to filter the map. A
+  host marked *no answer* was only ever the target of connection attempts that nothing answered:
+  PF keeps a state for a port forward or an IPv6 rule to a host that is off, or for an address
+  nobody uses, so such a host appears here even though it never spoke on the wire.
 - **Resizable panels**: drag the handles between the map and the side panel, and between the top
   talkers and the details (double-click resets).
 - **Actions** (administrators): *Investigate* (registry via RDAP, routing via RIPEstat and, with a
@@ -291,7 +294,10 @@ until it is switched on.*
     public IP discovery* for a WAN behind upstream NAT, which finds the public address with
     api.ipify.org and geolocates it the same way (behind upstream NAT the map shows your
     network's traffic, but not the firewall's own connections, such as its DNS lookups or a
-    VPN it opens itself); or manual latitude and longitude, which win;
+    VPN it opens itself); or manual latitude and longitude, which win. Every interface with an
+    upstream gateway counts as a WAN, whatever its name in OPNsense (a WAN on `opt1`, a
+    second WAN, a backup that takes over when the primary is down), and so does whichever
+    interface carries the default route right now;
     and *IPv6 location*: IPv6 joins the IPv4 location when any precise IPv6 location of the
     firewall, its inside prefixes first, is within 50 km of it or within the two locations'
     accuracy. A location known only by country never counts, and tunnel and VPN interfaces are
@@ -624,6 +630,12 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.66** (in development; Firewall Map+ test builds from 0.65.2): multi-WAN and a WAN assigned
+  to another role than `wan` behind an upstream NAT show their traffic (#24, #26): every interface
+  with an upstream gateway, and the interface carrying the default route, is a WAN to the
+  collector, and a backup WAN that takes over anchors the firewall's place on the map. Top talkers
+  mark inside hosts that only ever received connection attempts nothing answered as *no answer*
+  (#20).
 - **0.65.1** (all packages): Firewall Map+ details panel layout fix.
   - The details cards share each row, and a card left alone in the last row takes the whole row:
     since 0.65 added the CrowdSec card, the Reputation card used only half the width.

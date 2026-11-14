@@ -230,7 +230,7 @@ static bool read_request(struct request *r, bool *clean_eof, struct fm_error *er
   enum request_line got = LINE_EOF;
   bool header = false, run = false, got_line = false;
   bool seen_threats = false, seen_snapshot = false, seen_budget = false,
-       seen_correlation = false, seen_generation = false, seen_mirror = false, seen_wan = false;
+       seen_correlation = false, seen_generation = false, seen_mirror = false;
   struct context *ctx = r->ctx;
   while (!error->code && (got = read_line(stdin, line, &why)) == LINE_OK) {
     got_line = true;
@@ -351,10 +351,12 @@ static bool read_request(struct request *r, bool *clean_eof, struct fm_error *er
           !error->code)
         context_overflow(r, 'A', CONTEXT_MAX_ASSIGNED);
     } else if (line[0] == 'W' && sscanf(line, "W %15s %c", device, &extra) == 1) {
-      if (seen_wan)
-        request_error(error, "duplicate request keyword");
-      seen_wan = true;
-      strcpy(ctx->wan, device);
+      /* W <device>: one row per WAN device, each once, at most CONTEXT_MAX_WANS */
+      int added = context_add_wan(ctx, device);
+      if (added == EEXIST)
+        request_error(error, "duplicate W device");
+      else if (added)
+        request_error(error, "too many W rows");
     } else if (line[0] == 'S' && sscanf(line, "S %u %u %u %c", &x, &y, &z, &extra) == 3) {
       if (x > 255 || y > 65535)
         request_error(error, "service row");

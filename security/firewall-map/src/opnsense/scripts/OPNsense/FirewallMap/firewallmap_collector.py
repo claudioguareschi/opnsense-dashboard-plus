@@ -94,7 +94,7 @@ from firewallmap_snapshots import (
     DocumentBudget, SnapshotTooLarge, json_size, valid_id as snapshot_valid_id,
 )
 from lib.pf import (
-    _Record, carp_backup_addresses, host_info, port_forwards, rule_descriptions,
+    _Record, carp_backup_addresses, default_route_devices, host_info, port_forwards, rule_descriptions,
 )
 from lib import collector as state_collector
 from lib.collector import CollectorEngine, CollectorError, PROTOCOL_VERSION, READ_TIMEOUT, memory_budget
@@ -705,8 +705,12 @@ class Collector:
         self.descriptions, self.interfaces, self.leases = {}, {}, {}
         self.local_addresses, self.role, self.networks, self.interface_addresses = set(), None, [], {}
         self.carp_backup = set()
+        # the WAN devices (W rows): every interface with an upstream gateway and whichever carry a
+        # default route now; the primary is the one the map anchors the firewall's home on
         self.primary_wan_device = None
-        self.location_settings = {"discover_external_ip": False, "latitude": None, "longitude": None}
+        self.wan_devices = []
+        self.location_settings = {"discover_external_ip": False, "latitude": None, "longitude": None,
+                                  "primary_wan_device": None, "wan_devices": []}
         self.external_ip, self.external_ip_key, self.external_ip_checked = None, None, None
         self.homes, self.homes_key = None, None
         self.values = {}
@@ -786,7 +790,9 @@ class Collector:
         if self._due("metadata", now, METADATA_REFRESH_SECONDS):
             self.descriptions, self.interfaces, self.leases = rule_descriptions(), interface_names(), lease_names()
             self.location_settings = topology()
-            self.primary_wan_device = self.location_settings["primary_wan_device"]
+            self.wan_devices, self.primary_wan_device = self.choose_wans(
+                self.location_settings["wan_devices"], default_route_devices(),
+                self.location_settings["primary_wan_device"])
             self.correlator.forwards = port_forwards()
             self.checked["metadata"] = now
         if self._due("blocklists", now, BLOCKLIST_REFRESH_SECONDS):
@@ -844,18 +850,40 @@ class Collector:
         # blocked attempts stay matchable for late alerts even with no map open
         self.correlator.observe_block(event, wall, self.descriptions)
 
+    def choose_wans(self, configured, live, primary):
+        """(the WAN devices, the primary): the configured ones (every interface with a gateway)
+        and those carrying a default route now, the primary first. The primary is the configured
+        one while it has an address; a WAN that is down (multi-WAN failover) hands the firewall's
+        home to the first default-route WAN that has one, so the map still has a place to start from."""
+        has_address = lambda device: bool(self.interface_addresses.get(device))  # noqa: E731
+        candidates = ([primary] if primary else []) + list(configured) + list(live)
+        if not (primary and has_address(primary)):
+            primary = next((device for device in live if has_address(device)), primary or next(iter(candidates), None))
+        devices = []
+        for device in ([primary] if primary else []) + candidates:
+            if device and device not in devices:
+                devices.append(device)
+        return devices[:state_collector.WAN_DEVICES_MAX], primary
+
     def map_anchor(self, now):
         """Coordinates for rendering a private-WAN origin, never an address substituted into a flow."""
         latitude, longitude = self.location_settings["latitude"], self.location_settings["longitude"]
         if latitude is not None and longitude is not None:
             return {"lat": latitude, "lon": longitude, "name": "Firewall"}
-        device = self.primary_wan_device
-        addresses = self.interface_addresses.get(device, set())
-        # A public WAN remains on its existing local-GeoIP path even when CARP or an alias adds
-        # private addresses. No individual private address is the WAN's semantic identity.
-        private_ipv4 = any(private_ip(address) and ":" not in address for address in addresses)
-        if not self.location_settings["discover_external_ip"] or not device or not private_ipv4 \
-                or any(public_ip(address) for address in addresses):
+        if not self.location_settings["discover_external_ip"]:
+            return None
+        # the first WAN (the primary, then the others) that stands behind an upstream NAT: a private
+        # IPv4 address and no public one. A public WAN remains on its existing local-GeoIP path even
+        # when CARP or an alias adds private addresses. No individual private address is the WAN's
+        # semantic identity.
+        device = None
+        for candidate in [self.primary_wan_device] + [item for item in self.wan_devices if item != self.primary_wan_device]:
+            addresses = self.interface_addresses.get(candidate, set()) if candidate else set()
+            private_ipv4 = any(private_ip(address) and ":" not in address for address in addresses)
+            if private_ipv4 and not any(public_ip(address) for address in addresses):
+                device = candidate
+                break
+        if device is None:
             return None
         key = device
         if key != self.external_ip_key:
@@ -1319,7 +1347,7 @@ class Collector:
         evidence = self.evidence_remotes()
         try:
             sample = self.collector_engine.sample(
-                self.local_addresses, self.networks, self.interface_addresses, self.primary_wan_device,
+                self.local_addresses, self.networks, self.interface_addresses, self.wan_devices,
                 threat_summary=threat_due, event_queries=queries,
                 snapshot=not background and self.snapshot_requested(),
                 memory=memory_budget(self.values.get("helper_memory")),

@@ -82,6 +82,10 @@ MEMORY_MIN_MIB, MEMORY_MAX_MIB, MEMORY_AUTO_MAX_MIB = 64, 16384, 1024
 MEMORY_AUTO_SHARE = 0.05
 # operator context maxima: over them a sample is refused, naming the kind (never truncated)
 CONTEXT_MAXIMA = {"L": 4096, "N": 8192, "A": 1024}
+# WAN devices (W rows, collector/context.h CONTEXT_MAX_WANS): the first ones are sent, in the order
+# given (the primary first); an interface name as FreeBSD spells it
+WAN_DEVICES_MAX = 16
+_DEVICE = re.compile(r"^[A-Za-z0-9_.:-]{1,15}$")
 # Fixed record sizes, kind byte included (collector/protocol.c *_RECORD_SIZE), and the largest
 # candidate value (collector/aggregate.h CANDIDATE_VALUE_MAX). The response budget below counts each
 # record with its 4-byte frame length; the flow record's size follows its struct.
@@ -279,7 +283,19 @@ def _context_address(value):
     return str(address)
 
 
-def _context_rows(local_addresses, networks, interface_addresses, primary_wan_device):
+def wan_device_rows(wan_devices):
+    """W rows: the WAN devices (one, or several under multi-WAN or when a WAN is assigned to
+    another role than wan), each once, in the order given, at most WAN_DEVICES_MAX."""
+    devices = [wan_devices] if isinstance(wan_devices, str) else list(wan_devices or ())
+    kept = []
+    for device in devices:
+        device = str(device or "")
+        if _DEVICE.match(device) and device not in kept:
+            kept.append(device)
+    return [f"W {device}" for device in kept[:WAN_DEVICES_MAX]]
+
+
+def _context_rows(local_addresses, networks, interface_addresses, wan_devices):
     """(rows, refusal): the request's context, deduplicated, or the first maximum it exceeds."""
     rows = classification.rows()
     local = sorted({address for address in map(_context_address, local_addresses) if address})
@@ -298,8 +314,7 @@ def _context_rows(local_addresses, networks, interface_addresses, primary_wan_de
     rows.extend(f"L {address}" for address in local)
     rows.extend(network_rows)
     rows.extend(f"A {address} {device}" for device, address in assigned)
-    if primary_wan_device:
-        rows.append(f"W {primary_wan_device}")
+    rows.extend(wan_device_rows(wan_devices))
     groups = {}
     for (protocol, port), name in common.SERVICES.items():
         number = PROTO_NUMBERS.get(protocol)
@@ -795,17 +810,18 @@ class CollectorEngine:
                 raise CollectorError(self.last_error) from error
             raise
 
-    def sample(self, local_addresses, networks, interface_addresses, primary_wan_device,
+    def sample(self, local_addresses, networks, interface_addresses, wan_devices,
                threat_summary=False, event_queries=(), snapshot=False, memory=None, evidence=None,
                correlation=True, classification=None, classify=(), carp_backup=(), mirror=False):
-        """One complete sample. memory: the budget in bytes (default: automatic); evidence:
+        """One complete sample. wan_devices: the WAN device, or every WAN device (W rows); memory:
+        the budget in bytes (default: automatic); evidence:
         {remote: lib.evidence facts} (sent every sample: the ranking, forced tracking and the
         threat summary use them); correlation: whether anything consumes
         IDS/block tuple matching (it is skipped otherwise); classification: (generation token,
         [(category, PF table)...]) in set-ID order, the helper re-reading the tables only when
         either changes; classify: addresses whose set masks the response carries. The flows come
         ranked by the profile the helper was started with (set_profile)."""
-        rows, refused = _context_rows(local_addresses, networks, interface_addresses, primary_wan_device)
+        rows, refused = _context_rows(local_addresses, networks, interface_addresses, wan_devices)
         if refused:
             # Python's own check; the helper would refuse the same request
             return {"flows": [], "candidates": [], "matches": {}, "threat_remotes": [], "threat_candidates": [],

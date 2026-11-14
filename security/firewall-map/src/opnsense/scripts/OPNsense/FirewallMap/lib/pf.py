@@ -33,6 +33,28 @@ import subprocess
 from .common import PFCTL, RULES_DEBUG, host_port, ip_object, private_ip, public_ip
 
 IFCONFIG = "/sbin/ifconfig"
+NETSTAT = "/usr/bin/netstat"
+
+
+def default_route_devices(output=None):
+    """The interfaces carrying a default route, IPv4 then IPv6, each once: the WANs in use right
+    now, whatever their roles in the configuration (a backup WAN after failover, a WAN assigned
+    to optX). `output`: the routing tables as `netstat -rn` prints them (both families together)."""
+    if output is None:
+        output = ""
+        for family in ("inet", "inet6"):
+            try:
+                output += subprocess.run([NETSTAT, "-rn", "-f", family], capture_output=True, check=False,
+                                         text=True, timeout=2).stdout + "\n"
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+    devices = []
+    for line in output.splitlines():
+        # Destination Gateway Flags Netif [Expire]
+        fields = line.split()
+        if len(fields) >= 4 and fields[0] == "default" and fields[3] != "lo0" and fields[3] not in devices:
+            devices.append(fields[3])
+    return devices
 
 
 class _Record:

@@ -272,7 +272,7 @@ class TrackerTest(unittest.TestCase):
     def test_anchor_ignores_private_aliases_on_a_public_primary_wan(self):
         collector = object.__new__(COLLECTOR.Collector)
         collector.location_settings = {"latitude": None, "longitude": None, "discover_external_ip": True}
-        collector.primary_wan_device = "igb1"
+        collector.primary_wan_device, collector.wan_devices = "igb1", ["igb1"]
         collector.interface_addresses = {"igb1": {"1.2.3.163", "192.168.0.2"}}
         collector.external_ip = collector.external_ip_key = collector.external_ip_checked = None
         collector.store, collector.geo = mock.Mock(), Geo()
@@ -283,7 +283,7 @@ class TrackerTest(unittest.TestCase):
     def test_anchor_uses_the_primary_wan_device_not_one_of_its_carp_addresses(self):
         collector = object.__new__(COLLECTOR.Collector)
         collector.location_settings = {"latitude": None, "longitude": None, "discover_external_ip": True}
-        collector.primary_wan_device = "igb1"
+        collector.primary_wan_device, collector.wan_devices = "igb1", ["igb1"]
         collector.interface_addresses = {"igb1": {"192.168.0.2", "192.168.0.254"}}
         collector.external_ip = collector.external_ip_key = collector.external_ip_checked = None
         collector.store, collector.geo = mock.Mock(), Geo()
@@ -294,6 +294,37 @@ class TrackerTest(unittest.TestCase):
             collector.interface_addresses["igb1"] = {"192.168.0.254", "192.168.0.2"}
             collector.map_anchor(1.0)
         discover.assert_called_once_with()
+
+    def test_anchor_falls_back_to_a_backup_wan_behind_an_upstream_nat(self):
+        """Multi-WAN failover (#26): the primary WAN is down (no address), the backup WAN carries
+        the traffic from behind an upstream NAT: the map anchors on it."""
+        collector = object.__new__(COLLECTOR.Collector)
+        collector.location_settings = {"latitude": None, "longitude": None, "discover_external_ip": True}
+        collector.primary_wan_device, collector.wan_devices = "igb1", ["igb1", "igb3"]
+        collector.interface_addresses = {"igb3": {"172.30.1.2"}}
+        collector.external_ip = collector.external_ip_key = collector.external_ip_checked = None
+        collector.store, collector.geo = mock.Mock(), Geo()
+        collector.store.get.return_value = None
+        with mock.patch.object(COLLECTOR, "discover_external_ipv4", return_value="73.1.2.3") as discover:
+            self.assertEqual(collector.map_anchor(0.0), {"lat": 1.0, "lon": 2.0, "name": "Firewall"})
+            self.assertEqual(collector.external_ip_key, "igb3")
+            # a backup WAN with a public address needs no discovery: nothing to anchor
+            collector.interface_addresses = {"igb3": {"8.8.4.4"}}
+            collector.external_ip = collector.external_ip_key = collector.external_ip_checked = None
+            self.assertIsNone(collector.map_anchor(2.0))
+        discover.assert_called_once_with()
+
+    def test_the_wans_are_the_configured_ones_and_the_default_routes_the_primary_first(self):
+        collector = object.__new__(COLLECTOR.Collector)
+        collector.interface_addresses = {"igb1": {"198.51.100.2"}, "igb3": {"172.30.1.2"}, "pppoe0": set()}
+        # the configured primary has an address: it stays the primary, the others follow
+        self.assertEqual(collector.choose_wans(["igb1", "pppoe0"], ["igb3"], "igb1"), (["igb1", "pppoe0", "igb3"], "igb1"))
+        # the primary is down (no address): the first default-route WAN with one takes over
+        collector.interface_addresses = {"igb3": {"172.30.1.2"}}
+        self.assertEqual(collector.choose_wans(["igb1"], ["igb3"], "igb1"), (["igb3", "igb1"], "igb3"))
+        # nothing configured (a WAN on optX before the template knew it): the default route is the WAN
+        self.assertEqual(collector.choose_wans([], ["igb0"], None), (["igb0"], "igb0"))
+        self.assertEqual(collector.choose_wans([], [], None), ([], None))
 
 
 class SystemLogTest(unittest.TestCase):

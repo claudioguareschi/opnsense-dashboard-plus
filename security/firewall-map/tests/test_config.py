@@ -65,11 +65,23 @@ class SettingsFileTest(unittest.TestCase):
             self.assertEqual(CONFIG.abuseipdb_key(path), "key")
             self.assertEqual([alias["name"] for alias in CONFIG.aliases(path)], ["Drop"])
             self.assertEqual(CONFIG.interface_names(path), {"igb1": "WAN", "vlan01": "LAN"})
-            self.assertEqual(CONFIG.topology(path), {"primary_wan_device": "igb1", "discover_external_ip": False,
+            self.assertEqual(CONFIG.topology(path), {"primary_wan_device": "igb1", "wan_devices": ["igb1"],
+                                                      "discover_external_ip": False,
                                                       "latitude": None, "longitude": None, "ipv6_home": "auto"})
             for value, expected in (("ipv4", "ipv4"), ("auto", "auto"), ("other", "auto"), (None, "auto")):
                 self.write(path, {"topology": {"primary_wan_device": "igb1", "ipv6_home": value}})
                 self.assertEqual(CONFIG.topology(path)["ipv6_home"], expected)
+            # every WAN device, the primary first, each once; a WAN assigned to optX (no wan role) is
+            # the primary when the configuration names no other
+            self.write(path, {"topology": {"primary_wan_device": "igb1", "wan_devices": ["pppoe0", "igb1", "", "bad name"]}})
+            self.assertEqual((CONFIG.topology(path)["primary_wan_device"], CONFIG.topology(path)["wan_devices"]),
+                             ("igb1", ["igb1", "pppoe0"]))
+            self.write(path, {"topology": {"primary_wan_device": "", "wan_devices": ["igb0"]}})
+            self.assertEqual((CONFIG.topology(path)["primary_wan_device"], CONFIG.topology(path)["wan_devices"]),
+                             ("igb0", ["igb0"]))
+            self.write(path, {"topology": {"primary_wan_device": "", "wan_devices": "igb0"}})
+            self.assertEqual((CONFIG.topology(path)["primary_wan_device"], CONFIG.topology(path)["wan_devices"]),
+                             (None, []))
             # sampling interval bounds: valid ones kept, inverted or out of range ones back to the defaults
             for low, high, expected in (("5", "30", (5, 30)), ("30", "5", (2, 60)), ("1", "30", (2, 60)),
                                         ("2", "301", (2, 60)), ("x", "30", (2, 60))):

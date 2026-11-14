@@ -38,6 +38,9 @@
 #define CONTEXT_MAX_NETWORKS 8192
 #define CONTEXT_MAX_ASSIGNED 1024
 #define CONTEXT_MAX_SERVICES 1024
+/* WAN devices (W rows): every interface with an upstream gateway. Python
+ * bounds them; more is a malformed request. */
+#define CONTEXT_MAX_WANS 16
 struct addr {
   unsigned char af, b[16];
 };
@@ -82,7 +85,11 @@ struct context {
   size_t na;
   struct service *services;
   size_t ns;
-  char wan[FM_INTERFACE_SIZE];
+  /* the WAN devices: a private address on any of them is a WAN's own identity
+   * behind an upstream NAT (state.c); several under multi-WAN, or a WAN
+   * assigned to another role than wan */
+  char wans[CONTEXT_MAX_WANS][FM_INTERFACE_SIZE];
+  size_t nw;
   /* derived by context_prepare */
   struct addr *local_sorted, *wan_sorted;
   size_t nwan;
@@ -100,6 +107,10 @@ bool context_add_local(struct context *, struct addr, struct fm_error *);
 bool context_add_net(struct context *, struct net, struct fm_error *);
 bool context_add_assigned(struct context *, struct assigned, struct fm_error *);
 bool context_add_service(struct context *, struct service, struct fm_error *);
+/* A WAN device: 0 added, EEXIST when it is already one, E2BIG when there is
+ * no room (both malformed requests: Python sends each device once, at most
+ * CONTEXT_MAX_WANS). */
+int context_add_wan(struct context *, const char *device);
 /* Validates (ranges sorted and disjoint) and builds the lookup structures. */
 bool context_prepare(struct context *, struct fm_error *);
 
@@ -107,8 +118,10 @@ bool address_equal(struct addr, struct addr);
 /* O(log ranges): the flags of the range containing the address, or 0. */
 unsigned address_flags(const struct context *, struct addr);
 bool context_is_local(const struct context *, struct addr);
-/* An address assigned to the primary WAN device. */
+/* An address assigned to one of the WAN devices. */
 bool context_is_wan_address(const struct context *, struct addr);
+/* One of the WAN devices (W rows). */
+bool context_is_wan_device(const struct context *, const char *device);
 /* The device of the most specific network containing the address, skipping
  * networks on `excluded` (may be NULL); Python's order breaks ties. */
 const char *context_device(const struct context *, struct addr, const char *excluded);

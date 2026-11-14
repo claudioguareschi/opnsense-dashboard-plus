@@ -287,6 +287,8 @@
         map_waiting_profile: {{ lang._('Applying the {profile} ranking profile: the map resumes with its first ranked sample')|json_encode }},
         mirror_sub: {{ lang._('Mirrored from the CARP master (no traffic data)')|json_encode }},
         probe_sub: {{ lang._('{count} connection attempts, no data')|json_encode }},
+        host_unanswered: {{ lang._('no answer')|json_encode }},
+        host_unanswered_hint: {{ lang._('Only connection attempts reached this address and nothing answered: a port forward or an IPv6 rule to a host that is off, or an address nobody uses.')|json_encode }},
         snapshot_loading: {{ lang._('Loading the snapshot…')|json_encode }},
         snapshot_waiting: {{ lang._('The map is waiting for the collector: take the snapshot when it resumes')|json_encode }},
         map_ranking_bounded: {{ lang._('the top-ranked of {count} flows')|json_encode }},

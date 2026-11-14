@@ -160,7 +160,9 @@ class CollectorFixture:
             self.tracker = REFERENCE.FlowTracker()
         records = self.current_records = self.records()
         now = time.monotonic()
-        self.tracker.update(records, local, now, networks, interface_addresses=assigned, primary_wan_device=wan)
+        # the service sends every WAN device; the reference tracker anchors on the primary (the first)
+        primary = wan if isinstance(wan, str) or wan is None else next(iter(wan), None)
+        self.tracker.update(records, local, now, networks, interface_addresses=assigned, primary_wan_device=primary)
         selected = [((row[1], row[2], row[3]["owner"]), row[3]) for row in self.tracker.visible(now)]
         # like the helper, the threat summary covers only evidence and threat-listed remotes
         sets = (options.get("classification") or (None, []))[1]

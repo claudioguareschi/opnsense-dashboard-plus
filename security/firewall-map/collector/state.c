@@ -203,11 +203,11 @@ bool state_normalize(const struct state *s, const struct context *ctx,
   else if (context_is_local(ctx, dst.a))
     loc = dst.a;
   else if (has_nat && direction == FM_OUT && (src_flags & FM_PRIVATE) &&
-           (dst_flags & FM_PUBLIC) && !strcmp(s->original_interface, ctx->wan) &&
+           (dst_flags & FM_PUBLIC) && context_is_wan_device(ctx, s->original_interface) &&
            context_is_wan_address(ctx, src.a))
     loc = src.a;
   else if (has_nat && direction == FM_IN && (nat_flags & FM_PRIVATE) &&
-           (src_flags & FM_PUBLIC) && !strcmp(s->original_interface, ctx->wan) &&
+           (src_flags & FM_PUBLIC) && context_is_wan_device(ctx, s->original_interface) &&
            context_is_wan_address(ctx, nat.a))
     loc = nat.a;
   else if (has_nat && (src_flags & FM_PRIVATE) && (dst_flags & FM_PUBLIC) &&

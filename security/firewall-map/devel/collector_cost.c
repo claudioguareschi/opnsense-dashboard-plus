@@ -106,7 +106,7 @@ static bool read_context(const char *path, struct context *ctx, struct fm_error 
       strcpy(v.device, device);
       ok = parse_address(a, &v.a) && context_add_assigned(ctx, v, error);
     } else if (line[0] == 'W' && sscanf(line, "W %15s", device) == 1) {
-      strcpy(ctx->wan, device);
+      ok = context_add_wan(ctx, device) == 0;
     } else if (line[0] == 'S' && sscanf(line, "S %u %u %u", &x, &y, &z) == 3) {
       ok = context_add_service(ctx, (struct service){x, y, z}, error);
     }

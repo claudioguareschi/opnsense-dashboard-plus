@@ -39,7 +39,7 @@ function shortInterface(name) {
 }
 
 /** Top talkers by host, country and network, plus the addresses Suricata alerted on. */
-function groupTalkers(summary) {
+export function groupTalkers(summary) {
   const locations = locationsById(summary);
   const groups = {hosts: new Map(), countries: new Map(), networks: new Map(), ids: new Map()};
   const add = (group, key, fields, rate) => {
@@ -52,8 +52,13 @@ function groupTalkers(summary) {
     const rate = flow.rate || 0;
     const dest = locations.get(flow.dest) || {};
     for (const inside of (flow.inside || []).slice(0, 1)) {
+      // a host seen only in probes (connection attempts nothing answered: a port forward or an
+      // IPv6 rule to a host that is off, or an address nobody uses) is said to be unanswered
       add('hosts', inside.ip, {label: inside.name || inside.ip, ip: inside.ip, iface: inside.interface,
-        icon: 'laptop', filter: {host: inside.ip}}, rate);
+        icon: 'laptop', filter: {host: inside.ip}, unanswered: true}, rate);
+      if (flow.presence !== 'probe') {
+        groups.hosts.get(inside.ip).unanswered = false;
+      }
     }
     if (dest.country) {
       add('countries', dest.country, {label: plain(dest.country), flag: flagHtml(dest.country_code),
@@ -201,6 +206,7 @@ export function renderTalkers(groups) {
   }
   $list.html(`<table class="table table-condensed table-hover fwmap-talkers-table"><tbody>${rows.map((row, index) => {
     const sub = row.ip ? `${escapeHtml(row.ip)}${row.iface ? ` · <span title="${escapeHtml(row.iface)}">${escapeHtml(shortInterface(row.iface))}</span>` : ''}`
+      + (row.unanswered ? ` · <span class="text-warning" title="${escapeHtml(T.host_unanswered_hint)}">${escapeHtml(T.host_unanswered)}</span>` : '')
       : escapeHtml(row.sub || '');
     const value = ids
       ? `<span class="${row.severity <= 2 ? 'text-danger fwmap-ids-high' : 'fwmap-ids'}">${escapeHtml(row.count)} ${escapeHtml(T.alerts_short)}</span>`

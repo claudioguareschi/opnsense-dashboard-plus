@@ -555,5 +555,31 @@ igb2: flags=1008943<UP> metric 0 mtu 1500
         self.assertEqual(PF.carp_backup_addresses("igb0: flags=0\n\tinet 192.168.2.1 netmask 0xffffff00\n"), set())
 
 
+class DefaultRouteTest(unittest.TestCase):
+    """The WANs in use right now, from the default routes (multi-WAN failover, a WAN on optX)."""
+
+    ROUTES = """Routing tables
+
+Internet:
+Destination        Gateway            Flags         Netif Expire
+default            198.51.100.1       UGS            igb1
+127.0.0.1          link#2             UH              lo0
+203.0.113.1        198.51.100.1       UGHS           igb1
+
+Internet6:
+Destination                       Gateway                       Flags         Netif Expire
+default                           fe80::1%igb3                  UG             igb3
+::1                               link#2                        UHS             lo0
+default                           fe80::1%igb1                  UG             igb1
+"""
+
+    def test_each_interface_carrying_a_default_route_once_ipv4_first(self):
+        self.assertEqual(PF.default_route_devices(self.ROUTES), ["igb1", "igb3"])
+
+    def test_no_default_route_gives_none(self):
+        self.assertEqual(PF.default_route_devices("Internet:\n127.0.0.1 link#2 UH lo0\n"), [])
+        self.assertEqual(PF.default_route_devices("default link#2 UH lo0\n"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

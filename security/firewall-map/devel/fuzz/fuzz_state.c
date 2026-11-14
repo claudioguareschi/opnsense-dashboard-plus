@@ -69,7 +69,7 @@ static struct context *context(void) {
   context_add_net(ctx, wan, &error);
   struct assigned assigned = {parse("45.33.32.10"), "wan0"};
   context_add_assigned(ctx, assigned, &error);
-  strcpy(ctx->wan, "wan0");
+  context_add_wan(ctx, "wan0");
   context_add_service(ctx, (struct service){6, 443, 2}, &error);
   if (!context_prepare(ctx, &error)) abort();
   return ctx;
