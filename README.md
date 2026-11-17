@@ -206,7 +206,7 @@ Threat lists only **mark** traffic; no firewall rule is added or changed unless 
 a rule yourself. Choose them in **Reporting ▸ Firewall Map ▸ Settings**:
 
 - Curated feeds, downloaded daily by Firewall Map+: Spamhaus DROP, abuse.ch Feodo Tracker,
-  Emerging Threats compromised hosts, FireHOL level 1.
+  Emerging Threats compromised hosts, NetAPI honeypot attackers, FireHOL level 1.
 - Any URL-table or external alias of your own (e.g. CrowdSec).
 - With an AbuseIPDB API key: the AbuseIPDB blacklist (up to 10,000 IPv4 and IPv6 addresses at
   100% confidence, one download a day) and the verdicts of your *Investigate* lookups (flagged at

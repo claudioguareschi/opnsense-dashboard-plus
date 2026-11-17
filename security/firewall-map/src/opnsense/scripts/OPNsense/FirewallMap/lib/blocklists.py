@@ -85,6 +85,9 @@ FEEDS = [
      "url": "https://feodotracker.abuse.ch/downloads/ipblocklist.txt", "about": "Botnet command-and-control servers"},
     {"name": "FWMAP_ET_Compromised", "label": "Emerging Threats compromised",
      "url": "https://rules.emergingthreats.net/blockrules/compromised-ips.txt", "about": "Hosts known to be compromised"},
+    {"name": "FWMAP_NetAPI", "label": "NetAPI honeypot attackers",
+     "url": "https://netapi.com/api2/?method=compromised&dataset_type=ip",
+     "about": "Addresses that attacked honeypot sensors in the last 48 hours (CC BY 4.0)"},
     {"name": "FWMAP_FireHOL_L1", "label": "FireHOL level 1",
      "url": "https://iplists.firehol.org/files/firehol_level1.netset",
      "about": "Combined attack sources (DROP, Feodo, DShield...). Also lists private and bogon ranges: "
