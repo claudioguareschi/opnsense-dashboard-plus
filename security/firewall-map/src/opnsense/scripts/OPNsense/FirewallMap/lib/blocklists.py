@@ -81,14 +81,23 @@ def is_feed_table(table, aliases):
 FEEDS = [
     {"name": "FWMAP_Spamhaus_DROP", "label": "Spamhaus DROP", "url": "https://www.spamhaus.org/drop/drop.txt",
      "about": "Hijacked and criminal netblocks"},
-    {"name": "FWMAP_Feodo", "label": "abuse.ch Feodo Tracker",
-     "url": "https://feodotracker.abuse.ch/downloads/ipblocklist.txt", "about": "Botnet command-and-control servers"},
     {"name": "FWMAP_ET_Compromised", "label": "Emerging Threats compromised",
      "url": "https://rules.emergingthreats.net/blockrules/compromised-ips.txt", "about": "Hosts known to be compromised"},
     {"name": "FWMAP_FireHOL_L1", "label": "FireHOL level 1",
      "url": "https://iplists.firehol.org/files/firehol_level1.netset",
-     "about": "Combined attack sources (DROP, Feodo, DShield...). Also lists private and bogon ranges: "
-              "do not use it to block LAN traffic."},
+     "about": "Combined attack sources; includes private and bogon ranges"},
+    {"name": "FWMAP_FireHOL_L2", "label": "FireHOL level 2",
+     "url": "https://iplists.firehol.org/files/firehol_level2.netset",
+     "about": "Attackers of the last 48 hours (blocklist.de, DShield, GreenSnow)"},
+    {"name": "FWMAP_CINS_Army", "label": "CINS Army",
+     "url": "https://cinsscore.com/list/ci-badguys.txt",
+     "about": "Top 15,000 attackers seen by the CINS sensor network"},
+    {"name": "FWMAP_IPsum_L3", "label": "IPsum level 3",
+     "url": "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt",
+     "about": "On 3+ of 30+ public blocklists: fewer false positives"},
+    {"name": "FWMAP_Feodo", "label": "abuse.ch Feodo Tracker (deprecated)",
+     "url": "https://feodotracker.abuse.ch/downloads/ipblocklist.txt",
+     "about": "Not updated since June 2026; FireHOL level 1 includes it"},
 ]
 
 

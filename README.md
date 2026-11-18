@@ -205,8 +205,11 @@ sample every 20 seconds) even with no map open; switch this off in the Threats f
 Threat lists only **mark** traffic; no firewall rule is added or changed unless you use an alias in
 a rule yourself. Choose them in **Reporting ▸ Firewall Map ▸ Settings**:
 
-- Curated feeds, downloaded daily by Firewall Map+: Spamhaus DROP, abuse.ch Feodo Tracker,
-  Emerging Threats compromised hosts, FireHOL level 1.
+- Curated feeds, downloaded daily by Firewall Map+: Spamhaus DROP, Emerging Threats compromised
+  hosts, FireHOL level 1 and level 2 (attackers of the last 48 hours), CINS Army (its sensor
+  network's worst-scoring attackers) and IPsum level 3 (addresses on at least 3 of 30+ public
+  blocklists). abuse.ch Feodo Tracker is still offered but deprecated: it has not been updated
+  since June 2026, and FireHOL level 1 includes it.
 - Any URL-table or external alias of your own (e.g. CrowdSec).
 - With an AbuseIPDB API key: the AbuseIPDB blacklist (up to 10,000 IPv4 and IPv6 addresses at
   100% confidence, one download a day) and the verdicts of your *Investigate* lookups (flagged at
@@ -631,6 +634,15 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.67** (all packages): Firewall Map+ offers three more curated threat feeds.
+  - New curated feeds: FireHOL level 2 (attackers of the last 48 hours, from blocklist.de,
+    DShield and GreenSnow), CINS Army (the worst-scoring attackers its sensor network sees) and
+    IPsum level 3 (addresses on at least 3 of 30+ public blocklists). Like the others, they are
+    off until chosen in the threat lists.
+  - The threat list picker says in one line what each curated feed holds.
+  - abuse.ch Feodo Tracker is marked deprecated: it has not been updated since June 2026 and holds
+    a handful of addresses. It stays available for those who chose it; FireHOL level 1 includes it.
+  - Dashboard Plus and VNStat Traffic+ are unchanged apart from the version.
 - **0.66** (all packages): Firewall Map+ shows multi-WAN and WAN-on-`optX` traffic and names
   phantom inside hosts; Dashboard Plus names AMD sensors; VNStat Traffic+ needs no selection.
   - Firewall Map+: every interface with an upstream gateway, and the interface carrying the

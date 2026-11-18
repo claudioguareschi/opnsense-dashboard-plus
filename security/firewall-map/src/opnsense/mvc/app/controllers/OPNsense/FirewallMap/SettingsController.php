@@ -40,6 +40,10 @@ class SettingsController extends \OPNsense\Base\IndexController
         /* the editor's script, keyed on its own change (the plugin updates apart from the firmware) */
         $allocation = '/usr/local/opnsense/www/js/firewall-map-allocation.js';
         $this->view->allocationVersion = is_file($allocation) ? filemtime($allocation) : 0;
+        /* what each curated feed holds, shown beside its name in the threat list picker */
+        $notes = array_map(fn($feed) => $feed['about'], BlocklistAliases::feeds());
+        $flags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE;
+        $this->view->feedNotes = json_encode((object)$notes, $flags) ?: '{}';
         $this->view->pick('OPNsense/FirewallMap/settings');
     }
 }

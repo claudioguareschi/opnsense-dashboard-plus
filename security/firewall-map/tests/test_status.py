@@ -73,7 +73,7 @@ class StatusTest(unittest.TestCase):
             "unavailable": ["FWMAP_AbuseIPDB", "FWMAP_Spamhaus_DROP"], "ignored": []}}}
         lists = STATUS.threat_lists(timing)
         self.assertEqual([(row["name"], row["status"], row["description"]) for row in lists["lists"]],
-                         [("FWMAP_Feodo", "ok", "abuse.ch Feodo Tracker"), ("crowdsec_blacklists", "too_large", None)])
+                         [("FWMAP_Feodo", "ok", "abuse.ch Feodo Tracker (deprecated)"), ("crowdsec_blacklists", "too_large", None)])
         # an upgrade with alias maintenance off: the lists that no longer classify are named
         self.assertEqual([(row["name"], row["label"]) for row in lists["unavailable"]],
                          [("FWMAP_AbuseIPDB", "AbuseIPDB blacklist"), ("FWMAP_Spamhaus_DROP", "FWMAP_Spamhaus_DROP")])

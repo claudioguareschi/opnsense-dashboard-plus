@@ -182,6 +182,21 @@ class BlocklistTest(unittest.TestCase):
         self.assertTrue(feeds["FWMAP_Feodo"]["installed"])
         self.assertFalse(feeds["FWMAP_Spamhaus_DROP"]["installed"])
 
+    def test_curated_feeds_are_described_and_downloadable(self):
+        names = [feed["name"] for feed in BLOCKLISTS.FEEDS]
+        self.assertEqual(len(names), len(set(names)))
+        for name in ("FWMAP_FireHOL_L2", "FWMAP_CINS_Army", "FWMAP_IPsum_L3"):
+            self.assertIn(name, names)
+        for feed in BLOCKLISTS.FEEDS:
+            # an alias name, an https download and a note short enough for one picker line
+            self.assertRegex(feed["name"], r"^FWMAP_[A-Za-z0-9_]+$")
+            self.assertTrue(feed["url"].startswith("https://"), feed["name"])
+            self.assertTrue(0 < len(feed["about"]) <= 70, feed["name"])
+            self.assertTrue(BLOCKLISTS.is_feed_table(feed["name"], {feed["name"]}))
+        # Feodo stopped updating: still offered for those who chose it, marked as such
+        feodo = next(feed for feed in BLOCKLISTS.FEEDS if feed["name"] == "FWMAP_Feodo")
+        self.assertIn("deprecated", feodo["label"])
+
     def test_reads_block_rule_tables(self):
         with tempfile.TemporaryDirectory() as directory:
             rules = os.path.join(directory, "rules.debug")

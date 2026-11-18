@@ -66,7 +66,14 @@
         };
         provider.change(showRows);
         // one model behind every tab: the tabs' forms (frm_settings-*) load from one request
+        // what each curated feed holds (SettingsController), beside its name in the threat list picker
+        const feedNotes = {{ feedNotes }};
         mapDataToFormUI({'frm_settings': '/api/firewallmap/settings/get'}).done(function () {
+            $('[id="firewallmap.general.threat_lists"] option').each(function () {
+                if (feedNotes[this.value]) {
+                    $(this).attr('data-subtext', feedNotes[this.value]);
+                }
+            });
             $('.selectpicker').selectpicker('refresh');
             // the form is filled without change events: show the provider's rows now
             showRows();

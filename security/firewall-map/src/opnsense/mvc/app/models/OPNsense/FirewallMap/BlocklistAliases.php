@@ -46,8 +46,8 @@ class BlocklistAliases
     private static $feeds = null;
 
     /**
-     * Curated feeds as the collector lists them: [name => [url, label]]. The controllers call this
-     * before they take the config lock, so reconcile() never waits on configd while holding it.
+     * Curated feeds as the collector lists them: [name => [url, label, about]]. The controllers call
+     * this before they take the config lock, so reconcile() never waits on configd while holding it.
      */
     public static function feeds(): array
     {
@@ -59,6 +59,7 @@ class BlocklistAliases
                     self::$feeds[$table['name']] = [
                         'url' => $table['url'],
                         'label' => $table['label'] ?? $table['name'],
+                        'about' => $table['description'] ?? '',
                     ];
                 }
             }
