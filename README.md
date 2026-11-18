@@ -634,6 +634,12 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.67.4** (all packages): Firewall Map+ reads the direction of Suricata alerts correctly.
+  - An alert Suricata raises on a server's reply to a connection your side opened (a download
+    flagged on the way in) is now filed as outbound, not as an inbound connection from that
+    server, with its bytes the right way round. Firewall Map+ takes who opened the connection from
+    Suricata's flow record instead of the packet that raised the alert (from PR #21 by devnull34).
+  - Dashboard Plus and VNStat Traffic+ are unchanged apart from the version.
 - **0.67.3** (all packages): Firewall Map+ reputation card redesign.
   - Each threat list reads *Listed* or *Not listed* as text in the theme's state colors instead of
     a pill next to a check mark. A hit's icon says what happened to the address's traffic in the
