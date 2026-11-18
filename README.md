@@ -634,6 +634,12 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.67.1** (all packages): Firewall Map+ saves its settings when a deselected feed is still in use.
+  - Deselecting a curated feed whose `FWMAP_*` alias a firewall rule or another alias uses no
+    longer refuses the whole save: the alias is kept for that rule, the map stops using the feed,
+    and the settings page says which aliases are kept and how to delete them.
+  - The threat list help says that with *Use CrowdSec*, CrowdSec's ban tables always count.
+  - Dashboard Plus and VNStat Traffic+ are unchanged apart from the version.
 - **0.67** (all packages): Firewall Map+ offers three more curated threat feeds.
   - New curated feeds: FireHOL level 2 (attackers of the last 48 hours, from blocklist.de,
     DShield and GreenSnow), CINS Army (the worst-scoring attackers its sensor network sees) and
