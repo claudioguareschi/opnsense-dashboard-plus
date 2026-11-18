@@ -103,6 +103,55 @@ class AlertTest(unittest.TestCase):
         alerts.expire(IDS.parse_alert(self.LINE)["time"] + IDS.ALERT_WINDOW_SECONDS + 1)
         self.assertEqual(alerts.sources, {})
 
+    # a real Suricata 8 alert on the server's reply of a connection this firewall opened
+    # (addresses changed): the packet comes from the server, the flow record names the client
+    REPLY = json.dumps({
+        "timestamp": "2026-11-12T07:29:20.150895-0500", "flow_id": 2117293116102, "event_type": "alert",
+        "src_ip": "23.53.13.81", "src_port": 80, "dest_ip": "1.2.3.163", "dest_port": 47283, "proto": "TCP",
+        "direction": "to_client", "app_proto": "http",
+        "flow": {"pkts_toserver": 3, "pkts_toclient": 3, "bytes_toserver": 548, "bytes_toclient": 1486,
+                 "start": "2026-11-12T07:29:20.131564-0500", "src_ip": "1.2.3.163", "dest_ip": "23.53.13.81",
+                 "src_port": 47283, "dest_port": 80},
+        "alert": {"action": "allowed", "gid": 1, "signature_id": 2018959, "rev": 5,
+                  "signature": "ET POLICY PE EXE or DLL Windows file download HTTP",
+                  "category": "Potential Corporate Privacy Violation", "severity": 1},
+    })
+
+    def test_an_alert_on_a_reply_belongs_to_the_connection_this_side_opened(self):
+        alert = IDS.parse_alert(self.REPLY)
+        self.assertEqual(alert["initiator"], "1.2.3.163")
+        alerts = IDS.AlertTracker()
+        alerts.add(alert, {"1.2.3.163"})
+        entry = alerts.sources["23.53.13.81"]
+        self.assertTrue(entry["outbound"])
+        self.assertFalse(entry["inbound"])
+        self.assertEqual(list(entry["targets"]), ["1.2.3.163:47283/tcp"])
+        key = PRODUCTION_IDS.Correlator.alert_key(alert, {"1.2.3.163"})
+        connection = PRODUCTION_IDS.Correlator().alert_connection(key, alert, 1000.0)
+        self.assertFalse(connection["remote_started"])
+        # the 1486 bytes the server sent are the download
+        self.assertEqual((connection["bytes_in"], connection["bytes_out"]), (1486, 548))
+
+    def test_the_initiator_falls_back_to_the_packet(self):
+        reply = json.loads(self.REPLY)
+        reply["flow"].pop("src_ip")
+        self.assertEqual(IDS.parse_alert(json.dumps(reply))["initiator"], "1.2.3.163")  # direction
+        reply["flow"]["src_ip"] = "198.51.100.9"  # not one of the packet's addresses: ignored
+        self.assertEqual(IDS.parse_alert(json.dumps(reply))["initiator"], "1.2.3.163")
+        reply.pop("direction")
+        self.assertEqual(IDS.parse_alert(json.dumps(reply))["initiator"], "23.53.13.81")  # packet source
+        self.assertEqual(IDS.parse_alert(self.LINE)["initiator"], "94.154.43.203")
+
+    def test_an_alert_between_inside_hosts_stays_off_the_map(self):
+        # Suricata on a LAN interface: the flow record names a client, but neither side is remote
+        reply = json.loads(self.REPLY)
+        reply.update(src_ip="192.168.1.20", dest_ip="192.168.1.5")
+        reply["flow"].update(src_ip="192.168.1.5", dest_ip="192.168.1.20")
+        alerts = IDS.AlertTracker()
+        alerts.add(IDS.parse_alert(json.dumps(reply)), {"1.2.3.163"},
+                   networks=[(ipaddress.ip_network("192.168.1.0/24"), "lan")])
+        self.assertEqual(alerts.sources, {})
+
 
 class CorrelationTest(unittest.TestCase):
     LOCAL = {"1.2.3.163"}

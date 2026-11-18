@@ -253,12 +253,9 @@ class Correlator:
         return outside_key(alert["protocol"], dst, alert["dst_port"], src, alert["src_port"])
 
     def alert_connection(self, key, alert, now):
-        # The alert's src is the source of the packet that raised it, which is the flow's
-        # client only for alerts on client-to-server packets. Whether the installed
-        # Suricata reports the flow direction (and in which field) must be verified on the
-        # target before byte orientation is derived from it; until then this keeps the
-        # packet-source approximation (pending target verification).
-        remote_started = alert["src"] == key[3]
+        # who opened the connection, from Suricata's flow record (parse_alert), not from the
+        # packet that raised the alert: on a server-to-client packet that is the server
+        remote_started = alert.get("initiator", alert["src"]) == key[3]
         flow = alert.get("flow") or {}
         # Suricata counts to_server/to_client; the map counts bytes from/to the remote side
         to_server, to_client = flow.get("bytes_toserver"), flow.get("bytes_toclient")
@@ -430,6 +427,17 @@ def _string(value, default=""):
     return value if isinstance(value, str) else default
 
 
+def _initiator(src, dst, flow_src, direction):
+    """The side that opened the connection: the client of Suricata's flow record (its src_ip,
+    whatever the direction of the packet that raised the alert), else the packet's direction
+    (to_client: the packet comes from the server), else the packet's source."""
+    # the flow's client must be one of the packet's two addresses; anything else is ignored
+    client = normalize_ip(flow_src) if isinstance(flow_src, str) else None
+    if client in (src, dst):
+        return client
+    return dst if direction == "to_client" else src
+
+
 def parse_alert(line):
     """One Suricata EVE alert, or None for any other event (cheap check before JSON parsing).
 
@@ -449,10 +457,12 @@ def parse_alert(line):
     severity = alert.get("severity")
     sid = alert.get("signature_id")
     flow_id = event.get("flow_id")
+    src, dst = _address(event.get("src_ip")), _address(event.get("dest_ip"))
     return {
         "time": eve_time(_string(event.get("timestamp"))),
-        "src": _address(event.get("src_ip")),
-        "dst": _address(event.get("dest_ip")),
+        "src": src,
+        "dst": dst,
+        "initiator": _initiator(src, dst, flow.get("src_ip"), event.get("direction")),
         "src_port": _port(event.get("src_port")),
         "dst_port": _port(event.get("dest_port")),
         "protocol": _string(event.get("proto")).lower(),
@@ -500,6 +510,8 @@ class AlertTracker:
             remote, local, inbound = dst, src, False
         else:
             return
+        # the sides come from the packet; who started the connection from the flow (parse_alert)
+        inbound = alert.get("initiator", alert["src"]) == remote
         entry = self.sources.pop(remote, None)
         if entry is None:
             if len(self.sources) >= self.max_sources:
@@ -524,7 +536,7 @@ class AlertTracker:
             signature["action"] = alert["action"]
         else:
             self.dropped_signatures += 1
-        port = alert["dst_port"] if inbound else alert["src_port"]
+        port = alert["src_port"] if local == src else alert["dst_port"]
         target = f'{host_port(local, port)}/{alert["protocol"]}' if port else f'{local}/{alert["protocol"]}'
         if target in entry["targets"] or len(entry["targets"]) < MAX_SIGNATURES_PER_SOURCE:
             entry["targets"][target] = entry["targets"].get(target, 0) + 1
