@@ -634,6 +634,13 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.67.3** (all packages): Firewall Map+ reputation card redesign.
+  - Each threat list reads *Listed* or *Not listed* as text in the theme's state colors instead of
+    a pill next to a check mark. A hit's icon says what happened to the address's traffic in the
+    view: blocked, got through, or seen only in an IDS alert; *Not listed* is a quiet dot. Hits
+    come first, and the AbuseIPDB score uses the same style.
+  - The CrowdSec row is just *Listed* or *Not listed*, whatever the ban's origin.
+  - Dashboard Plus and VNStat Traffic+ are unchanged apart from the version.
 - **0.67.2** (all packages): Firewall Map+ shows CrowdSec as one row.
   - The details panel's reputation card has one CrowdSec row instead of *CrowdSec* and *CrowdSec
     (detected here)*: *Not listed*, or *Listed* followed by why (detected here, community, the
