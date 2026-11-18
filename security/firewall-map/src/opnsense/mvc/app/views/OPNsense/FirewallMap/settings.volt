@@ -46,7 +46,7 @@
         };
         // the keys are never sent back: say whether one is stored instead
         const describeKeys = function () {
-            ajaxGet('/api/firewallmap/settings/status', {}, function (data) {
+            ajaxGet('/api/firewallmap/settings/status', {aliases: '1'}, function (data) {
                 status = data || {};
                 // lang._() returns HTML-escaped text and .attr() takes plain text: decode once
                 const plain = (html) => $('<textarea/>').html(html).text();
@@ -61,6 +61,9 @@
                 const unused = (status.threat_lists_unavailable || []).concat(status.sets_missing || []);
                 $('#classificationWarning').toggleClass('hidden', !unused.length)
                     .find('.names').text(unused.join(', '));
+                // a deselected feed whose alias a rule still uses: kept, and said so
+                const kept = status.aliases_kept || [];
+                $('#aliasesKeptNotice').toggleClass('hidden', !kept.length).find('.names').text(kept.join(', '));
                 showRows();
             });
         };
@@ -392,6 +395,12 @@
     <i class="fa fa-triangle-exclamation fa-fw"></i>
     {{ lang._('Not used, because they have no PF table:') }} <strong class="names"></strong>.
     {{ lang._('Enable Maintain blocklist aliases (Security tab) for the curated feeds and the AbuseIPDB blacklist, or create the aliases.') }}
+</div>
+
+<div class="alert alert-info hidden" role="alert" id="aliasesKeptNotice">
+    <i class="fa fa-circle-info fa-fw"></i>
+    {{ lang._('No longer threat lists, but kept as aliases because firewall rules or other aliases use them:') }} <strong class="names"></strong>.
+    {{ lang._('The map no longer uses them. To delete them, remove them from those rules or aliases, then Apply here again.') }}
 </div>
 
 <ul class="nav nav-tabs" role="tablist" id="maintabs">

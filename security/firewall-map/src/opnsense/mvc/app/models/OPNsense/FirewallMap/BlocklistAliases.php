@@ -34,7 +34,8 @@ use OPNsense\Firewall\Alias;
 /**
  * "Maintain blocklist aliases": one FWMAP_* alias per chosen curated feed (a daily URL table)
  * and FWMAP_AbuseIPDB (an external alias filled by firewallmap_abuseipdb.py). No rules are made.
- * Only aliases this plugin created are changed or removed, and never while something uses them.
+ * Only aliases this plugin created are changed or removed; one that a rule or another alias still
+ * uses is kept (and reported) until that reference is gone.
  */
 class BlocklistAliases
 {
@@ -77,7 +78,7 @@ class BlocklistAliases
     /**
      * Bring the aliases in line with the settings. $threatLists empty means automatic: existing
      * feed aliases are kept, none are added. Returns [alias model, changes ("added FWMAP_x",
-     * "removed FWMAP_y"), error].
+     * "removed FWMAP_y"), error, aliases no longer wanted but kept because something uses them].
      */
     public static function reconcile(bool $enabled, string $threatLists, bool $abuseKey): array
     {
@@ -114,32 +115,27 @@ class BlocklistAliases
                 return [$model, [], sprintf(
                     gettext('An alias named %s already exists and was not created by Firewall Map+.'),
                     $name
-                )];
+                ), []];
             }
         }
-        $inUse = [];
+        $kept = [];
         foreach ($existing as $name => [$uuid, $alias]) {
             if (isset($wanted[$name]) || !self::ours($alias)) {
                 continue;
             }
+            /* deleting it would break the rule or alias that uses it */
             if (!empty($model->whereUsed($name))) {
-                $inUse[] = $name;
+                $kept[] = $name;
                 continue;
             }
             $model->aliases->alias->del($uuid);
             $changes[] = "removed {$name}";
         }
-        if (!empty($inUse)) {
-            return [$model, [], sprintf(
-                gettext('Used in firewall rules or other aliases, remove them there first: %s.'),
-                implode(', ', $inUse)
-            )];
-        }
         $messages = [];
         foreach ($model->performValidation() as $message) {
             $messages[] = $message->getMessage();
         }
-        return [$model, $changes, empty($messages) ? null : implode(' ', $messages)];
+        return [$model, $changes, empty($messages) ? null : implode(' ', $messages), $kept];
     }
 
     /** Load changed alias definitions into PF without touching rules, then fill the tables. */

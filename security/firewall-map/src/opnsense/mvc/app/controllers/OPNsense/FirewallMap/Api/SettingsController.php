@@ -28,6 +28,7 @@ namespace OPNsense\FirewallMap\Api;
 
 use OPNsense\Base\ApiMutableModelControllerBase;
 use OPNsense\Core\Backend;
+use OPNsense\FirewallMap\BlocklistAliases;
 use OPNsense\FirewallMap\Reports;
 
 /**
@@ -90,7 +91,7 @@ class SettingsController extends ApiMutableModelControllerBase
         /* chosen threat lists and sets the collector could not use (no PF table): never silent */
         $overview = json_decode((string)(new Backend())->configdRun('firewallmap overview'), true);
         $classification = is_array($overview) ? ($overview['threat_lists'] ?? []) : [];
-        return [
+        $status = [
             'threat_lists_unavailable' => array_column($classification['unavailable'] ?? [], 'name'),
             'sets_missing' => $classification['missing'] ?? [],
             'license_key_set' => $general->license_key->getValue() !== '',
@@ -99,6 +100,16 @@ class SettingsController extends ApiMutableModelControllerBase
             'abuseipdb_blacklist' => $this->blacklistStatus(),
             'database' => $this->databaseStatus(),
         ];
+        /* the settings page also asks which feed aliases Apply keeps although no longer chosen,
+           because a rule or another alias uses them (it costs a configd call the map does not need) */
+        if ($this->request->get('aliases') === '1') {
+            [, , , $status['aliases_kept']] = BlocklistAliases::reconcile(
+                (string)$general->blocklist_aliases === '1',
+                (string)$general->threat_lists,
+                $general->abuseipdb_key->getValue() !== ''
+            );
+        }
+        return $status;
     }
 
     /**

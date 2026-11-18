@@ -148,7 +148,7 @@
             <label>Threat lists</label>
             <type>select_multiple</type>
             <style>selectpicker</style>
-            <help>PF tables used to flag traffic on the map and in threat history. With none selected: feed tables and the aliases your block rules use. A curated feed counts only through its FWMAP_* alias (Maintain blocklist aliases).</help>
+            <help>PF tables used to flag traffic on the map and in threat history. With none selected: feed tables and the aliases your block rules use. A curated feed counts only through its FWMAP_* alias (Maintain blocklist aliases). With Use CrowdSec, CrowdSec's ban tables always count as well, selected here or not. A feed you deselect keeps its alias while a firewall rule or another alias uses it.</help>
         </field>
         <field>
             <id>firewallmap.general.abuseipdb_key</id>

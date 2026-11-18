@@ -76,7 +76,7 @@ class ServiceController extends ApiMutableServiceControllerBase
         BlocklistAliases::feeds();
         Config::getInstance()->lock();
         $general = (new FirewallMap())->general;
-        [$aliases, $changes, $error] = BlocklistAliases::reconcile(
+        [$aliases, $changes, $error, $kept] = BlocklistAliases::reconcile(
             (string)$general->blocklist_aliases === '1',
             (string)$general->threat_lists,
             $general->abuseipdb_key->getValue() !== ''
@@ -94,6 +94,9 @@ class ServiceController extends ApiMutableServiceControllerBase
         if ($changes) {
             BlocklistAliases::apply();
             $log->notice('blocklist aliases: ' . implode(', ', $changes));
+        }
+        if ($kept) {
+            $log->notice('blocklist aliases kept, still used by rules or aliases: ' . implode(', ', $kept));
         }
         $log->notice('settings applied');
         /* the scripts read the settings from the file this template renders, never from config.xml */
