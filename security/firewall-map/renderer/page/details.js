@@ -26,7 +26,7 @@
 
 /* The details panel for what was clicked on the map or in the IDS list. */
 import {
-  CROWDSEC_LIST, CROWDSEC_LOCAL_LIST, crowdsecVia, escapeHtml, fill, flagHtml, formatBytes, formatRate, hostPort, listLabel,
+  CROWDSEC_LIST, CROWDSEC_LOCAL_LIST, escapeHtml, fill, flagHtml, formatBytes, formatRate, hostPort, listLabel,
   plain, protocolLabel, splitHostPort,
 } from '../src/format.js';
 import {idsOutcome} from '../src/summaries.js';
@@ -50,6 +50,10 @@ export function remoteOf(address) {
   };
 }
 
+// what happened to the traffic of a listed address, by the view's outcome (the verdict's icons)
+const OUTCOME_ICONS = {blocked: 'ban', passed: 'triangle-exclamation', alert: 'flag'};
+
+/** The reputation card. `item.outcome` (blocked, passed or alert) picks the icon of every hit. */
 function reputationCard(item) {
   const listed = new Set(item.lists || []);
   const lists = [...new Set([...(state.data?.threat_lists || []), ...listed])];
@@ -58,6 +62,12 @@ function reputationCard(item) {
   // already on the downloaded AbuseIPDB blacklist: that row says it all, no lookup to offer
   const blacklisted = listed.has(ABUSEIPDB_BLACKLIST_LIST);
   const known = score !== null && score !== undefined;
+  // the icon of every hit says what happened to this address's traffic in this view
+  const hitIcon = ic(OUTCOME_ICONS[item.outcome] || 'circle-exclamation');
+  const hitTitle = escapeHtml(T[`listed_${item.outcome}`] || '');
+  const hit = (color, text) => `<span class="text-${color} text-nowrap fwmap-hit" title="${hitTitle}">${hitIcon} ${escapeHtml(text)}</span>`;
+  // absence is the normal state, not a verdict: a quiet dot, no check mark
+  const quiet = (text) => `<span class="text-success text-nowrap">${ic('circle', 'fwmap-dot')} ${escapeHtml(text)}</span>`;
   let abuse;
   if (state.abuseChecking.has(address)) {
     abuse = `<span class="text-muted">${escapeHtml(T.checking)}</span>`;
@@ -67,23 +77,21 @@ function reputationCard(item) {
       ? `<a href="#" class="fwmap-abuse-check" data-address="${escapeHtml(address)}">${ic('magnifying-glass')} ${escapeHtml(T.check_now)}</a>`
       : `<span class="text-muted" title="${escapeHtml(T.abuseipdb_hint)}">${escapeHtml(T.no_key)}</span>`;
   } else {
-    abuse = score >= 75 ? pill('danger', `${score}%`) : score >= 25 ? pill('warning', `${score}%`) : pill('success', T.clean, 'check');
+    abuse = score >= 75 ? hit('danger', `${score}%`) : score >= 25 ? hit('warning', `${score}%`) : quiet(`${score}%`);
   }
-  // listed stands out in red; everything else reads as a quiet green "not listed"
-  const notListed = `<span class="text-success text-nowrap">${ic('check')} ${escapeHtml(T.not_listed_short)}</span>`;
-  // CrowdSec is one row whatever the ban's origin (a subscribed list is as authoritative as a local
-  // detection); the origin follows as a muted reason: community, a blocklist's name, detected here
-  const crowdsecListed = listed.has(CROWDSEC_LIST) || listed.has(CROWDSEC_LOCAL_LIST);
-  const via = crowdsecVia(item.crowdsec || (listed.has(CROWDSEC_LOCAL_LIST) ? {origin: 'local'} : null), T);
-  const crowdsecValue = crowdsecListed
-    ? `${pill('danger', T.listed, 'ban')}${via ? ` <span class="text-muted">· ${escapeHtml(via)}</span>` : ''}`
-    : notListed;
+  // CrowdSec is one row whatever the ban's origin: a subscribed list is as authoritative as a local
+  // detection (which still weighs as evidence of its own in ranking and threat history)
+  const isListed = (name) => (name === CROWDSEC_LIST ? listed.has(CROWDSEC_LIST) || listed.has(CROWDSEC_LOCAL_LIST)
+    : listed.has(name));
+  const names = lists.filter((name) => name !== ABUSEIPDB_LOOKUP_LIST && name !== CROWDSEC_LOCAL_LIST);
+  if (lists.includes(CROWDSEC_LOCAL_LIST) && !names.includes(CROWDSEC_LIST)) {
+    names.push(CROWDSEC_LIST);
+  }
+  // hits first, so they lead the card
+  names.sort((a, b) => isListed(b) - isListed(a));
   const left = rows([
     ['AbuseIPDB', blacklisted && !known ? '' : abuse],
-    ...lists.filter((name) => name !== ABUSEIPDB_LOOKUP_LIST && name !== CROWDSEC_LOCAL_LIST).map((name) =>
-      [listLabel(name), name === CROWDSEC_LIST ? crowdsecValue : listed.has(name) ? pill('danger', T.listed, 'ban') : notListed]),
-    // only the local list reported (CrowdSec's tables not chosen): still one CrowdSec row
-    ...(lists.includes(CROWDSEC_LOCAL_LIST) && !lists.includes(CROWDSEC_LIST) ? [[CROWDSEC_LIST, crowdsecValue]] : []),
+    ...names.map((name) => [listLabel(name), isListed(name) ? hit('danger', T.listed) : quiet(T.not_listed_short)]),
   ]);
   const right = rows([
     ['ASN', item.asn ? escapeHtml(`AS${item.asn}`) : ''],
@@ -193,7 +201,7 @@ function flowModel(flow, context) {
     ids: idsCard(flow.ids, null),
     crowdsec: crowdsecCard(flow.crowdsec || item.crowdsec, address),
     reputation: reputationCard({...item, address, lists: flow.lists, abuseipdb: flow.abuseipdb, sets: flow.sets,
-      crowdsec: flow.crowdsec || item.crowdsec}),
+      outcome: 'passed'}),
   };
 }
 
@@ -237,7 +245,8 @@ function idsFlowModel(ids, context) {
     ]),
     ids: idsCard(null, ids.groups),
     crowdsec: crowdsecCard(ids.crowdsec || item.crowdsec, address),
-    reputation: reputationCard({...item, address, crowdsec: ids.crowdsec || item.crowdsec}),
+    reputation: reputationCard({...item, address,
+      outcome: ['blocked', 'contained'].includes(idsOutcome(ids)) ? 'blocked' : 'passed'}),
   };
 }
 
@@ -267,7 +276,7 @@ function blockModel(block, context) {
     ]),
     ids: idsCard(block.ids, null),
     crowdsec: crowdsecCard(block.crowdsec || item.crowdsec, address),
-    reputation: reputationCard({...item, address, crowdsec: block.crowdsec || item.crowdsec}),
+    reputation: reputationCard({...item, address, outcome: 'blocked'}),
   };
 }
 
@@ -283,7 +292,7 @@ function alertModel(alert, context) {
     firewall: `<div class="text-muted">${escapeHtml(T.no_connection)}</div>`,
     ids: idsCard(alert?.ids, null),
     crowdsec: crowdsecCard(alert?.crowdsec || item.crowdsec, address),
-    reputation: reputationCard({...item, address, crowdsec: alert?.crowdsec || item.crowdsec}),
+    reputation: reputationCard({...item, address, outcome: 'alert'}),
   };
 }
 

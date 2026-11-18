@@ -187,6 +187,9 @@ body.fwmap-resizing, body.fwmap-resizing * { user-select: none !important; }
 .fwmap-kv { margin: 0; }
 .fwmap-kv th { font-weight: normal; opacity: .7; width: 40%; }
 .fwmap-kv td { overflow-wrap: anywhere; }
+/* reputation values: a hit in the theme's state color, absence as a quiet dot */
+.fwmap-hit { font-weight: 600; }
+.fwmap-dot { font-size: .5em; vertical-align: .25em; }
 /* two tables side by side while both fit whole, otherwise one above the other */
 .fwmap-two { display: flex; flex-wrap: wrap; gap: 0 14px; }
 .fwmap-two .fwmap-kv { flex: 1 1 auto; width: auto; }

@@ -67,13 +67,6 @@
 	/** The CrowdSec lists the collector reports (lib/crowdsec.py): every ban, and the bans for what it
 	* detected on this firewall. The details panel shows them as one CrowdSec row. */
 	var CROWDSEC_LIST = "CrowdSec";
-	/** Why CrowdSec lists an address, in a few words: its ban's origin (lib/crowdsec.py ORIGINS), a
-	* subscribed blocklist by its name; '' when the ban or its origin is unknown. */
-	function crowdsecVia(ban, text) {
-		if (!ban) return "";
-		if (ban.origin === "list") return plain(ban.reason || "").replace(/^lists:/, "") || text.crowdsec_via_list || "";
-		return text[`crowdsec_via_${ban.origin}`] || "";
-	}
 	/** "FWMAP_Spamhaus_DROP" reads as "Spamhaus DROP". */
 	function listLabel(name) {
 		return plain(name).replace(/^FWMAP_/, "").replace(/_/g, " ");
@@ -987,6 +980,12 @@
 			country_code: location.country_code
 		};
 	}
+	var OUTCOME_ICONS = {
+		blocked: "ban",
+		passed: "triangle-exclamation",
+		alert: "flag"
+	};
+	/** The reputation card. `item.outcome` (blocked, passed or alert) picks the icon of every hit. */
 	function reputationCard(item) {
 		const listed = new Set(item.lists || []);
 		const lists = [.../* @__PURE__ */ new Set([...state.data?.threat_lists || [], ...listed])];
@@ -994,19 +993,19 @@
 		const score = item.abuseipdb ?? state.abuseScores.get(address);
 		const blacklisted = listed.has(ABUSEIPDB_BLACKLIST_LIST);
 		const known = score !== null && score !== void 0;
+		const hitIcon = ic(OUTCOME_ICONS[item.outcome] || "circle-exclamation");
+		const hitTitle = escapeHtml(T[`listed_${item.outcome}`] || "");
+		const hit = (color, text) => `<span class="text-${color} text-nowrap fwmap-hit" title="${hitTitle}">${hitIcon} ${escapeHtml(text)}</span>`;
+		const quiet = (text) => `<span class="text-success text-nowrap">${ic("circle", "fwmap-dot")} ${escapeHtml(text)}</span>`;
 		let abuse;
 		if (state.abuseChecking.has(address)) abuse = `<span class="text-muted">${escapeHtml(T.checking)}</span>`;
 		else if (!known) abuse = state.can.manage && state.abuseConfigured ? `<a href="#" class="fwmap-abuse-check" data-address="${escapeHtml(address)}">${ic("magnifying-glass")} ${escapeHtml(T.check_now)}</a>` : `<span class="text-muted" title="${escapeHtml(T.abuseipdb_hint)}">${escapeHtml(T.no_key)}</span>`;
-		else abuse = score >= 75 ? pill("danger", `${score}%`) : score >= 25 ? pill("warning", `${score}%`) : pill("success", T.clean, "check");
-		const notListed = `<span class="text-success text-nowrap">${ic("check")} ${escapeHtml(T.not_listed_short)}</span>`;
-		const crowdsecListed = listed.has("CrowdSec") || listed.has("CrowdSec (detected here)");
-		const via = crowdsecVia(item.crowdsec || (listed.has("CrowdSec (detected here)") ? { origin: "local" } : null), T);
-		const crowdsecValue = crowdsecListed ? `${pill("danger", T.listed, "ban")}${via ? ` <span class="text-muted">· ${escapeHtml(via)}</span>` : ""}` : notListed;
-		const left = rows([
-			["AbuseIPDB", blacklisted && !known ? "" : abuse],
-			...lists.filter((name) => name !== "AbuseIPDB (looked up)" && name !== "CrowdSec (detected here)").map((name) => [listLabel(name), name === "CrowdSec" ? crowdsecValue : listed.has(name) ? pill("danger", T.listed, "ban") : notListed]),
-			...lists.includes("CrowdSec (detected here)") && !lists.includes("CrowdSec") ? [[CROWDSEC_LIST, crowdsecValue]] : []
-		]);
+		else abuse = score >= 75 ? hit("danger", `${score}%`) : score >= 25 ? hit("warning", `${score}%`) : quiet(`${score}%`);
+		const isListed = (name) => name === "CrowdSec" ? listed.has("CrowdSec") || listed.has("CrowdSec (detected here)") : listed.has(name);
+		const names = lists.filter((name) => name !== "AbuseIPDB (looked up)" && name !== "CrowdSec (detected here)");
+		if (lists.includes("CrowdSec (detected here)") && !names.includes("CrowdSec")) names.push(CROWDSEC_LIST);
+		names.sort((a, b) => isListed(b) - isListed(a));
+		const left = rows([["AbuseIPDB", blacklisted && !known ? "" : abuse], ...names.map((name) => [listLabel(name), isListed(name) ? hit("danger", T.listed) : quiet(T.not_listed_short)])]);
 		const right = rows([
 			["ASN", item.asn ? escapeHtml(`AS${item.asn}`) : ""],
 			[T.organization, escapeHtml(plain(item.as_org || ""))],
@@ -1107,7 +1106,7 @@
 				lists: flow.lists,
 				abuseipdb: flow.abuseipdb,
 				sets: flow.sets,
-				crowdsec: flow.crowdsec || item.crowdsec
+				outcome: "passed"
 			})
 		};
 	}
@@ -1159,7 +1158,7 @@
 			reputation: reputationCard({
 				...item,
 				address,
-				crowdsec: ids.crowdsec || item.crowdsec
+				outcome: ["blocked", "contained"].includes(idsOutcome(ids)) ? "blocked" : "passed"
 			})
 		};
 	}
@@ -1196,7 +1195,7 @@
 			reputation: reputationCard({
 				...item,
 				address,
-				crowdsec: block.crowdsec || item.crowdsec
+				outcome: "blocked"
 			})
 		};
 	}
@@ -1213,7 +1212,7 @@
 			reputation: reputationCard({
 				...item,
 				address,
-				crowdsec: alert?.crowdsec || item.crowdsec
+				outcome: "alert"
 			})
 		};
 	}
