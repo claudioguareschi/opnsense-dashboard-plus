@@ -634,6 +634,12 @@ versions and signs the whole catalog.
 
 ## Changelog
 
+- **0.67.2** (all packages): Firewall Map+ shows CrowdSec as one row.
+  - The details panel's reputation card has one CrowdSec row instead of *CrowdSec* and *CrowdSec
+    (detected here)*: *Not listed*, or *Listed* followed by why (detected here, community, the
+    subscribed blocklist's name, by admin). Every CrowdSec ban counts the same; an address CrowdSec
+    detected on this firewall still weighs as evidence of its own.
+  - Dashboard Plus and VNStat Traffic+ are unchanged apart from the version.
 - **0.67.1** (all packages): Firewall Map+ saves its settings when a deselected feed is still in use.
   - Deselecting a curated feed whose `FWMAP_*` alias a firewall rule or another alias uses no
     longer refuses the whole save: the alias is kept for that rule, the map stops using the feed,
