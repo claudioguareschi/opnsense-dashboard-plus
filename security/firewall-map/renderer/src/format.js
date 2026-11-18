@@ -68,6 +68,23 @@ export function formatBytes(bytes) {
   return formatRate(bytes || 0).replace('/s', '');
 }
 
+/** The CrowdSec lists the collector reports (lib/crowdsec.py): every ban, and the bans for what it
+ * detected on this firewall. The details panel shows them as one CrowdSec row. */
+export const CROWDSEC_LIST = 'CrowdSec';
+export const CROWDSEC_LOCAL_LIST = 'CrowdSec (detected here)';
+
+/** Why CrowdSec lists an address, in a few words: its ban's origin (lib/crowdsec.py ORIGINS), a
+ * subscribed blocklist by its name; '' when the ban or its origin is unknown. */
+export function crowdsecVia(ban, text) {
+  if (!ban) {
+    return '';
+  }
+  if (ban.origin === 'list') {
+    return plain(ban.reason || '').replace(/^lists:/, '') || text.crowdsec_via_list || '';
+  }
+  return text[`crowdsec_via_${ban.origin}`] || '';
+}
+
 /** "FWMAP_Spamhaus_DROP" reads as "Spamhaus DROP". */
 export function listLabel(name) {
   return plain(name).replace(/^FWMAP_/, '').replace(/_/g, ' ');

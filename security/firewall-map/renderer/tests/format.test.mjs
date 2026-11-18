@@ -26,7 +26,7 @@
 
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {hostPort, privateAddress, protocolLabel, splitHostPort} from '../src/format.js';
+import {crowdsecVia, hostPort, privateAddress, protocolLabel, splitHostPort} from '../src/format.js';
 
 test('host and port in both address families', () => {
 
@@ -42,4 +42,18 @@ test('host and port in both address families', () => {
 test('a missing protocol shows blank, not an error', () => {
   assert.equal(protocolLabel('tcp'), 'TCP');
   assert.equal(protocolLabel(undefined), '');
+});
+
+test('a CrowdSec listing says why in a few words: the ban origin, or a blocklist by its name', () => {
+  const text = {crowdsec_via_local: 'detected here', crowdsec_via_manual: 'by admin',
+    crowdsec_via_community: 'community', crowdsec_via_list: 'blocklist'};
+  assert.equal(crowdsecVia({origin: 'local', reason: 'crowdsecurity/ssh-bf'}, text), 'detected here');
+  assert.equal(crowdsecVia({origin: 'community', reason: 'crowdsecurity/ssh-bf'}, text), 'community');
+  assert.equal(crowdsecVia({origin: 'manual'}, text), 'by admin');
+  assert.equal(crowdsecVia({origin: 'list', reason: 'firehol_cruzit_web_attacks'}, text), 'firehol_cruzit_web_attacks');
+  assert.equal(crowdsecVia({origin: 'list', reason: 'lists:tor-exit-nodes'}, text), 'tor-exit-nodes');
+  assert.equal(crowdsecVia({origin: 'list', reason: ''}, text), 'blocklist');
+  // unknown origin or no ban: no reason, just Listed
+  assert.equal(crowdsecVia({origin: 'other'}, text), '');
+  assert.equal(crowdsecVia(null, text), '');
 });

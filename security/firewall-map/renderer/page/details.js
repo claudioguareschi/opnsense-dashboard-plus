@@ -25,7 +25,10 @@
  */
 
 /* The details panel for what was clicked on the map or in the IDS list. */
-import {escapeHtml, fill, flagHtml, formatBytes, formatRate, hostPort, listLabel, plain, protocolLabel, splitHostPort} from '../src/format.js';
+import {
+  CROWDSEC_LIST, CROWDSEC_LOCAL_LIST, crowdsecVia, escapeHtml, fill, flagHtml, formatBytes, formatRate, hostPort, listLabel,
+  plain, protocolLabel, splitHostPort,
+} from '../src/format.js';
 import {idsOutcome} from '../src/summaries.js';
 import {ABUSEIPDB_BLACKLIST_LIST, ABUSEIPDB_LOOKUP_LIST, state, T} from './context.js';
 import {ic} from './icons.js';
@@ -68,10 +71,19 @@ function reputationCard(item) {
   }
   // listed stands out in red; everything else reads as a quiet green "not listed"
   const notListed = `<span class="text-success text-nowrap">${ic('check')} ${escapeHtml(T.not_listed_short)}</span>`;
+  // CrowdSec is one row whatever the ban's origin (a subscribed list is as authoritative as a local
+  // detection); the origin follows as a muted reason: community, a blocklist's name, detected here
+  const crowdsecListed = listed.has(CROWDSEC_LIST) || listed.has(CROWDSEC_LOCAL_LIST);
+  const via = crowdsecVia(item.crowdsec || (listed.has(CROWDSEC_LOCAL_LIST) ? {origin: 'local'} : null), T);
+  const crowdsecValue = crowdsecListed
+    ? `${pill('danger', T.listed, 'ban')}${via ? ` <span class="text-muted">· ${escapeHtml(via)}</span>` : ''}`
+    : notListed;
   const left = rows([
     ['AbuseIPDB', blacklisted && !known ? '' : abuse],
-    ...lists.filter((name) => name !== ABUSEIPDB_LOOKUP_LIST).map((name) =>
-      [listLabel(name), listed.has(name) ? pill('danger', T.listed, 'ban') : notListed]),
+    ...lists.filter((name) => name !== ABUSEIPDB_LOOKUP_LIST && name !== CROWDSEC_LOCAL_LIST).map((name) =>
+      [listLabel(name), name === CROWDSEC_LIST ? crowdsecValue : listed.has(name) ? pill('danger', T.listed, 'ban') : notListed]),
+    // only the local list reported (CrowdSec's tables not chosen): still one CrowdSec row
+    ...(lists.includes(CROWDSEC_LOCAL_LIST) && !lists.includes(CROWDSEC_LIST) ? [[CROWDSEC_LIST, crowdsecValue]] : []),
   ]);
   const right = rows([
     ['ASN', item.asn ? escapeHtml(`AS${item.asn}`) : ''],
@@ -180,7 +192,8 @@ function flowModel(flow, context) {
     ]),
     ids: idsCard(flow.ids, null),
     crowdsec: crowdsecCard(flow.crowdsec || item.crowdsec, address),
-    reputation: reputationCard({...item, address, lists: flow.lists, abuseipdb: flow.abuseipdb, sets: flow.sets}),
+    reputation: reputationCard({...item, address, lists: flow.lists, abuseipdb: flow.abuseipdb, sets: flow.sets,
+      crowdsec: flow.crowdsec || item.crowdsec}),
   };
 }
 
@@ -224,7 +237,7 @@ function idsFlowModel(ids, context) {
     ]),
     ids: idsCard(null, ids.groups),
     crowdsec: crowdsecCard(ids.crowdsec || item.crowdsec, address),
-    reputation: reputationCard({...item, address}),
+    reputation: reputationCard({...item, address, crowdsec: ids.crowdsec || item.crowdsec}),
   };
 }
 
@@ -254,7 +267,7 @@ function blockModel(block, context) {
     ]),
     ids: idsCard(block.ids, null),
     crowdsec: crowdsecCard(block.crowdsec || item.crowdsec, address),
-    reputation: reputationCard({...item, address}),
+    reputation: reputationCard({...item, address, crowdsec: block.crowdsec || item.crowdsec}),
   };
 }
 
@@ -270,7 +283,7 @@ function alertModel(alert, context) {
     firewall: `<div class="text-muted">${escapeHtml(T.no_connection)}</div>`,
     ids: idsCard(alert?.ids, null),
     crowdsec: crowdsecCard(alert?.crowdsec || item.crowdsec, address),
-    reputation: reputationCard({...item, address}),
+    reputation: reputationCard({...item, address, crowdsec: alert?.crowdsec || item.crowdsec}),
   };
 }
 
